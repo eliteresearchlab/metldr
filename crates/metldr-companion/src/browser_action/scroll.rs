@@ -1,3 +1,4 @@
+use metldr_browser_tools::valid_handle;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
@@ -59,12 +60,7 @@ pub(crate) struct Scroll {
 
 impl Scroll {
     pub(crate) fn valid(&self) -> bool {
-        !self.handle.is_empty()
-            && self.handle.len() <= 64
-            && self
-                .handle
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        valid_handle(&self.handle)
             && !self.label.trim().is_empty()
             && self.label.len() <= 128
             && !self.label.chars().any(char::is_control)
