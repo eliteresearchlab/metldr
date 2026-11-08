@@ -423,7 +423,7 @@ impl Owner {
             let previous = self.agent_runtime.states.get(&kind).copied();
             self.refresh_agent_runtime(kind);
             if previous != self.agent_runtime.states.get(&kind).copied() {
-                let current = self.state.view.runs.last().map(|run| run.id.clone());
+                let current = crate::settings_records::viewed_run(&self.state);
                 self.record_change(|edit, scope| {
                     let state = edit.refresh_view(scope, current.as_deref())?;
                     Ok(((), Some(state)))
