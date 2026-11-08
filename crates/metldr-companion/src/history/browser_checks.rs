@@ -17,7 +17,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-fn with_owner(codex: bool, check: impl FnOnce(&mut Owner, Proposal)) {
+pub(crate) fn with_owner(codex: bool, check: impl FnOnce(&mut Owner, Proposal)) {
     with_owner_seed(codex, |_, _| {}, check)
 }
 
@@ -175,7 +175,7 @@ fn with_owner_seed(
     fs::remove_dir_all(root).unwrap();
 }
 
-fn saved(owner: &mut Owner) -> Store {
+pub(crate) fn saved(owner: &mut Owner) -> Store {
     let selection = owner.record_history.selection().unwrap();
     owner
         .record_history
