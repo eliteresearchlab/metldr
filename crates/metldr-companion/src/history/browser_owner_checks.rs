@@ -248,16 +248,53 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
     };
     let initial_binding = binding.clone();
     let source_url = "http://127.0.0.1:4567/article";
-    let destination = "http://127.0.0.1:4567/decoy";
+    let requested_destination = "https://example.test/redirect";
+    let destination = "https://other.test/catalog?q=two#details";
+    for refused in [
+        "chrome://settings/",
+        "file:///tmp/owned",
+        "https://user:secret@example.test/",
+        "https://example.test:0/",
+        "https:///report",
+    ] {
+        let (ack, reply) = mpsc::sync_channel(1);
+        owner.browser_event(Event::Proposed {
+            proposal: proposal(
+                &run,
+                "invalid-destination",
+                &binding,
+                source_url,
+                Intent::Navigate {
+                    destination: refused.into(),
+                },
+            ),
+            ack,
+            budget: None,
+        })?;
+        assert!(reply.recv()?.is_err(), "admitted {refused}");
+        assert!(owner.browser_approval.is_none());
+    }
+    assert!(
+        owner
+            .record_history
+            .edit(|edit| {
+                let execution = edit.execution(&run)?;
+                edit.browser_by_tool(&execution, &run, "invalid-destination")
+            })?
+            .is_none()
+    );
     let mut navigation = proposal(
         &run,
         "tool-0",
         &binding,
         source_url,
         Intent::Navigate {
-            destination: destination.into(),
+            destination: requested_destination.into(),
         },
     );
+    navigation
+        .validate()
+        .expect("approved ordinary website destination must be admitted");
     let mut next_binding = binding.clone();
     next_binding.document = "document-2".into();
     next_binding.unique_context = "context-2".into();
@@ -386,7 +423,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
             let mut retry = navigation.clone();
             retry.tool_use_id = "tool-0".into();
             retry.intent = Intent::Navigate {
-                destination: destination.into(),
+                destination: requested_destination.into(),
             };
             retry
         },

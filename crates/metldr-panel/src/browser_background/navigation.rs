@@ -1,6 +1,5 @@
 use super::*;
 use serde::Deserialize;
-use web_sys::Url;
 
 const ROOT_SESSION: &str = "metldr-owned-root";
 
@@ -47,6 +46,17 @@ pub(super) struct PendingNavigation {
     response: Option<Value>,
 }
 
+impl PendingNavigation {
+    pub(super) fn revoked_by(&self, origins: &[String]) -> bool {
+        let Ok(site) = crate::site::permission(&self.destination) else {
+            return true;
+        };
+        origins
+            .iter()
+            .any(|removed| crate::site::removed_site(removed, &site))
+    }
+}
+
 pub(super) fn allowed_while_pending(method: &str) -> bool {
     matches!(
         method,
@@ -73,6 +83,8 @@ pub(super) async fn navigate(
 ) -> Result<Value, String> {
     let typed: NavigateParams = serde_json::from_value(params.clone())
         .map_err(|_| "Invalid Page.navigate parameters.".to_owned())?;
+    let destination_site = crate::site::permission(&destination)
+        .map_err(|_| "Invalid browser navigation request.".to_owned())?;
     if !bounded_id(&action, 128)
         || revision == 0
         || !valid_binding(&binding)
@@ -89,7 +101,7 @@ pub(super) async fn navigate(
             .frame_id
             .as_deref()
             .is_some_and(|frame| frame != binding.frame)
-        || !valid_navigation_url(&url, &destination)
+        || crate::site::permission(&url).is_err()
         || !bounded_json(&params, MAX_FRAME)
     {
         return Err("Invalid browser navigation request.".into());
@@ -158,9 +170,12 @@ pub(super) async fn navigate(
             .and_then(|v| v.get("frame"))
             .ok_or_else(|| "Missing root frame before navigation.".to_owned())?;
         if root.get("id").and_then(Value::as_str) != Some(binding.frame.as_str())
-            || root.get("url").and_then(Value::as_str) != Some(url.as_str())
+            || frame_url(root).as_deref() != Some(url.as_str())
         {
             return Err("Browser root frame changed before navigation.".into());
+        }
+        if !has_site_access(connection, epoch, &destination_site).await? {
+            return Err("Site access was revoked.".into());
         }
         ensure_epoch(connection, epoch)
     }
@@ -257,7 +272,7 @@ pub(super) async fn confirm(
 
     let checked =
         check_confirmed_document(connection, epoch, &binding, &destination, &frame, &loader).await;
-    let document = match checked {
+    let (document, confirmed_url) = match checked {
         Ok(value) => value,
         Err(error) => return invalidate(connection, epoch, &error),
     };
@@ -279,7 +294,7 @@ pub(super) async fn confirm(
         };
         let _ = pending;
         active.document = document.clone();
-        active.url = destination.clone();
+        active.url = confirmed_url.clone();
         active.grant_revision = next_revision;
         active.pending_navigation = None;
         active.confirming_navigation = false;
@@ -293,7 +308,7 @@ pub(super) async fn confirm(
         );
     }
     Ok(
-        json!({"document":document,"url":destination,"grant_revision":next_revision,"frame":frame,"loader":loader}),
+        json!({"document":document,"url":confirmed_url,"grant_revision":next_revision,"frame":frame,"loader":loader}),
     )
 }
 
@@ -304,7 +319,7 @@ async fn check_confirmed_document(
     destination: &str,
     frame_id: &str,
     loader_id: &str,
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
     let pending = STATE.with(|state| {
         state
             .borrow()
@@ -337,22 +352,19 @@ async fn check_confirmed_document(
         .ok_or_else(|| "Missing root frame after navigation.".to_owned())?;
     if root.get("id").and_then(Value::as_str) != Some(frame_id)
         || root.get("loaderId").and_then(Value::as_str) != Some(loader_id)
-        || root.get("url").and_then(Value::as_str) != Some(destination)
     {
         return Err("Root frame does not match the approved navigation.".into());
     }
-    if Url::new(destination)
-        .ok()
-        .is_none_or(|url| !matches!(url.pathname().as_str(), "/article" | "/decoy"))
-    {
-        return Err("Confirmed document is outside the owned capture routes.".into());
-    }
+    let confirmed_url =
+        frame_url(root).ok_or_else(|| "Missing root frame URL after navigation.".to_owned())?;
+    let site = crate::site::permission(&confirmed_url).map_err(|error| error.to_string())?;
     ensure_epoch(connection, epoch)?;
     let tabs = chrome_api("tabs").map_err(message)?;
     let tab = await_call(&tabs, "get", &[JsValue::from_f64(binding.tab as f64)]).await;
     ensure_epoch(connection, epoch)?;
     let tab = tab.map_err(message)?;
-    if get(&tab, "url").ok().and_then(|v| v.as_string()).as_deref() != Some(destination) {
+    if get(&tab, "url").ok().and_then(|v| v.as_string()).as_deref() != Some(confirmed_url.as_str())
+    {
         return Err("Active tab URL does not match the approved destination.".into());
     }
     ensure_epoch(connection, epoch)?;
@@ -382,21 +394,12 @@ async fn check_confirmed_document(
         .ok()
         .and_then(|v| v.as_string())
         .as_deref()
-        != Some(destination)
+        != Some(confirmed_url.as_str())
     {
         return Err("Chrome main frame URL does not match the approved destination.".into());
     }
     ensure_epoch(connection, epoch)?;
-    let permission = chrome_api("permissions").map_err(message)?;
-    let site = crate::site::permission(destination).map_err(|error| error.to_string())?;
-    let grant = await_call(
-        &permission,
-        "contains",
-        &[parse(&json!({"origins":[site]})).map_err(message)?],
-    )
-    .await;
-    ensure_epoch(connection, epoch)?;
-    if !grant.map_err(message)?.as_bool().unwrap_or(false) {
+    if !has_site_access(connection, epoch, &site).await? {
         return Err("Site access was revoked.".into());
     }
     let confirmed = send_command(
@@ -409,10 +412,13 @@ async fn check_confirmed_document(
     )
     .await?;
     let root = &confirmed["frameTree"]["frame"];
-    if root["id"] != frame_id || root["loaderId"] != loader_id || root["url"] != destination {
+    if root["id"] != frame_id
+        || root["loaderId"] != loader_id
+        || frame_url(root).as_deref() != Some(confirmed_url.as_str())
+    {
         return Err("Destination changed during navigation confirmation.".into());
     }
-    Ok(document)
+    Ok((document, confirmed_url))
 }
 
 async fn send_command(
@@ -483,28 +489,32 @@ pub(super) fn valid_binding(binding: &Binding) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'-' | b'_' | b'.'))
 }
 
-fn valid_navigation_url(current: &str, destination_url: &str) -> bool {
-    let (Ok(current), Ok(destination)) = (Url::new(current), Url::new(destination_url)) else {
-        return false;
-    };
-    let path = destination.pathname();
-    destination.protocol() == "http:"
-        && destination.hostname() == "127.0.0.1"
-        && destination.origin() == current.origin()
-        && matches!(path.as_str(), "/article" | "/decoy" | "/redirect")
-        && destination.username().is_empty()
-        && destination.password().is_empty()
-        && destination.search().is_empty()
-        && destination.hash().is_empty()
-        && !destination_url
-            .bytes()
-            .any(|byte| matches!(byte, b'?' | b'#'))
-        && destination.href() == destination_url
+fn frame_url(frame: &Value) -> Option<String> {
+    let url = frame.get("url")?.as_str()?;
+    match frame.get("urlFragment") {
+        None => Some(url.to_owned()),
+        Some(Value::String(fragment)) if fragment.starts_with('#') && !url.contains('#') => {
+            Some(format!("{url}{fragment}"))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod checks {
     use super::*;
+
+    #[test]
+    fn frame_urls_retain_fragments_without_accepting_malformed_metadata() {
+        let url = "https://example.test/catalog?q=two";
+        assert_eq!(frame_url(&json!({"url":url})).as_deref(), Some(url));
+        assert_eq!(
+            frame_url(&json!({"url":url,"urlFragment":"#details"})).as_deref(),
+            Some("https://example.test/catalog?q=two#details")
+        );
+        assert!(frame_url(&json!({"url":url,"urlFragment":"details"})).is_none());
+        assert!(frame_url(&json!({"url":url,"urlFragment":7})).is_none());
+    }
 
     #[test]
     fn pending_navigation_allows_only_setup_and_cleanup() {

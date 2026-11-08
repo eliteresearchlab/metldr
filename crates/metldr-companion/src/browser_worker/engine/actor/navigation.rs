@@ -83,21 +83,27 @@ impl Actor {
         context: FrameContext,
         value: Value,
     ) -> Result<()> {
-        let Intent::Navigate { destination } = &nav.action.proposal.intent else {
+        let Intent::Navigate { .. } = &nav.action.proposal.intent else {
             return Err("invalid navigation intent".into());
         };
         let frame = &value["frameTree"]["frame"];
-        if frame["id"] != nav.frame
-            || frame["loaderId"] != nav.loader
-            || frame["url"] != destination.as_str()
-            || nav.frame != context.frame_id()
-        {
-            self.finish(
-                nav.job,
-                Err("navigation response does not match the destination".into()),
-            );
-            return Ok(());
-        }
+        let final_url = match frame_url(frame) {
+            Some(url)
+                if frame["id"] == nav.frame
+                    && frame["loaderId"] == nav.loader
+                    && nav.frame == context.frame_id()
+                    && crate::model::validate_page_url(&url).is_ok() =>
+            {
+                url
+            }
+            _ => {
+                self.finish(
+                    nav.job,
+                    Err("navigation response does not match the destination".into()),
+                );
+                return Ok(());
+            }
+        };
         self.contexts.validate(&context)?;
         if self.stop.load(Ordering::Acquire) || self.shutdown.load(Ordering::Acquire) {
             return Err("browser stopped before destination confirmation".into());
@@ -113,7 +119,7 @@ impl Actor {
         self.inflight.push(
             async move {
                 (
-                    Completion::Confirmation(nav, context),
+                    Completion::Confirmation(nav, context, final_url),
                     wait_reply(deadline, reply).await,
                 )
             }
@@ -125,6 +131,7 @@ impl Actor {
         &mut self,
         nav: Navigation,
         context: FrameContext,
+        final_url: String,
         result: runtime::Result<Value>,
     ) -> Result<()> {
         let outcome = (|| -> Result<Outcome> {
@@ -132,11 +139,11 @@ impl Actor {
             let confirmed: Confirmation = serde_json::from_value(
                 result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?,
             )?;
-            let Intent::Navigate { destination } = &nav.action.proposal.intent else {
+            let Intent::Navigate { .. } = &nav.action.proposal.intent else {
                 return Err("invalid navigation intent".into());
             };
             let from = &nav.action.proposal.binding;
-            if confirmed.url != *destination
+            if confirmed.url != final_url
                 || confirmed.frame != from.frame
                 || confirmed.loader != nav.loader
                 || confirmed.document.is_empty()
@@ -168,5 +175,16 @@ impl Actor {
                 Ok(())
             }
         }
+    }
+}
+
+fn frame_url(frame: &Value) -> Option<String> {
+    let url = frame.get("url")?.as_str()?;
+    match frame.get("urlFragment") {
+        None => Some(url.to_owned()),
+        Some(Value::String(fragment)) if fragment.starts_with('#') && !url.contains('#') => {
+            Some(format!("{url}{fragment}"))
+        }
+        _ => None,
     }
 }

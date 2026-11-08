@@ -148,7 +148,7 @@ impl Actor {
             Kind::PrepareNavigation { tool, destination } => {
                 let result = (|| -> Result<Value> {
                     let context = self.context()?;
-                    if !crate::browser_action::valid_destination(&self.source.url, &destination) {
+                    if crate::model::validate_page_url(&destination).is_err() {
                         return Err("navigation destination is not permitted".into());
                     }
                     Ok(serde_json::to_value(Proposal {
@@ -169,7 +169,7 @@ impl Actor {
                     let Intent::Navigate { destination } = &action.proposal.intent else {
                         return Err("not a navigation action".into());
                     };
-                    if !crate::browser_action::valid_destination(&self.source.url, destination) {
+                    if crate::model::validate_page_url(destination).is_err() {
                         return Err("navigation destination is not permitted".into());
                     }
                     if self.seen.len() == 64
