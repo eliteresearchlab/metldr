@@ -405,7 +405,7 @@ impl Owner {
                 if !self.conversation_idle() {
                     return Err(crate::history::ConversationBusy.into());
                 }
-                let run = self.state.view.runs.last().map(|run| run.id.clone());
+                let run = crate::settings_records::viewed_run(&self.state);
                 self.record_change(|edit, _| {
                     edit.capture(scope, expected_source.as_deref(), page)?;
                     Ok(((), Some(edit.project(scope, run.as_deref())?)))
