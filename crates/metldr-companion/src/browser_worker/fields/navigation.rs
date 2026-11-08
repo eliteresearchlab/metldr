@@ -17,18 +17,22 @@ impl Tools {
             .ok_or("browser is not attached")?
             .prepare_navigation(tool_use_id, destination)
             .await?;
-        let approved = action(&self.client, stop, |ack| browser_owner::Event::Proposed {
-            proposal,
-            ack,
-            budget: budget.cloned(),
+        let approved = action(&self.client, Some(stop), |ack| {
+            browser_owner::Event::Proposed {
+                proposal,
+                ack,
+                budget: budget.cloned(),
+            }
         })
         .await?;
         let settled = match &approved.state {
             Phase::Approved => {
-                let dispatched = action(&self.client, stop, |ack| browser_owner::Event::Dispatch {
-                    action: approved.id.clone(),
-                    revision: approved.revision,
-                    ack,
+                let dispatched = action(&self.client, Some(stop), |ack| {
+                    browser_owner::Event::Dispatch {
+                        action: approved.id.clone(),
+                        revision: approved.revision,
+                        ack,
+                    }
                 })
                 .await?;
                 let outcome = self
