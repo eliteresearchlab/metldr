@@ -151,7 +151,7 @@ struct Navigation {
 }
 enum Completion {
     Command(CallId),
-    Confirmation(Navigation, FrameContext),
+    Confirmation(Navigation, FrameContext, String),
 }
 
 pub(super) struct Actor {
@@ -286,7 +286,7 @@ impl Actor {
                     let (completion,result)=completed.ok_or("browser completion stream ended")?;
                     match completion {
                         Completion::Command(id)=>self.transport.reply(id,result)?,
-                        Completion::Confirmation(nav,context)=>self.confirmed(nav,context,result)?,
+                        Completion::Confirmation(nav,context,url)=>self.confirmed(nav,context,url,result)?,
                     }
                 }
                 request=self.requests.recv(),if self.ready.is_none()=>{

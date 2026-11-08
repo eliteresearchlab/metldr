@@ -8,8 +8,8 @@ impl Tools {
         stop: &AtomicBool,
         budget: Option<&browser_owner::Budget>,
     ) -> Result<Value> {
-        if !crate::browser_action::valid_destination(&self.current.url, destination) {
-            return Err("browser navigation URL is outside the owned fixture".into());
+        if crate::model::validate_page_url(destination).is_err() {
+            return Err("invalid browser navigation URL".into());
         }
         let proposal = self
             .engine

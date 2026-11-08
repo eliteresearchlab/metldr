@@ -571,19 +571,23 @@ async fn verify(connection: u64, epoch: u64) -> Result<(), String> {
         return invalidate(connection, epoch, "Browser document changed.");
     }
     ensure_epoch(connection, epoch)?;
+    if !has_site_access(connection, epoch, &site).await? {
+        return invalidate(connection, epoch, "Site access was revoked.");
+    }
+    ensure_epoch(connection, epoch)
+}
+
+async fn has_site_access(connection: u64, epoch: u64, site: &str) -> Result<bool, String> {
+    ensure_epoch(connection, epoch)?;
     let permission = chrome_api("permissions").map_err(message)?;
-    let grant_result = await_call(
+    let result = await_call(
         &permission,
         "contains",
         &[parse(&json!({"origins":[site]})).map_err(message)?],
     )
     .await;
     ensure_epoch(connection, epoch)?;
-    let granted = grant_result.map_err(message)?;
-    if !granted.as_bool().unwrap_or(false) {
-        return invalidate(connection, epoch, "Site access was revoked.");
-    }
-    ensure_epoch(connection, epoch)
+    Ok(result.map_err(message)?.as_bool().unwrap_or(false))
 }
 
 fn attachment(connection: u64, epoch: u64) -> Result<(i32, String, String), String> {
@@ -800,17 +804,21 @@ fn on_permission_removed(permissions: JsValue) {
         let state = state.borrow();
         let active = state.active.as_ref()?;
         let site = crate::site::permission(&active.url).ok()?;
-        origins
+        (origins
             .iter()
             .any(|removed| crate::site::removed_site(removed, &site))
-            .then(|| {
-                (
-                    state.connection,
-                    active.epoch,
-                    active.run.clone(),
-                    active.tab,
-                )
-            })
+            || active
+                .pending_navigation
+                .as_ref()
+                .is_some_and(|pending| pending.revoked_by(&origins)))
+        .then(|| {
+            (
+                state.connection,
+                active.epoch,
+                active.run.clone(),
+                active.tab,
+            )
+        })
     });
     if let Some((connection, epoch, run, tab)) = details {
         clear_attachment(connection, epoch);
