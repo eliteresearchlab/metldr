@@ -73,7 +73,7 @@ impl TryFrom<WireProposal> for Proposal {
 }
 
 impl Intent {
-    pub(super) fn validate(&self, current_url: &str) -> Result<()> {
+    pub(super) fn validate(&self) -> Result<()> {
         match self {
             Self::Field {
                 field_id,
@@ -87,7 +87,11 @@ impl Intent {
             {
                 Ok(())
             }
-            Self::Navigate { destination } if valid_destination(current_url, destination) => Ok(()),
+            Self::Navigate { destination }
+                if crate::model::validate_page_url(destination).is_ok() =>
+            {
+                Ok(())
+            }
             Self::ActivateButton {
                 button_id,
                 button_label,
@@ -98,24 +102,4 @@ impl Intent {
             _ => Err("invalid browser action intent".into()),
         }
     }
-}
-
-pub(crate) fn valid_destination(current_url: &str, destination: &str) -> bool {
-    let (Ok(current), Ok(next)) = (
-        reqwest::Url::parse(current_url),
-        reqwest::Url::parse(destination),
-    ) else {
-        return false;
-    };
-    bounded(destination, 2048)
-        && next.as_str() == destination
-        && next.origin() == current.origin()
-        && next.scheme() == "http"
-        && next.host_str() == Some("127.0.0.1")
-        && next.port().is_some()
-        && next.username().is_empty()
-        && next.password().is_none()
-        && next.query().is_none()
-        && next.fragment().is_none()
-        && matches!(next.path(), "/article" | "/decoy" | "/redirect")
 }

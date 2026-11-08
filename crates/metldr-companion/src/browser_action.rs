@@ -9,7 +9,7 @@ mod scroll;
 mod selection;
 mod target;
 pub(crate) use control::{CheckboxState, Control, ControlReceipt, RadioGroup};
-pub(super) use intent::{Intent, valid_destination};
+pub(super) use intent::Intent;
 pub(crate) use scroll::{Direction, Point, Scroll, ScrollKind};
 pub(crate) use selection::{Choice, Selection};
 pub(super) use target::Target;
@@ -225,7 +225,7 @@ impl Proposal {
         {
             return Err("invalid browser proposal".into());
         }
-        self.intent.validate(&self.url)
+        self.intent.validate()
     }
 }
 
@@ -436,8 +436,8 @@ fn validate_outcome(outcome: &Outcome, proposal: &Proposal) -> Result<()> {
                 url,
                 loader,
             },
-            Intent::Navigate { destination },
-        ) if url == destination
+            Intent::Navigate { .. },
+        ) if crate::model::validate_page_url(url).is_ok()
             && bounded(loader, 128)
             && binding.tab == proposal.binding.tab
             && binding.target == proposal.binding.target
