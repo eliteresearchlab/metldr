@@ -11,7 +11,8 @@ use crate::{
     model::{Run, Status},
 };
 use metldr_conversation::{
-    ArtifactCompletion, ArtifactId, Change, Chart, CompleteSource, GeneratedAnswer, Table,
+    ArtifactCompletion, ArtifactId, Change, Chart, CompleteSource, GeneratedAnswer, MAX_ARTIFACTS,
+    Table,
 };
 use metldr_history_pages::Counter;
 
@@ -74,7 +75,7 @@ impl Edit<'_> {
             return Err("static artifacts require a Responses text run".into());
         }
         let refs = artifact_refs(&before.value);
-        if refs.len() > 4 {
+        if refs.len() > MAX_ARTIFACTS {
             return Err("run exceeds artifact reference limit".into());
         }
         let mut calls = Vec::with_capacity(refs.len());
@@ -102,7 +103,7 @@ impl Edit<'_> {
         if before.value.status != Status::Running {
             return Err("new artifacts require a running response".into());
         }
-        if refs.len() == 4 {
+        if refs.len() == MAX_ARTIFACTS {
             return Err("run artifact reference limit reached".into());
         }
 
@@ -197,7 +198,7 @@ impl Edit<'_> {
             return Err("generated artifacts require a Responses text run".into());
         }
         let refs = artifact_refs(&before.value);
-        if refs.len() > 4 {
+        if refs.len() > MAX_ARTIFACTS {
             return Err("run exceeds artifact reference limit".into());
         }
         for id in &refs {
@@ -223,10 +224,7 @@ impl Edit<'_> {
             else {
                 return Err("artifact call identity already has different content".into());
             };
-            if complete && *completion == ArtifactCompletion::Completed && *old == source {
-                return Ok(id.clone());
-            }
-            if !complete && *completion == ArtifactCompletion::Completed && *old == source {
+            if *completion == ArtifactCompletion::Completed && *old == source {
                 return Ok(id.clone());
             }
             if *completion != ArtifactCompletion::Streaming {
@@ -281,7 +279,7 @@ impl Edit<'_> {
         if before.value.status != Status::Running {
             return Err("new artifacts require a running response".into());
         }
-        if refs.len() == 4 {
+        if refs.len() == MAX_ARTIFACTS {
             return Err("run artifact reference limit reached".into());
         }
         let id = ArtifactId::new(self.id()?)?;
@@ -378,7 +376,7 @@ impl Edit<'_> {
             if refs.is_empty() {
                 return Ok(());
             }
-            if refs.len() > 4 {
+            if refs.len() > MAX_ARTIFACTS {
                 return Err("run exceeds artifact reference limit".into());
             }
             let saved_run: Record<Run> =
@@ -390,11 +388,7 @@ impl Edit<'_> {
                 || launch.conversation != execution.conversation()
                 || !eligible(&launch.value)
             {
-                return if refs.is_empty() {
-                    Ok(())
-                } else {
-                    Err("run is not eligible for artifact references".into())
-                };
+                return Err("run is not eligible for artifact references".into());
             }
             let mut calls = Vec::with_capacity(refs.len());
             for id in refs {
