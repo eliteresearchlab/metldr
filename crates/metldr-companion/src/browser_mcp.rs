@@ -471,7 +471,20 @@ async fn process_message(
             json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"metldr-browser","version":"0.1.0"}})
         }
         "tools/list" => {
-            json!({"tools":definitions().into_iter().map(|definition| json!({"name":definition.name,"description":definition.description,"inputSchema":definition.input_schema})).collect::<Vec<_>>() })
+            json!({"tools":definitions().into_iter().map(|definition| {
+                let read_only = definition.name == metldr_browser_tools::OBSERVE_TOOL;
+                json!({
+                    "name":definition.name,
+                    "description":definition.description,
+                    "inputSchema":definition.input_schema,
+                    "annotations":{
+                        "readOnlyHint":read_only,
+                        "destructiveHint":!read_only && definition.name != metldr_browser_tools::SCROLL_TOOL,
+                        "idempotentHint":read_only,
+                        "openWorldHint":true,
+                    }
+                })
+            }).collect::<Vec<_>>() })
         }
         "tools/call" => {
             let token = progress::token(&params)?;
@@ -820,6 +833,34 @@ mod tests {
                         definitions().len()
                     );
                     assert_eq!(value["result"]["tools"][0]["name"], definitions()[0].name);
+                    let expected = [
+                        ("observe_page", true, false, true),
+                        ("set_field_value", false, true, false),
+                        ("navigate_page", false, true, false),
+                        ("activate_button", false, true, false),
+                        ("select_option", false, true, false),
+                        ("scroll_page", false, false, false),
+                        ("set_native_control", false, true, false),
+                    ];
+                    for (tool, (name, read_only, destructive, idempotent)) in
+                        value["result"]["tools"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .zip(expected)
+                    {
+                        assert_eq!(tool["name"], name);
+                        assert_eq!(
+                            tool["annotations"],
+                            json!({
+                                "readOnlyHint": read_only,
+                                "destructiveHint": destructive,
+                                "idempotentHint": idempotent,
+                                "openWorldHint": true,
+                            }),
+                            "incorrect MCP safety hints for {name}"
+                        );
+                    }
                 }
             };
             let service = async {
