@@ -98,4 +98,55 @@ mod tests {
         assert!(budget.expired());
         assert!(budget.pause().is_err());
     }
+
+    #[test]
+    fn failed_review_pause_leaves_no_durable_pending_action() {
+        use crate::{
+            browser_owner::Event,
+            history::browser_checks::{saved, with_owner},
+        };
+        use std::sync::mpsc;
+
+        with_owner(false, |owner, proposal| {
+            let budget = Budget::new(Duration::from_secs(30));
+            // Holding the review passes the early expiry check and fails the pause.
+            let held = budget.pause().unwrap();
+            assert!(!budget.expired());
+            let before = saved(owner);
+            let (ack, rx) = mpsc::sync_channel(1);
+            owner
+                .browser_event(Event::Proposed {
+                    proposal: proposal.clone(),
+                    ack,
+                    budget: Some(budget.clone()),
+                })
+                .unwrap();
+            let error = rx.recv().unwrap().unwrap_err();
+            assert!(
+                error.contains("browser execution budget unavailable"),
+                "unexpected rejection: {error}"
+            );
+            assert!(owner.browser_approval.is_none());
+            let after = saved(owner);
+            assert!(after.browser_actions.is_empty());
+            assert_eq!(after.next, before.next);
+            assert_eq!(after.view.sequence, before.view.sequence);
+
+            drop(held);
+            let mut fresh = proposal;
+            fresh.tool_use_id = "tool-2".into();
+            let (ack, rx) = mpsc::sync_channel(1);
+            owner
+                .browser_event(Event::Proposed {
+                    proposal: fresh,
+                    ack,
+                    budget: Some(budget.clone()),
+                })
+                .unwrap();
+            assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            assert!(owner.browser_approval.is_some());
+            assert_eq!(saved(owner).browser_actions.len(), 1);
+            assert!(budget.review_elapsed().is_some());
+        });
+    }
 }
