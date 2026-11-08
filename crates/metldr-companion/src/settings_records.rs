@@ -1,6 +1,6 @@
 use crate::{Result, flow::Owner, model::Store};
 
-fn viewed_run(state: &Store) -> Option<String> {
+pub(crate) fn viewed_run(state: &Store) -> Option<String> {
     // A native projection also includes its workflow head when viewing an older task.
     let latest = state
         .workflows

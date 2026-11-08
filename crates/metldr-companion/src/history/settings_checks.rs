@@ -158,12 +158,26 @@ fn record_settings_reload_admit_replay_and_reject_stale_aggregate() -> Result<()
     assert_eq!(save_receipt.expected_revision, 0);
     assert_eq!(save_receipt.digest.len(), 64);
 
-    owner.state.agent_settings = stale_agents.clone();
     fs::remove_file(&executable)?;
+    owner.prepare_agent(Kind::Opencode)?;
+    assert_eq!(
+        owner
+            .state
+            .view
+            .runs
+            .iter()
+            .map(|run| run.id.clone())
+            .collect::<Vec<_>>(),
+        viewed_runs,
+        "agent runtime refresh replaced the viewed older native task with the workflow head"
+    );
+    let after_prepare = profile(&owner.record_history)?;
+
+    owner.state.agent_settings = stale_agents.clone();
     owner.agent_save("settings-save:1", 0, agent_profile.clone())?;
     assert_eq!(
         profile(&owner.record_history)?.sequence,
-        after_save.sequence
+        after_prepare.sequence
     );
     let changed_profile = AgentProfile::Opencode {
         executable: executable.clone(),
@@ -182,13 +196,13 @@ fn record_settings_reload_admit_replay_and_reject_stale_aggregate() -> Result<()
     owner.refresh_saved_settings()?;
     assert_eq!(
         profile(&owner.record_history)?.sequence,
-        after_save.sequence
+        after_prepare.sequence
     );
 
     let expected = owner.state.agent_settings.slot(Kind::Opencode).revision;
     owner.agent_remove("settings-remove:1", Kind::Opencode, expected)?;
     let after_remove = profile(&owner.record_history)?;
-    assert_eq!(after_remove.sequence, after_save.sequence + 1);
+    assert_eq!(after_remove.sequence, after_prepare.sequence + 1);
     assert_eq!(
         after_remove.agents.slot(Kind::Opencode).revision,
         expected + 1
