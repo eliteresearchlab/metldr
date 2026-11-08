@@ -7,8 +7,8 @@ use crate::{
     model::{Run, Status},
 };
 use metldr_conversation::{
-    ArtifactCompletion, ArtifactId, ArtifactPresentation, Chart, GeneratedAnswer, ProjectedEntry,
-    Table,
+    ArtifactCompletion, ArtifactId, ArtifactPresentation, Chart, GeneratedAnswer, MAX_ARTIFACTS,
+    ProjectedEntry, Table,
 };
 use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
@@ -152,7 +152,7 @@ pub(super) fn audit_tables(
             .filter(|reference| reference.as_str() == id)
             .count()
             != 1
-            || refs.len() > 4
+            || refs.len() > MAX_ARTIFACTS
             || projected != Some(presentation)
         {
             return Err("artifact reference index differs".into());
@@ -173,7 +173,7 @@ pub(super) fn audit_tables(
         })?;
         super::summary::audit_run(headers, run_id, &run)?;
         let refs = artifact_refs(&run.value);
-        if refs.len() > 4 {
+        if refs.len() > MAX_ARTIFACTS {
             return Err("run exceeds artifact reference limit".into());
         }
         let mut calls = Vec::with_capacity(refs.len());
