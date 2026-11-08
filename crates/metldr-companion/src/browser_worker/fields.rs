@@ -193,18 +193,22 @@ impl Tools {
         stop: &AtomicBool,
         budget: Option<&browser_owner::Budget>,
     ) -> Result<Value> {
-        let approved = action(&self.client, stop, |ack| browser_owner::Event::Proposed {
-            proposal,
-            ack,
-            budget: budget.cloned(),
+        let approved = action(&self.client, Some(stop), |ack| {
+            browser_owner::Event::Proposed {
+                proposal,
+                ack,
+                budget: budget.cloned(),
+            }
         })
         .await?;
         let settled = match &approved.state {
             Phase::Approved => {
-                let dispatched = action(&self.client, stop, |ack| browser_owner::Event::Dispatch {
-                    action: approved.id.clone(),
-                    revision: approved.revision,
-                    ack,
+                let dispatched = action(&self.client, Some(stop), |ack| {
+                    browser_owner::Event::Dispatch {
+                        action: approved.id.clone(),
+                        revision: approved.revision,
+                        ack,
+                    }
                 })
                 .await?;
                 let engine = self.engine.as_ref().ok_or("browser is not attached")?;
@@ -282,7 +286,7 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
 
 async fn action(
     client: &Client,
-    stop: &AtomicBool,
+    stop: Option<&AtomicBool>,
     event: impl FnOnce(mpsc::SyncSender<std::result::Result<Action, String>>) -> browser_owner::Event,
 ) -> Result<Action> {
     let (ack, rx) = mpsc::sync_channel(1);
@@ -298,7 +302,7 @@ async fn action(
             }
             Err(mpsc::TryRecvError::Empty) => {}
         }
-        if stop.load(Ordering::Acquire) {
+        if stop.is_some_and(|stop| stop.load(Ordering::Acquire)) {
             return Err("browser action cancelled".into());
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -306,19 +310,14 @@ async fn action(
 }
 
 async fn action_observed(client: &Client, action: &Action, outcome: Outcome) -> Result<Action> {
-    let (ack, rx) = mpsc::sync_channel(1);
-    client
-        .tx
-        .try_send(Event::Browser(browser_owner::Event::Observed {
-            action: action.id.clone(),
-            revision: action.revision,
-            outcome,
-            ack,
-        }))
-        .map_err(|_| "browser owner channel unavailable")?;
-    rx.recv()
-        .map_err(|_| "browser approval owner ended")?
-        .map_err(Into::into)
+    // Stop must not abandon an effect outcome that still needs durable settlement.
+    self::action(client, None, |ack| browser_owner::Event::Observed {
+        action: action.id.clone(),
+        revision: action.revision,
+        outcome,
+        ack,
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -417,5 +416,60 @@ mod failed_attach_check {
             );
             owner.join().unwrap();
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn observed_wait_does_not_starve_its_runtime() {
+        let (tx, rx) = mpsc::sync_channel::<FlowEvent>(1);
+        let client = Client {
+            run: "settle".into(),
+            tx,
+        };
+        let (progress, progressed) = mpsc::channel();
+        let owner = std::thread::spawn(move || {
+            let Ok(FlowEvent::Browser(browser_owner::Event::Observed { ack, .. })) = rx.recv()
+            else {
+                panic!("expected an observed event");
+            };
+            // The fallback lets the blocking baseline fail instead of hanging the check.
+            let result = if progressed.recv_timeout(Duration::from_secs(1)).is_ok() {
+                "owner saw runtime progress"
+            } else {
+                "runtime stalled"
+            };
+            let _ = ack.send(Err(result.into()));
+        });
+        tokio::spawn(async move {
+            let _ = progress.send(());
+        });
+        let action = Action {
+            id: "action-1".into(),
+            revision: 3,
+            proposal: Proposal {
+                run: "settle".into(),
+                tool_use_id: "tool-1".into(),
+                url: "https://example.test/article".into(),
+                binding: crate::browser_action::Binding {
+                    tab: 7,
+                    document: "document-1".into(),
+                    target: "target-1".into(),
+                    frame: "frame-1".into(),
+                    session: "session-1".into(),
+                    unique_context: "unique-1".into(),
+                    grant_revision: 1,
+                },
+                intent: Intent::ActivateButton {
+                    button_id: "metldr-button".into(),
+                    button_label: "Submit".into(),
+                },
+            },
+            state: Phase::Dispatching,
+        };
+        let result = action_observed(&client, &action, Outcome::ButtonClickObserved).await;
+        owner.join().unwrap();
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "owner saw runtime progress"
+        );
     }
 }
