@@ -461,15 +461,17 @@ async fn process_message(
     };
     let result = match method {
         "initialize" => {
-            if params.get("protocolVersion").and_then(Value::as_str) != Some("2025-11-25") {
-                return Ok(Some(rpc_error(
-                    id,
-                    -32602,
-                    "unsupported MCP protocol version",
-                )));
+            // The specification asks for a supported revision, not the requested one.
+            if !params
+                .get("protocolVersion")
+                .and_then(Value::as_str)
+                .is_some_and(|version| !version.is_empty())
+            {
+                return Ok(Some(rpc_error(id, -32602, "invalid MCP protocol version")));
             }
-            json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"metldr-browser","version":"0.1.0"}})
+            json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"metldr-browser","version":"0.1.0"},"instructions":metldr_browser_tools::BROWSER_POLICY})
         }
+        "ping" => json!({}),
         "tools/list" => {
             json!({"tools":definitions().into_iter().map(|definition| {
                 let read_only = definition.name == metldr_browser_tools::OBSERVE_TOOL;
@@ -733,6 +735,15 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    #[derive(Clone, Copy)]
+    enum Expect {
+        Status,
+        Tools,
+        Initialize,
+        Refused,
+        Ping,
+    }
+
     #[tokio::test]
     async fn native_http_authenticates_methods_and_negotiates_tools() {
         let server = Server::bind("0123456789abcdef0123456789abcdef:2")
@@ -747,10 +758,10 @@ mod tests {
             ready: server.ready(),
             ..Calls::default()
         });
-        for (method, authorized, origin, version, body, status) in [
-            ("GET", false, false, false, "", 403),
-            ("GET", true, false, false, "", 405),
-            ("DELETE", true, false, false, "", 405),
+        for (method, authorized, origin, version, body, status, expected) in [
+            ("GET", false, false, false, "", 403, Expect::Status),
+            ("GET", true, false, false, "", 405, Expect::Status),
+            ("DELETE", true, false, false, "", 405, Expect::Status),
             (
                 "POST",
                 true,
@@ -758,6 +769,7 @@ mod tests {
                 true,
                 r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
                 403,
+                Expect::Status,
             ),
             (
                 "POST",
@@ -766,6 +778,7 @@ mod tests {
                 false,
                 r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
                 400,
+                Expect::Status,
             ),
             (
                 "POST",
@@ -774,6 +787,7 @@ mod tests {
                 false,
                 r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#,
                 200,
+                Expect::Initialize,
             ),
             (
                 "POST",
@@ -782,8 +796,73 @@ mod tests {
                 true,
                 r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
                 200,
+                Expect::Tools,
+            ),
+            (
+                "POST",
+                true,
+                false,
+                true,
+                r#"{"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
+                200,
+                Expect::Initialize,
+            ),
+            (
+                "POST",
+                true,
+                false,
+                true,
+                r#"{"jsonrpc":"2.0","id":4,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}"#,
+                200,
+                Expect::Initialize,
+            ),
+            (
+                "POST",
+                true,
+                false,
+                true,
+                r#"{"jsonrpc":"2.0","id":5,"method":"initialize","params":{}}"#,
+                200,
+                Expect::Refused,
+            ),
+            (
+                "POST",
+                true,
+                false,
+                true,
+                r#"{"jsonrpc":"2.0","id":6,"method":"initialize","params":{"protocolVersion":""}}"#,
+                200,
+                Expect::Refused,
+            ),
+            (
+                "POST",
+                true,
+                false,
+                true,
+                r#"{"jsonrpc":"2.0","id":7,"method":"initialize","params":{"protocolVersion":20251125}}"#,
+                200,
+                Expect::Refused,
+            ),
+            (
+                "POST",
+                true,
+                false,
+                true,
+                r#"{"jsonrpc":"2.0","id":8,"method":"ping"}"#,
+                200,
+                Expect::Ping,
+            ),
+            (
+                "POST",
+                true,
+                false,
+                false,
+                r#"{"jsonrpc":"2.0","id":9,"method":"ping"}"#,
+                400,
+                Expect::Status,
             ),
         ] {
+            let ready_before = server.ready().load(Ordering::Acquire);
             let mut request = format!("{method} /mcp HTTP/1.1\r\nHost: {}\r\n", server.address);
             if authorized {
                 request.push_str(&format!("Authorization: Bearer {}\r\n", server.capability));
@@ -825,40 +904,77 @@ mod tests {
                     reply.starts_with(&format!("HTTP/1.1 {status} ")),
                     "unexpected HTTP status"
                 );
-                if body.contains("tools/list") && status == 200 {
-                    let value: Value =
-                        serde_json::from_str(reply.split_once("\r\n\r\n").unwrap().1).unwrap();
-                    assert_eq!(
-                        value["result"]["tools"].as_array().unwrap().len(),
-                        definitions().len()
-                    );
-                    assert_eq!(value["result"]["tools"][0]["name"], definitions()[0].name);
-                    let expected = [
-                        ("observe_page", true, false, true),
-                        ("set_field_value", false, true, false),
-                        ("navigate_page", false, true, false),
-                        ("activate_button", false, true, false),
-                        ("select_option", false, true, false),
-                        ("scroll_page", false, false, false),
-                        ("set_native_control", false, true, false),
-                    ];
-                    for (tool, (name, read_only, destructive, idempotent)) in
-                        value["result"]["tools"]
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .zip(expected)
-                    {
-                        assert_eq!(tool["name"], name);
+                match expected {
+                    Expect::Status => {}
+                    Expect::Tools => {
+                        let value: Value =
+                            serde_json::from_str(reply.split_once("\r\n\r\n").unwrap().1).unwrap();
+                        let tools = value["result"]["tools"].as_array().unwrap();
+                        let advertised = [
+                            ("observe_page", true, false, true),
+                            ("set_field_value", false, true, false),
+                            ("navigate_page", false, true, false),
+                            ("activate_button", false, true, false),
+                            ("select_option", false, true, false),
+                            ("scroll_page", false, false, false),
+                            ("set_native_control", false, true, false),
+                        ];
                         assert_eq!(
-                            tool["annotations"],
-                            json!({
-                                "readOnlyHint": read_only,
-                                "destructiveHint": destructive,
-                                "idempotentHint": idempotent,
-                                "openWorldHint": true,
-                            }),
-                            "incorrect MCP safety hints for {name}"
+                            tools.len(),
+                            advertised.len(),
+                            "unexpected number of advertised MCP tools"
+                        );
+                        for (name, read_only, destructive, idempotent) in advertised {
+                            let tool = tools
+                                .iter()
+                                .find(|tool| tool["name"] == name)
+                                .unwrap_or_else(|| panic!("missing MCP tool {name}"));
+                            assert_eq!(
+                                tool["annotations"],
+                                json!({
+                                    "readOnlyHint": read_only,
+                                    "destructiveHint": destructive,
+                                    "idempotentHint": idempotent,
+                                    "openWorldHint": true,
+                                }),
+                                "incorrect MCP safety hints for {name}"
+                            );
+                        }
+                    }
+                    Expect::Initialize => {
+                        let value: Value =
+                            serde_json::from_str(reply.split_once("\r\n\r\n").unwrap().1).unwrap();
+                        assert!(
+                            value.get("error").is_none(),
+                            "a supported version offer must not be refused"
+                        );
+                        assert_eq!(value["result"]["protocolVersion"], "2025-11-25");
+                        assert_eq!(
+                            value["result"]["capabilities"]["tools"]["listChanged"],
+                            false
+                        );
+                        assert_eq!(
+                            value["result"]["instructions"],
+                            metldr_browser_tools::BROWSER_POLICY
+                        );
+                    }
+                    Expect::Refused => {
+                        let value: Value =
+                            serde_json::from_str(reply.split_once("\r\n\r\n").unwrap().1).unwrap();
+                        assert!(
+                            value.get("result").is_none(),
+                            "an invalid version must not be accepted"
+                        );
+                        assert_eq!(value["error"]["code"], -32602);
+                    }
+                    Expect::Ping => {
+                        let value: Value =
+                            serde_json::from_str(reply.split_once("\r\n\r\n").unwrap().1).unwrap();
+                        assert!(value.get("error").is_none(), "ping must not fail");
+                        assert_eq!(
+                            value["result"],
+                            json!({}),
+                            "ping must answer an empty result"
                         );
                     }
                 }
@@ -883,7 +999,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 server.ready().load(Ordering::Acquire),
-                body.contains("tools/list") && status == 200
+                ready_before || matches!(expected, Expect::Tools)
             );
         }
     }
