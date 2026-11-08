@@ -1,5 +1,6 @@
 use super::{Binding, Control, Proposal, Scroll, Selection, bounded};
 use crate::Result;
+use metldr_browser_tools::valid_handle;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -79,11 +80,8 @@ impl Intent {
                 field_label,
                 previous_value,
                 value,
-            } if bounded(field_id, 64)
+            } if valid_handle(field_id)
                 && bounded(field_label, 128)
-                && field_id
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
                 && previous_value.len() <= 1024
                 && value.len() <= 1024 =>
             {
@@ -93,14 +91,7 @@ impl Intent {
             Self::ActivateButton {
                 button_id,
                 button_label,
-            } if bounded(button_id, 64)
-                && button_id
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-                && bounded(button_label, 128) =>
-            {
-                Ok(())
-            }
+            } if valid_handle(button_id) && bounded(button_label, 128) => Ok(()),
             Self::SelectOption { selection } if selection.valid() => Ok(()),
             Self::Scroll { scroll } if scroll.valid() => Ok(()),
             Self::SetNativeControl { control } if control.valid() => Ok(()),

@@ -7,6 +7,7 @@ use crate::{
     browser_owner,
     flow::Event,
 };
+use metldr_browser_tools::valid_handle;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -249,15 +250,7 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
         return Err("invalid browser tool id".into());
     }
     match call {
-        Call::SetNativeControl { handle, .. }
-            if !handle.is_empty()
-                && handle.len() <= 64
-                && handle
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-')) =>
-        {
-            Ok(())
-        }
+        Call::SetNativeControl { handle, .. } if valid_handle(handle) => Ok(()),
         Call::SetNativeControl { .. } => Err("invalid native control handle".into()),
         Call::Observe => Ok(()),
         Call::Navigate { destination }
@@ -268,46 +261,18 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
             Ok(())
         }
         Call::Navigate { .. } => Err("invalid browser navigation URL".into()),
-        Call::Change { handle, value }
-            if !handle.is_empty()
-                && handle.len() <= 64
-                && handle
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-                && value.len() <= 1024 =>
-        {
-            Ok(())
-        }
+        Call::Change { handle, value } if valid_handle(handle) && value.len() <= 1024 => Ok(()),
         Call::Change { .. } => Err("invalid browser field change".into()),
-        Call::ActivateButton { handle }
-            if !handle.is_empty()
-                && handle.len() <= 64
-                && handle
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')) =>
-        {
-            Ok(())
-        }
+        Call::ActivateButton { handle } if valid_handle(handle) => Ok(()),
         Call::ActivateButton { .. } => Err("invalid browser button handle".into()),
         Call::SelectOption { handle, option }
-            if [handle, option].into_iter().all(|id| {
-                !id.is_empty()
-                    && id.len() <= 64
-                    && id
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-            }) =>
+            if [handle, option].into_iter().all(|id| valid_handle(id)) =>
         {
             Ok(())
         }
         Call::SelectOption { .. } => Err("invalid browser selection handle".into()),
         Call::Scroll { handle, pixels, .. }
-            if !handle.is_empty()
-                && handle.len() <= 64
-                && handle
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-                && (1..=2000).contains(pixels) =>
+            if valid_handle(handle) && (1..=2000).contains(pixels) =>
         {
             Ok(())
         }

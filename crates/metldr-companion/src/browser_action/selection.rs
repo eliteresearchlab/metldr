@@ -1,3 +1,4 @@
+pub(super) use metldr_browser_tools::valid_handle as valid_id;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -31,14 +32,6 @@ impl Selection {
             && self.previous.as_ref().is_none_or(Choice::valid)
             && self.selected.valid()
     }
-}
-
-pub(super) fn valid_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 pub(super) fn valid_label(value: &str) -> bool {
