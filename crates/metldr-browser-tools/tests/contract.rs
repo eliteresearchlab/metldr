@@ -153,6 +153,7 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
         ),
         (ACTIVATE_TOOL, json!({"handle":"#submit"})),
         (ACTIVATE_TOOL, json!({"handle":"é"})),
+        (ACTIVATE_TOOL, json!({"handle":"a".repeat(65)})),
         (SELECT_TOOL, json!({})),
         (SELECT_TOOL, json!({"handle":"select_1"})),
         (SELECT_TOOL, json!({"option":"option_1"})),

@@ -68,6 +68,18 @@ pub struct Invocation {
     pub call: Call,
 }
 
+pub fn valid_handle(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+}
+
+fn handle_schema() -> Value {
+    json!({"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"})
+}
+
 pub fn definitions() -> [Definition; 7] {
     [
         Definition {
@@ -80,7 +92,7 @@ pub fn definitions() -> [Definition; 7] {
             description: "Propose a text field change on the current page. The user must approve before dispatch.",
             input_schema: json!({
                 "type":"object",
-                "properties":{"handle":{"type":"string"},"value":{"type":"string"}},
+                "properties":{"handle":handle_schema(),"value":{"type":"string"}},
                 "required":["handle","value"],
                 "additionalProperties":false
             }),
@@ -93,7 +105,7 @@ pub fn definitions() -> [Definition; 7] {
         Definition {
             name: ACTIVATE_TOOL,
             description: "Propose a click on an observed button. The user must approve before dispatch.",
-            input_schema: json!({"type":"object","properties":{"handle":{"type":"string"}},"required":["handle"],"additionalProperties":false}),
+            input_schema: json!({"type":"object","properties":{"handle":handle_schema()},"required":["handle"],"additionalProperties":false}),
         },
         Definition {
             name: SELECT_TOOL,
@@ -101,8 +113,8 @@ pub fn definitions() -> [Definition; 7] {
             input_schema: json!({
                 "type":"object",
                 "properties":{
-                    "handle":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"},
-                    "option":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"}
+                    "handle":handle_schema(),
+                    "option":handle_schema()
                 },
                 "required":["handle","option"],
                 "additionalProperties":false
@@ -114,7 +126,7 @@ pub fn definitions() -> [Definition; 7] {
             input_schema: json!({
                 "type":"object",
                 "properties":{
-                    "handle":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"},
+                    "handle":handle_schema(),
                     "direction":{"type":"string","enum":["up","down","left","right"]},
                     "pixels":{"type":"integer","minimum":1,"maximum":2000}
                 },
@@ -128,7 +140,7 @@ pub fn definitions() -> [Definition; 7] {
             input_schema: json!({
                 "type":"object",
                 "properties":{
-                    "handle":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"},
+                    "handle":handle_schema(),
                     "checked":{"type":"boolean"}
                 },
                 "required":["handle","checked"],
@@ -136,6 +148,14 @@ pub fn definitions() -> [Definition; 7] {
             }),
         },
     ]
+}
+
+fn handle_argument(value: Option<&Value>, error: &'static str) -> Result<String> {
+    Ok(value
+        .and_then(Value::as_str)
+        .filter(|value| valid_handle(value))
+        .ok_or(error)?
+        .to_owned())
 }
 
 pub fn decode_call(name: &str, arguments: Value) -> Result<Call> {
@@ -147,17 +167,7 @@ pub fn decode_call(name: &str, arguments: Value) -> Result<Call> {
             if object.len() != 3 {
                 return Err("invalid scroll_page input".into());
             }
-            let handle = object
-                .get("handle")
-                .and_then(Value::as_str)
-                .filter(|s| {
-                    !s.is_empty()
-                        && s.len() <= 64
-                        && s.bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-                })
-                .ok_or("invalid browser scroll handle")?
-                .to_owned();
+            let handle = handle_argument(object.get("handle"), "invalid browser scroll handle")?;
             let direction = match object.get("direction").and_then(Value::as_str) {
                 Some("up") => ScrollDirection::Up,
                 Some("down") => ScrollDirection::Down,
@@ -183,16 +193,7 @@ pub fn decode_call(name: &str, arguments: Value) -> Result<Call> {
             {
                 return Err("invalid set_native_control input".into());
             }
-            let handle = object["handle"]
-                .as_str()
-                .filter(|s| {
-                    !s.is_empty()
-                        && s.len() <= 64
-                        && s.bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-                })
-                .ok_or("invalid native control handle")?
-                .to_owned();
+            let handle = handle_argument(object.get("handle"), "invalid native control handle")?;
             let checked = object["checked"]
                 .as_bool()
                 .ok_or("invalid native control checked state")?;
@@ -214,16 +215,7 @@ pub fn decode_call(name: &str, arguments: Value) -> Result<Call> {
             if object.len() != 1 || !object.contains_key("handle") {
                 return Err("invalid activate_button input".into());
             }
-            let handle = object["handle"]
-                .as_str()
-                .filter(|s| {
-                    !s.is_empty()
-                        && s.len() <= 64
-                        && s.bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-                })
-                .ok_or("invalid browser button handle")?
-                .to_owned();
+            let handle = handle_argument(object.get("handle"), "invalid browser button handle")?;
             Ok(Call::ActivateButton { handle })
         }
         SELECT_TOOL => {
@@ -231,26 +223,8 @@ pub fn decode_call(name: &str, arguments: Value) -> Result<Call> {
             {
                 return Err("invalid select_option input".into());
             }
-            let handle = object["handle"]
-                .as_str()
-                .filter(|s| {
-                    !s.is_empty()
-                        && s.len() <= 64
-                        && s.bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-                })
-                .ok_or("invalid browser select handle")?
-                .to_owned();
-            let option = object["option"]
-                .as_str()
-                .filter(|s| {
-                    !s.is_empty()
-                        && s.len() <= 64
-                        && s.bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-                })
-                .ok_or("invalid browser option handle")?
-                .to_owned();
+            let handle = handle_argument(object.get("handle"), "invalid browser select handle")?;
+            let option = handle_argument(object.get("option"), "invalid browser option handle")?;
             Ok(Call::SelectOption { handle, option })
         }
         OBSERVE_TOOL if object.is_empty() => Ok(Call::Observe),
@@ -260,16 +234,7 @@ pub fn decode_call(name: &str, arguments: Value) -> Result<Call> {
             {
                 return Err("invalid set_field_value input".into());
             }
-            let handle = object["handle"]
-                .as_str()
-                .filter(|s| {
-                    !s.is_empty()
-                        && s.len() <= 64
-                        && s.bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-                })
-                .ok_or("invalid browser field handle")?
-                .to_owned();
+            let handle = handle_argument(object.get("handle"), "invalid browser field handle")?;
             let value = object["value"]
                 .as_str()
                 .filter(|s| s.len() <= 1024)
