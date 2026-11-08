@@ -22,7 +22,7 @@ mod summary;
 mod upgrade;
 
 #[cfg(test)]
-mod browser_checks;
+pub(crate) mod browser_checks;
 #[cfg(test)]
 mod browser_owner_checks;
 #[cfg(test)]

@@ -76,7 +76,7 @@ impl Owner {
                 ack,
                 budget,
             } => {
-                let result = (|| -> Result<(Action, bool)> {
+                let result = (|| -> Result<(Action, bool, Option<review::Review>)> {
                     if let Some(existing) =
                         self.saved_browser_tool(&proposal.run, &proposal.tool_use_id)?
                     {
@@ -85,7 +85,7 @@ impl Owner {
                                 "browser tool identity was reused with a changed proposal".into()
                             );
                         }
-                        return Ok((existing, false));
+                        return Ok((existing, false, None));
                     }
                     self.browser_operation(&proposal.run)?;
                     if self.browser_approval.is_some() {
@@ -97,19 +97,20 @@ impl Owner {
                     let run = proposal.run.clone();
                     self.record_execution(&run, |edit, execution| {
                         let (action, created) = edit.propose_browser(execution, proposal)?;
-                        Ok((action, created))
+                        if !created {
+                            return Ok((action, false, None));
+                        }
+                        // A failed pause must reject the edit, not orphan the action.
+                        let review = budget.as_ref().map(Budget::pause).transpose()?;
+                        Ok((action, true, review))
                     })
                 })();
                 match result {
-                    Ok((action, false)) => {
+                    Ok((action, false, _)) => {
                         let _ = ack.send(Ok(action));
                         Ok(())
                     }
-                    Ok((action, true)) => {
-                        let review = match budget.as_ref().map(Budget::pause).transpose() {
-                            Ok(review) => review,
-                            Err(error) => return acknowledge(ack, Err(error)),
-                        };
+                    Ok((action, true, review)) => {
                         self.browser_approval = Some(PendingApproval {
                             run: action.proposal.run,
                             action: action.id,
