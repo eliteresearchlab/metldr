@@ -1,7 +1,7 @@
 use crate::{
     Result,
     browser_owner::Budget,
-    browser_worker::{Call, Tools, decode_call, definitions},
+    browser_worker::{Call, Tools, decode_call},
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -28,6 +28,11 @@ const CONNECTION_MAX: usize = 8;
 const TOOL_DEADLINE: Duration = Duration::from_secs(30);
 
 mod progress;
+mod protocol;
+mod registry;
+
+#[cfg(test)]
+mod conformance;
 
 pub(super) struct Server {
     listener: TcpListener,
@@ -358,8 +363,7 @@ async fn handle_connection(
         && parsed
             .headers
             .get("mcp-protocol-version")
-            .map(String::as_str)
-            != Some("2025-11-25")
+            .is_none_or(|value| !protocol::accepts_header(value))
     {
         return write_http(&mut stream, 400, "").await;
     }
@@ -462,32 +466,17 @@ async fn process_message(
     let result = match method {
         "initialize" => {
             // The specification asks for a supported revision, not the requested one.
-            if !params
+            let Some(requested) = params
                 .get("protocolVersion")
                 .and_then(Value::as_str)
-                .is_some_and(|version| !version.is_empty())
-            {
+                .filter(|version| !version.is_empty())
+            else {
                 return Ok(Some(rpc_error(id, -32602, "invalid MCP protocol version")));
-            }
-            json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"metldr-browser","version":"0.1.0"},"instructions":metldr_browser_tools::BROWSER_POLICY})
+            };
+            json!({"protocolVersion":protocol::negotiate(requested),"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"metldr-browser","version":"0.1.0"},"instructions":metldr_browser_tools::BROWSER_POLICY})
         }
         "ping" => json!({}),
-        "tools/list" => {
-            json!({"tools":definitions().into_iter().map(|definition| {
-                let read_only = definition.name == metldr_browser_tools::OBSERVE_TOOL;
-                json!({
-                    "name":definition.name,
-                    "description":definition.description,
-                    "inputSchema":definition.input_schema,
-                    "annotations":{
-                        "readOnlyHint":read_only,
-                        "destructiveHint":!read_only && definition.name != metldr_browser_tools::SCROLL_TOOL,
-                        "idempotentHint":read_only,
-                        "openWorldHint":true,
-                    }
-                })
-            }).collect::<Vec<_>>() })
-        }
+        "tools/list" => registry::list(),
         "tools/call" => {
             let token = progress::token(&params)?;
             let name = params
