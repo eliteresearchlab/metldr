@@ -1,4 +1,4 @@
-.PHONY: rust check-rust check-rune check-codex check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm check-companion companion
+.PHONY: rust check-rust check-rune check-codex check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion
 
 rust:
 	npm run build:rust
@@ -53,6 +53,25 @@ panel-wasm:
 	cargo build --locked --release --manifest-path crates/metldr-panel/Cargo.toml --target wasm32-unknown-unknown --target-dir "$(PANEL_TARGET_DIR)"
 	mkdir -p crates/metldr-panel/pkg
 	$(WASM_BINDGEN) --target web --out-dir crates/metldr-panel/pkg "$(PANEL_TARGET_DIR)/wasm32-unknown-unknown/release/metldr_panel.wasm"
+
+RUNE_HOST_TARGET_DIR ?= crates/metldr-rune-host/target
+RUNE_HOST_OUT ?= crates/metldr-rune-host/pkg
+
+# Internal Rune host route: native lifecycle and font tests (no renderer), then the decoded fonts.
+check-rune-app:
+	cargo test --locked --manifest-path crates/metldr-rune-host/Cargo.toml
+	node scripts/check-rune-fonts.mjs
+
+# Rune host as its own wasm module, copied with its fonts into public/rune for the internal route
+# only. Shipping builds never run this target, so their packages gain nothing.
+rune-host:
+	cargo build --locked --release --features renderer --manifest-path crates/metldr-rune-host/Cargo.toml --target wasm32-unknown-unknown --target-dir "$(RUNE_HOST_TARGET_DIR)"
+	mkdir -p "$(RUNE_HOST_OUT)" public/rune
+	$(WASM_BINDGEN) --target web --out-name metldr_panel --out-dir "$(RUNE_HOST_OUT)" "$(RUNE_HOST_TARGET_DIR)/wasm32-unknown-unknown/release/metldr_rune_host.wasm"
+	cp "$(RUNE_HOST_OUT)/metldr_panel.js" "$(RUNE_HOST_OUT)/metldr_panel_bg.wasm" public/rune/
+	rm -rf public/rune/snippets && cp -R "$(RUNE_HOST_OUT)/snippets" public/rune/
+	mkdir -p public/rune/fonts && cp crates/metldr-rune-host/assets/fonts/* public/rune/fonts/
+	node scripts/check-rune-fonts.mjs
 
 check-companion:
 	cargo test --locked --manifest-path crates/metldr-companion/Cargo.toml

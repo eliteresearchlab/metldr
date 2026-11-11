@@ -1,0 +1,32 @@
+[package]
+name = "metldr-rune-host"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+version = "0.1.0"
+edition = "2024"
+
+# Own workspace: the Rune renderer stays out of the shipping panel module.
+[workspace]
+
+# Mirrors the shipping panel's release profile so sizes are comparable.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+# Rune renderer for the wasm build (`make rune-host`). Native tests run without it.
+renderer = ["dep:rune"]
+
+[dependencies]
+rune = { path = "../../vendor/rune/crates/rune", optional = true, default-features = false, features = ["accessibility", "webgl"] }
+js-sys = "=0.3.105"
+wasm-bindgen = "=0.2.128"
+web-sys = { version = "=0.3.105", features = ["Performance", "Window"] }
+
+[lints.rust]
+unsafe_code = "forbid"
