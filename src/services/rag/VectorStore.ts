@@ -1,75 +1,8 @@
 import { databaseService, DB_CONFIGS } from '../DatabaseService'
 import { localModels } from '../ai/LocalModelProvider'
-import type { VectorEntry, SearchResult } from '../../types'
-
-const TOKEN_PUNCTUATION_PATTERN = /[^\w\s]/g
-const WHITESPACE_PATTERN = /\s+/
-
-class InvertedIndex {
-  private index: Map<string, Set<string>> = new Map()
-  private docs: Map<string, VectorEntry> = new Map()
-
-  add(entry: VectorEntry) {
-    this.docs.set(entry.id, entry)
-    const tokens = this.tokenize(entry.content)
-    for (const token of tokens) {
-      if (!this.index.has(token)) this.index.set(token, new Set())
-      this.index.get(token)!.add(entry.id)
-    }
-  }
-
-  search(query: string, limit: number): SearchResult[] {
-    const tokens = this.tokenize(query)
-    if (tokens.length === 0) return []
-    
-    const scores = new Map<string, number>()
-    for (const token of tokens) {
-      const docIds = this.index.get(token)
-      if (docIds) {
-        const idf = Math.log(this.docs.size / docIds.size + 1)
-        for (const id of docIds) {
-          scores.set(id, (scores.get(id) || 0) + idf)
-        }
-      }
-    }
-    
-    return Array.from(scores.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([id, score]) => ({
-        entry: this.docs.get(id)!,
-        score: score / tokens.length,
-        matchType: 'keyword' as const
-      }))
-      .filter(r => r.entry)
-  }
-
-  clear() {
-    this.index.clear()
-    this.docs.clear()
-  }
-
-  getDocCount(): number {
-    return this.docs.size
-  }
-
-  // check if any document has this sourceUrl in metadata (fast O(n) scan, but docs are small)
-  hasSource(sourceUrl: string): boolean {
-    for (const entry of this.docs.values()) {
-      if (entry.metadata?.sourceUrl === sourceUrl || entry.metadata?.sourceId === sourceUrl) {
-        return true
-      }
-    }
-    return false
-  }
-
-  private tokenize(text: string): string[] {
-    return text.toLowerCase()
-      .replace(TOKEN_PUNCTUATION_PATTERN, ' ')
-      .split(WHITESPACE_PATTERN)
-      .filter(t => t.length > 2)
-  }
-}
+import type { VectorEntry } from '../../types'
+import { Bm25Index } from './bm25'
+import type { RankedHit } from './rankFusion'
 
 export class VectorStore {
   private operationQueue: Promise<void> = Promise.resolve()
@@ -77,7 +10,7 @@ export class VectorStore {
   private saveDebounceMs = 300
   private loaded = false
   private loadingPromise: Promise<void> | null = null
-  private invertedIndex = new InvertedIndex()
+  private invertedIndex = new Bm25Index<VectorEntry>()
   private pendingAdds = 0
   
   // sandbox lifecycle tracking
@@ -89,7 +22,7 @@ export class VectorStore {
     this.operationQueue = this.operationQueue.then(async () => {
       await this.ensureIndexLoaded()
       await this.storeDocument(entry)
-      this.invertedIndex.add(entry)
+      this.invertedIndex.add(entry.id, entry.content, entry)
       await localModels.voyAdd(entry.id, Array.from(embedding), String(entry.metadata?.title || entry.id), String(entry.metadata?.sourceUrl || ''))
       this.pendingAdds--
       this.scheduleDebouncedSave()
@@ -100,22 +33,23 @@ export class VectorStore {
     return this.operationQueue
   }
 
-  async search(queryEmbedding: number[], limit: number): Promise<SearchResult[]> {
+  // dense leg: Voy returns neighbours nearest-first and no similarity value, so the position is the only signal
+  async search(queryEmbedding: number[], limit: number): Promise<Array<RankedHit<VectorEntry>>> {
     await this.ensureIndexLoaded()
-    const results = await localModels.voySearch(queryEmbedding, limit)
+    const ids = await localModels.voySearch(queryEmbedding, limit)
 
-    const hydrated = await Promise.all(results.map(async r => {
-      const entry = await this.retrieveDocument(r.id)
-      if (!entry) return null
-      return { entry, score: r.score, matchType: 'semantic' } as SearchResult
+    const hydrated = await Promise.all(ids.map(async id => {
+      const entry = await this.retrieveDocument(id)
+      return entry ? { id, item: entry } : null
     }))
 
-    return hydrated.filter(Boolean) as SearchResult[]
+    return hydrated.filter((hit): hit is RankedHit<VectorEntry> => hit !== null)
   }
 
-  async searchKeyword(query: string, limit: number): Promise<SearchResult[]> {
+  // lexical leg: BM25 hits, best first
+  async searchKeyword(query: string, limit: number): Promise<Array<RankedHit<VectorEntry>>> {
     await this.ensureIndexLoaded()
-    return this.invertedIndex.search(query, limit)
+    return this.invertedIndex.search(query, limit).map(({ id, item }) => ({ id, item }))
   }
 
   async addBatch(entries: Array<{ entry: VectorEntry; embedding: Float32Array }>): Promise<void> {
@@ -126,7 +60,7 @@ export class VectorStore {
       this.operationQueue = this.operationQueue.then(async () => {
         await this.ensureIndexLoaded()
         await this.storeDocuments(entries.map(({ entry }) => entry))
-        for (const { entry } of entries) this.invertedIndex.add(entry)
+        for (const { entry } of entries) this.invertedIndex.add(entry.id, entry.content, entry)
         await localModels.voyAddBatch(entries.map(({ entry, embedding }) => ({
           id: entry.id,
           embedding: Array.from(embedding),
@@ -215,7 +149,7 @@ export class VectorStore {
     
     this.loaded = true
     this.lastSandboxId = localModels.getSandboxId()
-    console.log(`[VectorStore] Index ready. ${this.invertedIndex.getDocCount()} docs in inverted index. (${Date.now() - startTime}ms total)`)
+    console.log(`[VectorStore] Index ready. ${this.invertedIndex.size} docs in keyword index. (${Date.now() - startTime}ms total)`)
   }
 
   // force reload from IDB - call when index seems stale
@@ -229,8 +163,8 @@ export class VectorStore {
   async hasDocument(sourceId: string): Promise<boolean> {
     await this.ensureIndexLoaded()
     
-    // direct metadata check in inverted index (O(n) but reliable)
-    if (this.invertedIndex.hasSource(sourceId)) {
+    // direct metadata check in the keyword index (O(n) but reliable)
+    if (this.hasIndexedSource(sourceId)) {
       return true
     }
     
@@ -242,7 +176,17 @@ export class VectorStore {
 
   // get doc count for verification
   getDocCount(): number {
-    return this.invertedIndex.getDocCount()
+    return this.invertedIndex.size
+  }
+
+  // check if any document has this sourceUrl in metadata (fast O(n) scan, but docs are small)
+  private hasIndexedSource(sourceUrl: string): boolean {
+    for (const entry of this.invertedIndex.values()) {
+      if (entry.metadata?.sourceUrl === sourceUrl || entry.metadata?.sourceId === sourceUrl) {
+        return true
+      }
+    }
+    return false
   }
 
   private async rebuildInvertedIndex(): Promise<void> {
@@ -258,7 +202,8 @@ export class VectorStore {
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result
         if (cursor) {
-          this.invertedIndex.add(cursor.value)
+          const entry = cursor.value as VectorEntry
+          this.invertedIndex.add(entry.id, entry.content, entry)
           count++
           cursor.continue()
         } else {
