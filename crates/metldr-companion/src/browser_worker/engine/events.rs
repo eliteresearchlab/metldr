@@ -10,7 +10,8 @@ use regex::Regex;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    borrow::Cow,
+    collections::{BTreeMap, HashSet, VecDeque},
     sync::{Arc, LazyLock, Mutex},
 };
 
@@ -63,13 +64,20 @@ const URL_LIMIT: usize = 256;
 const ARGUMENT_LIMIT: usize = 32;
 const REDACTED: &str = "[redacted]";
 
-static SECRET: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(SECRET_METADATA_PATTERN).ok());
+static SECRET: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(&format!("(?i:{SECRET_METADATA_PATTERN})")).ok());
+static URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)https?://[^\s<>"']+"#).unwrap());
+static PEM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----").unwrap());
+static CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+    r"(?i)\b(?:bearer|basic)\s+[a-z0-9+/_.=-]+|\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[a-zA-Z0-9_-]{16,}|gh[pousr]_[a-zA-Z0-9_]{16,}|github_pat_[a-zA-Z0-9_]{16,}|AKIA[A-Z0-9]{16})\b"
+).unwrap()
+});
 
 /// Whether text carries a secret label. An unreadable pattern counts as a match, so nothing leaks.
 fn secret(text: &str) -> bool {
-    SECRET
-        .as_ref()
-        .is_none_or(|pattern| pattern.is_match(&text.to_lowercase()))
+    SECRET.as_ref().is_none_or(|pattern| pattern.is_match(text))
 }
 
 #[derive(Serialize)]
@@ -90,7 +98,8 @@ impl Entry {
 #[derive(Default)]
 struct Log {
     /// Recording starts only after the browser has replayed earlier output.
-    armed: bool,
+    armed: HashSet<Option<String>>,
+    epoch: u64,
     entries: VecDeque<Entry>,
     bytes: usize,
     evicted: usize,
@@ -113,6 +122,7 @@ impl Log {
         self.entries.clear();
         self.bytes = 0;
         self.evicted = 0;
+        self.epoch = self.epoch.wrapping_add(1);
     }
 }
 
@@ -125,11 +135,11 @@ impl PageLogs {
     pub(super) fn register(&self, subscriptions: &mut Subscriptions) {
         let logs = self.clone();
         subscriptions.subscribe("Runtime.consoleAPICalled", move |event| {
-            logs.console(&event.params);
+            logs.console_for(event.session.as_deref(), &event.params);
         });
         let logs = self.clone();
         subscriptions.subscribe("Log.entryAdded", move |event| {
-            logs.log_entry(&event.params);
+            logs.log_entry_for(event.session.as_deref(), &event.params);
         });
         let logs = self.clone();
         subscriptions.subscribe("Page.frameNavigated", move |event| {
@@ -142,10 +152,21 @@ impl PageLogs {
 
     /// Starts recording. The actor calls this after `Log.enable` answers, because
     /// the browser replays earlier console and log output in reply to it.
-    pub(super) fn arm(&self) {
+    pub(super) fn arm_session(&self, session: Option<&str>) {
         if let Ok(mut log) = self.0.lock() {
-            log.armed = true;
+            log.armed.insert(session.map(str::to_owned));
         }
+    }
+
+    pub(super) fn retain_sessions(&self, owned: impl Fn(Option<&str>) -> bool) {
+        if let Ok(mut log) = self.0.lock() {
+            log.armed.retain(|session| owned(session.as_deref()));
+        }
+    }
+
+    #[cfg(test)]
+    fn arm(&self) {
+        self.arm_session(None);
     }
 
     pub(super) fn snapshot(&self) -> Result<Value> {
@@ -160,25 +181,72 @@ impl PageLogs {
         }))
     }
 
+    #[cfg(test)]
     fn console(&self, params: &Value) {
-        let level = params["type"].as_str().unwrap_or("log");
-        let text = params["args"]
-            .as_array()
-            .map(|args| {
-                args.iter()
-                    .take(ARGUMENT_LIMIT)
-                    .map(argument)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
-            .unwrap_or_default();
-        let url = params["stackTrace"]["callFrames"][0]["url"].as_str();
-        self.push("console", level, &text, url);
+        self.console_for(None, params);
     }
 
+    fn console_for(&self, session: Option<&str>, params: &Value) {
+        let args = params["args"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        // Keep the scan independent of the output limit, including labels spanning arguments.
+        let mut tail = String::new();
+        let mut sensitive = false;
+        for arg in args.iter().take(ARGUMENT_LIMIT) {
+            let part = argument(arg);
+            let mut end = part.len().min(128);
+            while !part.is_char_boundary(end) {
+                end -= 1;
+            }
+            tail.push(' ');
+            tail.push_str(&part[..end]);
+            sensitive |= secret(&part)
+                || secret(&tail)
+                || CREDENTIAL.is_match(&part)
+                || CREDENTIAL.is_match(&tail);
+            let mut start = part.len().saturating_sub(128);
+            while !part.is_char_boundary(start) {
+                start += 1;
+            }
+            tail.clear();
+            tail.push_str(&part[start..]);
+        }
+        let mut text = String::new();
+        if sensitive {
+            text.push_str(REDACTED);
+        } else {
+            for (index, arg) in args.iter().take(ARGUMENT_LIMIT).enumerate() {
+                if text.len() >= TEXT_LIMIT {
+                    break;
+                }
+                if index > 0 {
+                    text.push(' ');
+                }
+                text.push_str(&sanitize(&argument(arg)));
+                text = bounded(&text, TEXT_LIMIT);
+            }
+        }
+        let url = params["stackTrace"]["callFrames"][0]["url"].as_str();
+        self.push(
+            session,
+            "console",
+            params["type"].as_str().unwrap_or("log"),
+            &text,
+            url,
+        );
+    }
+
+    #[cfg(test)]
     fn log_entry(&self, params: &Value) {
+        self.log_entry_for(None, params);
+    }
+
+    fn log_entry_for(&self, session: Option<&str>, params: &Value) {
         let entry = &params["entry"];
         self.push(
+            session,
             "log",
             entry["level"].as_str().unwrap_or("info"),
             entry["text"].as_str().unwrap_or_default(),
@@ -186,25 +254,31 @@ impl PageLogs {
         );
     }
 
-    fn push(&self, source: &'static str, level: &str, text: &str, url: Option<&str>) {
+    fn push(
+        &self,
+        session: Option<&str>,
+        source: &'static str,
+        level: &str,
+        text: &str,
+        url: Option<&str>,
+    ) {
         let Ok(mut log) = self.0.lock() else {
             return;
         };
-        if !log.armed {
+        if !log.armed.contains(&session.map(str::to_owned)) {
             return;
         }
         let entry = Entry {
             source,
             level: bounded(level, TEXT_LIMIT),
-            // Redaction reads the whole text, before it is cut to the entry limit.
-            text: if secret(text) {
+            text: if secret(text) || PEM.is_match(text) {
                 REDACTED.to_owned()
             } else {
-                bounded(text, TEXT_LIMIT)
+                bounded(&sanitize(text), TEXT_LIMIT)
             },
             url: url
                 .filter(|url| !secret(url))
-                .map(|url| bounded(url, URL_LIMIT)),
+                .map(|url| bounded(&sanitize_url(url), URL_LIMIT)),
         };
         log.push(entry);
     }
@@ -217,18 +291,48 @@ impl PageLogs {
 }
 
 /// Text for one console argument, as the page would print it.
-fn argument(arg: &Value) -> String {
+fn argument(arg: &Value) -> Cow<'_, str> {
     if let Some(value) = arg.get("value") {
         return match value {
-            Value::String(text) => text.clone(),
-            other => other.to_string(),
+            Value::String(text) => Cow::Borrowed(text),
+            other => Cow::Owned(other.to_string()),
         };
     }
-    ["unserializableValue", "description", "type"]
-        .into_iter()
-        .find_map(|key| arg[key].as_str())
-        .unwrap_or_default()
-        .to_owned()
+    Cow::Borrowed(
+        ["unserializableValue", "description", "type"]
+            .into_iter()
+            .find_map(|key| arg[key].as_str())
+            .unwrap_or_default(),
+    )
+}
+
+fn sanitize_url(value: &str) -> String {
+    let Ok(mut url) = reqwest::Url::parse(value) else {
+        return REDACTED.to_owned();
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return REDACTED.to_owned();
+    }
+    if url.set_username("").is_err() || url.set_password(None).is_err() {
+        return REDACTED.to_owned();
+    }
+    url.set_fragment(None);
+    if url.query().is_some() {
+        let keys: Vec<_> = url.query_pairs().map(|(key, _)| key.into_owned()).collect();
+        url.set_query(None);
+        let mut query = url.query_pairs_mut();
+        for key in keys {
+            query.append_pair(&key, REDACTED);
+        }
+    }
+    url.into()
+}
+
+fn sanitize(text: &str) -> String {
+    let urls = URL.replace_all(text, |captures: &regex::Captures<'_>| {
+        sanitize_url(&captures[0])
+    });
+    CREDENTIAL.replace_all(&urls, REDACTED).into_owned()
 }
 
 /// The longest prefix of `text` within `limit` bytes that ends on a character boundary.
@@ -236,6 +340,11 @@ fn bounded(text: &str, limit: usize) -> String {
     let mut end = text.len().min(limit);
     while !text.is_char_boundary(end) {
         end -= 1;
+    }
+    if let Some(start) = text[..end].rfind('[') {
+        if text[start..].starts_with(REDACTED) && start + REDACTED.len() > end {
+            end = start;
+        }
     }
     text[..end].to_owned()
 }
@@ -313,6 +422,15 @@ mod checks {
         let entry = &logs.snapshot().unwrap()["entries"][0];
         assert!(!entry.to_string().contains("private"));
         assert!(!entry.to_string().contains("fragment"));
+        assert!(entry.to_string().contains("code="));
+        let sanitized = sanitize_url("https://user:pass@example.test/cb?code=private#fragment");
+        assert!(
+            !sanitized.contains("user")
+                && !sanitized.contains("pass")
+                && !sanitized.contains("private")
+        );
+        assert_eq!(sanitize_url("https://%"), REDACTED);
+        assert_eq!(sanitize("Bearer abcdef"), REDACTED);
     }
 
     #[test]
@@ -324,9 +442,17 @@ mod checks {
         let owned = |_: Option<&str>| true;
         subscriptions.offer(&console(Some("child"), "replay"), owned);
         assert!(texts(&logs).is_empty());
-        subscriptions.offer(&event(None, "Page.frameNavigated", json!({"frame":{"id":"main"}})), owned);
+        subscriptions.offer(
+            &event(None, "Page.frameNavigated", json!({"frame":{"id":"main"}})),
+            owned,
+        );
         subscriptions.offer(&console(None, "new page"), owned);
         assert_eq!(texts(&logs), vec!["new page"]);
+        logs.arm_session(Some("child"));
+        subscriptions.offer(&console(Some("child"), "live"), owned);
+        logs.retain_sessions(|session| session.is_none());
+        subscriptions.offer(&console(Some("child"), "after detach"), owned);
+        assert_eq!(texts(&logs), vec!["new page", "live"]);
     }
 
     #[test]
@@ -338,5 +464,4 @@ mod checks {
         logs.console(&json!({"args":args}));
         assert_eq!(texts(&logs), vec![REDACTED]);
     }
-
 }

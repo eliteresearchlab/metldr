@@ -301,7 +301,12 @@ impl Actor {
         {
             return Ok(());
         }
-        match self.contexts.event(&event)? {
+        let change = self.contexts.event(&event)?;
+        if event.method.as_ref() == "Target.detachedFromTarget" {
+            self.page_logs
+                .retain_sessions(|session| self.contexts.owns(session));
+        }
+        match change {
             runtime::Change::Attached { session, page } => {
                 self.initialize(Some(session), page)?
             }
