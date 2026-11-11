@@ -1,4 +1,4 @@
-use super::{History, edit::Failure, fixture, schema::*};
+use super::{Commit, History, edit::Failure, fixture, schema::*};
 use crate::{
     Result,
     agent_model::Launch,
@@ -1064,5 +1064,132 @@ fn caught_late_failure_cannot_commit_partial_records() -> Result<()> {
             .is_err()
     );
     assert_eq!(serde_json::to_value(profile(&history)?)?, before);
+    Ok(())
+}
+
+/// redb 4.4.0 reclaims pages freed by a non-durable commit only when they were never persisted:
+/// `process_freed_pages_nondurable` calls `free_if_unpersisted`, which claims a page only if the
+/// in-memory unpersisted set holds it. A non-durable commit cannot touch anything the last durable
+/// transaction might still reference, so pages an earlier durable commit wrote stay in the freed
+/// table until the next durable commit. A streamed turn therefore holds one record's worth of
+/// pages per streamed commit until its settle, and the settle returns them to the allocator.
+/// The file must plateau across turns, not grow with every turn.
+#[test]
+fn streamed_turns_keep_the_history_file_within_a_bounded_size() -> Result<()> {
+    use metldr_conversation::{Change, Content, MessageKey};
+
+    const TURNS: usize = 50;
+    const DELTAS: usize = 200;
+    const RECORD_BYTES: usize = 4096;
+    // Measured with `history_bytes_plateau`, three turns each way, same record shape: the
+    // all-Immediate path plateaus at 180,224 bytes and the streamed path at 610,304 bytes. Both
+    // plateaus are reached by the first turn and do not move afterwards. The streamed plateau is
+    // also independent of how many deltas a turn carries: the commit-bench `turns_stream` case
+    // ends at 45 to 61 pages for 50, 200, 1000 and 5000 deltas per turn, from 2,450 up to 249,950
+    // streamed commits. The excess over the all-Immediate path is redb's high-water mark from the
+    // non-durable commits inside one turn: the settle reclaims those pages for reuse but does not
+    // truncate every trailing region. 768 KiB is 1.29x the measured streamed plateau and 4.4x the
+    // all-Immediate path, while per-turn accumulation would reach tens of megabytes over 50 turns.
+    const BOUND_BYTES: u64 = 768 * 1024;
+
+    let directory = Directory::new();
+    let disk = crate::store::Disk::lock(directory.0.clone())?;
+    let path = directory.0.join("history.redb");
+    let mut history = History::import_new(&path, &empty_snapshot()?, disk.lease())?;
+    let scope = history.selection()?;
+    let run = response_run(&mut history, &scope, "growth:start", 'e')?;
+
+    // Every commit rewrites the same 4 KiB message, so the record keeps its size and any file
+    // growth comes from allocator behavior rather than from the data.
+    let write = |history: &mut History, commit: Commit, turn: usize, delta: usize| -> Result<()> {
+        let mut bytes = vec![b'x'; RECORD_BYTES];
+        bytes[0] = b'0' + (turn % 10) as u8;
+        bytes[1] = b'0' + (delta % 10) as u8;
+        let text = String::from_utf8(bytes).expect("ascii");
+        history.edit_as(commit, |edit| {
+            let execution = edit.execution(&run)?;
+            let mut record = edit.run(&execution, &run)?;
+            let mut content = Content::native();
+            content.change(Change::Final {
+                key: MessageKey::observed(1)?,
+                text,
+            })?;
+            record.output = content;
+            edit.put_run(&execution, record)?;
+            Ok(())
+        })
+    };
+
+    let mut sizes = Vec::with_capacity(TURNS);
+    for turn in 0..TURNS {
+        for delta in 0..DELTAS - 1 {
+            write(&mut history, Commit::Streamed, turn, delta)?;
+        }
+        write(&mut history, Commit::Durable, turn, DELTAS - 1)?;
+        sizes.push(fs::metadata(&path)?.len());
+    }
+
+    let early = sizes[1];
+    let final_size = sizes[TURNS - 1];
+    assert!(
+        final_size <= early * 3 / 2,
+        "history file grew from {early} bytes after turn 2 to {final_size} bytes after turn {TURNS}"
+    );
+    assert!(
+        final_size <= BOUND_BYTES,
+        "history file is {final_size} bytes after {TURNS} turns of {DELTAS} deltas, above the {BOUND_BYTES} byte bound"
+    );
+    Ok(())
+}
+
+// Calibration harness for the bound above: the same record shape, three turns each way. The file
+// plateaus by the second turn, so three turns read the steady state without paying for ten
+// thousand durable commits. Run with:
+//   cargo test --manifest-path crates/metldr-companion/Cargo.toml \
+//     history_bytes_plateau -- --ignored --nocapture
+#[test]
+#[ignore = "calibration harness; run with --ignored --nocapture"]
+fn history_bytes_plateau() -> Result<()> {
+    use metldr_conversation::{Change, Content, MessageKey};
+
+    const TURNS: usize = 3;
+    const DELTAS: usize = 200;
+    const RECORD_BYTES: usize = 4096;
+    for (label, streamed) in [("streamed", true), ("immediate", false)] {
+        let directory = Directory::new();
+        let disk = crate::store::Disk::lock(directory.0.clone())?;
+        let path = directory.0.join("history.redb");
+        let mut history = History::import_new(&path, &empty_snapshot()?, disk.lease())?;
+        let scope = history.selection()?;
+        let run = response_run(&mut history, &scope, "plateau:start", 'a')?;
+        let mut sizes = Vec::new();
+        for turn in 0..TURNS {
+            for delta in 0..DELTAS {
+                let commit = if streamed && delta + 1 < DELTAS {
+                    Commit::Streamed
+                } else {
+                    Commit::Durable
+                };
+                let mut bytes = vec![b'x'; RECORD_BYTES];
+                bytes[0] = b'0' + (turn % 10) as u8;
+                bytes[1] = b'0' + (delta % 10) as u8;
+                let text = String::from_utf8(bytes).expect("ascii");
+                history.edit_as(commit, |edit| {
+                    let execution = edit.execution(&run)?;
+                    let mut record = edit.run(&execution, &run)?;
+                    let mut content = Content::native();
+                    content.change(Change::Final {
+                        key: MessageKey::observed(1)?,
+                        text,
+                    })?;
+                    record.output = content;
+                    edit.put_run(&execution, record)?;
+                    Ok(())
+                })?;
+            }
+            sizes.push(fs::metadata(&path)?.len());
+        }
+        eprintln!("history_bytes_plateau mode={label} sizes={sizes:?}");
+    }
     Ok(())
 }

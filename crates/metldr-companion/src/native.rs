@@ -9,7 +9,7 @@ pub(super) use config::{parse_bootstrap_config, valid_parent_window_arg};
 
 use crate::{
     Result,
-    flow::{Event, Owner},
+    flow::{Event, Owner, drain_texts},
     history::History,
     transport::{Action, Transport},
 };
@@ -167,19 +167,29 @@ pub(super) fn run() -> Result<()> {
     owner.reply_view(None, "ready", true)?;
     let mut closed = false;
     let mut input_error = None;
+    // The first event drained behind a streamed delta batch that was not a delta for that run.
+    // It is handled next, so events keep their order.
+    let mut carried: Option<Event> = None;
     loop {
         owner.expire_history();
         owner.settings.check_deadline()?;
-        if closed && owner.operations.is_empty() && owner.settings.job.is_none() {
+        if closed
+            && carried.is_none()
+            && owner.operations.is_empty()
+            && owner.settings.job.is_none()
+        {
             break;
         }
         if !closed {
             owner.transport.poll(&owner.tx)?;
         }
-        let event = match rx.recv_timeout(Duration::from_millis(20)) {
-            Ok(event) => event,
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(error) => return Err(error.into()),
+        let event = match carried.take() {
+            Some(event) => event,
+            None => match rx.recv_timeout(Duration::from_millis(20)) {
+                Ok(event) => event,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(error) => return Err(error.into()),
+            },
         };
         match event {
             Event::CorrectionReady { run, target } => owner.correction_ready(&run, target)?,
@@ -248,7 +258,11 @@ pub(super) fn run() -> Result<()> {
                 }
                 _ => (),
             },
-            Event::Text { run, change } => owner.text(&run, change)?,
+            Event::Text { run, change } => {
+                let (changes, next) = drain_texts(&rx, &run, change);
+                carried = next;
+                owner.texts(&run, changes)?;
+            }
             Event::Presentation { run, update, ack } => owner.presentation(&run, update, ack)?,
             Event::Settled { run, result } => owner.settled(&run, result, closed)?,
             Event::PiBound {

@@ -2,7 +2,7 @@ use crate::{
     Result,
     agent_model::{Launch, digest},
     flow::{Event, Operation, Owner},
-    history::{Edit, Execution, Selection},
+    history::{Commit, Edit, Execution, Selection},
     model::{ConversationAction, Run, Source, Status, Store, check_page_fields},
 };
 
@@ -36,7 +36,7 @@ impl Owner {
         &mut self,
         change: impl FnOnce(&mut Edit<'_>, &Selection) -> Result<(T, Option<Store>)>,
     ) -> Result<(T, bool)> {
-        self.persist_record_change(|edit, selection| {
+        self.persist_record_change(Commit::Durable, |edit, selection| {
             let (result, projection) = change(edit, selection)?;
             Ok((result, RecordProjection::View(projection)))
         })
@@ -47,7 +47,27 @@ impl Owner {
         run: &str,
         change: impl FnOnce(&mut Edit<'_>, &Execution) -> Result<T>,
     ) -> Result<T> {
-        let (result, publish) = self.persist_execution(run, change)?;
+        self.record_execution_as(Commit::Durable, run, change)
+    }
+
+    /// Records intermediate streamed output for `run` as a `Commit::Streamed` edit. Use only for
+    /// streamed deltas; settle and every other terminal or acknowledged change uses
+    /// `record_execution`.
+    pub(super) fn record_streamed_execution<T>(
+        &mut self,
+        run: &str,
+        change: impl FnOnce(&mut Edit<'_>, &Execution) -> Result<T>,
+    ) -> Result<T> {
+        self.record_execution_as(Commit::Streamed, run, change)
+    }
+
+    fn record_execution_as<T>(
+        &mut self,
+        commit: Commit,
+        run: &str,
+        change: impl FnOnce(&mut Edit<'_>, &Execution) -> Result<T>,
+    ) -> Result<T> {
+        let (result, publish) = self.persist_execution_as(commit, run, change)?;
         if publish {
             self.publish()?;
         }
@@ -59,7 +79,16 @@ impl Owner {
         run: &str,
         change: impl FnOnce(&mut Edit<'_>, &Execution) -> Result<T>,
     ) -> Result<(T, bool)> {
-        self.persist_record_change(|edit, _| {
+        self.persist_execution_as(Commit::Durable, run, change)
+    }
+
+    fn persist_execution_as<T>(
+        &mut self,
+        commit: Commit,
+        run: &str,
+        change: impl FnOnce(&mut Edit<'_>, &Execution) -> Result<T>,
+    ) -> Result<(T, bool)> {
+        self.persist_record_change(commit, |edit, _| {
             let execution = edit.execution(run)?;
             let result = change(edit, &execution)?;
             Ok((result, RecordProjection::Execution(execution)))
@@ -68,12 +97,13 @@ impl Owner {
 
     fn persist_record_change<T>(
         &mut self,
+        commit: Commit,
         change: impl FnOnce(&mut Edit<'_>, &Selection) -> Result<(T, RecordProjection)>,
     ) -> Result<(T, bool)> {
         let (history, view) = self.view_parts();
         let result = (|| {
             let selection = history.selection()?;
-            history.edit(|edit| {
+            history.edit_as(commit, |edit| {
                 let (result, request) = change(edit, &selection)?;
                 let current = edit.selection();
                 let projection = match request {

@@ -6,7 +6,11 @@ use serde_json::json;
 use std::{
     collections::BTreeMap,
     io,
-    sync::{Arc, atomic::AtomicBool, mpsc::SyncSender},
+    sync::{
+        Arc,
+        atomic::AtomicBool,
+        mpsc::{Receiver, SyncSender},
+    },
     thread::JoinHandle,
 };
 
@@ -147,6 +151,25 @@ pub(super) enum Event {
         released: bool,
     },
 }
+
+/// Collects the streamed deltas for `run` already queued behind `first`, so one owner iteration
+/// persists them in one intermediate edit. The first queued event that is not a delta for `run` is
+/// returned unprocessed, so the events keep their order.
+pub(super) fn drain_texts(
+    rx: &Receiver<Event>,
+    run: &str,
+    first: Change,
+) -> (Vec<Change>, Option<Event>) {
+    let mut changes = vec![first];
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            Event::Text { run: next, change } if next == run => changes.push(change),
+            other => return (changes, Some(other)),
+        }
+    }
+    (changes, None)
+}
+
 pub(super) struct PendingPermission {
     pub run: String,
     pub key: u64,
@@ -563,16 +586,27 @@ impl Owner {
         self.emit(json!({"v":crate::WIRE_VERSION,"request":id,"kind":kind,"scope":crate::history_io::Scope::from(&scope),"run":run}))
     }
 
-    pub(super) fn text(&mut self, run: &str, change: Change) -> Result<()> {
-        if matches!(change, Change::Artifact(_)) {
+    /// Persists streamed deltas for `run` in one intermediate (`Commit::Streamed`) edit. Settle is
+    /// the next durable commit and persists them.
+    pub(super) fn texts(&mut self, run: &str, changes: Vec<Change>) -> Result<()> {
+        if changes
+            .iter()
+            .any(|change| matches!(change, Change::Artifact(_)))
+        {
             return Err("artifact references require a committed table record".into());
         }
-        self.record_execution(run, |edit, execution| {
+        self.record_streamed_execution(run, |edit, execution| {
             let mut record = edit.run(execution, run)?;
-            if record.status.terminal() || !record.output.change(change)? {
+            if record.status.terminal() {
                 return Ok(());
             }
-            edit.put_run(execution, record)?;
+            let mut changed = false;
+            for change in changes {
+                changed |= record.output.change(change)?;
+            }
+            if changed {
+                edit.put_run(execution, record)?;
+            }
             Ok(())
         })
     }
