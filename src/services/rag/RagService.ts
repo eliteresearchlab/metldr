@@ -5,6 +5,7 @@ import { databaseService, DB_CONFIGS } from '../DatabaseService'
 import { aiGateway } from '../ai/AIGateway'
 import { LRUCache } from 'lru-cache'
 import type { VectorEntry, SearchResult } from '../../types'
+import { rankHybrid, type HybridRankOptions } from './rankFusion'
 
 interface ChunkMetadata {
   sourceId: string
@@ -36,6 +37,11 @@ const QUERY_CACHE_MAX = 100
 const QUERY_CACHE_TTL = 5 * 60 * 1000
 const WHITESPACE_PATTERN = /\s+/
 const COLLAPSED_WHITESPACE_PATTERN = /\s+/g
+// post-fusion adjustments carried over from the previous scorer; fusion itself is rank-based RRF (rankFusion.ts)
+const HYBRID_RANK_OPTIONS: HybridRankOptions<VectorEntry> = {
+  summaryBoost: { points: 8, isSummary: entry => entry.metadata?.isSummary === true },
+  sourceDiversity: { penaltyPerRepeat: 15, sourceOf: entry => (entry.metadata?.sourceUrl as string) || '' }
+}
 const LLM_TERM_QUOTES_PATTERN = /[\"\'\n]/g
 const LLM_TERM_SEPARATOR_PATTERN = /[,;]/
 const TRAILING_SLASH_PATTERN = /\/$/
@@ -364,20 +370,21 @@ export class RagService {
       const expanded = await this.expandQueryWithLLM(query)
       const processed = this.preprocessQuery(expanded)
       
-      // 2. parallel retrieval
+      // 2. parallel retrieval: dense hits and BM25 hits, each best first
       const queryEmbedding = await embeddingProvider.embedQuery(processed)
-      const [vectorResults, keywordResults] = await Promise.all([
+      const [denseHits, lexicalHits] = await Promise.all([
         vectorStore.search(Array.from(queryEmbedding), limit * 5),
         vectorStore.searchKeyword(processed, limit * 5)
       ])
       
-      // 3. RRF fusion with adaptive weights
-      const fused = this.fuseResultsByScore(vectorResults, keywordResults, processed)
+      // 3. rank-based Reciprocal Rank Fusion (k = 60), then the summary boost and the source-diversity penalty
+      const fused = rankHybrid(denseHits, lexicalHits, HYBRID_RANK_OPTIONS)
       
-      // 4. overlap reranking
-      const reranked = this.rerankByOverlap(processed, fused.slice(0, 50))
-      
-      const results = reranked.slice(0, limit)
+      const results: SearchResult[] = fused.slice(0, limit).map(hit => ({
+        entry: hit.item,
+        score: Math.round(hit.score),
+        matchType: hit.matchType
+      }))
       
       // cache results
       this.queryCache.set(cacheKey, results)
@@ -628,145 +635,6 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
     return query.toLowerCase()
       .split(WHITESPACE_PATTERN)
       .filter(t => t.length > 2 && !stopwords.has(t))
-  }
-
-  private fuseResultsByScore(vec: SearchResult[], key: SearchResult[], query?: string): SearchResult[] {
-    const queryType = query ? this.classifyQueryType(query) : 'hybrid'
-    
-    const vecIds = new Set(vec.map(r => r.entry.id))
-    const keyIds = new Set(key.map(r => r.entry.id))
-    const overlapCount = [...vecIds].filter(id => keyIds.has(id)).length
-    const overlapRatio = Math.max(vecIds.size, keyIds.size) > 0 
-      ? overlapCount / Math.max(vecIds.size, keyIds.size) 
-      : 0
-    
-    // adaptive weights: high overlap = trust both, low overlap = boost the method with better coverage
-    let weights: { vector: number; keyword: number }
-    if (overlapRatio > 0.5) {
-      // high agreement  trust both equally, hybrid matches are very reliable
-      weights = { vector: 0.5, keyword: 0.5 }
-    } else if (queryType === 'keyword') {
-      weights = { vector: 0.35, keyword: 0.65 }
-    } else if (queryType === 'semantic') {
-      weights = { vector: 0.65, keyword: 0.35 }
-    } else {
-      weights = { vector: 0.5, keyword: 0.5 }
-    }
-    
-    const scores = new Map<string, { 
-      result: SearchResult
-      vectorScore: number
-      keywordScore: number
-      vecRank: number
-      keyRank: number
-    }>()
-    
-    const vecScores = vec.map(r => r.score)
-    const keyScores = key.map(r => r.score)
-    const vecMean = vecScores.length > 0 ? vecScores.reduce((a,b) => a+b, 0) / vecScores.length : 0
-    const keyMean = keyScores.length > 0 ? keyScores.reduce((a,b) => a+b, 0) / keyScores.length : 0
-    const vecStd = Math.sqrt(vecScores.reduce((sum, s) => sum + (s - vecMean) ** 2, 0) / (vecScores.length || 1)) || 1
-    const keyStd = Math.sqrt(keyScores.reduce((sum, s) => sum + (s - keyMean) ** 2, 0) / (keyScores.length || 1)) || 1
-    
-    // add vector results with zscore normalization mapped to 0-100
-    vec.forEach((r, rank) => {
-      const zScore = (r.score - vecMean) / vecStd
-      const normalizedScore = Math.min(100, Math.max(0, 50 + zScore * 25))
-      scores.set(r.entry.id, { 
-        result: r, 
-        vectorScore: normalizedScore,
-        keywordScore: 0,
-        vecRank: rank,
-        keyRank: -1
-      })
-    })
-    
-    // merge keyword results
-    key.forEach((r, rank) => {
-      const zScore = (r.score - keyMean) / keyStd
-      const normalizedScore = Math.min(100, Math.max(0, 50 + zScore * 25))
-      if (scores.has(r.entry.id)) {
-        const existing = scores.get(r.entry.id)!
-        existing.keywordScore = normalizedScore
-        existing.keyRank = rank
-        existing.result.matchType = 'hybrid'
-      } else {
-        scores.set(r.entry.id, { 
-          result: r, 
-          vectorScore: 0,
-          keywordScore: normalizedScore,
-          vecRank: -1,
-          keyRank: rank
-        })
-      }
-    })
-    
-    const results = Array.from(scores.values()).map(s => {
-      const weightedScore = s.vectorScore * weights.vector + s.keywordScore * weights.keyword
-      
-      let hybridBonus = 0
-      if (s.vecRank >= 0 && s.keyRank >= 0) {
-        const rankDiff = Math.abs(s.vecRank - s.keyRank)
-        hybridBonus = Math.max(5, 25 - rankDiff * 3)
-      }
-
-      const summaryBoost = s.result.entry.metadata?.isSummary ? 8 : 0
-      
-      const finalScore = Math.min(100, weightedScore + hybridBonus + summaryBoost)
-      
-      return {
-        ...s.result,
-        score: Math.round(finalScore),
-        sourceUrl: s.result.entry.metadata?.sourceUrl as string || ''
-      }
-    })
-    
-    // sort by score
-    results.sort((a, b) => b.score - a.score)
-    
-    const seenSources = new Map<string, number>()
-    const diverseResults = results.map(r => {
-      const sourceBase = r.sourceUrl.split('?')[0].split('#')[0]
-      const occurrences = seenSources.get(sourceBase) || 0
-      seenSources.set(sourceBase, occurrences + 1)
-      
-      // reduce score for 2nd, 3rd, etc. chunks from same source
-      const diversityPenalty = occurrences > 0 ? occurrences * 15 : 0
-      
-      return {
-        ...r,
-        score: Math.max(0, r.score - diversityPenalty)
-      }
-    })
-    
-    return diverseResults.sort((a, b) => b.score - a.score)
-  }
-  
-  private classifyQueryType(query: string): 'semantic' | 'keyword' | 'hybrid' {
-    const words = query.split(WHITESPACE_PATTERN).length
-    if (words <= 2) return 'keyword'
-    if (words >= 8) return 'semantic'
-    return 'hybrid'
-  }
-
-  private rerankByOverlap(query: string, results: SearchResult[]): SearchResult[] {
-    const queryTerms = new Set(query.toLowerCase().split(WHITESPACE_PATTERN).filter(t => t.length > 2))
-    if (queryTerms.size === 0) return results
-    
-    const reranked = results.map(r => {
-      const docText = r.entry.content.toLowerCase()
-      
-      let matched = 0
-      for (const term of queryTerms) {
-        if (docText.includes(term)) matched++
-      }
-      const overlap = matched / queryTerms.size
-      
-      // bonus for overlap (max +15 points), cap at 100
-      return { ...r, score: Math.min(100, r.score + Math.round(overlap * 15)) }
-    }).sort((a, b) => b.score - a.score)
-    
-    return reranked
   }
 
   async indexSummary(summaryText: string, metadata: ChunkMetadata): Promise<void> {

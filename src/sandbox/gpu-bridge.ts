@@ -293,11 +293,9 @@ async function handleMessage(request: any): Promise<any> {
       case 'VOY_SEARCH':
         await ensureVoy()
         const searchResults = voyIndex.search(request.embedding, request.limit || 5)
-        // voy with inner product: distance IS similarity for normalized vectors (higher = better)
-        data = { results: searchResults.neighbors.map((n: any) => ({ 
-          id: n.id, 
-          score: n.distance // inner product similarity, range ~0-1
-        })) }
+        // voy-search 0.6.3 Neighbor is { id, title, url }: it has NO distance or score. The neighbours are
+        // nearest-first, so the list position is the rank. Callers fuse by rank and never read a similarity.
+        data = { results: searchResults.neighbors.map((n: any) => ({ id: n.id })) }
         break
         
       case 'VOY_SERIALIZE':

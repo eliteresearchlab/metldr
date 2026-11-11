@@ -3,11 +3,8 @@
 
 import { chunkingService } from './ChunkingService'
 import { embeddingProvider } from './EmbeddingProvider'
-import { localModels } from '../ai/LocalModelProvider'
-
-const punctuationPattern = /[^\w\s]/g
-const tokenWhitespacePattern = /\s+/
-
+import { Bm25Index } from './bm25'
+import { reciprocalRankFusion, type RankedHit } from './rankFusion'
 
 interface SessionChunk {
   id: string
@@ -16,56 +13,12 @@ interface SessionChunk {
   embedding: number[]
 }
 
-// simple in-memory inverted index for keyword search
-class SessionInvertedIndex {
-  private index = new Map<string, Set<number>>()
-  private docs = new Map<number, string>()
-
-  add(chunkIndex: number, text: string) {
-    this.docs.set(chunkIndex, text)
-    for (const token of this.tokenize(text)) {
-      if (!this.index.has(token)) this.index.set(token, new Set())
-      this.index.get(token)!.add(chunkIndex)
-    }
-  }
-
-  search(query: string, limit: number): Array<{ index: number; score: number }> {
-    const tokens = this.tokenize(query)
-    if (tokens.length === 0) return []
-    
-    const scores = new Map<number, number>()
-    for (const token of tokens) {
-      const indices = this.index.get(token)
-      if (indices) {
-        const idf = Math.log(this.docs.size / indices.size + 1)
-        for (const idx of indices) {
-          scores.set(idx, (scores.get(idx) || 0) + idf)
-        }
-      }
-    }
-    
-    return Array.from(scores.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([index, score]) => ({ index, score: score / tokens.length }))
-  }
-
-  clear() {
-    this.index.clear()
-    this.docs.clear()
-  }
-
-  private tokenize(text: string): string[] {
-    return text.toLowerCase()
-      .replace(punctuationPattern, ' ')
-      .split(tokenWhitespacePattern)
-      .filter(t => t.length > 2)
-  }
-}
+// candidate depth per leg, the same as RagService (limit * 5)
+const CANDIDATE_MULTIPLIER = 5
 
 class SessionRagService {
   private chunks: SessionChunk[] = []
-  private keywordIndex = new SessionInvertedIndex()
+  private keywordIndex = new Bm25Index<SessionChunk>()
   private indexed = false
   private indexingPromise: Promise<void> | null = null
   private contentHash = ''
@@ -121,13 +74,14 @@ class SessionRagService {
         
         for (let j = 0; j < batch.length; j++) {
           const chunk = batch[j]
-          this.chunks.push({
+          const record: SessionChunk = {
             id: `chunk:${chunk.index}`,
             text: chunk.text,
             index: chunk.index,
             embedding: Array.from(embeddings[j])
-          })
-          this.keywordIndex.add(chunk.index, chunk.text)
+          }
+          this.chunks.push(record)
+          this.keywordIndex.add(record.id, record.text, record)
         }
       } catch (err) {
         console.error('[SessionRag] Embedding batch failed:', err)
@@ -142,36 +96,27 @@ class SessionRagService {
     console.log('[SessionRag] Indexed', this.chunks.length, 'chunks in', elapsed, 'ms')
   }
 
-  // search for relevant chunks
+  // search for relevant chunks: exact cosine (dense) and BM25 (lexical), fused by rank with RRF
   async search(query: string, limit = 5): Promise<Array<{ text: string; score: number }>> {
     if (!this.indexed || this.chunks.length === 0) {
       return []
     }
     
     try {
-      // embed query
       const queryEmbedding = await embeddingProvider.embedQuery(query)
       const queryVec = Array.from(queryEmbedding)
-      
-      // vector similarity search
-      const vectorScores = this.chunks.map(chunk => ({
-        index: chunk.index,
-        score: this.cosineSimilarity(queryVec, chunk.embedding)
-      }))
-      
-      // keyword search
-      const keywordScores = this.keywordIndex.search(query, limit * 2)
-      
-      // fuse results (RRF - reciprocal rank fusion)
-      const fused = this.fuseResults(vectorScores, keywordScores)
-      
-      // return top K chunks
-      return fused
+      const candidates = limit * CANDIDATE_MULTIPLIER
+
+      const dense: Array<RankedHit<SessionChunk>> = this.chunks
+        .map(chunk => ({ chunk, similarity: this.cosineSimilarity(queryVec, chunk.embedding) }))
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, candidates)
+        .map(({ chunk }) => ({ id: chunk.id, item: chunk }))
+      const lexical = this.keywordIndex.search(query, candidates).map(hit => ({ id: hit.id, item: hit.item }))
+
+      return reciprocalRankFusion(dense, lexical)
         .slice(0, limit)
-        .map(({ index, score }) => ({
-          text: this.chunks.find(c => c.index === index)?.text || '',
-          score
-        }))
+        .map(hit => ({ text: hit.item.text, score: hit.score }))
         .filter(r => r.text.length > 0)
         
     } catch (err) {
@@ -198,28 +143,6 @@ class SessionRagService {
       normB += b[i] * b[i]
     }
     return dot / (Math.sqrt(normA) * Math.sqrt(normB) + 1e-8)
-  }
-
-  private fuseResults(
-    vec: Array<{ index: number; score: number }>,
-    key: Array<{ index: number; score: number }>
-  ): Array<{ index: number; score: number }> {
-    // normalize vector scores to 0-1
-    const maxVec = Math.max(...vec.map(v => v.score), 0.001)
-    const vecNorm = vec.map(v => ({ index: v.index, score: v.score / maxVec }))
-    
-    // combine with weighted average (vector 0.7, keyword 0.3)
-    const combined = new Map<number, number>()
-    for (const { index, score } of vecNorm) {
-      combined.set(index, (combined.get(index) || 0) + score * 0.7)
-    }
-    for (const { index, score } of key) {
-      combined.set(index, (combined.get(index) || 0) + score * 0.3)
-    }
-    
-    return Array.from(combined.entries())
-      .map(([index, score]) => ({ index, score }))
-      .sort((a, b) => b.score - a.score)
   }
 
   isIndexed(): boolean {

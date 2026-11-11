@@ -332,10 +332,11 @@ class LocalModelProvider {
     if (!res.ok) throw new Error(res.error)
   }
 
-  async voySearch(embedding: number[], limit = 5): Promise<Array<{ id: string; score: number }>> {
+  // ids nearest-first; Voy provides no similarity value, so the order is the only ranking signal
+  async voySearch(embedding: number[], limit = 5): Promise<string[]> {
     const res = await this.send({ type: 'VOY_SEARCH', embedding, limit })
     if (!res.ok) throw new Error(res.error)
-    return res.data.results
+    return (res.data.results as Array<{ id: string }>).map(result => result.id)
   }
 
   async voySerialize(): Promise<string | null> {
