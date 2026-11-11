@@ -338,7 +338,9 @@ mod deadline_check {
             panic!("command was not offered")
         };
         transport.dispatch(&command).unwrap();
-        tokio::time::sleep(TIMEOUT + std::time::Duration::from_millis(10)).await;
+        // Advance the paused test clock past the reply deadline instead of sleeping through it.
+        tokio::time::pause();
+        tokio::time::advance(TIMEOUT + std::time::Duration::from_millis(10)).await;
         assert_eq!(
             transport.reply(id, Ok(json!({}))).unwrap_err(),
             "browser reply deadline expired"

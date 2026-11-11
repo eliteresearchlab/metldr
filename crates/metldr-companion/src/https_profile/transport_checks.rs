@@ -165,6 +165,28 @@ pub(super) fn text_server(
     )
 }
 
+fn protocol_path(protocol: Protocol) -> &'static str {
+    match protocol {
+        Protocol::Messages => "/v1/messages",
+        Protocol::Responses => "/v1/responses",
+        Protocol::Google => "/v1/interactions",
+        Protocol::Chat => "/v1/chat/completions",
+    }
+}
+
+/// An endpoint that is bound but never served. A client that is cancelled before
+/// connecting must leave the listener without a pending connection.
+pub(super) fn unserved_endpoint(protocol: Protocol) -> (String, TcpListener) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let endpoint = format!(
+        "https://{}{}",
+        listener.local_addr().unwrap(),
+        protocol_path(protocol)
+    );
+    (endpoint, listener)
+}
+
 fn scripted_protocol(
     replies: Vec<(String, String)>,
     key: &str,
@@ -191,12 +213,7 @@ fn scripted_protocol(
     .unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
-    let path = match protocol {
-        Protocol::Messages => "/v1/messages",
-        Protocol::Responses => "/v1/responses",
-        Protocol::Google => "/v1/interactions",
-        Protocol::Chat => "/v1/chat/completions",
-    };
+    let path = protocol_path(protocol);
     let endpoint = format!("https://{}{path}", listener.local_addr().unwrap());
     let location = endpoint.clone();
     let worker = thread::spawn(move || {

@@ -31,15 +31,43 @@ const label = element => {
   if (referenced.includes(null) || associated.includes(null)) return null;
   return clean(referenced.join(' ') || associated.join(' ') || element.getAttribute('title') || element.placeholder || '');
 };
-const visible = element => {
-  if (!element.isConnected || element.ownerDocument !== document || element.closest('[hidden],[inert],[aria-hidden="true"]')) return false;
-  let depth = 0;
-  for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
-    if (++depth > 64) return false;
-    const style = getComputedStyle(node);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || Number(style.opacity) === 0 || style.contentVisibility === 'hidden' || style.clipPath !== 'none' || style.clip !== 'auto') return false;
+// Memos live for one invocation of the wrapped function, so one capture() shares them across
+// every node it visits. A caller that changes the DOM must finish its visibility checks first.
+const styleMemo = new WeakMap(), chainMemo = new WeakMap(), visibilityMemo = new WeakMap();
+const styleOf = node => {
+  let style = styleMemo.get(node);
+  if (!style) { style = getComputedStyle(node); styleMemo.set(node, style); }
+  return style;
+};
+const hiddenByStyle = style => style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || Number(style.opacity) === 0 || style.contentVisibility === 'hidden' || style.clipPath !== 'none' || style.clip !== 'auto';
+// Summarizes an element and its element ancestors: how many there are, and whether none is hidden by style.
+const chainOf = element => {
+  const uncached = [];
+  let node = element, summary = { depth: 0, clear: true };
+  while (node && node.nodeType === 1) {
+    const cached = chainMemo.get(node);
+    if (cached) { summary = cached; break; }
+    uncached.push(node);
+    node = node.parentElement;
   }
-  return element.getClientRects().length > 0;
+  for (let index = uncached.length - 1; index >= 0; index--) {
+    const current = uncached[index];
+    summary = { depth: summary.depth + 1, clear: summary.clear && !hiddenByStyle(styleOf(current)) };
+    chainMemo.set(current, summary);
+  }
+  return summary;
+};
+const visible = element => {
+  let known = visibilityMemo.get(element);
+  if (known === undefined) {
+    known = false;
+    if (element.isConnected && element.ownerDocument === document && !element.closest('[hidden],[inert],[aria-hidden="true"]')) {
+      const chain = chainOf(element);
+      known = chain.depth <= 64 && chain.clear && element.getClientRects().length > 0;
+    }
+    visibilityMemo.set(element, known);
+  }
+  return known;
 };
 const labelText = root => {
   if (!root || !visible(root)) return '';
@@ -106,7 +134,7 @@ const summary = { url: bounded(location.href, 2048)[0], title: bounded(document.
 const scrollingElement = document.scrollingElement;
 if (!scrollingElement || scrollingElement.ownerDocument !== document) throw new Error('document scrolling element unavailable');
 const saveScroller = (element, kind, slot) => {
-  const style = getComputedStyle(element);
+  const style = styleOf(element);
   const accessible = label(element);
   const targetLabel = bounded(accessible || (kind === 'page' ? 'Page' : `Scrollable region ${slot}`), 128)[0];
   const saved = { element, parent: element.parentElement, document, url: location.href, kind, label: targetLabel, overflowX: style.overflowX, overflowY: style.overflowY, width: element.scrollWidth, height: element.scrollHeight, clientWidth: element.clientWidth, clientHeight: element.clientHeight, x: element.scrollLeft, y: element.scrollTop };
@@ -122,7 +150,7 @@ while (walker.nextNode()) {
   const node = walker.currentNode;
   if (node.nodeType === Node.ELEMENT_NODE) {
     if (node !== scrollingElement && node !== document.documentElement && node !== document.body && node.ownerDocument === document && node.isConnected && visible(node)) {
-      const style = getComputedStyle(node);
+      const style = styleOf(node);
       const canScroll = value => ['auto','scroll','overlay'].includes(value);
       if ((canScroll(style.overflowX) && node.scrollWidth > node.clientWidth) || (canScroll(style.overflowY) && node.scrollHeight > node.clientHeight)) {
         if (scrollTargets.length < 16) saveScroller(node, 'region', scrollTargets.length);
