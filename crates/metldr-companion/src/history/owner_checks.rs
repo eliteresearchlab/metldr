@@ -1,7 +1,7 @@
 use super::{History, schema::*};
 use crate::{
     Result,
-    flow::{Event, Owner},
+    flow::{Event, Owner, drain_texts},
     model::{Command, Page, Request, Run, Source, Status, Store},
     store::Disk,
     transport::Transport,
@@ -213,7 +213,48 @@ fn complete(
     drop(socket);
     loop {
         match rx.recv_timeout(Duration::from_secs(3))? {
-            Event::Text { run, change } => owner.text(&run, change)?,
+            Event::Text { run, change } => owner.texts(&run, vec![change])?,
+            Event::Settled { run, result } => {
+                assert!(result.is_ok());
+                owner.settled(&run, result, false)?;
+                return Ok(());
+            }
+            _ => return Err("unexpected actual Owner event".into()),
+        }
+    }
+}
+
+/// Streams `pieces` through the provider's NDJSON wire and consumes the owner events the way the
+/// owner loop does: queued deltas for the run go to one `texts` edit per drain, and the settle is
+/// the last event.
+fn stream_pieces(
+    owner: &mut Owner,
+    rx: &mpsc::Receiver<Event>,
+    mut socket: TcpStream,
+    pieces: &[String],
+) -> Result<()> {
+    let mut body = String::from(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n",
+    );
+    for piece in pieces {
+        body.push_str(&json!({"delta": piece}).to_string());
+        body.push('\n');
+    }
+    body.push_str("{\"done\":true}\n");
+    socket.write_all(body.as_bytes())?;
+    drop(socket);
+    let mut pending = None;
+    loop {
+        let event = match pending.take() {
+            Some(event) => event,
+            None => rx.recv_timeout(Duration::from_secs(3))?,
+        };
+        match event {
+            Event::Text { run, change } => {
+                let (changes, next) = drain_texts(rx, &run, change);
+                pending = next;
+                owner.texts(&run, changes)?;
+            }
             Event::Settled { run, result } => {
                 assert!(result.is_ok());
                 owner.settled(&run, result, false)?;
@@ -950,4 +991,77 @@ fn actual_owner_conversation_switch_waits_for_work_and_preserves_retry() -> Resu
     );
     no_dispatch(&owner, &listener, &rx);
     Ok(())
+}
+
+#[test]
+fn streamed_deltas_settle_durably_and_reopen_with_the_final_text() -> Result<()> {
+    const DELTAS: usize = 64;
+    let directory = Directory::new()?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let address = listener.local_addr()?;
+    let (mut owner, rx, _wire) = setup(&directory, address)?;
+    owner.request(ask(&owner, "streamed-durable"))?;
+    let run = owner.state.view.runs[0].id.clone();
+    let (socket, _) = receive_request(&listener)?;
+    let pieces: Vec<String> = (0..DELTAS)
+        .map(|index| format!("delta {index}; "))
+        .collect();
+    let expected = pieces.concat();
+    stream_pieces(&mut owner, &rx, socket, &pieces)?;
+    // The settle is a Durable commit, so it persists the Streamed deltas before it. Copy the file
+    // as it is right after the settle, while the database is still open.
+    let settled = saved(&owner, &run)?;
+    assert_eq!(settled.value.status, Status::Complete);
+    assert_eq!(settled.value.output.text(), expected);
+    fs::copy(
+        directory.0.join("history.redb"),
+        directory.0.join("settled.redb"),
+    )?;
+    let (reopened, _rx, _wire) = reopen_projection(owner, address, &run)?;
+    assert_eq!(saved(&reopened, &run)?.value.output.text(), expected);
+    let copy = redb::Database::open(directory.0.join("settled.redb"))?;
+    let table = copy.begin_read()?.open_table(RUNS)?;
+    let record: Record<Run> = decode(table.get(run.as_str())?.unwrap().value())?;
+    assert_eq!(record.value.output.text(), expected);
+    Ok(())
+}
+
+// Timing harness for the streamed-turn persistence cost, from the first delta on the wire to the
+// settle. Run with:
+//   cargo test --manifest-path crates/metldr-companion/Cargo.toml \
+//     streamed_turn_persistence_timing -- --ignored --nocapture
+#[test]
+#[ignore = "timing harness; run with --ignored --nocapture"]
+fn streamed_turn_persistence_timing() -> Result<()> {
+    const DELTAS: usize = 200;
+    let directory = Directory::new()?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let address = listener.local_addr()?;
+    let (mut owner, rx, _wire) = setup(&directory, address)?;
+    owner.request(ask(&owner, "streamed-timing"))?;
+    let run = owner.state.view.runs[0].id.clone();
+    let (socket, _) = receive_request(&listener)?;
+    let pieces: Vec<String> = (0..DELTAS).map(|index| format!("token {index} ")).collect();
+    let file_bytes_before = fs::metadata(directory.0.join("history.redb"))?.len();
+    let pages_before = allocated_pages(history(&owner))?;
+    let started = Instant::now();
+    stream_pieces(&mut owner, &rx, socket, &pieces)?;
+    let elapsed = started.elapsed();
+    assert_eq!(saved(&owner, &run)?.value.output.text(), pieces.concat());
+    let file_bytes = fs::metadata(directory.0.join("history.redb"))?.len();
+    let pages_after = allocated_pages(history(&owner))?;
+    eprintln!(
+        "streamed_turn_persistence deltas={DELTAS} ms={:.1} history_file_bytes_before={file_bytes_before} history_file_bytes_after={file_bytes} allocated_pages_before={pages_before} allocated_pages_after={pages_after}",
+        elapsed.as_secs_f64() * 1e3
+    );
+    Ok(())
+}
+
+fn allocated_pages(history: &History) -> Result<u64> {
+    let write = history.db.begin_write()?;
+    let pages = write.stats()?.allocated_pages();
+    write.abort()?;
+    Ok(pages)
 }

@@ -83,6 +83,21 @@ fn storage<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
     operation().map_err(|error| Box::new(Failure(error)) as _)
 }
 
+/// How an edit reaches disk.
+///
+/// `Durable` is the default: the commit is on disk when the edit returns, and it also persists
+/// every earlier `Streamed` commit. Turn settle, final, error, cancel, retry or recovery state,
+/// client-acknowledged records and shutdown must use it.
+///
+/// `Streamed` is only for intermediate streamed output. It is visible to readers in this process
+/// as soon as it commits, but after a crash the database holds the last `Durable` state or a later
+/// consistent one, so streamed text not yet followed by a `Durable` commit may be lost.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Commit {
+    Durable,
+    Streamed,
+}
+
 pub(crate) struct Started {
     pub run: String,
 }
@@ -118,10 +133,25 @@ impl History {
     }
 
     pub(crate) fn edit<T>(&mut self, change: impl FnOnce(&mut Edit<'_>) -> Result<T>) -> Result<T> {
+        self.edit_as(Commit::Durable, change)
+    }
+
+    /// Runs one edit whose commit is `commit`. Only `Commit::Streamed` may be used for
+    /// intermediate streamed output; see [`Commit`].
+    pub(crate) fn edit_as<T>(
+        &mut self,
+        commit: Commit,
+        change: impl FnOnce(&mut Edit<'_>) -> Result<T>,
+    ) -> Result<T> {
         let mut write = storage(|| Ok(self.db.begin_write()?))?;
         storage(|| {
-            write.set_durability(Durability::Immediate)?;
-            write.set_two_phase_commit(true);
+            match commit {
+                Commit::Durable => {
+                    write.set_durability(Durability::Immediate)?;
+                    write.set_two_phase_commit(true);
+                }
+                Commit::Streamed => write.set_durability(Durability::None)?,
+            }
             Ok(())
         })?;
         let profile = storage(|| {

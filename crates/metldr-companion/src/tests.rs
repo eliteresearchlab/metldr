@@ -219,7 +219,7 @@ mod tests {
         let Event::Text { run: id, change } = rx.recv().unwrap() else {
             panic!("chunk must precede settlement");
         };
-        owner.text(&id, change).unwrap();
+        owner.texts(&id, vec![change]).unwrap();
         let stopping = saved_run(&mut owner, &run);
         assert_eq!(stopping.status, Status::StopRequested);
         assert_eq!(stopping.output.text(), "Pending in flight");
@@ -232,9 +232,11 @@ mod tests {
         assert_eq!(before.status, Status::Cancelled);
         let sequence = owner.record_history.edit(|edit| edit.sequence()).unwrap();
         owner
-            .text(
+            .texts(
                 &run,
-                metldr_conversation::Change::FlatAppend("must not appear".into()),
+                vec![metldr_conversation::Change::FlatAppend(
+                    "must not appear".into(),
+                )],
             )
             .unwrap();
         assert_eq!(
