@@ -256,3 +256,8 @@ templates/
 dictionary-data/
 public/models/
 # End of https://www.toptal.com/developers/gitignore/api/node,vue,macos,windows,linux,visualstudiocode
+
+# Internal Rune host route payload from `make rune-host` (wasm and fonts copied from crates/metldr-rune-host): never committed, so default builds package nothing new.
+/crates/metldr-rune-host/pkg/
+/crates/metldr-rune-host/target/
+/public/rune/

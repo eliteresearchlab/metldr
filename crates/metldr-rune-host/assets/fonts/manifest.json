@@ -1,0 +1,145 @@
+{
+  "format": "sfnt",
+  "note": "Decoded SFNT of the 13 approved WOFF2 subsets, in the order the Rune host receives them. Verify with scripts/check-rune-fonts.mjs.",
+  "conversion": {
+    "converter": "/usr/bin/woff2_decompress",
+    "method": "Google WOFF2 decoder produces SFNT; FontTools independently reads original WOFF2 and decoded SFNT and emits byte-identical complete font-table XML.",
+    "verifiedAt": "2026-11-06T20:42:57.839Z"
+  },
+  "fonts": [
+    {
+      "name": "ba9851c3c22cd980-s.ttf",
+      "family": "Inter",
+      "weight": "100 900",
+      "unicodeRange": "u+0460-052f,u+1c80-1c8a,u+20b4,u+2de0-2dff,u+a640-a69f,u+fe2e-fe2f",
+      "source": "ba9851c3c22cd980-s.woff2",
+      "sourceSha256": "fccca918fea40089dacadc7045861314d1a6bc91f1f323cc1eeb22ebcdb321b5",
+      "sha256": "c1300f6b1fe697842049027ea7ea375f242095d96e705867819b40ea1641daa6",
+      "bytes": 45752
+    },
+    {
+      "name": "21350d82a1f187e9-s.ttf",
+      "family": "Inter",
+      "weight": "100 900",
+      "unicodeRange": "u+0301,u+0400-045f,u+0490-0491,u+04b0-04b1,u+2116",
+      "source": "21350d82a1f187e9-s.woff2",
+      "sourceSha256": "aebf2ab4a4ce6810d73c1ac7be7cafb4e5ec4cee2d6db5fb3e09691747ec4bd6",
+      "sha256": "7e097fb55654a454982e412b56a28ba8808d3a63010555d55fa253cb76244df0",
+      "bytes": 34728
+    },
+    {
+      "name": "c5fe6dc8356a8c31-s.ttf",
+      "family": "Inter",
+      "weight": "100 900",
+      "unicodeRange": "u+1f??",
+      "source": "c5fe6dc8356a8c31-s.woff2",
+      "sourceSha256": "a2e2c783ca6f9c20486e81e72a279203e86730bbf8f01ff6a5ee9dbd09e1c271",
+      "sha256": "c6d7ee4320bcb4e85ef7fcd5729a1fafa1fd30266a6e9e3eb8c90928ed955dea",
+      "bytes": 29780
+    },
+    {
+      "name": "19cfc7226ec3afaa-s.ttf",
+      "family": "Inter",
+      "weight": "100 900",
+      "unicodeRange": "u+0370-0377,u+037a-037f,u+0384-038a,u+038c,u+038e-03a1,u+03a3-03ff",
+      "source": "19cfc7226ec3afaa-s.woff2",
+      "sourceSha256": "46dd4cdca58c26ae87cc6927657bf83b2e8abfc39ffd0ab176e301a8d28d22bf",
+      "sha256": "8538f3fad89ba37d176d5966cb5abf7ad9ef03391805f382e3605bb125793473",
+      "bytes": 34656
+    },
+    {
+      "name": "df0a9ae256c0569c-s.ttf",
+      "family": "Inter",
+      "weight": "100 900",
+      "unicodeRange": "u+0102-0103,u+0110-0111,u+0128-0129,u+0168-0169,u+01a0-01a1,u+01af-01b0,u+0300-0301,u+0303-0304,u+0308-0309,u+0323,u+0329,u+1ea0-1ef9,u+20ab",
+      "source": "df0a9ae256c0569c-s.woff2",
+      "sourceSha256": "8db00ff46c67b22cda8bed865acf7077651cac8d2841d5b40980556b48961931",
+      "sha256": "76a428a8c7e34365fe386e2f207c6c174b5eca6b740f97e17f372ef7aec846de",
+      "bytes": 24216
+    },
+    {
+      "name": "8e9860b6e62d6359-s.ttf",
+      "family": "Inter",
+      "weight": "100 900",
+      "unicodeRange": "u+0100-02ba,u+02bd-02c5,u+02c7-02cc,u+02ce-02d7,u+02dd-02ff,u+0304,u+0308,u+0329,u+1d00-1dbf,u+1e00-1e9f,u+1ef2-1eff,u+2020,u+20a0-20ab,u+20ad-20c4,u+2113,u+2c60-2c7f,u+a720-a7ff",
+      "source": "8e9860b6e62d6359-s.woff2",
+      "sourceSha256": "a28eb6d3ccb534ae0c94ca999371df024aab60b08c3c8a5720ee9e32fa0faaa2",
+      "sha256": "7d33979d8d2b3e00904c77ccb64df824d7146e5bdafb29609345612e4de92bec",
+      "bytes": 188548
+    },
+    {
+      "name": "e4af272ccee01ff0-s.p.ttf",
+      "family": "Inter",
+      "weight": "100 900",
+      "unicodeRange": "u+00??,u+0131,u+0152-0153,u+02bb-02bc,u+02c6,u+02da,u+02dc,u+0304,u+0308,u+0329,u+2000-206f,u+20ac,u+2122,u+2191,u+2193,u+2212,u+2215,u+feff,u+fffd",
+      "source": "e4af272ccee01ff0-s.p.woff2",
+      "sourceSha256": "c940764593d0fe5d596be327ca7558855e018039fb78509aa21921fd3644c3e4",
+      "sha256": "1665d30412302bdfffca80caf9f8c57e7448310c260997d10d802a0a67d2af10",
+      "bytes": 122888
+    },
+    {
+      "name": "886030b0b59bc5a7-s.ttf",
+      "family": "JetBrains Mono",
+      "weight": "100 800",
+      "unicodeRange": "u+0460-052f,u+1c80-1c8a,u+20b4,u+2de0-2dff,u+a640-a69f,u+fe2e-fe2f",
+      "source": "886030b0b59bc5a7-s.woff2",
+      "sourceSha256": "992eea2f70210457ddd1196de4df3240919ffe068ad188c79d985fba4565d3bf",
+      "sha256": "c70c66443f968962d0ee74cfbf178ec2dc0187cf0c5e441c3d5cc9683cb41e01",
+      "bytes": 4084
+    },
+    {
+      "name": "0aa834ed78bf6d07-s.ttf",
+      "family": "JetBrains Mono",
+      "weight": "100 800",
+      "unicodeRange": "u+0301,u+0400-045f,u+0490-0491,u+04b0-04b1,u+2116",
+      "source": "0aa834ed78bf6d07-s.woff2",
+      "sourceSha256": "af7486955880be1c2b972e9c766acffb776768d669b6576ed9a0919ce72e7ca6",
+      "sha256": "ff337a1216ae62f4232f3c4b3c51eaa123e82b243b2fcc40774f80bcb6efa7b2",
+      "bytes": 23516
+    },
+    {
+      "name": "67957d42bae0796d-s.ttf",
+      "family": "JetBrains Mono",
+      "weight": "100 800",
+      "unicodeRange": "u+0370-0377,u+037a-037f,u+0384-038a,u+038c,u+038e-03a1,u+03a3-03ff",
+      "source": "67957d42bae0796d-s.woff2",
+      "sourceSha256": "3edf363dbf9d5fa0cdc784ae2b431a8a4152f4055a8a8858028c0bd668808273",
+      "sha256": "6e0a4820d2bc2f350a1e1304571bcdbb4c790b6f745350f69e8f909bb5b3d8e0",
+      "bytes": 17892
+    },
+    {
+      "name": "f911b923c6adde36-s.ttf",
+      "family": "JetBrains Mono",
+      "weight": "100 800",
+      "unicodeRange": "u+0102-0103,u+0110-0111,u+0128-0129,u+0168-0169,u+01a0-01a1,u+01af-01b0,u+0300-0301,u+0303-0304,u+0308-0309,u+0323,u+0329,u+1ea0-1ef9,u+20ab",
+      "source": "f911b923c6adde36-s.woff2",
+      "sourceSha256": "1390e86cc2823e759358918c01c4fcc1b6e4f01bca915bdbeb6d68eb5c244405",
+      "sha256": "19b4489cc07220281e27ec5d19fa23df99f1f1af4698648713022f552951e8b4",
+      "bytes": 20292
+    },
+    {
+      "name": "939c4f875ee75fbb-s.ttf",
+      "family": "JetBrains Mono",
+      "weight": "100 800",
+      "unicodeRange": "u+0100-02ba,u+02bd-02c5,u+02c7-02cc,u+02ce-02d7,u+02dd-02ff,u+0304,u+0308,u+0329,u+1d00-1dbf,u+1e00-1e9f,u+1ef2-1eff,u+2020,u+20a0-20ab,u+20ad-20c4,u+2113,u+2c60-2c7f,u+a720-a7ff",
+      "source": "939c4f875ee75fbb-s.woff2",
+      "sourceSha256": "7db7affbce1fdee69c1ffc2641bbca289b049867f524c9d861fe35ab6670bf29",
+      "sha256": "f51478e915c3d04239893b65aaa7c7b91dcebf0bb793e2c9e0dfba58d5c6029c",
+      "bytes": 37872
+    },
+    {
+      "name": "bb3ef058b751a6ad-s.p.ttf",
+      "family": "JetBrains Mono",
+      "weight": "100 800",
+      "unicodeRange": "u+00??,u+0131,u+0152-0153,u+02bb-02bc,u+02c6,u+02da,u+02dc,u+0304,u+0308,u+0329,u+2000-206f,u+20ac,u+2122,u+2191,u+2193,u+2212,u+2215,u+feff,u+fffd",
+      "source": "bb3ef058b751a6ad-s.p.woff2",
+      "sourceSha256": "1e06740a02a443fb7f3eeda8fcaa685a0f6c620e3f01e6666e847295469ce3ad",
+      "sha256": "45f15f59ee31110eaf99bc0b13a78fb01ff47586f5069f81f9a651ad7e654911",
+      "bytes": 97312
+    }
+  ],
+  "licenses": [
+    "inter-OFL.txt",
+    "jetbrainsmono-OFL.txt"
+  ]
+}
