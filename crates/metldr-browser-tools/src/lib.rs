@@ -1,7 +1,9 @@
 #![doc = include_str!("../README.md")]
 
+pub mod tools;
+
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 pub struct Prompt<'a> {
     pub instruction: &'a str,
@@ -76,172 +78,14 @@ pub fn valid_handle(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
 }
 
-fn handle_schema() -> Value {
-    json!({"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"})
-}
-
 pub fn definitions() -> [Definition; 7] {
-    [
-        Definition {
-            name: OBSERVE_TOOL,
-            description: "Observe the current page and discover writable text fields, buttons, native checkbox and radio controls, single-select options, and scroll targets.",
-            input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
-        },
-        Definition {
-            name: FIELD_TOOL,
-            description: "Propose a text field change on the current page. The user must approve before dispatch.",
-            input_schema: json!({
-                "type":"object",
-                "properties":{"handle":handle_schema(),"value":{"type":"string"}},
-                "required":["handle","value"],
-                "additionalProperties":false
-            }),
-        },
-        Definition {
-            name: NAVIGATE_TOOL,
-            description: "Propose navigation to an exact URL. The user must approve. Success returns a fresh observation; use only its new handles.",
-            input_schema: json!({"type":"object","properties":{"url":{"type":"string"}},"required":["url"],"additionalProperties":false}),
-        },
-        Definition {
-            name: ACTIVATE_TOOL,
-            description: "Propose a click on an observed button. The user must approve before dispatch.",
-            input_schema: json!({"type":"object","properties":{"handle":handle_schema()},"required":["handle"],"additionalProperties":false}),
-        },
-        Definition {
-            name: SELECT_TOOL,
-            description: "Propose selecting an observed option. The user must approve before dispatch.",
-            input_schema: json!({
-                "type":"object",
-                "properties":{
-                    "handle":handle_schema(),
-                    "option":handle_schema()
-                },
-                "required":["handle","option"],
-                "additionalProperties":false
-            }),
-        },
-        Definition {
-            name: SCROLL_TOOL,
-            description: "Propose scrolling an observed page or region. The user must approve. Observe again to read the result or use fresh handles. Positions report local observations only.",
-            input_schema: json!({
-                "type":"object",
-                "properties":{
-                    "handle":handle_schema(),
-                    "direction":{"type":"string","enum":["up","down","left","right"]},
-                    "pixels":{"type":"integer","minimum":1,"maximum":2000}
-                },
-                "required":["handle","direction","pixels"],
-                "additionalProperties":false
-            }),
-        },
-        Definition {
-            name: CONTROL_TOOL,
-            description: "Propose a checked state for an observed native checkbox or radio. The user must approve before dispatch. Re-observe before proposing and use only handles from the latest observation. Already matching state is a no-op. Effects are local to the control; radio controls cannot be unchecked directly.",
-            input_schema: json!({
-                "type":"object",
-                "properties":{
-                    "handle":handle_schema(),
-                    "checked":{"type":"boolean"}
-                },
-                "required":["handle","checked"],
-                "additionalProperties":false
-            }),
-        },
-    ]
-}
-
-fn handle_argument(value: Option<&Value>, error: &'static str) -> Result<String> {
-    Ok(value
-        .and_then(Value::as_str)
-        .filter(|value| valid_handle(value))
-        .ok_or(error)?
-        .to_owned())
+    tools::definitions()
 }
 
 pub fn decode_call(name: &str, arguments: Value) -> Result<Call> {
     let object = arguments
         .as_object()
         .ok_or("tool arguments must be an object")?;
-    match name {
-        SCROLL_TOOL => {
-            if object.len() != 3 {
-                return Err("invalid scroll_page input".into());
-            }
-            let handle = handle_argument(object.get("handle"), "invalid browser scroll handle")?;
-            let direction = match object.get("direction").and_then(Value::as_str) {
-                Some("up") => ScrollDirection::Up,
-                Some("down") => ScrollDirection::Down,
-                Some("left") => ScrollDirection::Left,
-                Some("right") => ScrollDirection::Right,
-                _ => return Err("invalid browser scroll direction".into()),
-            };
-            let pixels = object
-                .get("pixels")
-                .and_then(Value::as_u64)
-                .filter(|pixels| (1..=2000).contains(pixels))
-                .ok_or("invalid browser scroll distance")?;
-            Ok(Call::Scroll {
-                handle,
-                direction,
-                pixels: u16::try_from(pixels)?,
-            })
-        }
-        CONTROL_TOOL => {
-            if object.len() != 2
-                || !object.contains_key("handle")
-                || !object.contains_key("checked")
-            {
-                return Err("invalid set_native_control input".into());
-            }
-            let handle = handle_argument(object.get("handle"), "invalid native control handle")?;
-            let checked = object["checked"]
-                .as_bool()
-                .ok_or("invalid native control checked state")?;
-            Ok(Call::SetNativeControl { handle, checked })
-        }
-        NAVIGATE_TOOL => {
-            if object.len() != 1 {
-                return Err("invalid navigate_page input".into());
-            }
-            let destination = object
-                .get("url")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty() && s.len() <= 2048 && !s.chars().any(char::is_control))
-                .ok_or("invalid browser navigation URL")?
-                .to_owned();
-            Ok(Call::Navigate { destination })
-        }
-        ACTIVATE_TOOL => {
-            if object.len() != 1 || !object.contains_key("handle") {
-                return Err("invalid activate_button input".into());
-            }
-            let handle = handle_argument(object.get("handle"), "invalid browser button handle")?;
-            Ok(Call::ActivateButton { handle })
-        }
-        SELECT_TOOL => {
-            if object.len() != 2 || !object.contains_key("handle") || !object.contains_key("option")
-            {
-                return Err("invalid select_option input".into());
-            }
-            let handle = handle_argument(object.get("handle"), "invalid browser select handle")?;
-            let option = handle_argument(object.get("option"), "invalid browser option handle")?;
-            Ok(Call::SelectOption { handle, option })
-        }
-        OBSERVE_TOOL if object.is_empty() => Ok(Call::Observe),
-        OBSERVE_TOOL => Err("invalid observe_page input".into()),
-        FIELD_TOOL => {
-            if object.len() != 2 || !object.contains_key("handle") || !object.contains_key("value")
-            {
-                return Err("invalid set_field_value input".into());
-            }
-            let handle = handle_argument(object.get("handle"), "invalid browser field handle")?;
-            let value = object["value"]
-                .as_str()
-                .filter(|s| s.len() <= 1024)
-                .ok_or("invalid browser field value")?
-                .to_owned();
-            Ok(Call::Change { handle, value })
-        }
-        _ => Err("unknown browser tool".into()),
-    }
+    let tool = tools::find(name).ok_or("unknown browser tool")?;
+    (tool.decode)(object)
 }
