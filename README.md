@@ -10,6 +10,9 @@
 
 metldr helps you read pages and get work done in Chrome with the AI you choose.
 
+> [!WARNING]
+> **Work in progress: new version.** metldr is being rebuilt in Rust with a new Rune-based interface, a native companion, and expanded browser control. Features, interfaces and data formats may change, and some parts are not finished yet. The current extension remains the reference until each replacement reaches parity.
+
 * Summarize pages, PDFs and Gmail.
 * Run approved tasks and restore chats.
 * Choose APIs, installed agents or local AI.
