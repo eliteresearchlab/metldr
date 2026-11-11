@@ -340,10 +340,8 @@ export class RagService {
       // true batch embedding (GPU processes all at once)
       const embeddings = await embeddingProvider.embedBatch(texts, false)
       
-      // batch add to vector store
-      await Promise.all(
-        batch.map((entry, idx) => vectorStore.add(entry, embeddings[idx]))
-      )
+      // one vector-store batch per embedded batch: one IDB transaction and one sandbox message
+      await vectorStore.addBatch(batch.map((entry, idx) => ({ entry, embedding: embeddings[idx] })))
       
       // report progress after each batch
       const batchNum = Math.floor(i / batchSize) + 1

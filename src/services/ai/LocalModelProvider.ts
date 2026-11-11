@@ -317,6 +317,21 @@ class LocalModelProvider {
     if (!res.ok) throw new Error(res.error)
   }
 
+  // one sandbox round trip for a whole batch of vectors
+  async voyAddBatch(items: Array<{ id: string; embedding: number[]; title?: string; url?: string }>): Promise<void> {
+    if (items.length === 0) return
+    const res = await this.send({
+      type: 'VOY_ADD_BATCH',
+      items: items.map(item => ({
+        id: item.id,
+        embedding: item.embedding,
+        title: item.title || item.id,
+        url: item.url || ''
+      }))
+    })
+    if (!res.ok) throw new Error(res.error)
+  }
+
   async voySearch(embedding: number[], limit = 5): Promise<Array<{ id: string; score: number }>> {
     const res = await this.send({ type: 'VOY_SEARCH', embedding, limit })
     if (!res.ok) throw new Error(res.error)

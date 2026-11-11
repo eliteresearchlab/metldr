@@ -84,6 +84,14 @@ export interface PipelineStatus {
   error?: string
 }
 
+// one vector-store entry in a VOY_ADD_BATCH request
+export interface VoyAddBatchItem {
+  id: string
+  embedding: number[]
+  title: string
+  url: string
+}
+
 // discriminated union for sandbox messages
 export type OffscreenRequest =
   | { type: 'EMBED'; payload: EmbedRequest }
@@ -92,6 +100,7 @@ export type OffscreenRequest =
   | { type: 'UNLOAD'; tasks: LocalTask[] }
   | { type: 'STATUS' }
   | { type: 'VOY'; action: 'ADD' | 'SEARCH' | 'SERIALIZE' | 'LOAD'; payload: unknown }
+  | { type: 'VOY_ADD_BATCH'; items: VoyAddBatchItem[] }
 
 export type OffscreenResponse<T = unknown> = 
   | { ok: true; data: T; timing: number }
