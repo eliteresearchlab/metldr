@@ -908,6 +908,8 @@ mod tests {
                             ("scroll_page", false, false, false),
                             ("set_native_control", false, true, false),
                             ("page_logs", true, false, true),
+                            ("status", true, false, true),
+                            ("settings", true, false, true),
                         ];
                         assert_eq!(
                             tools.len(),

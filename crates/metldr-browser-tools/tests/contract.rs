@@ -210,6 +210,7 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             "set_field_value",
             json!({"handle":"field_1","value":"ready","approve":true}),
         ),
+        ("settings", json!({"name":"pi.offline","value":false})),
     ] {
         assert!(
             decode_call(name, arguments.clone()).is_err(),
@@ -227,7 +228,9 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             SELECT_TOOL,
             SCROLL_TOOL,
             CONTROL_TOOL,
-            "page_logs"
+            "page_logs",
+            "status",
+            "settings"
         ]
     );
     assert!(

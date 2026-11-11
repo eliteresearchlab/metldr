@@ -212,6 +212,7 @@ pub(super) fn run() -> Result<()> {
             Event::Provider(completion) => owner.provider_completed(completion)?,
             Event::BrowserIo(call) => owner.browser_io_call(call)?,
             Event::Browser(event) => owner.browser_event(event)?,
+            Event::BrowserSettings { run, ack } => owner.browser_settings_read(&run, ack)?,
             Event::Input(input) => match owner.transport.input(input)? {
                 Action::Connected => {
                     owner.invalidate_history();

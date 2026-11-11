@@ -70,6 +70,13 @@ impl Tools {
         if self.completed.len() == super::MAX_TOOL_CALLS {
             return Err("browser task step limit reached".into());
         }
+        // Reads run before attachment, so reporting state never attaches the browser.
+        if matches!(call, Call::Status | Call::Settings) {
+            let result = self.read(&call, stop).await?;
+            self.completed
+                .insert(call_id.to_owned(), (call, result.clone()));
+            return Ok(result);
+        }
         self.attach().await?;
         if stop.load(Ordering::Acquire) {
             return Err("browser task stopped".into());
@@ -137,10 +144,51 @@ impl Tools {
                     .page_logs()
                     .await?
             }
+            Call::Status | Call::Settings => {
+                return Err("read-only browser call reached the attached path".into());
+            }
         };
         self.completed
             .insert(call_id.to_owned(), (call, result.clone()));
         Ok(result)
+    }
+
+    async fn read(&self, call: &Call, stop: &AtomicBool) -> Result<Value> {
+        match call {
+            Call::Status => Ok(self.status()),
+            Call::Settings => self.settings(stop).await,
+            _ => Err("browser call is not a read".into()),
+        }
+    }
+
+    // Local state only: the engine is present exactly while the tab is attached.
+    fn status(&self) -> Value {
+        json!({"attached": self.engine.is_some(), "release_confirmed": !self.release_unknown})
+    }
+
+    // The owner holds the saved settings, so the read waits for its answer.
+    async fn settings(&self, stop: &AtomicBool) -> Result<Value> {
+        let (ack, rx) = mpsc::sync_channel(1);
+        self.client
+            .tx
+            .try_send(Event::BrowserSettings {
+                run: self.client.run.clone(),
+                ack,
+            })
+            .map_err(|_| "settings owner channel unavailable")?;
+        loop {
+            match rx.try_recv() {
+                Ok(value) => return value.map_err(Into::into),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err("settings owner ended".into());
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+            if stop.load(Ordering::Acquire) {
+                return Err("browser task stopped".into());
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     async fn attach(&mut self) -> Result<()> {
@@ -290,6 +338,7 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
         }
         Call::Scroll { .. } => Err("invalid browser scroll request".into()),
         Call::PageLogs => Ok(()),
+        Call::Status | Call::Settings => Ok(()),
     }
 }
 
@@ -421,6 +470,66 @@ mod failed_attach_check {
             assert_eq!(
                 tools.close().await.is_ok(),
                 close_succeeds,
+                "failed attachment cleanup result"
+            );
+            owner.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn status_reports_the_detached_state_without_attaching() {
+        for release_succeeds in [true, false] {
+            let run = format!("status-{release_succeeds}");
+            let (tx, rx) = mpsc::sync_channel::<FlowEvent>(8);
+            let client = Client { run, tx };
+            // After the one release, the owner exits; a status that attached would find no owner.
+            let owner = std::thread::spawn(move || {
+                while let Ok(event) = rx.recv() {
+                    let FlowEvent::BrowserIo(call) = event else {
+                        panic!("unexpected event")
+                    };
+                    match call.operation {
+                        Operation::Attach { .. } => {
+                            let _ = call.ack.send(Err("attach failure".into()));
+                        }
+                        Operation::Detach { .. } => {
+                            let result = if release_succeeds {
+                                Ok(serde_json::json!({"released":true}))
+                            } else {
+                                Err("release failure".into())
+                            };
+                            let _ = call.ack.send(result);
+                            break;
+                        }
+                        _ => panic!("unexpected command"),
+                    }
+                }
+            });
+            let (_notice_tx, notice_rx) = tokio::sync::mpsc::channel(1);
+            let mut tools = Tools::new(
+                client,
+                Target::from(&source()),
+                notice_rx,
+                Arc::new(AtomicBool::new(false)),
+            );
+            assert!(
+                tools
+                    .dispatch("call-1", Call::Observe, &AtomicBool::new(false), None)
+                    .await
+                    .is_err()
+            );
+            let status = tools
+                .dispatch("status-1", Call::Status, &AtomicBool::new(false), None)
+                .await
+                .expect("status is a local read");
+            assert_eq!(
+                status,
+                serde_json::json!({"attached": false, "release_confirmed": release_succeeds}),
+                "status must report the detached state after a failed attach"
+            );
+            assert_eq!(
+                tools.close().await.is_ok(),
+                release_succeeds,
                 "failed attachment cleanup result"
             );
             owner.join().unwrap();
