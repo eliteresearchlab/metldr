@@ -229,6 +229,12 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             CONTROL_TOOL
         ]
     );
+    assert!(
+        metldr_browser_tools::tools::TOOLS
+            .windows(2)
+            .all(|pair| pair[0].order < pair[1].order),
+        "the registry order must ascend"
+    );
     assert_eq!(tools[3].input_schema["required"], json!(["handle"]));
     assert_eq!(
         tools[3].input_schema["properties"]
