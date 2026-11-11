@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
@@ -47,97 +47,80 @@ for (const asset of JSON.parse(readFileSync(join(repoRoot, 'scripts/panel-assets
   }
 }
 
-function run(command, args, label) {
-  const executable = isWindows ? `${command}.exe` : command;
-  const result = spawnSync(executable, args, {
-    cwd: repoRoot,
-    env: cargoEnv,
-    stdio: 'inherit',
-    shell: false,
-  });
+const running = new Set();
+const failedGroups = new Set();
+let failure;
+let cleanup;
 
-  if (result.error) {
-    console.error(`Unable to run ${label} (${executable}): ${result.error.message}`);
-    process.exit(result.error.code === 'ENOENT' ? 127 : 1);
-  }
-  if (result.status !== 0) {
-    if (result.status === null) {
-      console.error(`${label} terminated by signal ${result.signal ?? 'unknown'}`);
-      process.exit(1);
+function cancel(error) {
+  if (failure) return;
+  failure = error;
+  const children = [...running, ...failedGroups];
+  const signal = (child, name) => {
+    try {
+      if (isWindows) child.kill(name);
+      else if (child.pid) process.kill(-child.pid, name);
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
     }
-    process.exit(result.status);
-  }
+  };
+  for (const child of children) signal(child, 'SIGTERM');
+  cleanup = new Promise(resolve => setTimeout(resolve, 1000)).then(() => {
+    if (!isWindows) for (const child of children) signal(child, 'SIGKILL');
+  });
 }
 
-const running = new Set();
-
-function runAsync(command, args, label) {
+function runAsync(command, args, label, capture = false) {
   const executable = isWindows ? `${command}.exe` : command;
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(executable, args, {
       cwd: repoRoot,
       env: cargoEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
       shell: false,
+      detached: !isWindows,
     });
     running.add(child);
+    let spawnError;
     let output = '';
-    child.stdout.on('data', chunk => { output += chunk; });
-    child.stderr.on('data', chunk => { output += chunk; });
-    child.on('error', error => {
-      running.delete(child);
-      rejectPromise(Object.assign(
-        new Error(`Unable to run ${label} (${executable}): ${error.message}`),
-        { exitCode: error.code === 'ENOENT' ? 127 : 1 },
-      ));
-    });
+    if (capture) {
+      child.stdout.on('data', chunk => { output = (output + chunk).slice(0, 1024); });
+      child.stderr.resume();
+    }
+    child.on('error', error => { spawnError = error; });
     child.on('close', (status, signal) => {
       running.delete(child);
-      if (output) process.stdout.write(output.endsWith('\n') ? output : `${output}\n`);
-      if (status === 0) {
-        resolvePromise();
-        return;
+      if (!isWindows && status !== 0 && child.pid) failedGroups.add(child);
+      if (spawnError) {
+        rejectPromise(Object.assign(
+          new Error(`Unable to run ${label} (${executable}): ${spawnError.message}`),
+          { exitCode: spawnError.code === 'ENOENT' ? 127 : 1 },
+        ));
+      } else if (status === 0) {
+        resolvePromise(output);
+      } else {
+        rejectPromise(Object.assign(
+          new Error(status === null
+            ? `${label} terminated by signal ${signal ?? 'unknown'}`
+            : `${label} failed with exit code ${status}`),
+          { exitCode: status ?? 1 },
+        ));
       }
-      rejectPromise(Object.assign(
-        new Error(status === null
-          ? `${label} terminated by signal ${signal ?? 'unknown'}`
-          : `${label} failed with exit code ${status}`),
-        { exitCode: status ?? 1 },
-      ));
     });
   });
 }
 
-// Runs at most `limit` tasks at once. Cargo takes an exclusive lock on a target
-// directory, so each task below builds in its own directory under target/wasm.
 async function runPool(tasks, limit) {
   const queue = [...tasks];
   const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
-    for (let task = queue.shift(); task; task = queue.shift()) await task();
+    while (!failure && queue.length) {
+      try { await queue.shift()(); } catch (error) { cancel(error); }
+    }
   });
-  await Promise.all(workers);
+  await Promise.allSettled(workers);
+  if (cleanup) await cleanup;
+  if (failure) throw failure;
 }
-
-if (!isCheck) {
-  const versionResult = spawnSync(isWindows ? 'wasm-bindgen.exe' : 'wasm-bindgen', ['--version'], {
-    cwd: repoRoot,
-    env: cargoEnv,
-    encoding: 'utf8',
-    shell: false,
-  });
-  if (versionResult.error) {
-    console.error(`Unable to run wasm-bindgen${isWindows ? '.exe' : ''}: ${versionResult.error.message}`);
-    process.exit(versionResult.error.code === 'ENOENT' ? 127 : 1);
-  }
-  if (versionResult.status !== 0) process.exit(versionResult.status ?? 1);
-  if (!/^wasm-bindgen 0\.2\.128(?:\s|$)/.test(versionResult.stdout.trim())) {
-    console.error(`Expected wasm-bindgen 0.2.128, found: ${versionResult.stdout.trim() || 'unknown version'}`);
-    process.exit(1);
-  }
-
-}
-
-const answerSourceHash = isCheck ? undefined : sourceDigest();
 
 function cargoBuildArgs(crate) {
   const args = ['--locked', '--manifest-path', join('crates', crate.name, 'Cargo.toml'), '--lib', '--target', 'wasm32-unknown-unknown'];
@@ -149,40 +132,57 @@ function wasmTargetDir(crate) {
   return join(rootTargetDir, 'wasm', crate.name);
 }
 
-if (isCheck) {
-  for (const crate of crates) {
-    run('cargo', ['check', ...cargoBuildArgs(crate)], `Cargo (${crate.name})`);
+const onInterrupt = () => cancel(Object.assign(new Error('Interrupted by SIGINT'), { exitCode: 130 }));
+const onTerminate = () => cancel(Object.assign(new Error('Interrupted by SIGTERM'), { exitCode: 143 }));
+process.on('SIGINT', onInterrupt);
+process.on('SIGTERM', onTerminate);
+
+try {
+  if (!isCheck) {
+    const version = await runAsync('wasm-bindgen', ['--version'], 'wasm-bindgen', true);
+    if (failure) throw failure;
+    if (!/^wasm-bindgen 0\.2\.128(?:\s|$)/.test(version.trim())) {
+      throw Object.assign(new Error(`Expected wasm-bindgen 0.2.128, found: ${version.trim() || 'unknown version'}`), { exitCode: 1 });
+    }
   }
-} else {
-  const jobs = buildJobs();
-  try {
+  const answerSourceHash = isCheck ? undefined : sourceDigest();
+  if (isCheck) {
+    for (const crate of crates) {
+      await runAsync('cargo', ['check', ...cargoBuildArgs(crate)], `Cargo (${crate.name})`);
+      if (failure) throw failure;
+    }
+  } else {
     await runPool(crates.map(crate => async () => {
       const targetDir = wasmTargetDir(crate);
       await runAsync('cargo', ['build', '--release', ...cargoBuildArgs(crate), '--target-dir', targetDir], `Cargo (${crate.name})`);
+      if (failure) return;
       await runAsync('wasm-bindgen', [
         join(targetDir, 'wasm32-unknown-unknown', 'release', `${crate.artifact ?? crate.module}.wasm`),
         '--target', 'web', '--typescript', '--out-dir', crate.pkg, '--out-name', crate.module,
       ], `wasm-bindgen (${crate.name})`);
-    }), jobs);
-  } catch (error) {
-    for (const child of running) child.kill('SIGTERM');
-    console.error(error.message);
-    process.exit(error.exitCode ?? 1);
+    }), buildJobs());
   }
-}
-
-if (answerSourceHash) recordReceipt(answerSourceHash);
-
-if (!isCheck) {
-  const destination = join(repoRoot, 'public/chat/wasm');
-  mkdirSync(destination, { recursive: true });
-  for (const name of ['metldr_panel.js', 'metldr_panel_bg.wasm']) {
-    copyFileSync(join(repoRoot, 'crates/metldr-panel/pkg', name), join(destination, name));
+  if (failure) throw failure;
+  if (answerSourceHash) recordReceipt(answerSourceHash);
+  if (!isCheck) {
+    const destination = join(repoRoot, 'public/chat/wasm');
+    mkdirSync(destination, { recursive: true });
+    for (const name of ['metldr_panel.js', 'metldr_panel_bg.wasm']) {
+      copyFileSync(join(repoRoot, 'crates/metldr-panel/pkg', name), join(destination, name));
+    }
   }
+  await runAsync('cargo', [
+    isCheck ? 'check' : 'build', '--locked', '--release',
+    '--manifest-path', 'crates/metldr-welcome/Cargo.toml', '--bin', 'welcome-guide',
+    '--target-dir', rootTargetDir,
+  ], 'welcome generator');
+  if (failure) throw failure;
+} catch (error) {
+  cancel(error);
+  if (cleanup) await cleanup;
+  console.error(failure.message);
+  process.exitCode = failure.exitCode ?? 1;
+} finally {
+  process.off('SIGINT', onInterrupt);
+  process.off('SIGTERM', onTerminate);
 }
-
-run('cargo', [
-  isCheck ? 'check' : 'build', '--locked', '--release',
-  '--manifest-path', 'crates/metldr-welcome/Cargo.toml', '--bin', 'welcome-guide',
-  '--target-dir', rootTargetDir,
-], 'welcome generator');
