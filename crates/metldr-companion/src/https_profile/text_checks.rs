@@ -1,4 +1,4 @@
-use super::transport_checks::{Protocol, text_server};
+use super::transport_checks::{Protocol, text_server, unserved_endpoint};
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 
@@ -322,13 +322,18 @@ fn all_native_text_clients_accept_only_complete_tool_free_responses_over_tls() {
             assert!(output.is_empty());
             assert_eq!(server.join().unwrap().len(), 1);
 
-            let (endpoint, server) = text_server("", protocol);
+            let (endpoint, listener) = unserved_endpoint(protocol);
             let stop = AtomicBool::new(true);
             let error = call(protocol, &endpoint, &stop, |_| Ok(()))
                 .await
                 .unwrap_err();
             assert_eq!(error.to_string(), cancelled);
-            assert!(server.join().unwrap().is_empty());
+            assert!(
+                listener
+                    .accept()
+                    .is_err_and(|error| error.kind() == std::io::ErrorKind::WouldBlock),
+                "cancelled request must not connect"
+            );
         }
     });
 }
