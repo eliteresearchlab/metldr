@@ -66,7 +66,7 @@ const REDACTED: &str = "[redacted]";
 
 static SECRET: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(&format!("(?i:{SECRET_METADATA_PATTERN})")).ok());
-static URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)https?://[^\s<>"']+"#).unwrap());
+static URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)https?://[^\s<>"]+"#).unwrap());
 static PEM: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----").unwrap());
 static CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
@@ -329,6 +329,13 @@ fn sanitize_url(value: &str) -> String {
 }
 
 fn sanitize(text: &str) -> String {
+    // A JSON-escaped quote can hide the rest of a query value.
+    if URL
+        .find_iter(text)
+        .any(|value| value.as_str().ends_with('\\'))
+    {
+        return REDACTED.to_owned();
+    }
     let urls = URL.replace_all(text, |captures: &regex::Captures<'_>| {
         sanitize_url(&captures[0])
     });
@@ -431,6 +438,20 @@ mod checks {
         );
         assert_eq!(sanitize_url("https://%"), REDACTED);
         assert_eq!(sanitize("Bearer abcdef"), REDACTED);
+        assert_eq!(
+            sanitize("https://example.test/cb?q=alice'bob"),
+            "https://example.test/cb?q=%5Bredacted%5D"
+        );
+        assert!(sanitize("'https://example.test/p'").contains("https://example.test/p"));
+        logs.console(&json!({"args":[{"value":{"link":"https://example.test/cb?q=alice\"bob"}}]}));
+        let logged = texts(&logs);
+        let text = logged.last().unwrap();
+        assert_eq!(text, REDACTED);
+        assert!(!text.contains("alice") && !text.contains("bob"));
+        assert_eq!(
+            sanitize(&json!({"link":"https://example.test/cb?q=public"}).to_string()),
+            r#"{"link":"https://example.test/cb?q=%5Bredacted%5D"}"#
+        );
     }
 
     #[test]
