@@ -120,14 +120,30 @@ export class VectorStore {
 
   async addBatch(entries: Array<{ entry: VectorEntry; embedding: Float32Array }>): Promise<void> {
     console.log(`[VectorStore] Batch adding ${entries.length} entries...`)
-    for (const { entry, embedding } of entries) {
-      await this.add(entry, embedding)
+    if (entries.length > 0) {
+      // one queue operation: one IDB transaction and one sandbox message for the whole batch
+      this.pendingAdds += entries.length
+      this.operationQueue = this.operationQueue.then(async () => {
+        await this.ensureIndexLoaded()
+        await this.storeDocuments(entries.map(({ entry }) => entry))
+        for (const { entry } of entries) this.invertedIndex.add(entry)
+        await localModels.voyAddBatch(entries.map(({ entry, embedding }) => ({
+          id: entry.id,
+          embedding: Array.from(embedding),
+          title: String(entry.metadata?.title || entry.id),
+          url: String(entry.metadata?.sourceUrl || '')
+        })))
+        // same save schedule as add(): one debounced save request per entry, never a synchronous save
+        for (let i = 0; i < entries.length; i++) {
+          this.pendingAdds--
+          this.scheduleDebouncedSave()
+        }
+      }).catch(err => {
+        this.pendingAdds -= entries.length
+        console.error('[VectorStore] Batch add failed:', err)
+      })
+      await this.operationQueue
     }
-    if (this.pendingSaveTimeout) {
-      clearTimeout(this.pendingSaveTimeout)
-      this.pendingSaveTimeout = null
-    }
-    await this.saveIndex()
     console.log(`[VectorStore] Batch add complete.`)
   }
 
@@ -323,6 +339,16 @@ export class VectorStore {
       timestamp: Date.now(),
       ttl: 24 * 60 * 60 * 1000 * 60 // 60 days
     })
+  }
+
+  // one IDB transaction for the whole batch (putBatch splits only above its chunk size)
+  private async storeDocuments(entries: VectorEntry[]): Promise<void> {
+    await databaseService.putBatch(DB_CONFIGS.cache, 'page_cache', entries.map(entry => ({
+      url: `rag:${entry.id}`,
+      ...entry,
+      timestamp: Date.now(),
+      ttl: 24 * 60 * 60 * 1000 * 60 // 60 days
+    })), entries.length)
   }
 
   private async retrieveDocument(id: string): Promise<VectorEntry | undefined> {
