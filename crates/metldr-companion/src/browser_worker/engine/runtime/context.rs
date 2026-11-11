@@ -310,6 +310,11 @@ impl ContextMap {
         })
     }
 
+    /// Whether a session belongs to this tab. Events from any other session are not ours.
+    pub fn owns(&self, session: Option<&str>) -> bool {
+        self.sessions.contains_key(&session.map(str::to_owned))
+    }
+
     pub fn validate(&self, context: &FrameContext) -> Result<()> {
         if self.context(context.frame_id()).as_ref() != Some(context) {
             return Err("browser execution context is stale".into());

@@ -129,6 +129,14 @@ impl Tools {
                     .await?;
                 self.perform(proposal, stop, budget).await?
             }
+            // Read-only: the captured output is returned as data and triggers no effect.
+            Call::PageLogs => {
+                self.engine
+                    .as_ref()
+                    .ok_or("browser is not attached")?
+                    .page_logs()
+                    .await?
+            }
         };
         self.completed
             .insert(call_id.to_owned(), (call, result.clone()));
@@ -281,6 +289,7 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
             Ok(())
         }
         Call::Scroll { .. } => Err("invalid browser scroll request".into()),
+        Call::PageLogs => Ok(()),
     }
 }
 

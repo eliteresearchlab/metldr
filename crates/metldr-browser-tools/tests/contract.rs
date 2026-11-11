@@ -226,7 +226,8 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             ACTIVATE_TOOL,
             SELECT_TOOL,
             SCROLL_TOOL,
-            CONTROL_TOOL
+            CONTROL_TOOL,
+            "page_logs"
         ]
     );
     assert!(

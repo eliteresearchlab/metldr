@@ -29,7 +29,13 @@ impl Actor {
                 )),
                 7 => Some(("Performance.enable", json!({}))),
                 8 => Some(("Log.enable", json!({}))),
-                9 => Some(("Runtime.runIfWaitingForDebugger", json!({}))),
+                9 => {
+                    // Runtime.enable and Log.enable have answered, so the replay of earlier output is over.
+                    if init.session.is_none() {
+                        self.page_logs.arm();
+                    }
+                    Some(("Runtime.runIfWaitingForDebugger", json!({})))
+                }
                 _ => None,
             }
         };

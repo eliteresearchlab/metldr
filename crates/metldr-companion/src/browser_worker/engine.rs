@@ -20,6 +20,7 @@ use tokio::{
 
 mod actor;
 mod admission;
+mod events;
 mod observation;
 mod runtime;
 mod scripts;
@@ -74,6 +75,7 @@ enum Kind {
         pixels: u16,
     },
     Scroll(Action),
+    PageLogs,
 }
 
 pub(super) struct AttachFailure {
@@ -214,6 +216,9 @@ impl Engine {
     }
     pub(super) async fn observe(&self, generation: u64) -> Result<Value> {
         self.request(Kind::Observe { generation }).await
+    }
+    pub(super) async fn page_logs(&self) -> Result<Value> {
+        self.request(Kind::PageLogs).await
     }
     pub(super) async fn prepare_control(
         &self,

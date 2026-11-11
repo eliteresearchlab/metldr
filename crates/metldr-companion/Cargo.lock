@@ -993,6 +993,7 @@ dependencies = [
  "metldr-pi-session",
  "metldr-responses",
  "redb",
+ "regex",
  "reqwest",
  "rustix",
  "rustls",
