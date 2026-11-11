@@ -2,7 +2,7 @@
 // handles all transformers.js operations via postMessage API
 
 import { pipeline, env, AutoTokenizer, type Pipeline } from '@huggingface/transformers'
-import type { LocalTask, OffscreenRequest, OffscreenResponse } from '../types/local-models'
+import type { LocalTask, OffscreenRequest, OffscreenResponse, VoyAddBatchItem } from '../types/local-models'
 
 // voy-search WASM binding (loaded manually to avoid bundler-style imports)
 let Voy: any = null
@@ -273,7 +273,23 @@ async function handleMessage(request: any): Promise<any> {
         }] })
         data = { added: request.id }
         break
-        
+
+      case 'VOY_ADD_BATCH': {
+        await ensureVoy()
+        const items: VoyAddBatchItem[] = request.items ?? []
+        // one WASM call for the whole batch, entries kept in request order
+        if (items.length > 0) {
+          voyIndex.add({ embeddings: items.map(item => ({
+            id: item.id,
+            title: item.title || item.id,
+            url: item.url || '',
+            embeddings: item.embedding
+          })) })
+        }
+        data = { added: items.length }
+        break
+      }
+
       case 'VOY_SEARCH':
         await ensureVoy()
         const searchResults = voyIndex.search(request.embedding, request.limit || 5)
