@@ -305,4 +305,38 @@ mod checks {
         let delivered = subscriptions.offer(&console(Some("other-tab"), "leak"), owned);
         assert_eq!((delivered, texts(&logs)), (false, kept));
     }
+    #[test]
+    fn callback_url_values_are_redacted() {
+        let logs = PageLogs::default();
+        logs.arm();
+        logs.log_entry(&json!({"entry":{"text":"callback https://example.test/cb?code=private#fragment", "url":"https://example.test/cb?code=private#fragment"}}));
+        let entry = &logs.snapshot().unwrap()["entries"][0];
+        assert!(!entry.to_string().contains("private"));
+        assert!(!entry.to_string().contains("fragment"));
+    }
+
+    #[test]
+    fn child_replay_is_dropped_and_root_survives_navigation() {
+        let logs = PageLogs::default();
+        let mut subscriptions = Subscriptions::default();
+        logs.register(&mut subscriptions);
+        logs.arm();
+        let owned = |_: Option<&str>| true;
+        subscriptions.offer(&console(Some("child"), "replay"), owned);
+        assert!(texts(&logs).is_empty());
+        subscriptions.offer(&event(None, "Page.frameNavigated", json!({"frame":{"id":"main"}})), owned);
+        subscriptions.offer(&console(None, "new page"), owned);
+        assert_eq!(texts(&logs), vec!["new page"]);
+    }
+
+    #[test]
+    fn last_argument_label_redacts_complete_message() {
+        let logs = PageLogs::default();
+        logs.arm();
+        let mut args = vec![json!({"value":"x".repeat(40)}); 31];
+        args.push(json!({"value":"password: private"}));
+        logs.console(&json!({"args":args}));
+        assert_eq!(texts(&logs), vec![REDACTED]);
+    }
+
 }
