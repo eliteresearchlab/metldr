@@ -71,8 +71,16 @@ async function loadRuneFonts(base) {
   }));
 }
 
+// `gpu=webgl` hides WebGPU before the renderer reads it, so wgpu draws through WebGL2. Headless
+// Chromium with SwiftShader offers a WebGPU adapter whose canvas cannot present: Chrome destroys
+// the device and the canvas stays empty. Pages on a real GPU keep the default.
+function hideWebGpu() {
+  Object.defineProperty(Navigator.prototype, "gpu", { get: () => undefined, configurable: true });
+}
+
 async function startRuneHost() {
   const base = new URL("rune/", document.baseURI);
+  if (new URLSearchParams(location.search).get("gpu") === "webgl") hideWebGpu();
   const fonts = loadRuneFonts(base);
   const glue = await import(/* @vite-ignore */ new URL("metldr_panel.js", base).href);
   const initialized = glue.default({ module_or_path: new URL("metldr_panel_bg.wasm", base) });

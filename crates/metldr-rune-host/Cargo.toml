@@ -9,11 +9,15 @@ edition = "2024"
 # Own workspace: the Rune renderer stays out of the shipping panel module.
 [workspace]
 
-# Mirrors the shipping panel's release profile so sizes are comparable.
+# Mirrors the shipping panel's release profile so sizes are comparable, plus two size settings.
+# The host has no catch_unwind, and wasm32 already aborts on panic, so `panic = "abort"` changes no
+# behaviour there. `strip = "symbols"` drops the function-name section from the module.
 [profile.release]
 opt-level = "s"
 lto = true
 codegen-units = 1
+strip = "symbols"
+panic = "abort"
 
 [lib]
 crate-type = ["cdylib"]
