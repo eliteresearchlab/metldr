@@ -23,7 +23,7 @@ extern "C" {
     #[wasm_bindgen(js_name = syncCopy)]
     fn sync_copy(handle: &JsValue, text: &str);
     #[wasm_bindgen(js_name = syncA11y)]
-    fn sync_a11y(handle: &JsValue, json: &str);
+    fn sync_a11y(handle: &JsValue, json: &str, revision: f64);
     fn activate(handle: &JsValue, request_focus: bool);
     fn destroy(handle: &JsValue);
     #[wasm_bindgen(js_name = pastedImage)]
@@ -37,6 +37,8 @@ pub(super) struct Bridge {
     mods: ModifiersState,
     mirror: crate::runtime::web_runtime::Mirror,
     a11y: crate::runtime::web_a11y::A11yMirror,
+    // Counts each mirror pushed to the page. A press names the revision it was rendered from.
+    a11y_revision: u64,
     copy_cache: String,
     fit_height: bool,
 }
@@ -81,6 +83,7 @@ impl Bridge {
             mods: ModifiersState::empty(),
             mirror: Default::default(),
             a11y: Default::default(),
+            a11y_revision: 0,
             copy_cache: String::new(),
             fit_height,
         }
@@ -96,7 +99,8 @@ impl Drop for Bridge {
 impl<S: 'static> Running<S> {
     pub(super) fn sync_input(&mut self, focus: bool) {
         let semantics_changed = if let Some(json) = self.rt.web_a11y(&mut self.input.a11y) {
-            sync_a11y(&self.input.handle, json);
+            self.input.a11y_revision += 1;
+            sync_a11y(&self.input.handle, json, self.input.a11y_revision as f64);
             true
         } else {
             false
@@ -125,6 +129,14 @@ impl<S: 'static> Running<S> {
     }
 
     pub(super) fn input_event(&mut self, event: &mut serde_json::Value, window: &Arc<Window>) {
+        if !crate::runtime::provenance::admits(
+            event["kind"].as_str().unwrap_or_default(),
+            event["trusted"].as_bool() == Some(true),
+            event["revision"].as_u64(),
+            self.input.a11y_revision,
+        ) {
+            return;
+        }
         let mut activate = false;
         match event["kind"].as_str() {
             Some("viewport") => {

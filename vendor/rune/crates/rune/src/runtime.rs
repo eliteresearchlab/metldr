@@ -332,6 +332,9 @@ mod keys;
 #[path = "runtime/input/pointer.rs"]
 mod pointer;
 use pointer::CLICK_SLOP;
+#[cfg(any(test, target_arch = "wasm32"))]
+#[path = "runtime/input/provenance.rs"]
+pub(crate) mod provenance;
 #[path = "runtime/motion/live_check.rs"]
 mod live_check;
 pub(crate) use live_check::fold_live;

@@ -26,6 +26,14 @@ function replacement(old, next, composition, caret) {
     return { start, end, text: next.slice(start, nextEnd) };
 }
 
+// Input types page script can dispatch synthetically. Untrusted events of these types aimed at this
+// host's canvas, fields or mirror are stopped in the window's capture phase, which runs before the
+// target listeners below and before winit's canvas listeners. Page script cannot press or type here.
+const GATED_INPUT = ['pointerdown', 'pointerup', 'pointermove', 'pointercancel', 'mousedown', 'mouseup',
+    'mousemove', 'click', 'dblclick', 'auxclick', 'wheel', 'touchstart', 'touchmove', 'touchend',
+    'touchcancel', 'keydown', 'keyup', 'keypress', 'beforeinput', 'input', 'compositionstart',
+    'compositionupdate', 'compositionend', 'select', 'paste', 'copy', 'cut'];
+
 function browserShortcut(event) {
     const chord = event.metaKey || event.ctrlKey;
     if (event.key === 'F5' || event.key === 'F12') return true;
@@ -79,6 +87,10 @@ export function mount(canvas, callback, embedded, fitHeight) {
         target.addEventListener(name, handler, options);
         h.listeners.push(() => target.removeEventListener(name, handler, options));
     };
+    // Only this host's own nodes are gated, so the rest of the page keeps its scripted events.
+    const owned = target => target === canvas || target === textarea || target === password || (target instanceof Node && a11y.contains(target));
+    const refuseUntrusted = event => { if (!event.isTrusted && owned(event.target)) event.stopImmediatePropagation(); };
+    for (const name of GATED_INPUT) listen(window, name, refuseUntrusted, { capture: true });
     function changed(preedit = false) {
         if (h.field.disabled || h.field.readOnly) return;
         const backward = textarea.selectionDirection === 'backward';
@@ -205,8 +217,9 @@ function webLink(url) {
     return url.startsWith('https://') || url.startsWith('http://') || url.startsWith('mailto:');
 }
 
-export function syncA11y(h, json) {
+export function syncA11y(h, json, revision) {
     if (h.disposed) return;
+    h.revision = revision;
     h.restoreFocus ||= ownsFieldFocus(h);
     const items = JSON.parse(json);
     const seen = new Set();
@@ -221,7 +234,7 @@ export function syncA11y(h, json) {
             if (item.k === 'input') {
                 el.setAttribute('role', 'textbox');
                 el.tabIndex = -1;
-                el.addEventListener('focus', () => activateA11yInput(h, el));
+                el.addEventListener('focus', event => activateA11yInput(h, el, event));
                 el.addEventListener('click', event => {
                     event.preventDefault();
                     if (!el._item?.disabled && document.activeElement !== el) el.focus({ preventScroll: true });
@@ -231,7 +244,7 @@ export function syncA11y(h, json) {
                 el.tabIndex = -1;
                 el.addEventListener('click', ev => {
                     ev.preventDefault();
-                    h.send({ kind: 'a11y_press', path: item.p });
+                    h.send({ kind: 'a11y_press', path: item.p, trusted: ev.isTrusted === true, revision: h.revision });
                 });
             }
             h.a11yNodes.set(key, el);
@@ -273,7 +286,7 @@ export function syncA11y(h, json) {
                             a.href = '#';
                             a.addEventListener('click', ev => {
                                 ev.preventDefault();
-                                h.send({ kind: 'a11y_link', path: run.p, link: run.i });
+                                h.send({ kind: 'a11y_link', path: run.p, link: run.i, trusted: ev.isTrusted === true, revision: h.revision });
                             });
                         }
                         el.append(a);
@@ -308,9 +321,9 @@ function setA11yInputHidden(el, hidden) {
     else el.removeAttribute('aria-hidden');
 }
 
-function activateA11yInput(h, el) {
+function activateA11yInput(h, el, event) {
     const item = el._item;
-    if (!h.disposed && item && !item.disabled) h.send({ kind: 'a11y_focus', path: item.p });
+    if (!h.disposed && item && !item.disabled) h.send({ kind: 'a11y_focus', path: item.p, trusted: event.isTrusted === true, revision: h.revision });
 }
 
 function ownsFieldFocus(h) {

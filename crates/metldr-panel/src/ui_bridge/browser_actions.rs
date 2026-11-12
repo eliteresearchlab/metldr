@@ -354,6 +354,40 @@ mod tests {
     use crate::model::BrowserActionIntent;
 
     #[test]
+    fn a_decision_for_a_superseded_revision_is_not_offered() {
+        let id: BrowserActionId =
+            serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:2"))
+                .unwrap();
+        let run = serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:1"))
+            .unwrap();
+        let mut action = BrowserActionView {
+            id: id.clone(),
+            revision: 1,
+            run,
+            tab: 1,
+            document: "document".into(),
+            url: "https://example.test/".into(),
+            intent: BrowserActionIntent::Field {
+                field_id: "field".into(),
+                field_label: "Name".into(),
+                previous_value: "".into(),
+                value: "Alex".into(),
+            },
+            phase: BrowserActionPhase::Pending,
+            outcome: None,
+            reason: None,
+            observed_selection: None,
+            observed_scroll: None,
+            observed_control: None,
+            target_current: false,
+        };
+        let shown = Key { id, revision: 1 };
+        assert!(shown.offered(&action));
+        action.revision = 2;
+        assert!(!shown.offered(&action));
+    }
+
+    #[test]
     fn stale_document_can_be_declined_and_observation_cannot_clear_unknown_decisions() {
         let id = serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:2"))
             .unwrap();
