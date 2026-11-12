@@ -27,11 +27,11 @@ Provider and installed agent tasks need the native companion, built and register
 
 Open Help on the welcome page for Chrome AI and Ollama setup. Its Ollama guide includes the extension origin and platform commands. Check reads availability without sending a prompt.
 
-## Build speed
+## Build configuration
 
 Cargo uses one target directory for the whole repository, set in `.cargo/config.toml`. Every crate under `crates/` and `prototypes/` is a separate Cargo root, so without that file the shared dependency stack is compiled again for each crate.
 
-`scripts/build-rust.mjs` builds the four wasm crates in parallel, two at a time. Set `METLDR_BUILD_JOBS` to change the limit. Each build gets its own directory under `target/wasm`, so cargo does not serialise them on one target lock and the peak memory stays at the single largest crate.
+`scripts/build-rust.mjs` builds the four wasm crates through a pool, two at a time by default. Set `METLDR_BUILD_JOBS` to change the limit. Each build gets its own directory under `target/wasm`, so cargo does not serialise them on one target lock.
 
 `sccache` is optional. The repository does not configure it, because a contributor without it would fail the build. Enable it in your shell when you want it:
 
@@ -40,11 +40,9 @@ export RUSTC_WRAPPER=sccache
 export CARGO_INCREMENTAL=0
 ```
 
-`sccache` does not cache incremental compilation units, so `CARGO_INCREMENTAL=0` is what makes the cache work. With both variables set, a clean `cargo test --no-run` for `metldr-companion` falls from 129.7 s to 33.7 s, with 582 cache hits, no misses on the second run, and 243 MB of cache.
+`sccache` shares its compile cache across builds. It does not cache incremental compilation units, so set `CARGO_INCREMENTAL=0` when using it.
 
-Measured on a 16 core Linux machine with the same commands: `npm run build` cold falls from 154 s to 89 s, `npm run build:rust` cold falls from 115 s to 92 s, and the `cargo test` matrix cold falls from 363 s to 231 s. The warm rebuilds change little, because they are test execution rather than compilation.
-
-`make check` type-checks all 18 Cargo roots with `cargo check`, without linking and without running tests. It costs about 140 s against 363 s for the test matrix, so run it before the `check-*` targets when a change touches a shared crate.
+`make check` type-checks the Cargo roots under `crates/` and the Rune frontend prototype with `cargo check`, without linking or running tests. Run it before the `check-*` targets when a change touches a shared crate.
 
 ## Checks
 
