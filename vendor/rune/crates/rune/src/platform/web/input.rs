@@ -290,7 +290,12 @@ impl<S: 'static> Running<S> {
         self.focus_native(false);
     }
 
-    fn focus_native(&self, requested: bool) {
+    fn focus_native(&mut self, requested: bool) {
+        if requested {
+            self.input.candidate = None;
+        } else if self.input.candidate.is_some() {
+            return;
+        }
         if let Some(path) = self.rt.native_focused_path()
             && let Some(reg) = self.input.native.iter().find(|r| r.binding.path == path && self.native_registered(&r.binding)) {
             if self.rt.native_controls().iter().any(|(p, k)| p == path && k == &reg.binding.key) {
@@ -321,10 +326,10 @@ impl<S: 'static> Running<S> {
         if (kind == "pointerdown" && g.value(&g.primary, event).and_then(|v| v.as_bool()) != Some(true))
             || g.value(&g.button, event).and_then(|v| v.as_f64()) != Some(0.0) { return; }
         let (Some(x), Some(y)) = (g.value(&g.x, event).and_then(|v| v.as_f64()), g.value(&g.y, event).and_then(|v| v.as_f64())) else { return };
+        if !self.rt.native_geometry_valid { window.request_redraw(); return; }
         let rect = canvas.get_bounding_client_rect();
         let target = self.rt.native_primary_target((x - rect.left()) as f32, (y - rect.top()) as f32);
         if kind == "pointerdown" {
-            if !self.rt.native_geometry_valid { window.request_redraw(); return; }
             if let Some((path, key)) = target
                 && self.input.native.iter().any(|r| r.binding.path == path && r.binding.key == key && self.native_registered(&r.binding)) {
                 self.input.candidate = Some((id, path, key));
@@ -336,6 +341,9 @@ impl<S: 'static> Running<S> {
     }
 
     pub(super) fn sync_input(&mut self, focus: bool) {
+        if focus {
+            self.input.candidate = None;
+        }
         let semantics_changed = if let Some(json) = self.rt.web_a11y(&mut self.input.a11y) {
             self.input.a11y_revision += 1;
             sync_a11y(&self.input.handle, json, self.input.a11y_revision as f64);
@@ -460,7 +468,8 @@ impl<S: 'static> Running<S> {
                 self.cursor.apply(window, crate::el::Cursor::Default, false);
             }
             WindowEvent::MouseInput { button, state, .. } if !self.rt.touching() => {
-                immediate = true;
+                // Keep presented hit geometry available until the native click arrives.
+                immediate = *button != MouseButton::Left || self.input.candidate.is_none();
                 let Some((x, y)) = self.rt.pointer() else {
                     return false;
                 };
@@ -549,7 +558,7 @@ impl<S: 'static> Running<S> {
                 // A tap is a user activation: links, the clipboard and focus act before the handler returns.
                 if matches!(touch.phase, TouchPhase::Ended) {
                     activate = true;
-                    immediate = true;
+                    immediate = self.input.candidate.is_none();
                 }
             }
             _ => return false,
