@@ -99,8 +99,9 @@ impl NativeGetters {
 
     fn in_document(&self, node: &JsValue) -> bool {
         let Some(document) = web_sys::window().and_then(|w| w.document()) else { return false };
+        let document_value: &JsValue = document.as_ref();
         self.connected.call0(node).ok().and_then(|v| v.as_bool()) == Some(true)
-            && self.owner_document.call0(node).is_ok_and(|v| v == *document.as_ref())
+            && self.owner_document.call0(node).is_ok_and(|v| v == *document_value)
     }
 
     fn connected(&self, node: &web_sys::HtmlElement) -> bool {
@@ -229,8 +230,9 @@ impl<S: 'static> Running<S> {
         for registration in old {
             let binding = &registration.binding;
             let locator = native_button(&self.input.handle, &binding.path);
+            let bound_node: &JsValue = binding.node.as_ref();
             if desired.iter().any(|(p, k)| p == &binding.path && k == &binding.key)
-                && self.input.getters.as_ref().is_some_and(|g| g.connected(&binding.node)) && locator == *binding.node.as_ref() {
+                && self.input.getters.as_ref().is_some_and(|g| g.connected(&binding.node)) && locator == *bound_node {
                 self.input.native.push(registration);
             } else {
                 registration.retire(&self.input.handle);
