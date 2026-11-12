@@ -91,7 +91,11 @@ impl Owner {
         run: &str,
         ack: std::sync::mpsc::SyncSender<std::result::Result<Value, String>>,
     ) -> Result<()> {
-        let result = if self.operations.contains_key(run) {
+        let result = if self
+            .operations
+            .get(run)
+            .is_some_and(|operation| operation.browser_io.is_some())
+        {
             Ok(self.browser_settings_snapshot())
         } else {
             Err("browser run is not active".to_owned())
