@@ -63,6 +63,9 @@ impl Tools {
         validate_call(call_id, &call)?;
         if let Some((previous, result)) = self.completed.get(call_id) {
             if previous == &call {
+                if matches!(call, Call::Status) {
+                    return Ok(self.status());
+                }
                 return Ok(result.clone());
             }
             return Err("model reused a tool identity with changed arguments".into());
@@ -523,6 +526,13 @@ mod failed_attach_check {
                     .await
                     .is_err()
             );
+            tools.completed.insert(
+                "status-1".into(),
+                (
+                    Call::Status,
+                    serde_json::json!({"attached": true, "release_confirmed": !release_succeeds}),
+                ),
+            );
             let status = tools
                 .dispatch("status-1", Call::Status, &AtomicBool::new(false), None)
                 .await
@@ -531,6 +541,14 @@ mod failed_attach_check {
                 status,
                 serde_json::json!({"attached": false, "release_confirmed": release_succeeds}),
                 "status must report the detached state after a failed attach"
+            );
+            assert_eq!(
+                tools
+                    .dispatch("status-1", Call::Observe, &AtomicBool::new(false), None)
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                "model reused a tool identity with changed arguments"
             );
             assert_eq!(
                 tools.close().await.is_ok(),
