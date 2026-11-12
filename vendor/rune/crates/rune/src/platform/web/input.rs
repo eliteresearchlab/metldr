@@ -319,6 +319,7 @@ impl<S: 'static> Running<S> {
         if kind == "pointercancel" { self.input.candidate = None; return; }
         if kind != "pointerdown" && kind != "click" { return; }
         let candidate = if kind == "click" { self.input.candidate.take() } else { None };
+        if candidate.is_some() { window.request_redraw(); }
         let Some(dom_window) = web_sys::window() else { return };
         if !g.in_document(canvas.as_ref())
             || !g.valid(event, &kind, dom_window.as_ref(), canvas.as_ref()) { return; }
