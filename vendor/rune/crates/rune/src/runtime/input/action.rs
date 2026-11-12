@@ -202,6 +202,11 @@ pub(super) fn merge(tx: &mut Tx, one: Tx) {
     if one.font_families.is_some() { tx.font_families = one.font_families; }
     if one.rewind.is_some() { tx.rewind = one.rewind; }
     tx.blur |= one.blur;
+    if one.blur { tx.focus_request = None; }
+    if one.focus_request.is_some() {
+        tx.focus_request = one.focus_request;
+        tx.blur = false;
+    }
     if one.select.is_some() {
         tx.select = one.select;
         tx.select_from_change = one.select_from_change;

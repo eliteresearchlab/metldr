@@ -40,10 +40,13 @@ mod providers;
 mod run;
 mod run_details;
 mod run_reference;
+#[cfg(feature = "rune-ui")]
+mod rune;
 mod saved_source;
 mod settings;
 mod settings_updates;
 mod source_updates;
+mod stop;
 pub use active::UiActiveRun;
 pub use agents::{UiAgentConfiguration, UiAgentProfile, UiAgentSettings};
 pub use answer_frame::UiAnswerFrame;
@@ -155,6 +158,7 @@ struct PageSession {
     connection_subscriptions: RefCell<Vec<std::rc::Weak<connection::Observer>>>,
     source_subscriptions: RefCell<Vec<std::rc::Weak<saved_source::Observer>>>,
     connection_waiter: RefCell<Option<Waker>>,
+    changed: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 impl PageSession {
@@ -244,6 +248,7 @@ impl UiBridge {
             connection_subscriptions: RefCell::new(Vec::new()),
             source_subscriptions: RefCell::new(Vec::new()),
             connection_waiter: RefCell::new(None),
+            changed: RefCell::new(None),
         });
         page.install_source_updates();
         page.install_connection_updates(flow, views);
@@ -487,32 +492,12 @@ impl UiBridge {
     }
 
     pub async fn stop(&self, id: String) -> Result<String, JsValue> {
-        self.core.ensure_current().map_err(js_error)?;
-        if self.core.page.recovery.borrow().active() {
-            return Err(js_error(FlowError::HistoryBusy));
-        }
-        let stop = self.core.owner.borrow_mut().stop(&id).map_err(js_error)?;
-        match stop {
-            Stop::Pending => {
-                let preparing = self.core.preparing.borrow_mut().take();
-                if let Some(waker) = preparing {
-                    waker.wake();
-                }
-                Ok("pending".into())
-            }
-            Stop::Native(native) => {
-                match self
-                    .core
-                    .flow()
-                    .request_stop(self.core.scope.clone(), native)
-                    .await
-                    .map_err(js_error)?
-                {
-                    StopReceipt::Requested => Ok("requested".into()),
-                    StopReceipt::AlreadyTerminal => Ok("already_terminal".into()),
-                }
-            }
-        }
+        self.core
+            .stop(&id)
+            .map_err(js_error)?
+            .await
+            .map(|receipt| receipt.name().into())
+            .map_err(js_error)
     }
 }
 

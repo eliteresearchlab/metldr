@@ -555,6 +555,7 @@ pub struct Runtime<S: 'static> {
     caught_up: f32,
     slack_dt: f32,
     focused: Option<String>,
+    requested_focus: Option<String>,
     keyboard_focus: bool,
     /// The pointer focused a `focus_highlight` row, so its highlight shows without a key.
     hover_focus: bool,
@@ -928,6 +929,7 @@ impl<S: 'static> Runtime<S> {
             caught_up: 0.0,
             slack_dt: 0.0,
             focused: None,
+            requested_focus: None,
             keyboard_focus: false,
             hover_focus: false,
             typeahead: (String::new(), f64::NEG_INFINITY),

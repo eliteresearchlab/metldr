@@ -24,6 +24,7 @@ pub struct Tx {
     pub(crate) physical_key: Option<crate::PhysicalKeyCode>,
     pub(crate) key_base: Option<char>,
     pub(crate) focused: Option<String>,
+    pub(crate) focus_request: Option<String>,
     pub(crate) instant: bool,
     pub(crate) motion: Option<Spring>,
     /// The layout curve from [`Tx::motion_curve`]; `motion` holds its spring stand-in.
@@ -151,7 +152,7 @@ impl Tx {
     /// or a text flight. A `wake_after` only schedules.
     pub(crate) fn frame_work(&self) -> bool {
         !self.pick_reads.is_empty() || !self.scroll_to.is_empty() || !self.scroll_bottom.is_empty() || !self.scroll_pages.is_empty() || !self.scroll_offsets.is_empty()
-            || !self.keep_on_screen.is_empty() || !self.text_flights.is_empty() || !self.launches.is_empty() || self.select.is_some()
+            || !self.keep_on_screen.is_empty() || !self.text_flights.is_empty() || !self.launches.is_empty() || self.select.is_some() || self.focus_request.is_some()
     }
 
     /// An app marker on the next frame, e.g. `tx.trace_event(format_args!("lab:{step:?}"))`.
@@ -259,6 +260,15 @@ impl Tx {
     /// model clears it too. Does nothing when nothing has focus.
     pub fn blur(&mut self) {
         self.blur = true;
+        self.focus_request = None;
+    }
+
+    /// Focus a keyed control after this handler's view commits, including a newly opened menu
+    /// row. The key uses the same selectors as `scroll_into_view`. Hidden, disabled and inert
+    /// controls cannot take focus. The last `focus` or `blur` in a handler wins.
+    pub fn focus(&mut self, key: impl Into<String>) {
+        self.focus_request = Some(key.into());
+        self.blur = false;
     }
 
     /// The [`El::selectable`] text selection as this event arrived: the texts it covers with

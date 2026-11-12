@@ -162,7 +162,7 @@ pub struct UiConnectionSnapshot {
 }
 
 impl UiConnectionSnapshot {
-    fn read(core: &Core) -> Self {
+    pub(super) fn read(core: &Core) -> Self {
         let stale = core.ensure_current().is_err();
         let reconnecting = core.page.recovery.borrow().active();
         let connected = !stale && core.flow().is_connected();

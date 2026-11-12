@@ -268,6 +268,10 @@ impl PageSession {
             core.notify_codex_input();
             core.notify_corrections();
         }
+        let changed = self.changed.borrow().clone();
+        if let Some(changed) = changed {
+            changed();
+        }
     }
 }
 
