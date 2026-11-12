@@ -31,9 +31,7 @@ impl Actor {
                 8 => Some(("Log.enable", json!({}))),
                 9 => {
                     // Runtime.enable and Log.enable have answered, so the replay of earlier output is over.
-                    if init.session.is_none() {
-                        self.page_logs.arm();
-                    }
+                    self.page_logs.arm_session(init.session.as_deref());
                     Some(("Runtime.runIfWaitingForDebugger", json!({})))
                 }
                 _ => None,
