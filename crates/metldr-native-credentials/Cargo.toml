@@ -25,3 +25,9 @@ apple-native-keyring-store = { version = "=1.0.2", default-features = false, fea
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"

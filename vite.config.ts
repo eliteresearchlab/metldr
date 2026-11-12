@@ -10,9 +10,9 @@ import { execFileSync } from 'node:child_process'
 const isContentBuild = process.env.BUILD_TARGET === 'content'
 const privateFiles = [
   '**/.tmp/**', '**/prototypes/**', '**/docs/**',
-  '**/{AGENTS,CLAUDE,PRODUCT,DESIGN}.md', '**/crates/**/target/**',
+  '**/{AGENTS,CLAUDE,PRODUCT,DESIGN}.md', '**/crates/**/target/**', '**/target/**',
 ]
-const welcomeGenerator = resolve(process.env.CARGO_TARGET_DIR || 'crates/metldr-welcome/target', 'release',
+const welcomeGenerator = resolve(process.env.CARGO_TARGET_DIR || 'target', 'release',
   process.platform === 'win32' ? 'welcome-guide.exe' : 'welcome-guide')
 
 const rustWelcome = (): Plugin => ({

@@ -1,4 +1,20 @@
-.PHONY: rust check-rust check-rune check-codex check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion
+.PHONY: rust check check-rust check-rune check-codex check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion
+
+# Every Cargo root in the repository, in the order the check-* targets use.
+RUST_CRATES := metldr-sse metldr-responses metldr-google-interactions metldr-messages \
+  metldr-chat-completions metldr-native-credentials metldr-conversation \
+  metldr-pi-session metldr-codex-session metldr-opencode-session \
+  metldr-browser-tools metldr-answer-codec metldr-panel metldr-companion \
+  metldr-core metldr-history-pages metldr-welcome metldr-rune-host
+
+# Fast pre-gate: type-check every Cargo root without linking or running tests.
+# Run it before the check-* targets when a change touches a shared crate.
+check:
+	@set -e; for crate in $(RUST_CRATES); do \
+	  echo "check $$crate"; \
+	  cargo check --locked --manifest-path crates/$$crate/Cargo.toml; \
+	done
+	cargo check --locked --manifest-path prototypes/rune-frontend/Cargo.toml --lib
 
 rust:
 	npm run build:rust
@@ -43,7 +59,8 @@ check-conversation:
 	cargo test --locked --manifest-path crates/metldr-conversation/Cargo.toml
 
 WASM_BINDGEN ?= wasm-bindgen
-PANEL_TARGET_DIR ?= crates/metldr-panel/target
+# The directory scripts/build-rust.mjs builds the panel wasm into.
+PANEL_TARGET_DIR ?= target/wasm/metldr-panel
 
 check-panel:
 	cargo test --locked --manifest-path crates/metldr-answer-codec/Cargo.toml
@@ -54,7 +71,7 @@ panel-wasm:
 	mkdir -p crates/metldr-panel/pkg
 	$(WASM_BINDGEN) --target web --out-dir crates/metldr-panel/pkg "$(PANEL_TARGET_DIR)/wasm32-unknown-unknown/release/metldr_panel.wasm"
 
-RUNE_HOST_TARGET_DIR ?= crates/metldr-rune-host/target
+RUNE_HOST_TARGET_DIR ?= target/wasm/metldr-rune-host
 RUNE_HOST_OUT ?= crates/metldr-rune-host/pkg
 
 # Internal Rune host route: native lifecycle and font tests (no renderer), then the decoded fonts.

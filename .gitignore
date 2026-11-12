@@ -255,6 +255,10 @@ PROJECT.md
 templates/
 dictionary-data/
 public/models/
+
+# Shared Cargo target directory for every crate in this repository (.cargo/config.toml).
+/target/
+
 # End of https://www.toptal.com/developers/gitignore/api/node,vue,macos,windows,linux,visualstudiocode
 
 # Internal Rune host route payload from `make rune-host` (wasm and fonts copied from crates/metldr-rune-host): never committed, so default builds package nothing new.

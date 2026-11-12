@@ -10,3 +10,9 @@ publish = false
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"

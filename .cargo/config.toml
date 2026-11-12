@@ -1,0 +1,10 @@
+# Every crate under crates/ and prototypes/ declares its own empty [workspace]
+# table, so each one is a separate Cargo root. Without this file each root would
+# build the shared dependency stack (serde, tokio, reqwest, rustls, web-sys, ...)
+# again in its own crates/<name>/target directory.
+#
+# One target directory for the whole repository. Cargo resolves a relative
+# target-dir against the directory that holds this .cargo directory, so the path
+# is the same from any working directory.
+[build]
+target-dir = "target"
