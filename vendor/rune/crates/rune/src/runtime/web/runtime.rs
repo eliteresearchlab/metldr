@@ -14,6 +14,38 @@ pub(crate) struct Mirror {
     pub secure: bool,
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+pub(crate) struct NativeSubmitBinding {
+    pub id: NodeId,
+    pub path: String,
+    pub element_key: String,
+    pub key: String,
+    pub handler: crate::el::NativeSubmitFn,
+    pub access: crate::el::EditFn,
+    pub text: String,
+    pub base: usize,
+    pub window: String,
+    pub anchor: u32,
+    pub focus: u32,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl NativeSubmitBinding {
+    pub(crate) fn matches(&self, current: &Self) -> bool {
+        self.id == current.id && self.path == current.path && self.element_key == current.element_key
+            && self.key == current.key && Rc::ptr_eq(&self.handler, &current.handler)
+            && Rc::ptr_eq(&self.access, &current.access) && self.text == current.text
+            && self.base == current.base && self.window == current.window
+            && self.anchor == current.anchor && self.focus == current.focus
+    }
+
+    pub(crate) fn matches_mirror(&self, mirror: &Mirror) -> bool {
+        !mirror.secure && self.path == mirror.key && self.base == mirror.base
+            && self.window == mirror.text && self.anchor == mirror.anchor && self.focus == mirror.focus
+    }
+}
+
 /// Read at most 512 UTF-16 units on each side, without scanning the document prefix.
 fn context_window(edit: &crate::TextEdit) -> (usize, &str, u32, u32) {
     let (a, b) = edit.range();
@@ -210,6 +242,29 @@ fn byte_at(text: &str, utf16: usize) -> Option<usize> {
 }
 
 impl<S: 'static> Runtime<S> {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_submit_binding(&mut self) -> Option<NativeSubmitBinding> {
+        let index = self.focused_index()?;
+        let node = &self.nodes[index];
+        if node.a11y.disabled || node.inert || !self.can_focus(index)
+            || !self.allowed(index) || self.subtree_exiting(index) { return None; }
+        let input = node.input.as_deref()?;
+        if input.edit.is_secure() || input.edit.preedit.is_some() { return None; }
+        let (key, handler) = input.native_submit.clone()?;
+        let access = input.access.clone()?;
+        let (id, path, element_key) = (node.id, node.path.clone(), node.key.clone()?);
+        let text = input.edit.text.clone();
+        let (rendered_anchor, rendered_focus) = (input.edit.anchor, input.edit.focus);
+        let edit = access(states!(self));
+        if edit.is_secure() || edit.preedit.is_some() || edit.text != text
+            || edit.anchor != rendered_anchor || edit.focus != rendered_focus { return None; }
+        let (base, window, anchor, focus) = context_window(edit);
+        Some(NativeSubmitBinding {
+            id, path, element_key, key, handler, access, text, base,
+            window: window.to_owned(), anchor, focus,
+        })
+    }
+
     pub(crate) fn web_context(&self, mirror: &mut Mirror) -> bool {
         match self.focused_input().filter(|i| i.access.is_some()) {
             Some(input) => mirror.update(self.focused.as_deref().unwrap_or_default(), Some(&input.edit)),

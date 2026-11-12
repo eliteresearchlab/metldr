@@ -17,6 +17,22 @@ pub(crate) struct ScrollRequest {
 }
 
 impl<S: 'static> Runtime<S> {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn relay_wheel(&mut self, key: &str, dx: f32, dy: f32) {
+        let mut matches = self.nodes.iter().enumerate().filter(|(i, n)| n.key.as_deref() == Some(key)
+            && n.scroll.is_some() && !self.subtree_exiting(*i));
+        let Some((_, node)) = matches.next() else { return };
+        if matches.next().is_some() { return; }
+        let path = node.path.clone();
+        if self.nodes.iter().filter(|n| n.named(&path)).count() != 1 { return; }
+        let Some(scroll) = self.scrolls.get(&node.id) else { return };
+        let x = node.scroll_axes.x().then_some((scroll.x.offset + f64::from(dx)) as f32);
+        let y = node.scroll_axes.y().then_some((scroll.offset + f64::from(dy)) as f32);
+        self.native_geometry_valid = false;
+        self.scroll_to_offsets(vec![ScrollRequest { key: path, x, y, glide: None, anchor: false }]);
+        self.invalidate();
+    }
+
     /// Each request moves the viewport keyed (or pathed) by its key, or the nearest one around
     /// it that scrolls an axis it asks for, clamped to its content. Axes the viewport doesn't
     /// scroll are left alone.

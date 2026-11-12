@@ -19,6 +19,7 @@ pub(crate) struct A11yMirror {
 pub(crate) struct A11yItem {
     pub kind: A11yKind,
     pub path: String,
+    pub parent: Option<String>,
     /// `[x, y, w, h]` in viewport points (CSS pixels).
     pub rect: [f32; 4],
     pub font_size: f32,
@@ -29,9 +30,15 @@ pub(crate) struct A11yItem {
 #[derive(Debug, PartialEq)]
 pub(crate) enum A11yKind {
     Text,
+    Status,
+    Alert,
     Heading(u32),
     Button(Option<bool>),
     Input(Box<InputSemantics>),
+    Table,
+    Row,
+    ColumnHeader,
+    Cell,
 }
 
 #[derive(Debug, PartialEq)]
@@ -64,8 +71,26 @@ impl A11yItem {
     fn to_json(&self) -> Value {
         let mut obj = serde_json::Map::new();
         match &self.kind {
+            A11yKind::Table => {
+                obj.insert("k".into(), json!("table"));
+            }
+            A11yKind::Row => {
+                obj.insert("k".into(), json!("row"));
+            }
+            A11yKind::ColumnHeader => {
+                obj.insert("k".into(), json!("columnheader"));
+            }
+            A11yKind::Cell => {
+                obj.insert("k".into(), json!("cell"));
+            }
             A11yKind::Text => {
                 obj.insert("k".into(), json!("text"));
+            }
+            A11yKind::Status => {
+                obj.insert("k".into(), json!("status"));
+            }
+            A11yKind::Alert => {
+                obj.insert("k".into(), json!("alert"));
             }
             A11yKind::Heading(level) => {
                 obj.insert("k".into(), json!("heading"));
@@ -98,6 +123,9 @@ impl A11yItem {
             }
         }
         obj.insert("p".into(), json!(self.path));
+        if let Some(parent) = &self.parent {
+            obj.insert("parent".into(), json!(parent));
+        }
         obj.insert("r".into(), json!(self.rect));
         if self.font_size != 0.0 {
             obj.insert("s".into(), json!(self.font_size));
@@ -295,10 +323,13 @@ impl<S: 'static> Runtime<S> {
     pub(crate) fn web_a11y_items(&self) -> Vec<A11yItem> {
         let mut out: Vec<A11yItem> = Vec::new();
         let mut last_flow_parent: Option<usize> = None;
+        let mut groups: Vec<Option<usize>> = vec![None; self.nodes.len()];
         let mut i = 0;
         while i < self.nodes.len() {
             let n = &self.nodes[i];
             let end = self.subtree_end(i);
+            let parent_group = n.parent.and_then(|parent| groups[parent]);
+            groups[i] = parent_group;
             if self.subtree_exiting(i) || n.vis.opacity <= 0.01 || n.a11y.hidden {
                 i = end;
                 last_flow_parent = None;
@@ -311,6 +342,40 @@ impl<S: 'static> Runtime<S> {
             }
             let b = self.drawn_box(i);
             let rect = rect4(b);
+            let parent_kind = parent_group.map(|index| &out[index].kind);
+            let group = if n.input.is_none() && n.handlers.on_press.is_none() {
+                match (n.role, parent_kind) {
+                    ("table", None | Some(A11yKind::Cell | A11yKind::ColumnHeader)) => {
+                        Some(A11yKind::Table)
+                    }
+                    ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
+                    ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
+                    ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            if group.is_none() && matches!(n.role, "table" | "row" | "columnheader" | "cell") {
+                groups[i] = None;
+            }
+            if let Some(kind) = group {
+                let parent = parent_group.map(|index| out[index].path.clone());
+                groups[i] = Some(out.len());
+                out.push(A11yItem {
+                    kind,
+                    path: n.path.clone(),
+                    parent,
+                    rect,
+                    font_size: 0.0,
+                    text: n.label.clone().unwrap_or_default(),
+                    runs: Vec::new(),
+                });
+                last_flow_parent = None;
+            }
+            let content_parent = groups[i]
+                .filter(|&index| matches!(out[index].kind, A11yKind::Cell | A11yKind::ColumnHeader))
+                .map(|index| out[index].path.clone());
             if let Some(input) = n.input.as_deref() {
                 if rect[2] > 0.0 && rect[3] > 0.0 {
                     let more = n.a11y.more.as_deref();
@@ -340,6 +405,7 @@ impl<S: 'static> Runtime<S> {
                             },
                         })),
                         path: n.path.clone(),
+                        parent: content_parent.clone(),
                         rect,
                         font_size: n.text.as_deref().map_or(14.0, |t| round1(t.style.size)),
                         text: String::new(),
@@ -367,6 +433,7 @@ impl<S: 'static> Runtime<S> {
                     out.push(A11yItem {
                         kind: A11yKind::Button(n.a11y.expanded),
                         path: n.path.clone(),
+                        parent: content_parent.clone(),
                         rect,
                         font_size: 0.0,
                         text: label,
@@ -384,7 +451,7 @@ impl<S: 'static> Runtime<S> {
             {
                 let runs = text_runs(&n.path, spec);
                 if !runs.is_empty() {
-                    let is_heading = n.role == "heading";
+                    let semantic_text = matches!(n.role, "heading" | "status" | "alert");
                     // Flowed word-by-word paragraphs (`pr_chips::flow`) put sibling words (or 1-word
                     // wrapper rows) inside one flex-wrap line row: merge consecutive inline text runs
                     // sharing that flow container so screen readers and Find-in-page see whole sentences.
@@ -407,10 +474,12 @@ impl<S: 'static> Runtime<S> {
                             None
                         }
                     });
-                    if !is_heading
+                    if !semantic_text
                         && flow_group.is_some()
                         && flow_group == last_flow_parent
-                        && let Some(prev) = out.last_mut().filter(|it| it.kind == A11yKind::Text)
+                        && let Some(prev) = out
+                            .last_mut()
+                            .filter(|it| it.kind == A11yKind::Text && it.parent == content_parent)
                     {
                         let px1 = prev.rect[0] + prev.rect[2];
                         let py1 = prev.rect[1] + prev.rect[3];
@@ -457,18 +526,20 @@ impl<S: 'static> Runtime<S> {
                             (String::new(), runs)
                         };
                     out.push(A11yItem {
-                        kind: if is_heading {
-                            A11yKind::Heading(n.a11y.level.unwrap_or(2).clamp(1, 6))
-                        } else {
-                            A11yKind::Text
+                        kind: match n.role {
+                            "heading" => A11yKind::Heading(n.a11y.level.unwrap_or(2).clamp(1, 6)),
+                            "status" => A11yKind::Status,
+                            "alert" => A11yKind::Alert,
+                            _ => A11yKind::Text,
                         },
                         path: n.path.clone(),
+                        parent: content_parent.clone(),
                         rect,
                         font_size: round1(spec.style.size),
                         text: plain,
                         runs: rich_runs,
                     });
-                    last_flow_parent = if is_heading { None } else { flow_group };
+                    last_flow_parent = if semantic_text { None } else { flow_group };
                 }
             } else if n.role == "heading"
                 && let Some(lbl) = n.label.clone().filter(|s| !s.trim().is_empty())
@@ -476,6 +547,7 @@ impl<S: 'static> Runtime<S> {
                 out.push(A11yItem {
                     kind: A11yKind::Heading(n.a11y.level.unwrap_or(2).clamp(1, 6)),
                     path: n.path.clone(),
+                    parent: content_parent.clone(),
                     rect,
                     font_size: 16.0,
                     text: lbl,
@@ -767,6 +839,70 @@ mod tests {
         assert!(rt.web_a11y_action(&json!({"kind": "a11y_link", "path": link_path, "link": 0})));
         rt.frame(0.0);
         assert_eq!(rt.state.1, 1);
+    }
+
+    #[test]
+    fn live_messages_preserve_roles_across_updates() {
+        fn view(phase: &usize, _: &mut Cx<usize>) -> El {
+            crate::text(["Saving", "Save failed", "Saved"][*phase])
+                .key("notice")
+                .role(["status", "alert", "text"][*phase])
+        }
+        let mut rt = Runtime::new(0, view, (480.0, 320.0), Env::default());
+        for (phase, role) in ["status", "alert", "text"].into_iter().enumerate() {
+            rt.state = phase;
+            rt.invalidate();
+            rt.frame(0.0);
+            let items: Vec<Value> = serde_json::from_str(&rt.a11y_json()).unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0]["k"], role);
+            assert_eq!(items[0]["t"], ["Saving", "Save failed", "Saved"][phase]);
+        }
+    }
+
+    #[test]
+    fn table_mirror_preserves_semantic_parents() {
+        fn view(_: &(), _: &mut Cx<()>) -> El {
+            let header = crate::row()
+                .role("row")
+                .child(crate::text("Name").role("columnheader"));
+            let row = crate::row()
+                .role("row")
+                .child(crate::text("Ada").role("cell"));
+            crate::col()
+                .role("table")
+                .label("Results")
+                .w_full()
+                .children([header, row])
+        }
+        let mut rt = Runtime::new((), view, (480.0, 320.0), Env::default());
+        rt.frame(0.0);
+        let items = rt.web_a11y_items();
+        let table = items
+            .iter()
+            .find(|item| item.kind == A11yKind::Table)
+            .unwrap();
+        assert_eq!(table.text, "Results");
+        for item in items.iter().filter(|item| {
+            matches!(
+                item.kind,
+                A11yKind::Row | A11yKind::ColumnHeader | A11yKind::Cell
+            )
+        }) {
+            let parent = items
+                .iter()
+                .find(|parent| Some(&parent.path) == item.parent.as_ref())
+                .unwrap();
+            assert_eq!(
+                parent.kind,
+                if item.kind == A11yKind::Row {
+                    A11yKind::Table
+                } else {
+                    A11yKind::Row
+                }
+            );
+        }
+        assert!(!rt.web_a11y_action(&json!({"kind":"a11y_press", "path":table.path})));
     }
 
     #[test]

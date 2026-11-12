@@ -15,7 +15,7 @@ const SILENCE: f64 = 0.0001;
 
 thread_local! {
     static LISTENER: RefCell<Option<Listener>> = const { RefCell::new(None) };
-    static AUDIO: RefCell<AudioState> = const { RefCell::new(AudioState { context: None, master: None }) };
+    static AUDIO: RefCell<AudioState> = const { RefCell::new(AudioState { context: None, master: None, initialized: false }) };
     static RELEASE_LABEL: RegExp = RegExp::new("close|dismiss|remove|delete|collapse|cancel|clear", "i");
     static PULSE_LABEL: RegExp = RegExp::new("send|save|submit|calculate|create|add|upgrade|replay", "i");
 }
@@ -45,10 +45,11 @@ impl Drop for Listener {
 struct AudioState {
     context: Option<AudioContext>,
     master: Option<GainNode>,
+    initialized: bool,
 }
 
 #[derive(Clone, Copy)]
-enum Cue {
+pub(super) enum Cue {
     Press,
     Tick,
     Release,
@@ -138,13 +139,12 @@ pub(super) fn install(document: &Document, preferences: Rc<UiPreferences>) -> Re
     let window = document
         .default_view()
         .ok_or_else(|| JsValue::from_str("document has no default window"))?;
-    let mut initialized = false;
     let click = Closure::wrap(Box::new(move |event: Event| {
         if preferences
             .snapshot()
             .is_ok_and(|snapshot| snapshot.sounds_enabled())
         {
-            let _ = on_click(event, &mut initialized);
+            let _ = on_click(event);
         }
     }) as Box<dyn FnMut(Event)>);
     let mut cleanup_pending = false;
@@ -191,13 +191,17 @@ pub(super) fn install(document: &Document, preferences: Rc<UiPreferences>) -> Re
     Ok(())
 }
 
-fn on_click(event: Event, initialized: &mut bool) -> Result<(), JsValue> {
+fn on_click(event: Event) -> Result<(), JsValue> {
     let Some(target) = event
         .target()
         .and_then(|target| target.dyn_into::<Element>().ok())
     else {
         return Ok(());
     };
+    #[cfg(feature = "rune-ui")]
+    if target.closest("[data-rune-a11y]")?.is_some() {
+        return Ok(());
+    }
     let Some(control) = target.closest(SELECTOR)? else {
         return Ok(());
     };
@@ -207,7 +211,18 @@ fn on_click(event: Event, initialized: &mut bool) -> Result<(), JsValue> {
         return Ok(());
     }
     let cue = cue_for(&control);
-    AUDIO.with(|audio| play(audio, cue, initialized))
+    AUDIO.with(|audio| play(audio, cue))
+}
+
+#[cfg(feature = "rune-ui")]
+pub(super) fn rune(
+    cue: Cue,
+    snapshot: Option<crate::preferences::UiPreferenceSnapshot>,
+) -> Result<(), JsValue> {
+    if snapshot.is_some_and(|snapshot| snapshot.sounds_enabled()) {
+        AUDIO.with(|audio| play(audio, cue))?;
+    }
+    Ok(())
 }
 
 fn cue_for(element: &Element) -> Cue {
@@ -242,9 +257,13 @@ fn cue_for(element: &Element) -> Cue {
     Cue::Press
 }
 
-fn play(audio: &RefCell<AudioState>, cue: Cue, initialized: &mut bool) -> Result<(), JsValue> {
+fn play(audio: &RefCell<AudioState>, cue: Cue) -> Result<(), JsValue> {
     let mut audio = audio.borrow_mut();
-    let initialize = !*initialized;
+    let initialize = !audio.initialized
+        || audio
+            .context
+            .as_ref()
+            .is_some_and(|context| context.state() == AudioContextState::Closed);
     if initialize {
         // ensureReady() is intentionally not awaited by the reference caller.
         if let Ok(context) = get_context(&mut audio) {
@@ -253,7 +272,7 @@ fn play(audio: &RefCell<AudioState>, cue: Cue, initialized: &mut bool) -> Result
             }
         }
         get_master_bus(&mut audio)?.gain().set_value(0.32);
-        *initialized = true;
+        audio.initialized = true;
     }
     // defineSound() and getDestination() each call getContext() in the source.
     let context = get_context(&mut audio)?;
@@ -278,6 +297,7 @@ fn get_context(audio: &mut AudioState) -> Result<AudioContext, JsValue> {
         _ => {
             let context = AudioContext::new()?;
             audio.master = None;
+            audio.initialized = false;
             context
         }
     };

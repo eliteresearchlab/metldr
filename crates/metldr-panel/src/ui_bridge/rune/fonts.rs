@@ -12,6 +12,16 @@ pub(super) const FONTS: &[&[u8]] = &[
     include_bytes!("../../../assets/fonts/f911b923c6adde36-s.ttf"),
     include_bytes!("../../../assets/fonts/939c4f875ee75fbb-s.ttf"),
     include_bytes!("../../../assets/fonts/bb3ef058b751a6ad-s.p.ttf"),
+    include_bytes!("../../../assets/fonts/fallback/NotoSansHebrew-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/fallback/NotoSansArabic-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/fallback/NotoSansDevanagari-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/fallback/NotoSansBengali-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/fallback/NotoSansThai-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/fallback/NotoSansSymbols-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/fallback/NotoSansSymbols2-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/fallback/NotoSansMath-Regular.ttf"),
+    include_bytes!("../../../assets/fonts/fallback/NotoSansCJK-Regular.ttc"),
+    include_bytes!("../../../assets/fonts/fallback/NotoColorEmoji.ttf"),
 ];
 
 pub(super) const FAMILIES: (&str, &str) = ("Inter", "JetBrains Mono");

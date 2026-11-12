@@ -1,6 +1,7 @@
 use super::settings::{Family, Work};
 use super::*;
 use crate::model::{ProviderConnectionState, ProviderConnectionView};
+use std::future::Future;
 use wasm_bindgen_futures::future_to_promise_typed;
 
 #[wasm_bindgen]
@@ -11,6 +12,13 @@ pub struct UiProviderSettings {
 impl UiProviderSettings {
     pub(super) fn new(page: Rc<PageSession>) -> Self {
         Self { page }
+    }
+    pub(super) fn refresh_work(
+        &self,
+    ) -> Result<impl Future<Output = Result<js_sys::Undefined, FlowError>> + 'static, FlowError>
+    {
+        let work = Work::begin(Rc::clone(&self.page), Family::Providers, true)?;
+        Ok(async move { work.refresh().await })
     }
 }
 
@@ -69,9 +77,9 @@ impl UiProviderSettings {
     // The generator erases Promise's type argument in exported declarations.
     #[wasm_bindgen(unchecked_return_type = "Promise<undefined>")]
     pub fn refresh(&self) -> Result<Promise<js_sys::Undefined>, JsValue> {
-        let work = Work::begin(Rc::clone(&self.page), Family::Providers, true).map_err(js_error)?;
+        let work = self.refresh_work().map_err(js_error)?;
         Ok(future_to_promise_typed(async move {
-            work.refresh().await.map_err(js_error)
+            work.await.map_err(js_error)
         }))
     }
 }
@@ -85,6 +93,45 @@ pub struct UiProviderConnection {
 impl UiProviderConnection {
     pub(super) fn new(page: Rc<PageSession>, connection: ProviderConnectionView) -> Self {
         Self { page, connection }
+    }
+    pub(super) fn save_work(
+        &self,
+        endpoint: String,
+        model: String,
+        key: Option<String>,
+    ) -> Result<impl Future<Output = Result<js_sys::Undefined, FlowError>> + 'static, FlowError>
+    {
+        let work = self.begin()?;
+        let protocol = self.connection.protocol;
+        let revision = self.connection.revision;
+        Ok(async move {
+            let result = async {
+                work.current_flow()
+                    .await?
+                    .provider_save(protocol, revision, endpoint, model, key)
+                    .await
+            }
+            .await;
+            work.finish(result)
+        })
+    }
+    pub(super) fn remove_work(
+        &self,
+    ) -> Result<impl Future<Output = Result<js_sys::Undefined, FlowError>> + 'static, FlowError>
+    {
+        let work = self.begin()?;
+        let protocol = self.connection.protocol;
+        let revision = self.connection.revision;
+        Ok(async move {
+            let result = async {
+                work.current_flow()
+                    .await?
+                    .provider_remove(protocol, revision)
+                    .await
+            }
+            .await;
+            work.finish(result)
+        })
     }
 }
 
@@ -143,32 +190,17 @@ impl UiProviderConnection {
         model: String,
         key: Option<String>,
     ) -> Result<Promise<js_sys::Undefined>, JsValue> {
-        let work = self.begin().map_err(js_error)?;
-        let protocol = self.connection.protocol;
-        let revision = self.connection.revision;
+        let work = self.save_work(endpoint, model, key).map_err(js_error)?;
         Ok(future_to_promise_typed(async move {
-            let result = async {
-                let flow = work.current_flow().await?;
-                flow.provider_save(protocol, revision, endpoint, model, key)
-                    .await
-            }
-            .await;
-            work.finish(result).map_err(js_error)
+            work.await.map_err(js_error)
         }))
     }
 
     #[wasm_bindgen(unchecked_return_type = "Promise<undefined>")]
     pub fn remove(&self) -> Result<Promise<js_sys::Undefined>, JsValue> {
-        let work = self.begin().map_err(js_error)?;
-        let protocol = self.connection.protocol;
-        let revision = self.connection.revision;
+        let work = self.remove_work().map_err(js_error)?;
         Ok(future_to_promise_typed(async move {
-            let result = async {
-                let flow = work.current_flow().await?;
-                flow.provider_remove(protocol, revision).await
-            }
-            .await;
-            work.finish(result).map_err(js_error)
+            work.await.map_err(js_error)
         }))
     }
 }

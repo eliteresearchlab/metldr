@@ -47,6 +47,50 @@ function start(initialization: string, report: (encoded: string) => void, follow
   window.addEventListener("resize", resize, { signal: abort.signal });
   window.addEventListener("load", resize, { signal: abort.signal });
   document.addEventListener("submit", event => event.preventDefault(), { signal: abort.signal });
+  if (followup) window.addEventListener("wheel", event => {
+    if (closed || !event.isTrusted || event.defaultPrevented || !event.cancelable || event.ctrlKey || event.metaKey) return;
+    const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 40 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? window.innerHeight : 1;
+    let dx = event.deltaX * scale, dy = event.deltaY * scale;
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+    if (event.shiftKey && dx === 0) { dx = dy; dy = 0; }
+    const path = event.composedPath().filter((target): target is HTMLElement => target instanceof HTMLElement);
+    const root = document.scrollingElement;
+    const html = document.documentElement, body = document.body;
+    const htmlStyle = getComputedStyle(html), bodyStyle = getComputedStyle(body);
+    const propagatesBody = html.localName === "html" && body.parentElement === html
+      && htmlStyle.overflowX === "visible" && htmlStyle.overflowY === "visible" && bodyStyle.display !== "none"
+      && htmlStyle.contain === "none" && bodyStyle.contain === "none"
+      && htmlStyle.contentVisibility === "visible" && bodyStyle.contentVisibility === "visible";
+    const viewportStyle = propagatesBody ? bodyStyle : htmlStyle;
+    if (root instanceof HTMLElement && !path.includes(root)) path.push(root);
+    // shortcut: native events lose any delta past a boundary; revisit if the browser flow needs that remainder.
+    const route = (axis: "x" | "y", delta: number) => {
+      if (delta === 0) return "blocked";
+      for (const element of path) {
+        // Propagated body overflow belongs to the viewport, not a second scroll container.
+        if (propagatesBody && element === body && element !== root) continue;
+        const style = getComputedStyle(element);
+        const viewport = element === root;
+        const overflowStyle = viewport ? viewportStyle : style;
+        const overflow = axis === "x" ? overflowStyle.overflowX : overflowStyle.overflowY;
+        const userScrollable = viewport ? overflow !== "hidden" && overflow !== "clip" : overflow === "auto" || overflow === "scroll";
+        if (!viewport && !userScrollable && overflow !== "hidden") continue;
+        const maximum = axis === "x" ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight;
+        const position = axis === "x"
+          ? element.scrollLeft + (overflowStyle.direction === "rtl" ? maximum : 0)
+          : element.scrollTop;
+        if (userScrollable && maximum > 0 && (delta > 0 ? position < maximum - 1 : position > 1)) return "native";
+        const boundaryStyle = viewport ? htmlStyle : style;
+        const overscroll = axis === "x" ? boundaryStyle.overscrollBehaviorX : boundaryStyle.overscrollBehaviorY;
+        if (overscroll === "contain" || overscroll === "none") return "blocked";
+      }
+      return "relay";
+    };
+    const x = route("x", dx), y = route("y", dy);
+    if (x !== "native" && y !== "native") event.preventDefault();
+    const relayX = x === "relay" ? dx : 0, relayY = y === "relay" ? dy : 0;
+    if (relayX !== 0 || relayY !== 0) report(session.wheel(relayX, relayY));
+  }, { passive: false, signal: abort.signal });
 
   const close = () => {
     if (closed) return;

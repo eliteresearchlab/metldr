@@ -473,6 +473,21 @@ impl El {
         }
         self
     }
+    /// Synchronous Enter from the presented physical field. Validate the original event and
+    /// return true only after reserving the operation; false preserves ordinary key handling.
+    #[cfg(target_arch = "wasm32")]
+    pub fn on_native_submit<S: 'static>(
+        mut self,
+        activation_key: impl Into<String>,
+        handler: impl Fn(&mut S, &web_sys::Event, &mut Tx) -> bool + 'static,
+    ) -> Self {
+        if let Some(input) = &mut self.input {
+            input.native_submit = Some((activation_key.into(), Rc::new(move |state, event, tx| {
+                handler(downcast::<S>(state), event, tx)
+            })));
+        }
+        self
+    }
     /// Let dependent layout reflow when this input changes; the typed text remains immediate.
     pub fn animate_edit_layout(mut self) -> Self {
         if let Some(i) = &mut self.input { i.animate_layout = true; }

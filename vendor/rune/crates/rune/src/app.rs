@@ -425,7 +425,7 @@ impl<S: 'static> App<S> {
     /// that frame presented it (`Runtime::elements`, `Runtime::state`), for an app that watches
     /// its own motion. Pair it with [`last_input`](crate::last_input) to tell motion the user
     /// caused from motion they didn't. Like `on_frame_encoded`, it changes nothing about when
-    /// or what the window draws, and only desktop windows call it.
+    /// or what the window draws. Desktop windows and the web canvas call it after presentation.
     pub fn on_frame_drawn(mut self, f: impl FnMut(&crate::Runtime<S>) + 'static) -> Self {
         self.on_frame_drawn = Some(Box::new(f));
         self
@@ -652,6 +652,17 @@ impl<S: 'static> AppHandle<S> {
         self.request(|q| q.updates.push(Box::new(f)));
     }
 
+    /// Queue an authority-free wheel relay for an application-owned scroll key on web.
+    #[cfg(target_arch = "wasm32")]
+    pub fn relay_wheel(&self, key: &str, dx: f32, dy: f32) {
+        if key.is_empty() || !dx.is_finite() || !dy.is_finite() { return; }
+        self.request(|q| {
+            if q.relay_wheel.len() < 64 {
+                q.relay_wheel.push((key.to_owned(), dx.clamp(-1200.0, 1200.0), dy.clamp(-1200.0, 1200.0)));
+            }
+        });
+    }
+
     fn request(&self, f: impl FnOnce(&mut Requests<S>)) {
         f(&mut self.shared.requests.lock().unwrap());
         self.shared.wake();
@@ -679,6 +690,8 @@ pub(crate) struct Requests<S> {
     /// `AppHandle::wake` asked for `poll`.
     pub woken: bool,
     pub updates: Vec<Update<S>>,
+    #[cfg(target_arch = "wasm32")]
+    pub relay_wheel: Vec<(String, f32, f32)>,
 }
 
 impl<S> Requests<S> {
@@ -700,6 +713,8 @@ impl<S> Default for Requests<S> {
             quit: false,
             woken: false,
             updates: Vec::new(),
+            #[cfg(target_arch = "wasm32")]
+            relay_wheel: Vec::new(),
         }
     }
 }

@@ -1,5 +1,5 @@
 import { build, context } from 'esbuild';
-import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkReceipt, watchPaths } from './answer-contract.mjs';
@@ -91,6 +91,8 @@ async function copyBindings() {
   for (const name of ['metldr_panel.js', 'metldr_panel_bg.wasm']) {
     await copyFile(join(root, 'crates/metldr-panel/pkg', name), join(destination, name));
   }
+  await rm(join(destination, 'snippets'), { recursive: true, force: true });
+  await cp(join(root, 'crates/metldr-panel/pkg/snippets'), join(destination, 'snippets'), { recursive: true });
 }
 
 export async function buildChat() {

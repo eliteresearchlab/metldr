@@ -4,6 +4,8 @@ use winit::event::{ElementState, MouseButton, TouchPhase};
 use winit::keyboard::ModifiersState;
 use std::cell::Cell;
 use js_sys::{Function, Object, Reflect};
+mod submit;
+use submit::NativeSubmitField;
 
 #[wasm_bindgen(module = "/src/platform/web/bridge.js")]
 extern "C" {
@@ -11,6 +13,7 @@ extern "C" {
         canvas: &web_sys::HtmlCanvasElement,
         callback: &js_sys::Function,
         raw: &js_sys::Function,
+        field_ready: &js_sys::Function,
         embedded: bool,
         fit_height: bool,
     ) -> JsValue;
@@ -133,7 +136,9 @@ pub(super) struct Bridge<S: 'static> {
     _callback: Closure<dyn FnMut(String)>,
     _raw: Closure<dyn FnMut(web_sys::Event)>,
     native: Vec<NativeRegistration>,
+    submit: Option<NativeSubmitField>,
     candidate: Option<(i32, String, String)>,
+    relay_wheel: Option<(String, f32, f32)>,
     getters: Option<NativeGetters>,
     running: std::rc::Weak<RefCell<Option<Running<S>>>>,
     dispose_viewport: js_sys::Function,
@@ -185,20 +190,34 @@ impl<S: 'static> Bridge<S> {
         });
         let dispose_viewport =
             platform::viewport(canvas, callback.as_ref().unchecked_ref(), embedded);
+        let getters = NativeGetters::new();
+        let submit = Rc::new(RefCell::new(None));
+        let received = Rc::clone(&submit);
+        let field_running = running.clone();
+        let field_getters = getters.clone();
+        let field_ready = Closure::<dyn FnMut(web_sys::HtmlElement)>::new(move |node| {
+            if let Some(getters) = field_getters.clone() {
+                *received.borrow_mut() = NativeSubmitField::new(node, getters, field_running.clone(), window.clone());
+            }
+        });
         let handle = mount(
             canvas,
             callback.as_ref().unchecked_ref(),
             raw.as_ref().unchecked_ref(),
+            field_ready.as_ref().unchecked_ref(),
             embedded,
             fit_height,
         );
+        let submit = submit.borrow_mut().take();
         Self {
             handle,
             _callback: callback,
             _raw: raw,
             native: Vec::new(),
+            submit,
             candidate: None,
-            getters: NativeGetters::new(),
+            relay_wheel: None,
+            getters,
             running,
             dispose_viewport,
             mods: ModifiersState::empty(),
@@ -212,6 +231,7 @@ impl<S: 'static> Bridge<S> {
 }
 impl<S: 'static> Drop for Bridge<S> {
     fn drop(&mut self) {
+        self.submit.take();
         for registration in self.native.drain(..) { registration.retire(&self.handle); }
         let _ = self.dispose_viewport.call0(&JsValue::NULL);
         destroy(&self.handle);
@@ -219,6 +239,29 @@ impl<S: 'static> Drop for Bridge<S> {
 }
 
 impl<S: 'static> Running<S> {
+    pub(super) fn accept_relay_wheel(&mut self, key: String, dx: f32, dy: f32) {
+        if self.rt.pointer().is_some() || !dx.is_finite() || !dy.is_finite() { return; }
+        self.input.candidate = None;
+        match &mut self.input.relay_wheel {
+            Some((existing, x, y)) if *existing == key => {
+                *x = (*x + dx).clamp(-1200.0, 1200.0);
+                *y = (*y + dy).clamp(-1200.0, 1200.0);
+            }
+            None => self.input.relay_wheel = Some((key, dx, dy)),
+            _ => {}
+        }
+    }
+
+    pub(super) fn apply_relay_wheel(&mut self) {
+        let relay = self.input.relay_wheel.take();
+        if self.rt.pointer().is_none() {
+            if let Some((key, dx, dy)) = relay {
+                self.input.candidate = None;
+                self.rt.relay_wheel(&key, dx, dy);
+            }
+        }
+    }
+
     fn native_registered(&self, binding: &Rc<NativeBinding>) -> bool {
         binding.live.get() && self.input.getters.as_ref().is_some_and(|g| g.connected(&binding.node))
             && self.input.native.iter().any(|r| Rc::ptr_eq(&r.binding, binding))
@@ -290,6 +333,7 @@ impl<S: 'static> Running<S> {
             self.input.native.push(NativeRegistration { binding, click, focus, tab });
         }
         self.focus_native(false);
+        self.reconcile_submit();
     }
 
     fn focus_native(&mut self, requested: bool) {
@@ -344,6 +388,7 @@ impl<S: 'static> Running<S> {
     }
 
     pub(super) fn sync_input(&mut self, focus: bool) {
+        self.retire_stale_submit();
         if focus {
             self.input.candidate = None;
         }
@@ -375,6 +420,9 @@ impl<S: 'static> Running<S> {
         if semantics_changed || context_changed || focus {
             activate(&self.input.handle, focus);
             self.focus_native(focus);
+        }
+        if let Some(field) = &self.input.submit {
+            field.synced();
         }
     }
 

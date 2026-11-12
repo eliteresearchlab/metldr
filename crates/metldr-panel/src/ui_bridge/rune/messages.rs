@@ -25,6 +25,13 @@ impl Messages {
         }
     }
 
+    pub(super) fn replace_archive(&mut self, messages: Vec<AgUiMessage>) -> Result<(), FlowError> {
+        validate(&messages)?;
+        self.messages = messages;
+        self.scope = DisplayScope::History;
+        Ok(())
+    }
+
     pub(super) fn apply(&mut self, event: Event) -> Result<(), FlowError> {
         match event {
             Event::RunStarted { .. } => {
@@ -260,6 +267,38 @@ mod tests {
             thread_id: "thread".into(),
             run_id: "run".into(),
         }
+    }
+
+    #[test]
+    fn archive_replacement_resets_run_scope_and_rejects_invalid_pages_atomically() {
+        let mut state = Messages::new();
+        state.replace_archive(vec![user("first")]).unwrap();
+        state.apply(started()).unwrap();
+        state.replace_archive(vec![user("archive")]).unwrap();
+        assert_eq!(state.scope, DisplayScope::History);
+        state.apply(started()).unwrap();
+        let scope = state.scope;
+        assert!(
+            state
+                .replace_archive(vec![user("same"), user("same")])
+                .is_err()
+        );
+        assert_eq!(state.scope, scope);
+        assert_eq!(state.messages.len(), 1);
+        assert_eq!(state.messages[0].id(), "archive");
+        state
+            .apply(Event::MessagesSnapshot {
+                messages: vec![user("next")],
+            })
+            .unwrap();
+        assert_eq!(
+            state
+                .messages
+                .iter()
+                .map(AgUiMessage::id)
+                .collect::<Vec<_>>(),
+            vec!["archive", "next"]
+        );
     }
 
     #[test]

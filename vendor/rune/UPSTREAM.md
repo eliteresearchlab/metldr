@@ -7,6 +7,8 @@ This directory keeps the Rune runtime, motion, staging, layout and optional prof
 
 Local changes:
 
+* The browser calls the existing frame-drawn hook after presentation, allowing restricted answer frames to follow submitted canvas geometry.
+* Application fallback fonts are registered for Hebrew, Arabic, Devanagari, Bengali and Thai as well as CJK. Browser symbol fallback recognizes the supplied Noto Sans Symbols 2 family.
 * The WebAssembly GPU instance cache uses thread local storage; native targets retain the upstream mutex.
 * Browser field semantics share Rust paths and focus state with the existing text service bridge. Secure field values are omitted from the semantic mirror.
 * Disabled fields cannot take focus through traversal or restoration, or retain offscreen editing focus.

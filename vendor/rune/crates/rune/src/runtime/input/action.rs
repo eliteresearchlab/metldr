@@ -296,6 +296,28 @@ impl<S: 'static> Runtime<S> {
         true
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_submit(
+        &mut self,
+        binding: &crate::runtime::web_runtime::NativeSubmitBinding,
+        event: &web_sys::Event,
+    ) -> bool {
+        if !self.native_submit_binding().is_some_and(|current| binding.matches(&current)) {
+            return false;
+        }
+        let mut tx = self.transaction();
+        let scope = tx.activation_scope(binding.key.clone());
+        let handled = (binding.handler)(states!(self), event, &mut tx);
+        drop(scope);
+        tx.activation = None;
+        merge(&mut self.pending, tx);
+        if handled {
+            self.dirty = true;
+            self.native_geometry_valid = false;
+        }
+        handled
+    }
+
     /// Runs `action`'s handlers; debug builds warn when they block the main thread.
     pub(super) fn run_action(&mut self, action: Action, tx: &mut Tx) -> bool {
         #[cfg(debug_assertions)]

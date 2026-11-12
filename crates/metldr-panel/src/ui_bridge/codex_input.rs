@@ -135,25 +135,94 @@ impl UiCodexInput {
             run: parse(run)?,
             request: parse(request)?,
         };
-        let state = State::read(&self.core);
+        let work = self
+            .core
+            .reserve_codex_reply(key, answer)
+            .map_err(js_error)?;
+        Ok(future_to_promise(async move {
+            work.await.map(|()| JsValue::UNDEFINED).map_err(js_error)
+        }))
+    }
+}
+
+impl Core {
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_codex_requests(
+        &self,
+    ) -> (
+        Vec<(RunId, crate::model::CodexInputPending, bool)>,
+        Option<String>,
+    ) {
+        let state = State::read(self);
+        let notice = UiCodexSnapshot {
+            state: state.clone(),
+        }
+        .notice();
+        let enabled = state.enabled();
+        let rows = state
+            .ui
+            .map(|ui| {
+                ui.pending
+                    .into_iter()
+                    .map(|pending| (ui.run.clone(), pending, enabled))
+                    .collect()
+            })
+            .unwrap_or_default();
+        (rows, notice)
+    }
+
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_codex_reply(
+        self: &Rc<Self>,
+        run: RunId,
+        request: RunId,
+        answer: UiCodexAnswer,
+        tx: &mut ::rune::Tx,
+    ) -> Result<impl Future<Output = Result<(), FlowError>> + 'static, FlowError> {
+        let action = match &answer.kind {
+            answer::Kind::Questions(_) => "questions",
+            answer::Kind::Form(_) => "form",
+            answer::Kind::Skip => "skip",
+            answer::Kind::Allow => "allow",
+            answer::Kind::Deny => "deny",
+            answer::Kind::Cancel => "cancel",
+        };
+        if !tx.consume_activation(&rune_reply_key("codex", &run, &request, action)) {
+            return Err(FlowError::InvalidInput(
+                "Use a current action to answer the request.".into(),
+            ));
+        }
+        self.reserve_codex_reply(Key { run, request }, answer)
+    }
+
+    fn reserve_codex_reply(
+        self: &Rc<Self>,
+        key: Key,
+        answer: UiCodexAnswer,
+    ) -> Result<impl Future<Output = Result<(), FlowError>> + 'static, FlowError> {
+        let state = State::read(self);
         let prompt = state
             .ui
             .as_ref()
             .filter(|ui| ui.run == key.run)
             .and_then(|ui| ui.pending.iter().find(|p| p.request == key.request))
             .map(|p| &p.prompt)
-            .ok_or_else(|| crate::err("This Codex request is no longer available."))?;
+            .ok_or_else(|| {
+                FlowError::InvalidInput("This Codex request is no longer available.".into())
+            })?;
         if !state.enabled() {
-            return Err(crate::err("This Codex reply is no longer available."));
+            return Err(FlowError::InvalidInput(
+                "This Codex reply is no longer available.".into(),
+            ));
         }
         let reply = answer
             .validate(prompt)
             .and_then(ValidatedReply::bounded)
-            .map_err(|message| crate::err(&message))?;
-        *self.core.codex_operation.borrow_mut() = Operation::Sending(key.clone());
-        self.core.notify_codex_input();
-        let core = Rc::clone(&self.core);
-        Ok(future_to_promise(async move {
+            .map_err(FlowError::InvalidInput)?;
+        *self.codex_operation.borrow_mut() = Operation::Sending(key.clone());
+        self.notify_codex_input();
+        let core = Rc::clone(self);
+        Ok(async move {
             let result = core
                 .flow()
                 .codex_input_reply(
@@ -180,12 +249,10 @@ impl UiCodexInput {
                 }
             };
             core.notify_codex_input();
-            result.map(|()| JsValue::UNDEFINED).map_err(js_error)
-        }))
+            result
+        })
     }
-}
 
-impl Core {
     pub(super) fn notify_codex_input(&self) {
         self.page.notify_connection();
         {
@@ -206,6 +273,10 @@ impl Core {
                 observer.close();
             }
             observer.wake();
+        }
+        let changed = self.page.changed.borrow().clone();
+        if let Some(changed) = changed {
+            changed();
         }
     }
 }
@@ -332,6 +403,35 @@ fn validate_fields(
 mod tests {
     use super::*;
     use answer::{Field, Kind, Question};
+    #[cfg(feature = "rune-ui")]
+    #[test]
+    fn activation_keys_bind_operation_and_request() {
+        let id = |n| {
+            serde_json::from_value(json!(format!("0123456789abcdef0123456789abcdef:{n}"))).unwrap()
+        };
+        let (run, request, other) = (id(1), id(2), id(3));
+        let key = rune_reply_key("codex", &run, &request, "questions");
+        assert_ne!(key, rune_reply_key("codex", &run, &request, "cancel"));
+        assert_ne!(key, rune_reply_key("codex", &run, &request, "form"));
+        assert_ne!(
+            rune_reply_key(
+                "native",
+                &run,
+                &request,
+                &serde_json::to_string(&None::<String>).unwrap()
+            ),
+            rune_reply_key(
+                "native",
+                &run,
+                &request,
+                &serde_json::to_string(&Some("null")).unwrap()
+            ),
+        );
+        assert_ne!(key, rune_reply_key("codex", &run, &other, "questions"));
+        assert_ne!(key, rune_reply_key("native", &run, &request, "questions"));
+        assert_ne!(key, rune_reply_key("codex", &other, &request, "questions"));
+    }
+
     #[test]
     fn validates_complete_unicode_answers_and_distinct_mcp_outcomes() {
         let q = CodexInputPrompt::Questions {
@@ -475,4 +575,9 @@ mod tests {
         assert_eq!(serde_json::to_vec(&boundary.native).unwrap().len(), 16385);
         assert!(boundary.bounded().is_err());
     }
+}
+
+#[cfg(feature = "rune-ui")]
+pub(super) fn rune_reply_key(kind: &str, run: &RunId, request: &RunId, action: &str) -> String {
+    serde_json::to_string(&(kind, run.as_str(), request.as_str(), action)).expect("string key")
 }

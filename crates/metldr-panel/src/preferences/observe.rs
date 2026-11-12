@@ -2,9 +2,14 @@ use super::*;
 
 pub(super) struct Observer {
     core: Rc<Core>,
-    callback: Function,
+    callback: Callback,
     closed: Cell<bool>,
     last: Cell<Option<UiPreferenceSnapshot>>,
+}
+
+enum Callback {
+    Js(Function),
+    Rust(Box<dyn Fn(UiPreferenceSnapshot)>),
 }
 
 #[wasm_bindgen]
@@ -35,9 +40,15 @@ impl Observer {
             return Ok(());
         }
         self.last.set(Some(snapshot));
-        self.callback
-            .call1(&JsValue::UNDEFINED, &snapshot.into())
-            .map(|_| ())
+        match &self.callback {
+            Callback::Js(callback) => callback
+                .call1(&JsValue::UNDEFINED, &snapshot.into())
+                .map(|_| ()),
+            Callback::Rust(callback) => {
+                callback(snapshot);
+                Ok(())
+            }
+        }
     }
 }
 
@@ -48,6 +59,19 @@ impl UiPreferences {
         #[wasm_bindgen(unchecked_param_type = "(snapshot: UiPreferenceSnapshot) => void")]
         callback: Function,
     ) -> Result<UiPreferenceSubscription, JsValue> {
+        self.subscribe_callback(Callback::Js(callback))
+    }
+}
+
+impl UiPreferences {
+    pub(crate) fn subscribe_rust(
+        &self,
+        callback: impl Fn(UiPreferenceSnapshot) + 'static,
+    ) -> Result<UiPreferenceSubscription, JsValue> {
+        self.subscribe_callback(Callback::Rust(Box::new(callback)))
+    }
+
+    fn subscribe_callback(&self, callback: Callback) -> Result<UiPreferenceSubscription, JsValue> {
         self.core.ensure_open()?;
         let observer = Rc::new(Observer {
             core: Rc::clone(&self.core),

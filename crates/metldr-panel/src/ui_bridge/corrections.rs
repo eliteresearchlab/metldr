@@ -72,6 +72,13 @@ pub(super) struct State {
     receipts: Vec<UiCorrectionReceipt>,
 }
 impl State {
+    fn candidate(&self, expected: Option<&RunId>) -> Option<RunId> {
+        self.run.clone().filter(|run| {
+            self.available
+                && !self.operation.blocked()
+                && expected.is_none_or(|expected| expected == run)
+        })
+    }
     fn read(core: &Core) -> Self {
         let view = core.page.view.borrow();
         let operation = core.correction_operation.borrow().clone();
@@ -267,22 +274,51 @@ impl UiNativeCorrections {
         #[wasm_bindgen(unchecked_param_type = "Event")] event: JsValue,
     ) -> Result<Promise, JsValue> {
         self.activation.require(&event).map_err(js_error)?;
-        let state = State::read(&self.core);
-        let run = state
-            .run
-            .filter(|_| state.available)
-            .ok_or_else(|| crate::err("A correction is not available for this active run."))?;
-        let text = UserText::try_from(text.as_str()).map_err(js_error)?;
-        let flow = self.core.flow();
+        let (pending, work) = self.core.reserve_correction(None, text).map_err(js_error)?;
+        self.last_request.replace(Some(pending.request.clone()));
+        self.core.page.notify_settings();
+        Ok(future_to_promise(async move {
+            work.await.map(|()| JsValue::UNDEFINED).map_err(js_error)
+        }))
+    }
+    #[wasm_bindgen(unchecked_return_type = "Promise<undefined>")]
+    pub fn refresh(&self) -> Promise {
+        let core = Rc::clone(&self.core);
+        future_to_promise(async move {
+            core.refresh_correction()
+                .await
+                .map(|()| JsValue::UNDEFINED)
+                .map_err(js_error)
+        })
+    }
+}
+
+impl Core {
+    fn reserve_correction(
+        self: &Rc<Self>,
+        expected_run: Option<&RunId>,
+        text: String,
+    ) -> Result<
+        (
+            Pending,
+            impl Future<Output = Result<(), FlowError>> + 'static,
+        ),
+        FlowError,
+    > {
+        let state = State::read(self);
+        let run = state.candidate(expected_run).ok_or_else(|| {
+            FlowError::InvalidInput("A correction is not available for this active run.".into())
+        })?;
+        let text = UserText::try_from(text.as_str())?;
+        let flow = self.flow();
         let pending = Pending {
             run: run.clone(),
-            request: flow.correction_request_id().map_err(js_error)?,
+            request: flow.correction_request_id()?,
         };
-        self.last_request.replace(Some(pending.request.clone()));
-        *self.core.correction_operation.borrow_mut() = Operation::Sending(pending.clone());
-        self.core.page.notify_settings();
-        let core = Rc::clone(&self.core);
-        Ok(future_to_promise(async move {
+        *self.correction_operation.borrow_mut() = Operation::Sending(pending.clone());
+        let core = Rc::clone(self);
+        let receipt = pending.clone();
+        Ok((receipt, async move {
             let result = flow
                 .correct(pending.request.clone(), core.scope.clone(), run, text)
                 .await;
@@ -293,12 +329,12 @@ impl UiNativeCorrections {
                     }
                     core.page.notify_settings();
                     let _ = core.current().await;
-                    Ok(JsValue::UNDEFINED)
+                    Ok(())
                 }
                 Err(error) => {
                     let reconciled = reconcile(&core, &flow, &pending).await;
                     if reconciled == Reconciled::Admitted {
-                        Ok(JsValue::UNDEFINED)
+                        Ok(())
                     } else {
                         if core.correction_operation.borrow().owns(&pending) {
                             *core.correction_operation.borrow_mut() =
@@ -311,34 +347,86 @@ impl UiNativeCorrections {
                                 };
                         }
                         core.page.notify_settings();
-                        Err(js_error(error))
+                        Err(error)
                     }
                 }
             }
         }))
     }
-    #[wasm_bindgen(unchecked_return_type = "Promise<undefined>")]
-    pub fn refresh(&self) -> Promise {
-        let core = Rc::clone(&self.core);
-        future_to_promise(async move {
-            core.ensure_current().map_err(js_error)?;
-            if core.correction_operation.borrow().sending() {
-                return Err(js_error(FlowError::HistoryBusy));
+
+    pub(super) async fn refresh_correction(&self) -> Result<(), FlowError> {
+        self.ensure_current()?;
+        if self.correction_operation.borrow().sending() {
+            return Err(FlowError::HistoryBusy);
+        }
+        let pending = self.correction_operation.borrow().pending().cloned();
+        if let Some(pending) = pending {
+            let flow = self.flow();
+            if reconcile(self, &flow, &pending).await != Reconciled::Admitted {
+                return Err(FlowError::InvalidInput(
+                    "Correction status is unresolved. Check saved work before sending again."
+                        .into(),
+                ));
             }
-            let pending = core.correction_operation.borrow().pending().cloned();
-            if let Some(pending) = pending {
-                let flow = core.flow();
-                if reconcile(&core, &flow, &pending).await != Reconciled::Admitted {
-                    return Err(crate::err(
-                        "Correction status is unresolved. Check saved work before sending again.",
-                    ));
-                }
-            } else {
-                core.current().await.map_err(js_error)?;
-            }
-            Ok(JsValue::UNDEFINED)
-        })
+        } else {
+            self.current().await?;
+        }
+        Ok(())
     }
+
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_correction_snapshot(&self) -> UiNativeCorrectionSnapshot {
+        UiNativeCorrectionSnapshot {
+            state: State::read(self),
+        }
+    }
+
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_correction_progress(&self) -> Option<(String, bool, bool)> {
+        match &*self.correction_operation.borrow() {
+            Operation::Sending(p) => Some((p.request.clone(), false, false)),
+            Operation::Waiting(p) | Operation::Recorded(p) => {
+                Some((p.request.clone(), true, false))
+            }
+            Operation::Uncertain(p) => Some((p.request.clone(), false, true)),
+            Operation::Idle => None,
+        }
+    }
+
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_correction_offer(&self) -> (Option<RunId>, bool) {
+        let state = State::read(self);
+        (state.run.clone(), state.candidate(None).is_some())
+    }
+
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_correction(
+        self: &Rc<Self>,
+        run: &RunId,
+        draft_version: u64,
+        text: String,
+        tx: &mut ::rune::Tx,
+    ) -> Result<
+        (
+            String,
+            impl Future<Output = Result<(), FlowError>> + 'static,
+        ),
+        FlowError,
+    > {
+        if !tx.consume_activation(&correction_key(run, draft_version)) {
+            return Err(FlowError::InvalidInput(
+                "Use the current correction button.".into(),
+            ));
+        }
+        let (pending, work) = self.reserve_correction(Some(run), text)?;
+        self.page.notify_settings();
+        Ok((pending.request, work))
+    }
+}
+
+#[cfg(feature = "rune-ui")]
+pub(super) fn correction_key(run: &RunId, draft_version: u64) -> String {
+    serde_json::to_string(&("correction", run.as_str(), draft_version)).expect("string key")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -397,6 +485,47 @@ async fn reconcile(core: &Core, flow: &FlowClient, pending: &Pending) -> Reconci
 #[cfg(test)]
 mod checks {
     use super::*;
+
+    #[cfg(feature = "rune-ui")]
+    #[test]
+    fn correction_activation_binds_the_run_and_draft_version() {
+        let run: RunId =
+            serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:1"))
+                .unwrap();
+        let other_run: RunId =
+            serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:2"))
+                .unwrap();
+        assert_ne!(correction_key(&run, 1), correction_key(&run, 2));
+        assert_ne!(correction_key(&run, 1), correction_key(&other_run, 1));
+    }
+
+    #[test]
+    fn reservation_rejects_pending_and_uncertain() {
+        let id: RunId =
+            serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:1"))
+                .unwrap();
+        let pending = Pending {
+            run: id.clone(),
+            request: "request".into(),
+        };
+        let mut state = State {
+            connected: true,
+            stale: false,
+            available: true,
+            operation: Operation::Idle,
+            run: Some(id.clone()),
+            receipts: vec![],
+        };
+        assert_eq!(state.candidate(Some(&id)), Some(id.clone()));
+        for operation in [
+            Operation::Sending(pending.clone()),
+            Operation::Waiting(pending.clone()),
+            Operation::Uncertain(pending),
+        ] {
+            state.operation = operation;
+            assert!(state.candidate(Some(&id)).is_none());
+        }
+    }
 
     #[test]
     fn partial_history_cannot_prove_a_correction_was_absent() {

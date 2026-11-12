@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordReceipt, sourceDigest } from './answer-contract.mjs';
@@ -8,7 +8,7 @@ import { recordReceipt, sourceDigest } from './answer-contract.mjs';
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 // Ordered longest first so the parallel pool below finishes as early as it can.
 const crates = [
-  { name: 'metldr-panel', module: 'metldr_panel', pkg: 'crates/metldr-panel/pkg' },
+  { name: 'metldr-panel', module: 'metldr_panel', pkg: 'crates/metldr-panel/pkg', features: 'rune-ui' },
   { name: 'metldr-welcome', module: 'welcome_runtime', pkg: 'public/welcome/pkg' },
   { name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg' },
   { name: 'metldr-answer-codec', artifact: 'metldr_answer_codec', module: 'answer_codec', pkg: 'crates/metldr-answer-codec/pkg', features: 'guest' },
@@ -170,6 +170,8 @@ try {
     for (const name of ['metldr_panel.js', 'metldr_panel_bg.wasm']) {
       copyFileSync(join(repoRoot, 'crates/metldr-panel/pkg', name), join(destination, name));
     }
+    rmSync(join(destination, 'snippets'), { recursive: true, force: true });
+    cpSync(join(repoRoot, 'crates/metldr-panel/pkg/snippets'), join(destination, 'snippets'), { recursive: true });
   }
   await runAsync('cargo', [
     isCheck ? 'check' : 'build', '--locked', '--release',

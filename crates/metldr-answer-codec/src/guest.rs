@@ -84,6 +84,9 @@ impl GuestSession {
     pub fn height(&self, height: f64) -> Result<String, JsValue> {
         self.send(ChildMessage::Height { height })
     }
+    pub fn wheel(&self, dx: f64, dy: f64) -> Result<String, JsValue> {
+        self.send(ChildMessage::Wheel { dx, dy })
+    }
     pub fn followup(&self, text: String) -> Option<String> {
         self.send(ChildMessage::Followup { text }).ok()
     }

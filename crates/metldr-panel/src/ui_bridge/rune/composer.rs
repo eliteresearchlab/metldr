@@ -22,7 +22,6 @@
 
 use super::{Menu, Mode, State};
 use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, oklch, row, text};
-use std::sync::LazyLock;
 
 const CONTROL: f32 = 28.0;
 const BORDER: f32 = 1.0;
@@ -83,36 +82,29 @@ struct Palette {
     accent: ::rune::Color,
 }
 
-static DARK: LazyLock<Palette> = LazyLock::new(|| colors(true));
-static LIGHT: LazyLock<Palette> = LazyLock::new(|| colors(false));
-
-fn palette(dark: bool) -> Palette {
-    if dark { *DARK } else { *LIGHT }
-}
-
-fn colors(dark: bool) -> Palette {
-    if dark {
-        Palette {
-            surface: oklch(0.26, 0.006, 271.191),
-            hover: oklch(0.289, 0.006, 271.22),
-            ink: oklch(0.964, 0.002, 247.839),
-            secondary: oklch(0.731, 0.008, 260.731),
-            muted: oklch(0.541, 0.01, 264.484),
-            line: oklch(0.308, 0.006, 258.354),
-            strong: oklch(0.356, 0.007, 264.474),
-            accent: oklch(0.68, 0.173, 253.301),
-        }
-    } else {
-        Palette {
-            surface: oklch(1.0, 0.0, 0.0),
-            hover: oklch(0.97, 0.002, 247.839),
-            ink: oklch(0.247, 0.006, 258.361),
-            secondary: oklch(0.506, 0.01, 264.477),
-            muted: oklch(0.695, 0.009, 264.505),
-            line: oklch(0.946, 0.003, 264.542),
-            strong: oklch(0.912, 0.005, 258.326),
-            accent: oklch(0.626, 0.205, 254.947),
-        }
+fn palette(state: &State) -> Palette {
+    let p = state.preferences.palette();
+    let light = state
+        .preferences
+        .snapshot()
+        .is_some_and(|snapshot| snapshot.theme() == "light");
+    Palette {
+        surface: p.surface,
+        hover: p.hover,
+        ink: p.ink,
+        secondary: p.ink_2,
+        muted: p.ink_3,
+        line: p.line,
+        strong: if light {
+            oklch(0.912, 0.005, 258.326)
+        } else {
+            oklch(0.356, 0.007, 264.474)
+        },
+        accent: if light {
+            oklch(0.626, 0.205, 254.947)
+        } else {
+            oklch(0.68, 0.173, 253.301)
+        },
     }
 }
 
@@ -148,6 +140,7 @@ fn supports_plan(value: &str) -> bool {
 }
 
 fn close(state: &mut State, _: &mut Tx) {
+    state.sound(crate::interaction_audio::Cue::Release);
     state.menu = None;
     state.source_engaged = false;
 }
@@ -168,6 +161,7 @@ pub(super) fn enter(
 }
 
 fn sources(state: &mut State, _: &mut Tx) {
+    state.sound(crate::interaction_audio::Cue::Pulse);
     state.source_engaged = false;
     state.menu = if state.menu == Some(Menu::Sources) {
         None
@@ -177,6 +171,7 @@ fn sources(state: &mut State, _: &mut Tx) {
 }
 
 fn models(state: &mut State, _: &mut Tx) {
+    state.sound(crate::interaction_audio::Cue::Press);
     state.source_engaged = false;
     state.menu = if state.menu == Some(Menu::Models) {
         None
@@ -185,13 +180,19 @@ fn models(state: &mut State, _: &mut Tx) {
     };
 }
 
+pub(super) fn source_menu_owns_enter(state: &State) -> bool {
+    state.menu == Some(Menu::Sources)
+        && page_matches(&state.draft.text)
+        && !state.capture_disabled()
+}
+
 fn capture(state: &mut State, tx: &mut Tx) {
     if state.capture_disabled() {
         return;
     }
     if let Some(token) = token(&state.draft.text) {
         let retained = state.draft.text[..token.start].to_owned();
-        state.draft.replace_text(retained);
+        state.replace_draft(retained);
     }
     state.source_engaged = false;
     state.capture(tx);
@@ -210,7 +211,8 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
 }
 
 pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
-    let p = palette(cx.system_dark());
+    let p = palette(state);
+    let typography = state.preferences.typography();
     let choices = state.choices();
     let selected = choices
         .iter()
@@ -225,59 +227,63 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
             }
         },
     );
-    let mut field = ::rune::el::text_input(&state.draft, TextStyle::new(16.0, 400.0))
-        .key("rune-composer-field")
-        .w_full()
-        .min_h(68.0)
-        .max_h(100.0)
-        .padding(8.0)
-        .label("Prompt")
-        .placeholder("Write a message…", p.muted)
-        .caret(p.ink, p.accent.alpha(0.28))
-        .on_edit(|state: &mut State| &mut state.draft)
-        .on_input_change(|state: &mut State, _| {
-            state.menu = token(&state.draft.text).map(|_| Menu::Sources);
+    let mut field = ::rune::el::text_input(
+        &state.draft,
+        TextStyle::new((16.0 * typography.scale).max(16.0), 400.0),
+    )
+    .key("rune-composer-field")
+    .w_full()
+    .min_h(68.0)
+    .max_h(100.0)
+    .padding(8.0)
+    .label("Prompt")
+    .placeholder("Write a message…", p.muted)
+    .caret(p.ink, p.accent.alpha(0.28))
+    .on_edit(|state: &mut State| &mut state.draft)
+    .on_input_change(|state: &mut State, _| {
+        state.draft_changed();
+        state.menu = token(&state.draft.text).map(|_| Menu::Sources);
+        state.source_engaged = false;
+    })
+    .on_input_key(|state: &mut State, key, tx| match &key.key {
+        Key::Enter if !key.mods.shift && tx.key_repeat() => true,
+        Key::Escape if state.menu.is_some() => {
+            close(state, tx);
             state.source_engaged = false;
-        })
-        .on_input_key(|state: &mut State, key, tx| match &key.key {
-            Key::Enter if !key.mods.shift && tx.key_repeat() => true,
-            Key::Escape if state.menu.is_some() => {
-                close(state, tx);
-                state.source_engaged = false;
-                true
-            }
-            Key::Enter
-                if !key.mods.shift
-                    && state.menu == Some(Menu::Sources)
-                    && page_matches(&state.draft.text)
-                    && !state.capture_disabled() =>
-            {
-                capture(state, tx);
-                true
-            }
-            Key::Tab
-                if key.mods == Default::default()
-                    && state.menu == Some(Menu::Sources)
-                    && page_matches(&state.draft.text)
-                    && !state.capture_disabled() =>
-            {
-                capture(state, tx);
-                true
-            }
-            Key::Down | Key::Up
-                if state.menu == Some(Menu::Sources)
-                    && token(&state.draft.text).is_some_and(|t| t.marker == '@') =>
-            {
-                state.source_engaged = true;
-                true
-            }
-            Key::Enter if !key.mods.shift => {
+            true
+        }
+        Key::Enter if !key.mods.shift && source_menu_owns_enter(state) => {
+            capture(state, tx);
+            true
+        }
+        Key::Tab if key.mods == Default::default() && source_menu_owns_enter(state) => {
+            capture(state, tx);
+            true
+        }
+        Key::Down | Key::Up
+            if state.menu == Some(Menu::Sources)
+                && token(&state.draft.text).is_some_and(|t| t.marker == '@') =>
+        {
+            state.source_engaged = true;
+            true
+        }
+        Key::Enter if !key.mods.shift => {
+            if !super::corrections::focus(state, tx) {
                 state.send(tx);
-                true
             }
-            _ => false,
-        })
-        .on_submit(|state: &mut State, tx| state.send(tx));
+            true
+        }
+        _ => false,
+    })
+    .on_submit(|state: &mut State, tx| {
+        if !super::corrections::focus(state, tx) {
+            state.send(tx);
+        }
+    });
+    #[cfg(target_arch = "wasm32")]
+    {
+        field = super::corrections::attach_field(field, state);
+    }
     if state.menu == Some(Menu::Sources) {
         field = field.preserve_focus_on_press(true);
     }
@@ -314,8 +320,9 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .max_w(160.0)
         .radius(8.0)
         .child(
-            text(model_label)
-                .font(TextStyle::new(12.0, 500.0))
+            typography
+                .text(model_label)
+                .font(typography.font(12.0, 500.0))
                 .color(p.secondary)
                 .truncate(),
         )
@@ -355,11 +362,16 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .opacity(0.48)
         .disabled(true);
     let action = if running {
-        button("rune-stop", "Stop", &STOP, p.surface)
+        let stop = button("rune-stop", "Stop", &STOP, p.surface)
             .fill(p.ink)
             .press(p.surface.alpha(0.16))
             .on_press_tx(|state: &mut State, tx| state.stop(tx))
-            .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::stop))
+            .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::stop));
+        if let Some(correction) = super::corrections::control(state) {
+            row().gap(4.0).center_y().child(correction).child(stop)
+        } else {
+            stop
+        }
     } else {
         let can_send = state.can_send();
         let mut send = button(
@@ -423,7 +435,8 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
 }
 
 pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
-    let p = palette(cx.system_dark());
+    let p = palette(state);
+    let typography = state.preferences.typography();
     match state.menu? {
         Menu::Sources => {
             let marker = token(&state.draft.text).map(|t| t.marker);
@@ -457,15 +470,17 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                             .child(::rune::el::icon(&GLOBE, 15.0).color(p.secondary)),
                     )
                     .child(
-                        text("Current page")
-                            .font(TextStyle::new(12.5, 500.0))
+                        typography
+                            .text("Current page")
+                            .font(typography.font(12.5, 500.0))
                             .color(p.ink)
                             .truncate(),
                     )
                     .child(
-                        text("Use the page you are viewing")
+                        typography
+                            .text("Use the page you are viewing")
                             .grow(1.0)
-                            .font(TextStyle::new(12.0, 400.0))
+                            .font(typography.font(12.0, 400.0))
                             .color(p.muted)
                             .truncate(),
                     )
@@ -492,14 +507,16 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                         .radius(6.0)
                         .child(::rune::el::icon(&PAPERCLIP, 16.0).color(p.muted))
                         .child(
-                            text("Photos and files")
+                            typography
+                                .text("Photos and files")
                                 .grow(1.0)
-                                .font(TextStyle::new(12.5, 500.0))
+                                .font(typography.font(12.5, 500.0))
                                 .color(p.ink),
                         )
                         .child(
-                            text("Unavailable")
-                                .font(TextStyle::new(12.0, 400.0))
+                            typography
+                                .text("Unavailable")
+                                .font(typography.font(12.0, 400.0))
                                 .color(p.muted),
                         )
                         .disabled(true)
@@ -509,16 +526,17 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
             }
             if marker == Some('/') || !show_page {
                 rows = rows.child(
-                    text(if marker == Some('/') {
-                        "Commands are unavailable."
-                    } else {
-                        "No matching sources."
-                    })
-                    .w_full()
-                    .padding(8.0)
-                    .font(TextStyle::new(12.0, 400.0))
-                    .color(p.muted)
-                    .wrap(),
+                    typography
+                        .text(if marker == Some('/') {
+                            "Commands are unavailable."
+                        } else {
+                            "No matching sources."
+                        })
+                        .w_full()
+                        .padding(8.0)
+                        .font(typography.font(12.0, 400.0))
+                        .color(p.muted)
+                        .wrap(),
                 );
             }
             Some(
@@ -536,15 +554,16 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                     .child(rows)
                     .child(row().w_full().h(1.0).fill(p.line))
                     .child(
-                        text(if marker == Some('/') {
-                            "Saved commands"
-                        } else {
-                            "Type to search sources and files"
-                        })
-                        .w_full()
-                        .padding(7.0)
-                        .font(TextStyle::new(11.0, 400.0))
-                        .color(p.muted),
+                        typography
+                            .text(if marker == Some('/') {
+                                "Saved commands"
+                            } else {
+                                "Type to search sources and files"
+                            })
+                            .w_full()
+                            .padding(7.0)
+                            .font(typography.font(11.0, 400.0))
+                            .color(p.muted),
                     )
                     .anchored_fit("rune-composer", Side::Top, Align::Start, 8.0)
                     .focus_return("rune-source-trigger")
@@ -578,23 +597,25 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                             .hover(p.hover)
                             .focus_highlight(p.hover)
                             .child(
-                                text(choice.label.clone())
+                                typography
+                                    .text(choice.label.clone())
                                     .grow(1.0)
-                                    .font(TextStyle::new(12.5, 500.0))
+                                    .font(typography.font(12.5, 500.0))
                                     .color(if choice.enabled { p.ink } else { p.muted })
                                     .truncate(),
                             )
                             .child(if choice.enabled {
-                                text("")
+                                typography.text("")
                             } else {
-                                text("Unavailable")
-                                    .font(TextStyle::new(11.0, 400.0))
+                                typography
+                                    .text("Unavailable")
+                                    .font(typography.font(11.0, 400.0))
                                     .color(p.muted)
                             })
                             .child(if active {
                                 ::rune::el::icon(&CHECK, 13.0).color(p.ink)
                             } else {
-                                text("").size(13.0, 13.0)
+                                typography.text("").size(13.0, 13.0)
                             })
                             .focusable(true)
                             .disabled(disabled)
@@ -659,15 +680,16 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                             .hover(p.hover)
                             .focus_highlight(p.hover)
                             .child(
-                                text(label)
+                                typography
+                                    .text(label)
                                     .grow(1.0)
-                                    .font(TextStyle::new(12.5, 500.0))
+                                    .font(typography.font(12.5, 500.0))
                                     .color(p.ink),
                             )
                             .child(if state.mode == mode {
                                 ::rune::el::icon(&CHECK, 13.0).color(p.ink)
                             } else {
-                                text("").size(13.0, 13.0)
+                                typography.text("").size(13.0, 13.0)
                             })
                             .focusable(true)
                             .disabled(disabled)
@@ -701,6 +723,22 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replaced_and_restored_drafts_have_distinct_submission_versions() {
+        let mut state = State::default();
+        state.replace_draft("שלום مرحبا 🦀");
+        let presented_version = state.draft_version;
+        let presented_text = state.draft.text.clone();
+        state.replace_draft("Changed");
+        state.replace_draft(presented_text.clone());
+        assert_eq!(state.draft.text, presented_text);
+        assert_ne!(state.draft_version, presented_version);
+        let restored_version = state.draft_version;
+        state.clear_draft();
+        assert!(state.draft.text.is_empty());
+        assert_ne!(state.draft_version, restored_version);
+    }
 
     #[test]
     fn the_actual_composer_preserves_button_tab_order_and_enter_activation() {

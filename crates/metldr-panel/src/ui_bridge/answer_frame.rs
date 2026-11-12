@@ -410,6 +410,7 @@ impl UiAnswerFrame {
                     .map_err(|error| crate::err(&error))?
                     .pixels() as f64,
             },
+            ChildMessage::Wheel { dx, dy } => ChildMessage::Wheel { dx, dy },
             ChildMessage::Followup { text } => {
                 state
                     .propose_followup()

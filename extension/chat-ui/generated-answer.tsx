@@ -53,6 +53,8 @@ export function GeneratedAnswer({ reference, open, enqueue }: {
     let freed = false;
     let loaded = "";
     let completion = "streaming";
+    let wheelFrame = 0;
+    let wheelX = 0, wheelY = 0;
     let transport: { iframe: HTMLIFrameElement; port: MessagePort; timer?: ReturnType<typeof setTimeout> } | undefined;
     setExporting(false);
     setSaveFailure("");
@@ -60,6 +62,8 @@ export function GeneratedAnswer({ reference, open, enqueue }: {
     const destroy = () => {
       const previous = transport;
       transport = undefined;
+      cancelAnimationFrame(wheelFrame);
+      wheelFrame = 0; wheelX = 0; wheelY = 0;
       if (!previous) return;
       clearTimeout(previous.timer);
       previous.port.close();
@@ -94,6 +98,15 @@ export function GeneratedAnswer({ reference, open, enqueue }: {
             const kind = incoming.kind();
             switch (kind) {
             case AnswerEventKind.Height: setHeight(incoming.height()); break;
+            case AnswerEventKind.Wheel:
+              wheelX = Math.max(-1200, Math.min(1200, wheelX + incoming.wheel_dx()));
+              wheelY = Math.max(-1200, Math.min(1200, wheelY + incoming.wheel_dy()));
+              if (!wheelFrame) wheelFrame = requestAnimationFrame(() => {
+                wheelFrame = 0;
+                if (!disposed && transport === attached) owner.closest<HTMLElement>(".chat-layout__scroll")?.scrollBy({ left: wheelX, top: wheelY, behavior: "instant" });
+                wheelX = 0; wheelY = 0;
+              });
+              break;
             case AnswerEventKind.Followup: setProposal(incoming.text()); break;
             case AnswerEventKind.Failed: fail("The answer could not finish its display. Retry to reopen it."); return;
             case AnswerEventKind.RuntimeFailed:

@@ -255,7 +255,59 @@ impl UiNativePermissions {
             run: parse(run)?,
             request: parse(request)?,
         };
-        let state = State::read(&self.core);
+        let work = self
+            .core
+            .reserve_native_reply(key, option)
+            .map_err(js_error)?;
+        Ok(future_to_promise(async move {
+            work.await.map(|()| JsValue::UNDEFINED).map_err(js_error)
+        }))
+    }
+}
+
+impl Core {
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_native_requests(
+        &self,
+    ) -> (Vec<(NativePermissionView, bool)>, Option<String>) {
+        let state = State::read(self);
+        let notice = UiNativePermissionSnapshot {
+            state: state.clone(),
+        }
+        .notice();
+        let rows = state
+            .requests
+            .iter()
+            .map(|row| (row.clone(), state.enabled(row)))
+            .collect();
+        (rows, notice)
+    }
+
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_native_reply(
+        self: &Rc<Self>,
+        run: RunId,
+        request: RunId,
+        option: Option<String>,
+        tx: &mut ::rune::Tx,
+    ) -> Result<impl Future<Output = Result<(), FlowError>> + 'static, FlowError> {
+        let action = serde_json::to_string(&option).expect("option key");
+        if !tx.consume_activation(&super::codex_input::rune_reply_key(
+            "native", &run, &request, &action,
+        )) {
+            return Err(FlowError::InvalidInput(
+                "Use a current action to answer the request.".into(),
+            ));
+        }
+        self.reserve_native_reply(Key { run, request }, option)
+    }
+
+    fn reserve_native_reply(
+        self: &Rc<Self>,
+        key: Key,
+        option: Option<String>,
+    ) -> Result<impl Future<Output = Result<(), FlowError>> + 'static, FlowError> {
+        let state = State::read(self);
         let offered = state.requests.iter().find(|row| key.offered(row));
         if !offered.is_some_and(|row| {
             state.enabled(row)
@@ -263,12 +315,14 @@ impl UiNativePermissions {
                     .as_ref()
                     .is_none_or(|selected| row.options.iter().any(|item| &item.id == selected))
         }) {
-            return Err(crate::err("This native permission is no longer available."));
+            return Err(FlowError::InvalidInput(
+                "This native permission is no longer available.".into(),
+            ));
         }
-        *self.core.native_operation.borrow_mut() = Operation::Sending(key.clone());
-        self.core.notify_native_permissions();
-        let core = Rc::clone(&self.core);
-        Ok(future_to_promise(async move {
+        *self.native_operation.borrow_mut() = Operation::Sending(key.clone());
+        self.notify_native_permissions();
+        let core = Rc::clone(self);
+        Ok(async move {
             let result = core
                 .flow()
                 .native_permission(
@@ -295,12 +349,10 @@ impl UiNativePermissions {
                 }
             };
             core.notify_native_permissions();
-            result.map(|()| JsValue::UNDEFINED).map_err(js_error)
-        }))
+            result
+        })
     }
-}
 
-impl Core {
     pub(super) fn notify_native_permissions(&self) {
         self.page.notify_connection();
         {
@@ -320,6 +372,10 @@ impl Core {
                 observer.close();
             }
             observer.wake();
+        }
+        let changed = self.page.changed.borrow().clone();
+        if let Some(changed) = changed {
+            changed();
         }
     }
 }

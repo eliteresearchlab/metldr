@@ -93,10 +93,16 @@ impl UiSourceSnapshot {
     }
 
     pub fn text(&self) -> Result<Option<String>, JsValue> {
-        self.core.ensure_current().map_err(js_error)?;
-        let view = self.core.cached().map_err(js_error)?;
+        self.read_text().map_err(js_error)
+    }
+}
+
+impl UiSourceSnapshot {
+    pub(super) fn read_text(&self) -> Result<Option<String>, FlowError> {
+        self.core.ensure_current()?;
+        let view = self.core.cached()?;
         if view.source.as_ref().map(|source| &source.id) != self.state.source.as_ref() {
-            return Err(js_error(FlowError::HistoryStale));
+            return Err(FlowError::HistoryStale);
         }
         Ok(view.source.as_ref().map(|source| source.text.clone()))
     }
@@ -127,8 +133,7 @@ impl UiSavedSource {
         self.core.ensure_current().map_err(js_error)?;
         let core = Rc::clone(&self.core);
         Ok(future_to_promise(async move {
-            let _read = core.begin_read().map_err(js_error)?;
-            core.current().await.map_err(js_error)?;
+            refresh(&core).await.map_err(js_error)?;
             Ok(JsValue::UNDEFINED)
         }))
     }
@@ -138,30 +143,59 @@ impl UiSavedSource {
         #[wasm_bindgen(unchecked_param_type = "(snapshot: UiSourceSnapshot) => void")]
         callback: Function,
     ) -> Result<UiSourceSubscription, JsValue> {
-        self.core.ensure_current().map_err(js_error)?;
-        let observer = Rc::new(Observer {
-            core: Rc::clone(&self.core),
-            callback,
-            closed: Cell::new(false),
-            last: RefCell::new(None),
-        });
-        {
-            let mut list = self.core.page.source_subscriptions.borrow_mut();
-            list.retain(|weak| weak.upgrade().is_some_and(|item| !item.closed.get()));
-            if list.len() >= 4 {
-                return Err(crate::err("Source listener capacity reached."));
-            }
-            list.push(Rc::downgrade(&observer));
-        }
-        observer.emit().map_err(js_error)?;
-        self.core.page.refresh_action_source();
-        Ok(UiSourceSubscription { observer })
+        subscribe(&self.core, Callback::Js(callback)).map_err(js_error)
     }
+}
+
+async fn refresh(core: &Core) -> Result<(), FlowError> {
+    let _read = core.begin_read()?;
+    core.current().await?;
+    Ok(())
+}
+
+fn subscribe(core: &Rc<Core>, callback: Callback) -> Result<UiSourceSubscription, FlowError> {
+    core.ensure_current()?;
+    let observer = Rc::new(Observer {
+        core: Rc::clone(core),
+        callback,
+        closed: Cell::new(false),
+        last: RefCell::new(None),
+    });
+    {
+        let mut list = core.page.source_subscriptions.borrow_mut();
+        list.retain(|weak| weak.upgrade().is_some_and(|item| !item.closed.get()));
+        if list.len() >= 4 {
+            return Err(FlowError::Host("Source listener capacity reached.".into()));
+        }
+        list.push(Rc::downgrade(&observer));
+    }
+    observer.emit()?;
+    core.page.refresh_action_source();
+    Ok(UiSourceSubscription { observer })
+}
+
+enum Callback {
+    Js(Function),
+    #[cfg(feature = "rune-ui")]
+    Rust(Box<dyn Fn(UiSourceSnapshot)>),
+}
+
+#[cfg(feature = "rune-ui")]
+pub(super) fn subscribe_rust(
+    core: &Rc<Core>,
+    callback: impl Fn(UiSourceSnapshot) + 'static,
+) -> Result<UiSourceSubscription, FlowError> {
+    subscribe(core, Callback::Rust(Box::new(callback)))
+}
+
+#[cfg(feature = "rune-ui")]
+pub(super) async fn refresh_rust(core: &Core) -> Result<(), FlowError> {
+    refresh(core).await
 }
 
 pub(super) struct Observer {
     core: Rc<Core>,
-    callback: Function,
+    callback: Callback,
     closed: Cell<bool>,
     last: RefCell<Option<State>>,
 }
@@ -198,9 +232,15 @@ impl Observer {
             core: Rc::clone(&self.core),
             state,
         };
-        self.callback
-            .call1(&JsValue::UNDEFINED, &snapshot.into())
-            .map_err(|_| FlowError::Host("The source listener disconnected.".into()))?;
+        match &self.callback {
+            Callback::Js(callback) => {
+                callback
+                    .call1(&JsValue::UNDEFINED, &snapshot.into())
+                    .map_err(|_| FlowError::Host("The source listener disconnected.".into()))?;
+            }
+            #[cfg(feature = "rune-ui")]
+            Callback::Rust(callback) => callback(snapshot),
+        }
         Ok(())
     }
 }
