@@ -202,6 +202,7 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
         .key(key)
         .size(CONTROL, CONTROL)
         .radius(8.0)
+        .press(color.alpha(0.16))
         .center()
         .child(::rune::el::icon(icon, 16.0).color(color))
         .role("button")
@@ -240,6 +241,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
             state.source_engaged = false;
         })
         .on_input_key(|state: &mut State, key, tx| match &key.key {
+            Key::Enter if !key.mods.shift && tx.key_repeat() => true,
             Key::Escape if state.menu.is_some() => {
                 close(state, tx);
                 state.source_engaged = false;
@@ -255,7 +257,8 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
                 true
             }
             Key::Tab
-                if state.menu == Some(Menu::Sources)
+                if key.mods == Default::default()
+                    && state.menu == Some(Menu::Sources)
                     && page_matches(&state.draft.text)
                     && !state.capture_disabled() =>
             {
@@ -318,6 +321,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         )
         .child(::rune::el::icon(&CHEVRON, 11.0).color(p.muted))
         .hover(p.hover)
+        .press(p.strong)
         .role("button")
         .focusable(true)
         .label("Choose model")
@@ -439,6 +443,7 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                             p.surface
                         })
                         .hover(p.hover)
+                        .press(p.strong)
                         .focus_highlight(p.hover)
                         .child(
                             row()
@@ -562,6 +567,7 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                                 .center_y()
                                 .radius(6.0)
                                 .hover(p.hover)
+                                .press(p.strong)
                                 .focus_highlight(p.hover)
                                 .child(
                                     text(choice.label.clone())
@@ -636,6 +642,7 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                                 .center_y()
                                 .radius(6.0)
                                 .hover(p.hover)
+                                .press(p.strong)
                                 .focus_highlight(p.hover)
                                 .child(
                                     text(label)
@@ -716,6 +723,21 @@ mod tests {
             } else if key == Key::Escape {
                 assert!(rt.state.menu.is_none());
             }
+        }
+        for target in [
+            "rune-model-trigger",
+            "rune-composer-field",
+            "rune-source-trigger",
+        ] {
+            rt.key(KeyEvent {
+                key: Key::Tab,
+                mods: Mods {
+                    shift: true,
+                    ..Default::default()
+                },
+            });
+            rt.frame(0.0);
+            assert_eq!(focused(&rt).as_deref(), Some(target));
         }
     }
 
