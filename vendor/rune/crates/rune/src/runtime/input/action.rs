@@ -249,6 +249,51 @@ pub(super) fn order_drag_ends(queue: ActionQueue, ended: Vec<(String, crate::Dra
 }
 
 impl<S: 'static> Runtime<S> {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_controls(&self) -> Vec<(String, String)> {
+        self.nodes.iter().enumerate().filter_map(|(i, n)| {
+            (n.a11y.native_activation && !n.a11y.disabled && !n.inert
+                && self.allowed(i) && !self.subtree_exiting(i)
+                && n.handlers.on_press.is_some()).then_some(())?;
+            Some((n.path.clone(), n.key.clone()?))
+        }).collect()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_focused_path(&self) -> Option<&str> {
+        let i = self.focused_index()?;
+        let node = &self.nodes[i];
+        (node.a11y.native_activation && !node.a11y.disabled && !node.inert
+            && self.allowed(i) && !self.subtree_exiting(i)).then_some(node.path.as_str())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_focus(&mut self, path: &str, key: &str) -> bool {
+        let Some(i) = self.live_index(path) else { return false };
+        let n = &self.nodes[i];
+        if !n.a11y.native_activation || n.a11y.disabled || n.inert
+            || n.key.as_deref() != Some(key) || !self.can_focus(i) { return false; }
+        self.set_focus(Some(path.to_owned()), true)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_press(&mut self, path: &str, key: &str) -> bool {
+        let Some(i) = self.live_index(path) else { return false };
+        let node = &self.nodes[i];
+        if !node.a11y.native_activation || node.a11y.disabled || node.inert
+            || node.key.as_deref() != Some(key) || !self.allowed(i) { return false; }
+        let Some(handler) = node.handlers.on_press.clone() else { return false };
+        let mut tx = self.transaction();
+        let scope = tx.activation_scope(key.to_owned());
+        handler(states!(self), &mut tx);
+        drop(scope);
+        tx.activation = None;
+        merge(&mut self.pending, tx);
+        self.dirty = true;
+        self.native_geometry_valid = false;
+        true
+    }
+
     /// Runs `action`'s handlers; debug builds warn when they block the main thread.
     pub(super) fn run_action(&mut self, action: Action, tx: &mut Tx) -> bool {
         #[cfg(debug_assertions)]
@@ -382,6 +427,8 @@ impl<S: 'static> Runtime<S> {
                 true
             }
             Action::Press(path, button) => {
+                #[cfg(target_arch = "wasm32")]
+                if self.node(&path).is_some_and(|n| n.a11y.native_activation) { return false; }
                 let Some(f) = self.node(&path).and_then(|n| n.handlers.on_press.clone()) else { return false };
                 log_event!(self, "press {path}");
                 one.button = button;

@@ -360,6 +360,7 @@ mod commit;
 use commit::{Measured, Measurement, unwrapped_width};
 
 pub struct Runtime<S: 'static> {
+    pub(crate) native_geometry_valid: bool,
     pub state: S,
     pub(crate) on_focus: Option<fn(&mut S, bool, &mut Tx)>,
     /// `App::on_ime` and the composition it has open.
@@ -799,6 +800,7 @@ impl<S: 'static> Runtime<S> {
         crate::recorder::headless_reset();
         crate::video::headless_reset();
         Runtime {
+            native_geometry_valid: false,
             state,
             view,
             playground: None,

@@ -147,6 +147,7 @@ impl<S: 'static> Runtime<S> {
 
     /// `self.nodes` changed without a commit: kept per-node answers no longer hold.
     pub(super) fn nodes_replaced(&mut self) {
+        self.native_geometry_valid = false;
         self.key_index.forget();
         self.exit_mask.forget();
     }

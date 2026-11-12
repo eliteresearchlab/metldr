@@ -159,6 +159,15 @@ impl State {
         }
     }
 
+    fn decide_browser_action(&mut self, decision: browser_actions::DecisionKey, tx: &mut Tx) {
+        let Some(core) = self.core().cloned() else { return };
+        let Some(updates) = self.updates.clone() else { return };
+        match core.decide_from_rune(decision, tx) {
+            Ok(work) => spawn_local(async move { updates.finish(work.await); }),
+            Err(error) => self.fail(error),
+        }
+    }
+
     fn select(&mut self, value: String, _: &mut Tx) {
         let result = (|| {
             let core = self.core().ok_or(FlowError::Disconnected)?;
@@ -544,6 +553,21 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         return col().w_full().h_full().fill(page).color(ink).child(thread);
     };
     let connection = connection::UiConnectionSnapshot::read(core);
+    if let Some((action, can_approve, can_decline)) = core.rune_browser_action() {
+        let display = crate::browser_action_display::display(&action);
+        let mut approval = col().key("browser-approval").w_full().gap(8.0)
+            .child(text(display.title).wrap());
+        for detail in display.details {
+            approval = approval.child(text(format!("{}: {}", detail.label, detail.value)).wrap());
+        }
+        for (approve, enabled, label) in [(true, can_approve, "Approve"), (false, can_decline, "Decline")] {
+            let decision = browser_actions::DecisionKey { id: action.id.clone(), revision: action.revision, approve };
+            approval = approval.child(text(label).key(decision.element_key()).role("button")
+                .focusable(true).disabled(!enabled).label(label).native_activation()
+                .on_press_tx(move |state: &mut State, tx| state.decide_browser_action(decision.clone(), tx)));
+        }
+        thread = thread.child(approval);
+    }
     if !connection.connected() {
         thread = thread.child(
             text("Reconnect")

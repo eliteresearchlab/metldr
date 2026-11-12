@@ -34,6 +34,24 @@ const GATED_INPUT = ['pointerdown', 'pointerup', 'pointermove', 'pointercancel',
     'touchcancel', 'keydown', 'keyup', 'keypress', 'beforeinput', 'input', 'compositionstart',
     'compositionupdate', 'compositionend', 'select', 'paste', 'copy', 'cut'];
 
+const nativeButtons = new WeakSet();
+
+export function native_button(h, path) {
+    return h.disposed ? null : h.a11yNodes.get(`button:${path}`) ?? null;
+}
+
+export function set_native_button(_h, node, enabled) {
+    if (enabled) nativeButtons.add(node);
+    else nativeButtons.delete(node);
+}
+
+export function focus_native_button(h, node, requested) {
+    if (h.disposed || !nativeButtons.has(node)) return;
+    const active = document.activeElement;
+    if ((requested || active === h.canvas || nativeButtons.has(active)) && active !== node)
+        node.focus({ preventScroll: true });
+}
+
 function browserShortcut(event) {
     const chord = event.metaKey || event.ctrlKey;
     if (event.key === 'F5' || event.key === 'F12') return true;
@@ -44,7 +62,7 @@ function browserShortcut(event) {
         || (event.altKey && ['i', 'j', 'u'].includes(k));
 }
 
-export function mount(canvas, callback, embedded, fitHeight) {
+export function mount(canvas, callback, raw, embedded, fitHeight) {
     const textarea = document.createElement('textarea');
     textarea.setAttribute('aria-label', 'Text input');
     textarea.setAttribute('autocapitalize', 'sentences');
@@ -91,6 +109,8 @@ export function mount(canvas, callback, embedded, fitHeight) {
     const owned = target => target === canvas || target === textarea || target === password || (target instanceof Node && a11y.contains(target));
     const refuseUntrusted = event => { if (!event.isTrusted && owned(event.target)) event.stopImmediatePropagation(); };
     for (const name of GATED_INPUT) listen(window, name, refuseUntrusted, { capture: true });
+    for (const name of ['pointerdown', 'pointercancel', 'click', 'blur'])
+        listen(window, name, raw, { capture: true });
     function changed(preedit = false) {
         if (h.field.disabled || h.field.readOnly) return;
         const backward = textarea.selectionDirection === 'backward';
@@ -243,6 +263,7 @@ export function syncA11y(h, json, revision) {
                 el.type = 'button';
                 el.tabIndex = -1;
                 el.addEventListener('click', ev => {
+                    if (nativeButtons.has(el)) return;
                     ev.preventDefault();
                     h.send({ kind: 'a11y_press', path: item.p, trusted: ev.isTrusted === true, revision: h.revision });
                 });

@@ -1,6 +1,7 @@
 //! `Tx`: what a handler may say about the commit it causes.
 
 use std::rc::Rc;
+use std::cell::Cell;
 
 use rune_motion::{Anim, Spring};
 
@@ -13,6 +14,7 @@ mod scroll;
 /// What a handler may say about the commit it causes.
 #[derive(Clone, Debug, Default)]
 pub struct Tx {
+    pub(crate) activation: Option<Rc<Activation>>,
     pub(crate) shortcut_activation_token: Option<String>,
     pub(crate) key_repeat: bool,
     /// `Tx::drag_repeat`.
@@ -88,6 +90,42 @@ pub struct Tx {
     pub(crate) playground: Vec<crate::playground::Request>,
 }
 
+#[cfg(test)]
+mod activation_tests {
+    use super::Tx;
+
+    #[test]
+    fn activation_is_scoped_keyed_and_shared_by_clones() {
+        let mut tx = Tx::default();
+        assert!(!tx.consume_activation("key"));
+        let scope = tx.activation_scope("key".into());
+        let mut cloned = tx.clone();
+        assert!(!tx.consume_activation("other"));
+        assert!(cloned.consume_activation("key"));
+        assert!(!tx.consume_activation("key"));
+        drop(scope);
+        let mut expired = Tx::default();
+        let scope = expired.activation_scope("key".into());
+        drop(scope);
+        assert!(!expired.consume_activation("key"));
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Activation {
+    key: String,
+    live: Cell<bool>,
+    consumed: Cell<bool>,
+}
+
+pub(crate) struct ActivationScope(Rc<Activation>);
+
+impl Drop for ActivationScope {
+    fn drop(&mut self) {
+        self.0.live.set(false);
+    }
+}
+
 /// A change to the text selection a handler asked for, carried out after its commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SelectRequest {
@@ -112,6 +150,24 @@ pub enum Shell {
 }
 
 impl Tx {
+    pub(crate) fn activation_scope(&mut self, key: String) -> ActivationScope {
+        let activation = Rc::new(Activation {
+            key,
+            live: Cell::new(true),
+            consumed: Cell::new(false),
+        });
+        self.activation = Some(Rc::clone(&activation));
+        ActivationScope(activation)
+    }
+
+    /// Consumes the current validated activation for exactly this control.
+    pub fn consume_activation(&mut self, expected_key: &str) -> bool {
+        self.activation.as_ref().is_some_and(|activation| {
+            activation.live.get()
+                && activation.key == expected_key
+                && !activation.consumed.replace(true)
+        })
+    }
     /// Pick from the last presented frame, with the geometry and visibility rules of
     /// [`Runtime::element_at`](crate::Runtime::element_at). Runs `f` after this handler,
     /// before its view commit. Pass `PointerEvent::window_x` and `window_y`, not local points.

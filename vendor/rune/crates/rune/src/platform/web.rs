@@ -92,7 +92,7 @@ struct Running<S: 'static> {
     cursor: crate::cursor::os::OsCursor,
     _menus: crate::native_menu::Guard<S>,
     shortcuts: crate::shortcuts::Guard,
-    input: input::Bridge,
+    input: input::Bridge<S>,
     clipboard: crate::clipboard::Client,
 }
 
@@ -107,6 +107,7 @@ impl<S: 'static> Running<S> {
     }
 
     pub(super) fn resize_surface(&mut self, window: &Window, size: winit::dpi::PhysicalSize<u32>, scale: f32) {
+        self.rt.native_geometry_valid = false;
         let size = window.canvas().map_or(size, |c| canvas_physical(&c, size, scale));
         self.suspended = size.width == 0 || size.height == 0;
         if self.suspended { return; }
@@ -132,6 +133,7 @@ impl<S: 'static> Running<S> {
             && let Some((_, h)) = req.size
             && let Some(canvas) = window.canvas()
         {
+            self.rt.native_geometry_valid = false;
             let _ = canvas.style().set_property("height", &format!("{h}px"));
         }
     }
@@ -445,6 +447,8 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
                 r.renderer.submit(&r.gpu.queue, encoder);
                 window.pre_present_notify();
                 r.gpu.queue.present(frame);
+                r.rt.native_geometry_valid = true;
+                r.reconcile_native(window);
                 if r.rt.shell_request.take().is_some() { self.end(event_loop); return; }
                 if animating || r.rt.has_pending_input() || r.rt.live_pending() || r.compositor.as_ref().is_some_and(|c| c.animating()) {
                     window.request_redraw();
