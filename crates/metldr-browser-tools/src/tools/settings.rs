@@ -7,7 +7,7 @@ pub const ORDER: u8 = 9;
 pub fn definition() -> Definition {
     Definition {
         name: NAME,
-        description: "Read the saved provider and agent settings for this run: each stored value, its effective value and the source that supplies it. Read-only. Credentials, endpoints and file paths are never returned. An agent cannot change any setting, including security switches such as offline mode; changes belong to the user's settings view.",
+        description: "Read provider and agent setting states, revisions, sources, runtime availability and Pi offline mode for this run. Read-only. Free-form values, credentials, endpoints and file paths are never returned. An agent cannot change any setting; changes belong to the user's settings view.",
         input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
     }
 }

@@ -161,9 +161,9 @@ impl Tools {
         }
     }
 
-    // Local state only: the engine is present exactly while the tab is attached.
+    // The actor remains live while transport cleanup runs after a detach notice.
     fn status(&self) -> Value {
-        json!({"attached": self.engine.is_some(), "release_confirmed": !self.release_unknown})
+        json!({"attached": self.engine.as_ref().is_some_and(Engine::is_live), "release_confirmed": !self.release_unknown})
     }
 
     // The owner holds the saved settings, so the read waits for its answer.
@@ -177,15 +177,20 @@ impl Tools {
             })
             .map_err(|_| "settings owner channel unavailable")?;
         loop {
+            if stop.load(Ordering::Acquire) {
+                return Err("browser task stopped".into());
+            }
             match rx.try_recv() {
-                Ok(value) => return value.map_err(Into::into),
+                Ok(value) => {
+                    if stop.load(Ordering::Acquire) {
+                        return Err("browser task stopped".into());
+                    }
+                    return value.map_err(Into::into);
+                }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     return Err("settings owner ended".into());
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
-            }
-            if stop.load(Ordering::Acquire) {
-                return Err("browser task stopped".into());
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }

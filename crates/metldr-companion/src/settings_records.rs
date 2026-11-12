@@ -91,11 +91,10 @@ impl Owner {
         run: &str,
         ack: std::sync::mpsc::SyncSender<std::result::Result<Value, String>>,
     ) -> Result<()> {
-        let result = if self
-            .operations
-            .get(run)
-            .is_some_and(|operation| operation.browser_io.is_some())
-        {
+        let result = if self.operations.get(run).is_some_and(|operation| {
+            operation.browser_io.is_some()
+                && !operation.stop.load(std::sync::atomic::Ordering::Acquire)
+        }) {
             Ok(self.browser_settings_snapshot())
         } else {
             Err("browser run is not active".to_owned())
@@ -110,20 +109,17 @@ impl Owner {
             .into_iter()
             .map(|protocol| {
                 let slot = self.state.providers.slot(protocol);
-                let (state, model) = match &slot.selection {
-                    ProviderSelection::Unmanaged => ("unmanaged", None),
-                    ProviderSelection::Removed => ("removed", None),
-                    ProviderSelection::Configured { connection } => {
-                        ("configured", Some(connection.model.as_str()))
-                    }
+                let state = match &slot.selection {
+                    ProviderSelection::Unmanaged => "unmanaged",
+                    ProviderSelection::Removed => "removed",
+                    ProviderSelection::Configured { .. } => "configured",
                 };
                 let route = self.provider_route(protocol);
                 json!({
                     "protocol": protocol.name(),
-                    "stored": {"state": state, "revision": slot.revision, "model": model},
+                    "stored": {"state": state, "revision": slot.revision},
                     "effective": {
                         "source": route_source(self.state.providers.managed(protocol), route),
-                        "model": route_model(route),
                     },
                 })
             })
@@ -172,21 +168,9 @@ fn route_source(managed: bool, route: Option<&Profile>) -> &'static str {
     }
 }
 
-fn route_model(route: Option<&Profile>) -> Option<&str> {
-    match route {
-        Some(Profile::Https { binding, .. }) => Some(binding.model.as_str()),
-        Some(Profile::Fixture { .. }) | None => None,
-    }
-}
-
 fn agent_detail(profile: &AgentProfile) -> Value {
     match profile {
-        AgentProfile::Pi {
-            provider,
-            model,
-            offline,
-            ..
-        } => json!({"provider": provider, "model": model, "offline": offline}),
+        AgentProfile::Pi { offline, .. } => json!({"offline": offline}),
         AgentProfile::Codex { .. } | AgentProfile::Opencode { .. } => json!({}),
     }
 }
@@ -209,8 +193,16 @@ mod tests {
             trust_pem: None,
         };
         assert_eq!(route_source(false, Some(&route)), "environment");
-        assert_eq!(route_model(Some(&route)), Some("model-a"));
         assert_eq!(route_source(true, Some(&route)), "saved");
         assert_eq!(route_source(false, None), "none");
+        let pi = AgentProfile::Pi {
+            executable: "/bin/pi".into(),
+            workspace: "/workspace".into(),
+            session_dir: "/sessions".into(),
+            provider: "/p".into(),
+            model: "sk-test-0".into(),
+            offline: true,
+        };
+        assert_eq!(agent_detail(&pi), json!({"offline": true}));
     }
 }
