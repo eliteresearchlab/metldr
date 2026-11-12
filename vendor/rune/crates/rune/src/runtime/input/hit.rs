@@ -173,6 +173,14 @@ impl<S: 'static> Runtime<S> {
         Some(i)
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_primary_target(&self, x: f32, y: f32) -> Option<(String, String)> {
+        let i = self.primary_target(x, y)?;
+        let node = &self.nodes[i];
+        if !node.a11y.native_activation || node.a11y.disabled || node.inert { return None; }
+        Some((node.path.clone(), node.key.clone()?))
+    }
+
     /// The selectable text under (x, y), if it's the topmost thing there that takes input.
     pub(super) fn selectable_at(&self, x: f32, y: f32) -> Option<usize> {
         self.top_target(x, y).filter(|&i| self.is_selectable(i))

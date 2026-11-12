@@ -197,6 +197,7 @@ impl<S: 'static> Runtime<S> {
         if let Some(srgb) = tx.srgb_blend.take() { self.set_srgb_blend(srgb); }
         if let Some(rewind) = tx.rewind.take() { self.rewind = rewind; }
         if std::mem::take(&mut tx.blur) {
+            self.requested_focus = None;
             if self.focused.is_some() {
                 self.set_focus(None, self.keyboard_focus);
                 self.dirty = true;
@@ -204,12 +205,20 @@ impl<S: 'static> Runtime<S> {
             // An explicit blur is not the temporary pointer-down blur of a scrim.
             self.last_focused = None;
         }
+        self.latch_focus(tx);
         if let Some(title) = tx.title.take() { self.window_title.set(title); }
         if let Some(mut request) = tx.window_frame.take() {
             request.spring = (request.animate && !tx.instant && !self.reduced_motion).then(|| tx.motion.unwrap_or(motion::DEFAULT));
             self.window_frame = Some(self.window_frame.unwrap_or_default().merge(request));
         }
         crate::clipboard::flush_memory(self);
+    }
+
+    fn latch_focus(&mut self, tx: &mut Tx) {
+        if let Some(key) = tx.focus_request.take() {
+            self.requested_focus = Some(key);
+            self.dirty = true;
+        }
     }
 
     /// Host time on the logical clock.
@@ -461,7 +470,10 @@ impl<S: 'static> Runtime<S> {
             // nothing until this).
             let routed = matches!(&action, Action::Key { .. } | Action::KeyUp(_) | Action::Physical(..) | Action::Ime(_) | Action::Paste(..) | Action::Files(_));
             // So is a playground an earlier handler opened or moved.
-            if routed { self.latch_playground(&mut tx); }
+            if routed {
+                self.latch_playground(&mut tx);
+                self.latch_focus(&mut tx);
+            }
             if (ran || self.dirty || !tx.scroll_to.is_empty()) && routed {
                 if ran || self.dirty {
                     self.capture_flights(&mut tx);

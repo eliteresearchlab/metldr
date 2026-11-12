@@ -332,6 +332,9 @@ mod keys;
 #[path = "runtime/input/pointer.rs"]
 mod pointer;
 use pointer::CLICK_SLOP;
+#[cfg(any(test, target_arch = "wasm32"))]
+#[path = "runtime/input/provenance.rs"]
+pub(crate) mod provenance;
 #[path = "runtime/motion/live_check.rs"]
 mod live_check;
 pub(crate) use live_check::fold_live;
@@ -357,6 +360,7 @@ mod commit;
 use commit::{Measured, Measurement, unwrapped_width};
 
 pub struct Runtime<S: 'static> {
+    pub(crate) native_geometry_valid: bool,
     pub state: S,
     pub(crate) on_focus: Option<fn(&mut S, bool, &mut Tx)>,
     /// `App::on_ime` and the composition it has open.
@@ -552,6 +556,7 @@ pub struct Runtime<S: 'static> {
     caught_up: f32,
     slack_dt: f32,
     focused: Option<String>,
+    requested_focus: Option<String>,
     keyboard_focus: bool,
     /// The pointer focused a `focus_highlight` row, so its highlight shows without a key.
     hover_focus: bool,
@@ -795,6 +800,7 @@ impl<S: 'static> Runtime<S> {
         crate::recorder::headless_reset();
         crate::video::headless_reset();
         Runtime {
+            native_geometry_valid: false,
             state,
             view,
             playground: None,
@@ -925,6 +931,7 @@ impl<S: 'static> Runtime<S> {
             caught_up: 0.0,
             slack_dt: 0.0,
             focused: None,
+            requested_focus: None,
             keyboard_focus: false,
             hover_focus: false,
             typeahead: (String::new(), f64::NEG_INFINITY),

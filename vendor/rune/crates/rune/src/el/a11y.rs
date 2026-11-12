@@ -55,6 +55,7 @@ pub(crate) struct A11yMore {
 /// this file's builders).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct A11y {
+    pub native_activation: bool,
     pub level: Option<u32>,
     pub expanded: Option<bool>,
     pub secure: bool,
@@ -67,6 +68,7 @@ pub(crate) struct A11y {
 
 impl A11y {
     pub(crate) const EMPTY: A11y = A11y {
+        native_activation: false,
         level: None, expanded: None, secure: false, checked: None, disabled: false, hidden: false, live: None, more: None,
     };
 
@@ -76,6 +78,11 @@ impl A11y {
 }
 
 impl El {
+    /// Marks a keyed control for the web host's direct native activation path.
+    pub fn native_activation(mut self) -> Self {
+        self.a11y.native_activation = true;
+        self
+    }
     /// A longer explanation than the label, read after it (ARIA `aria-description`): what a
     /// setting does, or the shortcut a button has. The label stays short. Without one, an
     /// [`El::help`] tooltip describes the element; `description("")` turns that off.

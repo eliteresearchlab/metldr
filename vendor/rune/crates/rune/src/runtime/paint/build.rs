@@ -3,6 +3,7 @@ use super::*;
 
 impl<S: 'static> Runtime<S> {
     pub(super) fn build(&mut self) -> bool {
+        self.native_geometry_valid = false;
         let (_paint_time, _blend) = (crate::frame::profile::Scope::new(crate::frame::profile::Phase::Paint), crate::theme::scope(self.srgb_blend));
         let s = self.env.scale;
         let snap_px = |v: f32| grid(v, s) * s;

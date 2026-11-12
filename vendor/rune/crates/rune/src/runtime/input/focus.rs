@@ -195,6 +195,7 @@ impl<S: 'static> Runtime<S> {
         changed
     }
     pub(super) fn sync_requested_focus(&mut self, nodes: &mut Vec<Node>) -> bool {
+        let explicit_key = self.requested_focus.take();
         for old in &self.nodes {
             if let Some(input) = &old.input
                 && input.edit.focused
@@ -213,6 +214,12 @@ impl<S: 'static> Runtime<S> {
             !n.inert && !n.a11y.disabled && n.vis.opacity > 0.0 && n.local.w > 0.0 && n.local.h > 0.0
                 && std::iter::successors(n.parent, |&p| nodes[p].parent).all(|p| nodes[p].vis.opacity > 0.0)
         };
+        let explicit = explicit_key.and_then(|key| {
+            nodes.iter().enumerate().find(|(j, n)| shown(*j)
+                && (n.focus.enabled || n.input.as_ref().is_some_and(|i| i.access.is_some()))
+                && crate::flight::selects(&key, &n.path, n.key.as_deref()))
+                .map(|(_, n)| n.path.clone())
+        });
         let restore = self.nodes.iter().enumerate().rev().find_map(|(i, old)| {
             let key = old.focus.return_to.as_deref()?;
             if self.subtree_exiting(i) || nodes.iter().any(|n| n.path == old.path) { return None; }
@@ -259,9 +266,9 @@ impl<S: 'static> Runtime<S> {
         let newly_requested = |p: &str, edit: &crate::edit::TextEdit| {
             self.focused.as_deref() != Some(p) && !was_focused(edit, p)
         };
-        let next = requested.clone().find(|&(p, edit)| newly_requested(p, edit))
+        let next = explicit.or_else(|| requested.clone().find(|&(p, edit)| newly_requested(p, edit))
             .or_else(|| virtual_req().filter(|&(p, edit)| newly_requested(p, edit)).min_by_key(|&(p, _)| p))
-            .map(|(p, _)| p.to_owned())
+            .map(|(p, _)| p.to_owned()))
             .or(restore)
             .or_else(|| self.focused.clone().filter(|p| (0..nodes.len()).any(|j| &nodes[j].path == p && shown(j)
                 && (nodes[j].focus.enabled || nodes[j].input.as_ref().is_some_and(|i| i.edit.focused)))

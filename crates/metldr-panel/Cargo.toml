@@ -16,7 +16,12 @@ codegen-units = 1
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+rune-ui = ["dep:rune", "dep:wgpu"]
+
 [dependencies]
+rune = { path = "../../vendor/rune/crates/rune", optional = true, default-features = false, features = ["accessibility", "svg", "webgl"] }
+wgpu = { version = "~30.0.1", optional = true, default-features = false, features = ["wgsl"] }
 metldr-answer-codec = { path = "../metldr-answer-codec" }
 metldr-conversation = { path = "../metldr-conversation" }
 metldr-history-pages = { path = "../metldr-history-pages" }

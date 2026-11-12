@@ -26,6 +26,32 @@ function replacement(old, next, composition, caret) {
     return { start, end, text: next.slice(start, nextEnd) };
 }
 
+// Input types page script can dispatch synthetically. Untrusted events of these types aimed at this
+// host's canvas, fields or mirror are stopped in the window's capture phase, which runs before the
+// target listeners below and before winit's canvas listeners. Page script cannot press or type here.
+const GATED_INPUT = ['pointerdown', 'pointerup', 'pointermove', 'pointercancel', 'mousedown', 'mouseup',
+    'mousemove', 'click', 'dblclick', 'auxclick', 'wheel', 'touchstart', 'touchmove', 'touchend',
+    'touchcancel', 'keydown', 'keyup', 'keypress', 'beforeinput', 'input', 'compositionstart',
+    'compositionupdate', 'compositionend', 'select', 'paste', 'copy', 'cut'];
+
+const nativeButtons = new WeakSet();
+
+export function native_button(h, path) {
+    return h.disposed ? null : h.a11yNodes.get(`button:${path}`) ?? null;
+}
+
+export function set_native_button(_h, node, enabled) {
+    if (enabled) nativeButtons.add(node);
+    else nativeButtons.delete(node);
+}
+
+export function focus_native_button(h, node, requested) {
+    if (h.disposed || !nativeButtons.has(node)) return;
+    const active = document.activeElement;
+    if ((requested || active === h.canvas || nativeButtons.has(active)) && active !== node)
+        node.focus({ preventScroll: true });
+}
+
 function browserShortcut(event) {
     const chord = event.metaKey || event.ctrlKey;
     if (event.key === 'F5' || event.key === 'F12') return true;
@@ -36,7 +62,7 @@ function browserShortcut(event) {
         || (event.altKey && ['i', 'j', 'u'].includes(k));
 }
 
-export function mount(canvas, callback, embedded, fitHeight) {
+export function mount(canvas, callback, raw, embedded, fitHeight) {
     const textarea = document.createElement('textarea');
     textarea.setAttribute('aria-label', 'Text input');
     textarea.setAttribute('autocapitalize', 'sentences');
@@ -79,6 +105,12 @@ export function mount(canvas, callback, embedded, fitHeight) {
         target.addEventListener(name, handler, options);
         h.listeners.push(() => target.removeEventListener(name, handler, options));
     };
+    // Only this host's own nodes are gated, so the rest of the page keeps its scripted events.
+    const owned = target => target === canvas || target === textarea || target === password || (target instanceof Node && a11y.contains(target));
+    const refuseUntrusted = event => { if (!event.isTrusted && owned(event.target)) event.stopImmediatePropagation(); };
+    for (const name of GATED_INPUT) listen(window, name, refuseUntrusted, { capture: true });
+    for (const name of ['pointerdown', 'pointercancel', 'click', 'blur'])
+        listen(window, name, raw, { capture: true });
     function changed(preedit = false) {
         if (h.field.disabled || h.field.readOnly) return;
         const backward = textarea.selectionDirection === 'backward';
@@ -205,8 +237,9 @@ function webLink(url) {
     return url.startsWith('https://') || url.startsWith('http://') || url.startsWith('mailto:');
 }
 
-export function syncA11y(h, json) {
+export function syncA11y(h, json, revision) {
     if (h.disposed) return;
+    h.revision = revision;
     h.restoreFocus ||= ownsFieldFocus(h);
     const items = JSON.parse(json);
     const seen = new Set();
@@ -221,7 +254,7 @@ export function syncA11y(h, json) {
             if (item.k === 'input') {
                 el.setAttribute('role', 'textbox');
                 el.tabIndex = -1;
-                el.addEventListener('focus', () => activateA11yInput(h, el));
+                el.addEventListener('focus', event => activateA11yInput(h, el, event));
                 el.addEventListener('click', event => {
                     event.preventDefault();
                     if (!el._item?.disabled && document.activeElement !== el) el.focus({ preventScroll: true });
@@ -230,8 +263,9 @@ export function syncA11y(h, json) {
                 el.type = 'button';
                 el.tabIndex = -1;
                 el.addEventListener('click', ev => {
+                    if (nativeButtons.has(el)) return;
                     ev.preventDefault();
-                    h.send({ kind: 'a11y_press', path: item.p });
+                    h.send({ kind: 'a11y_press', path: item.p, trusted: ev.isTrusted === true, revision: h.revision });
                 });
             }
             h.a11yNodes.set(key, el);
@@ -273,7 +307,7 @@ export function syncA11y(h, json) {
                             a.href = '#';
                             a.addEventListener('click', ev => {
                                 ev.preventDefault();
-                                h.send({ kind: 'a11y_link', path: run.p, link: run.i });
+                                h.send({ kind: 'a11y_link', path: run.p, link: run.i, trusted: ev.isTrusted === true, revision: h.revision });
                             });
                         }
                         el.append(a);
@@ -308,9 +342,9 @@ function setA11yInputHidden(el, hidden) {
     else el.removeAttribute('aria-hidden');
 }
 
-function activateA11yInput(h, el) {
+function activateA11yInput(h, el, event) {
     const item = el._item;
-    if (!h.disposed && item && !item.disabled) h.send({ kind: 'a11y_focus', path: item.p });
+    if (!h.disposed && item && !item.disabled) h.send({ kind: 'a11y_focus', path: item.p, trusted: event.isTrusted === true, revision: h.revision });
 }
 
 function ownsFieldFocus(h) {
