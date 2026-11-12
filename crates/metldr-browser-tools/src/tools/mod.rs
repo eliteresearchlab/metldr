@@ -15,6 +15,8 @@ pub mod observe;
 mod schema;
 pub mod scroll;
 pub mod select;
+pub mod settings;
+pub mod status;
 
 use crate::{Call, Definition, Result};
 use serde_json::{Map, Value};
@@ -55,8 +57,15 @@ const LOCAL_WRITE: Annotations = Annotations {
     open_world: true,
 };
 
+const LOCAL_READ: Annotations = Annotations {
+    read_only: true,
+    destructive: false,
+    idempotent: true,
+    open_world: true,
+};
+
 /// Every browser tool, in advertised order.
-pub static TOOLS: [Tool; 8] = [
+pub static TOOLS: [Tool; 10] = [
     Tool {
         name: observe::NAME,
         order: observe::ORDER,
@@ -123,6 +132,20 @@ pub static TOOLS: [Tool; 8] = [
         definition: logs::definition,
         decode: logs::decode,
     },
+    Tool {
+        name: status::NAME,
+        order: status::ORDER,
+        annotations: LOCAL_READ,
+        definition: status::definition,
+        decode: status::decode,
+    },
+    Tool {
+        name: settings::NAME,
+        order: settings::ORDER,
+        annotations: LOCAL_READ,
+        definition: settings::definition,
+        decode: settings::decode,
+    },
 ];
 
 /// The registered tool with this name.
@@ -131,6 +154,6 @@ pub fn find(name: &str) -> Option<&'static Tool> {
 }
 
 /// Every definition in advertised order.
-pub fn definitions() -> [Definition; 8] {
+pub fn definitions() -> [Definition; 10] {
     TOOLS.each_ref().map(|tool| (tool.definition)())
 }

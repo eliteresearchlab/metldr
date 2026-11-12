@@ -99,6 +99,10 @@ pub(super) enum ControlPreparation {
 }
 
 impl Engine {
+    pub(super) fn is_live(&self) -> bool {
+        !self.task.is_finished() && !self.requests.is_closed()
+    }
+
     pub(super) async fn attach(
         client: Client,
         source: &Target,

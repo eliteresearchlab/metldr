@@ -62,6 +62,10 @@ pub(super) enum Event {
     Provider(crate::provider_settings::Completion),
     BrowserIo(crate::browser_io::Call),
     Browser(crate::browser_owner::Event),
+    BrowserSettings {
+        run: String,
+        ack: SyncSender<std::result::Result<serde_json::Value, String>>,
+    },
     Input(crate::transport::Input),
     Text {
         run: String,
