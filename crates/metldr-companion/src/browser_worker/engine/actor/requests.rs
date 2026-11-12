@@ -10,6 +10,13 @@ impl Actor {
         }
         self.busy = true;
         match kind {
+            Kind::PageLogs => match self.page_logs.snapshot() {
+                Ok(snapshot) => self.value(job, snapshot),
+                Err(error) => {
+                    self.finish(job, Err(error));
+                    Ok(())
+                }
+            },
             Kind::PrepareControl {
                 tool,
                 handle,

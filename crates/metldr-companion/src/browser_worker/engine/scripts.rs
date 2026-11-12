@@ -4,11 +4,22 @@ pub(super) mod scroll;
 pub(super) mod selects;
 pub(super) use buttons::{arm_button, button_receipt, check_button};
 
-const HELPERS: &str = r#"
+/// The secret metadata pattern. The page capture script and the Rust log redaction both read it from here.
+macro_rules! secret_metadata_pattern {
+    () => {
+        r"password|passcode|one[ -]?time[ -]?code|\botp\b|token|secret|api[ _-]?key|payment[ _-]?card|credit[ _-]?card|card[ _-]?(number|cvc|cvv)|cc[ _-]?(number|name|exp|csc|cvc|cvv)|\b(cvc|cvv)\b|social[ _-]?security|\bssn\b"
+    };
+}
+pub(super) const SECRET_METADATA_PATTERN: &str = secret_metadata_pattern!();
+
+const HELPERS: &str = concat!(
+    r#"
 const encoder = new TextEncoder();
 const whitespacePattern = /\s+/g;
 const labelReferencesPattern = /\s+/;
-const secretMetadataPattern = /password|passcode|one[ -]?time[ -]?code|\botp\b|token|secret|api[ _-]?key|payment[ _-]?card|credit[ _-]?card|card[ _-]?(number|cvc|cvv)|cc[ _-]?(number|name|exp|csc|cvc|cvv)|\b(cvc|cvv)\b|social[ _-]?security|\bssn\b/;
+const secretMetadataPattern = /"#,
+    secret_metadata_pattern!(),
+    r#"/;
 const clean = value => String(value || '').replace(whitespacePattern, ' ').trim();
 const bounded = (value, limit) => {
   let text = '', size = 0, truncated = false;
@@ -108,7 +119,8 @@ const eligibleButton = element => {
   const result = clean(text);
   return result && result.length <= 512 ? result : null;
 };
-"#;
+"#
+);
 
 fn function(body: &str) -> String {
     format!("function(root) {{ {HELPERS} {body} }}")

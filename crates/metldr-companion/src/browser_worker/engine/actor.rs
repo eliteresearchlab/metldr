@@ -1,5 +1,6 @@
 use super::{
     Job, Kind, Operation, Request, Result, TIMEOUT, Target,
+    events::{PageLogs, Subscriptions},
     observation::Snapshot,
     runtime::{self, ContextMap, FrameContext, Transport},
     scripts,
@@ -176,6 +177,8 @@ pub(super) struct Actor {
     busy: bool,
     seen: HashSet<(String, u64)>,
     navigation: Option<Navigation>,
+    subscriptions: Subscriptions,
+    page_logs: PageLogs,
 }
 impl Actor {
     pub(super) fn new(
@@ -190,6 +193,9 @@ impl Actor {
         ready: oneshot::Sender<runtime::Result<()>>,
         deadline: Instant,
     ) -> Self {
+        let page_logs = PageLogs::default();
+        let mut subscriptions = Subscriptions::default();
+        page_logs.register(&mut subscriptions);
         Self {
             client,
             source,
@@ -212,6 +218,8 @@ impl Actor {
             busy: false,
             seen: HashSet::new(),
             navigation: None,
+            subscriptions,
+            page_logs,
         }
     }
     pub(super) async fn run(mut self) -> (Result<()>, Result<()>) {
@@ -264,18 +272,7 @@ impl Actor {
                 biased;
                 notice=self.events.recv()=>self.notice(notice.ok_or("browser event channel ended")?)?,
                 output=self.transport.next()=>match output? {
-                    runtime::Output::Event(event)=>{
-                        match self.contexts.event(&event)? {
-                            runtime::Change::Attached{session,page}=>self.initialize(Some(session),page)?,
-                            runtime::Change::CreateWorld{session,frame} if self.world_allowed()=>self.queue(
-                                "Page.createIsolatedWorld", session,
-                                json!({"frameId":frame,"worldName":runtime::AUTOMATION_WORLD,"grantUniveralAccess":false}),
-                                Work::CreateWorld,
-                                if self.ready.is_none() && !self.navigation_granted {self.granted_root.clone()} else {None},None,
-                            )?,
-                            runtime::Change::None | runtime::Change::CreateWorld{..}=>(),
-                        }
-                    }
+                    runtime::Output::Event(event)=>self.transport_event(event)?,
                     runtime::Output::Dispatch(command)=>{
                         if self.offers.len()==64 {return Err("browser offered command limit".into())}
                         self.offers.push_back(command);
@@ -295,6 +292,34 @@ impl Actor {
                 _=tokio::time::sleep(std::time::Duration::from_millis(10))=>(),
             }
         }
+    }
+    fn transport_event(&mut self, event: runtime::RawEvent) -> Result<()> {
+        // A subscribed event from an unowned session is dropped before any handler or context state sees it.
+        if !self
+            .subscriptions
+            .offer(&event, |session| self.contexts.owns(session))
+        {
+            return Ok(());
+        }
+        match self.contexts.event(&event)? {
+            runtime::Change::Attached { session, page } => {
+                self.initialize(Some(session), page)?
+            }
+            runtime::Change::CreateWorld { session, frame } if self.world_allowed() => self.queue(
+                "Page.createIsolatedWorld",
+                session,
+                json!({"frameId":frame,"worldName":runtime::AUTOMATION_WORLD,"grantUniveralAccess":false}),
+                Work::CreateWorld,
+                if self.ready.is_none() && !self.navigation_granted {
+                    self.granted_root.clone()
+                } else {
+                    None
+                },
+                None,
+            )?,
+            runtime::Change::None | runtime::Change::CreateWorld { .. } => (),
+        }
+        Ok(())
     }
     fn notice(&mut self, notice: Notice) -> Result<()> {
         if notice.method == "metldr.detached" {
