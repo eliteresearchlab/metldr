@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     ag_ui::{AgUiMessage, Event, MAX_HISTORY_MESSAGES, MessageRole},
-    model::FlowError,
+    model::{FlowError, RunId},
 };
 
 pub(super) struct Messages {
@@ -106,11 +106,6 @@ impl Messages {
                     .iter()
                     .position(|message| message.id() == message_id);
                 if !replace && matches!(self.scope, DisplayScope::AwaitingRun { .. }) {
-                    if existing.is_some_and(|index| {
-                        !matches!(self.messages[index], AgUiMessage::Activity { .. })
-                    }) {
-                        return Err(protocol("activity snapshot conflicts with its snapshot"));
-                    }
                     return self.replace_snapshot(vec![AgUiMessage::Activity {
                         id: message_id,
                         activity,
@@ -160,11 +155,36 @@ impl Messages {
     }
 
     fn replace_snapshot(&mut self, messages: Vec<AgUiMessage>) -> Result<(), FlowError> {
+        if messages.is_empty() && matches!(self.scope, DisplayScope::AwaitingRun { .. }) {
+            return Ok(());
+        }
+        let roles: HashMap<_, _> = self
+            .messages
+            .iter()
+            .map(|message| (message.id(), std::mem::discriminant(message)))
+            .collect();
+        if messages.iter().any(|message| {
+            roles
+                .get(message.id())
+                .is_some_and(|role| *role != std::mem::discriminant(message))
+        }) {
+            return Err(protocol(
+                "message snapshot changes an existing message role",
+            ));
+        }
         let (boundary, scope) = match self.scope {
             DisplayScope::AwaitingRun { boundary } => {
-                let boundary = messages
-                    .first()
-                    .and_then(|first| self.messages.iter().position(|old| old.id() == first.id()))
+                let first = &messages[0];
+                let run_prefix = entry_run(first.id()).map(|run| format!("{run}:"));
+                let boundary = self
+                    .messages
+                    .iter()
+                    .position(|old| {
+                        run_prefix.as_ref().map_or_else(
+                            || old.id() == first.id(),
+                            |prefix| old.id().starts_with(prefix),
+                        )
+                    })
                     .unwrap_or(boundary);
                 (boundary, DisplayScope::Run { boundary })
             }
@@ -182,6 +202,14 @@ impl Messages {
         self.scope = scope;
         Ok(())
     }
+}
+
+fn entry_run(id: &str) -> Option<RunId> {
+    let mut parts = id.splitn(3, ':');
+    let store = parts.next()?;
+    let local = parts.next()?;
+    parts.next().filter(|suffix| !suffix.is_empty())?;
+    serde_json::from_value(serde_json::Value::String(format!("{store}:{local}"))).ok()
 }
 
 fn validate(messages: &[AgUiMessage]) -> Result<(), FlowError> {
@@ -361,47 +389,57 @@ mod tests {
 
     #[test]
     fn reconnect_replaces_loaded_run_entries_including_questionless_activity() {
-        for question in [false, true] {
+        for (question, tail_only) in [(false, false), (true, false), (false, true), (true, true)] {
+            let question_id = "0123456789abcdef0123456789abcdef:7:question";
+            let details_id = "0123456789abcdef0123456789abcdef:7:details";
+            let answer_id = "0123456789abcdef0123456789abcdef:7:answer";
             let mut state = Messages::new();
             let mut history = vec![user("earlier")];
-            if question {
-                history.push(user("current"));
+            if question && !tail_only {
+                history.push(user(question_id));
             }
-            history.push(AgUiMessage::Activity {
-                id: "details".into(),
-                activity: activity("old"),
-            });
+            if !tail_only {
+                history.push(AgUiMessage::Activity {
+                    id: details_id.into(),
+                    activity: activity("old"),
+                });
+            }
             history.push(AgUiMessage::Assistant {
-                id: "answer".into(),
+                id: answer_id.into(),
                 content: "partial".into(),
             });
             state
                 .apply(Event::MessagesSnapshot { messages: history })
                 .unwrap();
             state.apply(started()).unwrap();
+            let before = (state.messages.clone(), state.scope);
+            state
+                .apply(Event::MessagesSnapshot { messages: vec![] })
+                .unwrap();
+            assert_eq!((state.messages.clone(), state.scope), before);
             if question {
                 state
                     .apply(Event::MessagesSnapshot {
-                        messages: vec![user("current")],
+                        messages: vec![user(question_id)],
                     })
                     .unwrap();
             }
             state
                 .apply(Event::ActivitySnapshot {
-                    message_id: "details".into(),
+                    message_id: details_id.into(),
                     activity: activity("new"),
                     replace: false,
                 })
                 .unwrap();
             state
                 .apply(Event::TextMessageStart {
-                    message_id: "answer".into(),
+                    message_id: answer_id.into(),
                     role: MessageRole::Assistant,
                 })
                 .unwrap();
             state
                 .apply(Event::TextMessageContent {
-                    message_id: "answer".into(),
+                    message_id: answer_id.into(),
                     delta: "fresh".into(),
                 })
                 .unwrap();
@@ -429,6 +467,14 @@ mod tests {
         assert!(
             state
                 .apply(Event::MessagesSnapshot {
+                    messages: vec![user("earlier")]
+                })
+                .is_err()
+        );
+        assert_eq!((state.messages.clone(), state.scope), before);
+        assert!(
+            state
+                .apply(Event::MessagesSnapshot {
                     messages: vec![user("")]
                 })
                 .is_err()
@@ -442,6 +488,9 @@ mod tests {
         for event in [
             Event::MessagesSnapshot {
                 messages: vec![user("earlier")],
+            },
+            Event::MessagesSnapshot {
+                messages: vec![user("current"), user("current")],
             },
             Event::TextMessageStart {
                 message_id: "earlier".into(),
