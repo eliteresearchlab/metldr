@@ -202,7 +202,6 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
         .key(key)
         .size(CONTROL, CONTROL)
         .radius(8.0)
-        .press(color.alpha(0.16))
         .center()
         .child(::rune::el::icon(icon, 16.0).color(color))
         .role("button")
@@ -291,6 +290,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         p.secondary,
     )
     .hover(p.hover)
+    .press(p.secondary.alpha(0.16))
     .on_press_tx(sources)
     .on_key(|state: &mut State, key, tx| {
         if matches!(&key.key, Key::Down | Key::Up) {
@@ -357,20 +357,26 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     let action = if running {
         button("rune-stop", "Stop", &STOP, p.surface)
             .fill(p.ink)
+            .press(p.surface.alpha(0.16))
             .on_press_tx(|state: &mut State, tx| state.stop(tx))
             .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::stop))
     } else {
         let can_send = state.can_send();
-        button(
+        let mut send = button(
             "rune-send",
             "Send",
             &SEND,
             if can_send { p.surface } else { p.secondary },
         )
         .fill(if can_send { p.ink } else { p.strong })
-        .disabled(!can_send)
-        .on_press_tx(|state: &mut State, tx| state.send(tx))
-        .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::send))
+        .disabled(!can_send);
+        if can_send {
+            send = send
+                .press(p.surface.alpha(0.16))
+                .on_press_tx(|state: &mut State, tx| state.send(tx))
+                .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::send));
+        }
+        send
     };
     col()
         .key("rune-composer")
@@ -428,48 +434,51 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
             let show_page = marker != Some('/') && "current page".contains(&query);
             let mut rows = col().key("rune-source-rows").w_full();
             if show_page {
-                rows = rows.child(
-                    row()
-                        .key("rune-current-page")
-                        .w_full()
-                        .h(36.0)
-                        .gap(10.0)
-                        .px(8.0)
-                        .center_y()
-                        .radius(6.0)
-                        .fill(if state.source_engaged {
-                            p.hover
-                        } else {
-                            p.surface
-                        })
-                        .hover(p.hover)
+                let disabled = state.capture_disabled();
+                let mut page = row()
+                    .key("rune-current-page")
+                    .w_full()
+                    .h(36.0)
+                    .gap(10.0)
+                    .px(8.0)
+                    .center_y()
+                    .radius(6.0)
+                    .fill(if state.source_engaged {
+                        p.hover
+                    } else {
+                        p.surface
+                    })
+                    .hover(p.hover)
+                    .focus_highlight(p.hover)
+                    .child(
+                        row()
+                            .size(22.0, 22.0)
+                            .center()
+                            .child(::rune::el::icon(&GLOBE, 15.0).color(p.secondary)),
+                    )
+                    .child(
+                        text("Current page")
+                            .font(TextStyle::new(12.5, 500.0))
+                            .color(p.ink)
+                            .truncate(),
+                    )
+                    .child(
+                        text("Use the page you are viewing")
+                            .grow(1.0)
+                            .font(TextStyle::new(12.0, 400.0))
+                            .color(p.muted)
+                            .truncate(),
+                    )
+                    .focusable(true)
+                    .disabled(disabled)
+                    .role("button")
+                    .label("Current page, Use the page you are viewing");
+                if !disabled {
+                    page = page
                         .press(p.strong)
-                        .focus_highlight(p.hover)
-                        .child(
-                            row()
-                                .size(22.0, 22.0)
-                                .center()
-                                .child(::rune::el::icon(&GLOBE, 15.0).color(p.secondary)),
-                        )
-                        .child(
-                            text("Current page")
-                                .font(TextStyle::new(12.5, 500.0))
-                                .color(p.ink)
-                                .truncate(),
-                        )
-                        .child(
-                            text("Use the page you are viewing")
-                                .grow(1.0)
-                                .font(TextStyle::new(12.0, 400.0))
-                                .color(p.muted)
-                                .truncate(),
-                        )
-                        .focusable(true)
-                        .disabled(state.capture_disabled())
-                        .role("button")
-                        .label("Current page, Use the page you are viewing")
-                        .on_press_tx(|state: &mut State, tx| capture(state, tx)),
-                );
+                        .on_press_tx(|state: &mut State, tx| capture(state, tx));
+                }
+                rows = rows.child(page);
             }
             if marker != Some('/') && query.is_empty() {
                 rows = rows.child(
@@ -557,46 +566,52 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                     .into_iter()
                     .fold(col().key("rune-model-rows").w_full(), |rows, choice| {
                         let active = choice.value == state.selection;
-                        rows.child(
-                            row()
-                                .key(format!("model:{}", choice.value))
-                                .w_full()
-                                .h(30.0)
-                                .gap(8.0)
-                                .px(8.0)
-                                .center_y()
-                                .radius(6.0)
-                                .hover(p.hover)
-                                .press(p.strong)
-                                .focus_highlight(p.hover)
-                                .child(
-                                    text(choice.label.clone())
-                                        .grow(1.0)
-                                        .font(TextStyle::new(12.5, 500.0))
-                                        .color(if choice.enabled { p.ink } else { p.muted })
-                                        .truncate(),
-                                )
-                                .child(if choice.enabled {
-                                    text("")
-                                } else {
-                                    text("Unavailable")
-                                        .font(TextStyle::new(11.0, 400.0))
-                                        .color(p.muted)
-                                })
-                                .child(if active {
-                                    ::rune::el::icon(&CHECK, 13.0).color(p.ink)
-                                } else {
-                                    text("").size(13.0, 13.0)
-                                })
-                                .focusable(true)
-                                .disabled(!choice.enabled || state.running())
-                                .checked(active)
-                                .role("menuitemradio")
-                                .label(choice.label.clone())
-                                .on_press_tx(move |state: &mut State, tx| {
-                                    state.select(choice.value.clone(), tx)
-                                }),
-                        )
+                        let disabled = !choice.enabled || state.running();
+                        let mut model = row()
+                            .key(format!("model:{}", choice.value))
+                            .w_full()
+                            .h(30.0)
+                            .gap(8.0)
+                            .px(8.0)
+                            .center_y()
+                            .radius(6.0)
+                            .hover(p.hover)
+                            .focus_highlight(p.hover)
+                            .child(
+                                text(choice.label.clone())
+                                    .grow(1.0)
+                                    .font(TextStyle::new(12.5, 500.0))
+                                    .color(if choice.enabled { p.ink } else { p.muted })
+                                    .truncate(),
+                            )
+                            .child(if choice.enabled {
+                                text("")
+                            } else {
+                                text("Unavailable")
+                                    .font(TextStyle::new(11.0, 400.0))
+                                    .color(p.muted)
+                            })
+                            .child(if active {
+                                ::rune::el::icon(&CHECK, 13.0).color(p.ink)
+                            } else {
+                                text("").size(13.0, 13.0)
+                            })
+                            .focusable(true)
+                            .disabled(disabled)
+                            .checked(active)
+                            .role("menuitemradio")
+                            .label(choice.label.clone());
+                        if !disabled {
+                            model =
+                                model
+                                    .press(p.strong)
+                                    .on_press_tx(move |state: &mut State, tx| {
+                                        if !state.running() {
+                                            state.select(choice.value.clone(), tx);
+                                        }
+                                    });
+                        }
+                        rows.child(model)
                     });
             let mut menu = col()
                 .key("rune-model-menu")
@@ -633,40 +648,47 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                 let mode_rows = modes.into_iter().fold(
                     col().key("rune-mode-rows").w_full(),
                     |rows, (mode, label)| {
-                        rows.child(
-                            row()
-                                .key(label)
-                                .w_full()
-                                .h(30.0)
-                                .px(8.0)
-                                .center_y()
-                                .radius(6.0)
-                                .hover(p.hover)
-                                .press(p.strong)
-                                .focus_highlight(p.hover)
-                                .child(
-                                    text(label)
-                                        .grow(1.0)
-                                        .font(TextStyle::new(12.5, 500.0))
-                                        .color(p.ink),
-                                )
-                                .child(if state.mode == mode {
-                                    ::rune::el::icon(&CHECK, 13.0).color(p.ink)
-                                } else {
-                                    text("").size(13.0, 13.0)
-                                })
-                                .focusable(true)
-                                .disabled(state.capture_disabled())
-                                .checked(state.mode == mode)
-                                .role("menuitemradio")
-                                .label(label)
-                                .on_press_tx(move |state: &mut State, _| {
+                        let disabled = state.capture_disabled();
+                        let mut mode_row = row()
+                            .key(label)
+                            .w_full()
+                            .h(30.0)
+                            .px(8.0)
+                            .center_y()
+                            .radius(6.0)
+                            .hover(p.hover)
+                            .focus_highlight(p.hover)
+                            .child(
+                                text(label)
+                                    .grow(1.0)
+                                    .font(TextStyle::new(12.5, 500.0))
+                                    .color(p.ink),
+                            )
+                            .child(if state.mode == mode {
+                                ::rune::el::icon(&CHECK, 13.0).color(p.ink)
+                            } else {
+                                text("").size(13.0, 13.0)
+                            })
+                            .focusable(true)
+                            .disabled(disabled)
+                            .checked(state.mode == mode)
+                            .role("menuitemradio")
+                            .label(label);
+                        if !disabled {
+                            mode_row = mode_row.press(p.strong).on_press_tx(
+                                move |state: &mut State, _| {
+                                    if state.capture_disabled() || !supports_plan(&state.selection)
+                                    {
+                                        return;
+                                    }
                                     state.mode = mode;
                                     state.menu = None;
                                     state.source_engaged = false;
                                     state.draft.focused = true;
-                                }),
-                        )
+                                },
+                            );
+                        }
+                        rows.child(mode_row)
                     },
                 );
                 menu = menu.child(mode_rows.role("group").label("Codex mode"));
@@ -695,6 +717,24 @@ mod tests {
         }
         let mut rt = Runtime::new(State::default(), tree, (640.0, 300.0), Env::default());
         rt.set_tab_visits_controls(true);
+        rt.frame(0.0);
+        let send = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("rune-send"))
+            .unwrap();
+        let [x, y, w, h] = send.rect;
+        rt.pointer_down(x + w / 2.0, y + h / 2.0);
+        rt.frame(0.0);
+        assert_eq!(
+            rt.elements()
+                .into_iter()
+                .find(|e| e.key == send.key)
+                .unwrap()
+                .press,
+            0.0
+        );
+        rt.pointer_up(x + w / 2.0, y + h / 2.0);
         rt.frame(0.0);
         let focused = |rt: &Runtime<State>| {
             rt.elements()
