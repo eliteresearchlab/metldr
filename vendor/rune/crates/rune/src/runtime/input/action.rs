@@ -273,7 +273,9 @@ impl<S: 'static> Runtime<S> {
         let n = &self.nodes[i];
         if !n.a11y.native_activation || n.a11y.disabled || n.inert
             || n.key.as_deref() != Some(key) || !self.can_focus(i) { return false; }
-        self.set_focus(Some(path.to_owned()), true)
+        self.set_focus(Some(path.to_owned()), true);
+        self.dirty = true;
+        true
     }
 
     #[cfg(target_arch = "wasm32")]
