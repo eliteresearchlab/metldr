@@ -312,9 +312,7 @@ impl Conversations {
         };
         let retry = matches!(*core.owner.borrow(), Owner::Navigating(_));
         let available = !self.busy && !state.running() && !retry;
-        let mut out = col()
-            .w_full()
-            .gap(8.0)
+        let mut out = chat_list()
             .child(typography.text("Saved chats").role("heading"))
             .child(button(
                 typography,
@@ -411,6 +409,10 @@ impl Conversations {
             |state, _| action(state, Action::LatestArchive),
         ))
     }
+}
+
+fn chat_list() -> El {
+    col().w_full().gap(8.0).instant_changes()
 }
 
 fn activate(key: &::rune::KeyEvent, tx: &mut Tx, action: impl FnOnce(&mut Tx)) -> bool {
@@ -521,6 +523,27 @@ fn close_tab(state: &mut State, id: &str, tx: &mut Tx) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_chat_rows_do_not_move_after_the_list_updates() {
+        fn view(loading: &bool, _: &mut Cx<bool>) -> El {
+            let mut list = chat_list();
+            if *loading {
+                list = list.child(::rune::text("Loading chats").h(30.0));
+            }
+            list.child(::rune::text("North report").key("saved-chat"))
+        }
+        let mut rt = ::rune::Runtime::new(true, view, (360.0, 300.0), ::rune::Env::default());
+        rt.frame(0.0);
+        rt.update(|loading, _| *loading = false);
+        rt.frame(0.0);
+        let row = rt
+            .elements()
+            .into_iter()
+            .find(|el| el.key.as_deref() == Some("saved-chat"))
+            .unwrap();
+        assert_eq!(row.rect, row.target);
+    }
 
     #[test]
     fn opening_switching_closing_and_starting_a_chat_preserves_other_tabs() {
