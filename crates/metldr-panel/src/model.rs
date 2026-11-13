@@ -458,6 +458,30 @@ pub(crate) enum BrowserActionIntent {
     SetNativeControl {
         control: Control,
     },
+    /// A consented secret entry (B3.5). The view never carries the secret itself.
+    EnterSecret {
+        field_id: String,
+        field_label: String,
+        secret: SecretKind,
+        reference: String,
+        expires_at_ms: u64,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SecretKind {
+    Password,
+    OneTimeCode,
+}
+
+impl SecretKind {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Password => "Password",
+            Self::OneTimeCode => "One-time code",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -583,6 +607,12 @@ struct WireBrowserAction {
     scroll: Option<Scroll>,
     #[serde(default, deserialize_with = "present")]
     control: Option<Control>,
+    #[serde(default, deserialize_with = "present")]
+    secret: Option<SecretKind>,
+    #[serde(default, deserialize_with = "present")]
+    reference: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    expires_at_ms: Option<u64>,
     phase: BrowserActionPhase,
     #[serde(default, deserialize_with = "Option::deserialize")]
     outcome: Option<BrowserActionOutcome>,
@@ -610,7 +640,39 @@ impl<'de> Deserialize<'de> for BrowserActionView {
         let selection_member = wire.selection.is_some();
         let scroll_member = wire.scroll.is_some();
         let control_member = wire.control.is_some();
+        let secret_members =
+            wire.secret.is_some() || wire.reference.is_some() || wire.expires_at_ms.is_some();
+        if secret_members != (wire.kind == "enter_secret") {
+            return Err(serde::de::Error::custom("invalid browser action intent"));
+        }
         let intent = match wire.kind.as_str() {
+            "enter_secret"
+                if wire.previous_value.is_none()
+                    && wire.value.is_none()
+                    && !button_members
+                    && wire.destination.is_none()
+                    && !selection_member
+                    && !scroll_member
+                    && !control_member =>
+            {
+                BrowserActionIntent::EnterSecret {
+                    field_id: wire
+                        .field_id
+                        .ok_or_else(|| serde::de::Error::missing_field("field_id"))?,
+                    field_label: wire
+                        .field_label
+                        .ok_or_else(|| serde::de::Error::missing_field("field_label"))?,
+                    secret: wire
+                        .secret
+                        .ok_or_else(|| serde::de::Error::missing_field("secret"))?,
+                    reference: wire
+                        .reference
+                        .ok_or_else(|| serde::de::Error::missing_field("reference"))?,
+                    expires_at_ms: wire
+                        .expires_at_ms
+                        .ok_or_else(|| serde::de::Error::missing_field("expires_at_ms"))?,
+                }
+            }
             "field"
                 if field_members
                     && !button_members
@@ -762,6 +824,7 @@ pub(crate) enum BrowserActionOutcome {
     SelectionObserved,
     ScrollObserved,
     ControlObserved,
+    SecretEntered,
     Prevented,
     Uncertain,
 }
@@ -774,6 +837,7 @@ impl std::fmt::Display for BrowserActionOutcome {
             Self::SelectionObserved => "selection_observed",
             Self::ScrollObserved => "scroll_observed",
             Self::ControlObserved => "control_observed",
+            Self::SecretEntered => "secret_entered",
             Self::Prevented => "prevented",
             Self::Uncertain => "uncertain",
         })
@@ -2116,24 +2180,31 @@ impl PageView {
 }
 
 fn valid_browser_intent(intent: &BrowserActionIntent) -> bool {
+    let field = |id: &str, label: &str| {
+        valid_control_id(id)
+            && !label.is_empty()
+            && label.len() <= 128
+            && !label.chars().any(char::is_control)
+    };
     match intent {
+        BrowserActionIntent::EnterSecret {
+            field_id,
+            field_label,
+            reference,
+            expires_at_ms,
+            ..
+        } => {
+            field(field_id, field_label)
+                && reference.len() == 32
+                && reference.bytes().all(|b| b.is_ascii_hexdigit())
+                && *expires_at_ms > 0
+        }
         BrowserActionIntent::Field {
             field_id,
             field_label,
             previous_value,
             value,
-        } => {
-            !field_id.is_empty()
-                && field_id.len() <= 64
-                && field_id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-                && !field_label.is_empty()
-                && field_label.len() <= 128
-                && !field_label.chars().any(char::is_control)
-                && value.len() <= 1_024
-                && previous_value.len() <= 1_024
-        }
+        } => field(field_id, field_label) && value.len() <= 1_024 && previous_value.len() <= 1_024,
         BrowserActionIntent::Navigate { destination } => {
             !destination.is_empty()
                 && destination.len() <= 2_048
@@ -2142,16 +2213,7 @@ fn valid_browser_intent(intent: &BrowserActionIntent) -> bool {
         BrowserActionIntent::ActivateButton {
             button_id,
             button_label,
-        } => {
-            !button_id.is_empty()
-                && button_id.len() <= 64
-                && button_id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-                && !button_label.trim().is_empty()
-                && button_label.len() <= 128
-                && !button_label.chars().any(char::is_control)
-        }
+        } => field(button_id, button_label) && !button_label.trim().is_empty(),
         BrowserActionIntent::SelectOption { selection } => selection.valid(),
         BrowserActionIntent::Scroll { scroll } => scroll.valid(),
         BrowserActionIntent::SetNativeControl { control } => control.valid(),

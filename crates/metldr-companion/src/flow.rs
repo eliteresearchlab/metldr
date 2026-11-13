@@ -512,6 +512,17 @@ impl Owner {
                 self.browser_decide(&action, revision, approve)?;
                 self.reply_view(Some(id), "view", true)
             }
+            ConversationAction::SecretEntry {
+                action,
+                revision,
+                secret,
+            } => {
+                self.require_conversation(scope)?;
+                self.record_history
+                    .edit(|edit| edit.current_action_execution(scope, &action).map(|_| ()))?;
+                self.secret_enter(&action, revision, secret)?;
+                self.reply_view(Some(id), "view", true)
+            }
             ConversationAction::PlanReply {
                 run,
                 revision,

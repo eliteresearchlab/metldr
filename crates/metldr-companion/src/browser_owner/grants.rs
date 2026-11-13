@@ -48,6 +48,7 @@ impl SessionGrant {
 }
 
 /// Tier 1 kinds from decision 09. Anything that can submit, send, delete or buy is Tier 2.
+/// A secret entry always needs its own consent, so no grant covers it.
 pub(crate) fn tier_one(intent: &Intent) -> bool {
     match intent {
         Intent::Field { .. }
@@ -55,7 +56,7 @@ pub(crate) fn tier_one(intent: &Intent) -> bool {
         | Intent::SelectOption { .. }
         | Intent::Scroll { .. }
         | Intent::SetNativeControl { .. } => true,
-        Intent::ActivateButton { .. } => false,
+        Intent::ActivateButton { .. } | Intent::Secret { .. } => false,
     }
 }
 
@@ -109,6 +110,17 @@ mod tests {
             },
         );
         assert!(!grant.covers(&button, 2, now));
+        let secret = proposal(
+            "session-1",
+            Intent::Secret {
+                field_id: "field_1".into(),
+                field_label: "Password".into(),
+                secret: crate::browser_action::SecretKind::Password,
+                reference: "0".repeat(32),
+                expires_at_ms: 1,
+            },
+        );
+        assert!(!grant.covers(&secret, 2, now), "a secret needs its own consent");
         assert!(!grant.covers(&step, 2, now + GRANT_TTL));
     }
 }

@@ -155,6 +155,20 @@ impl Transport {
         }
     }
 
+    /// Emits `value` with its sentinel replaced by `secret`, wiping the frame afterwards.
+    pub(crate) fn emit_secret(&mut self, value: &Value, secret: &str) -> Result<()> {
+        let frame = crate::wire::secret_frame(value, secret)?;
+        #[cfg(test)]
+        if let Some(frames) = &self.captured_frames {
+            return crate::wire::write_sealed(&mut *frames.lock().unwrap(), &frame);
+        }
+        match &mut self.mode {
+            Mode::Stdio => crate::wire::write_sealed(&mut std::io::stdout().lock(), &frame),
+            #[cfg(unix)]
+            Mode::Socket(socket) => socket.emit_sealed(&frame),
+        }
+    }
+
     pub(crate) fn finish(&mut self) -> Result<()> {
         #[cfg(unix)]
         if let Mode::Socket(socket) = &mut self.mode {

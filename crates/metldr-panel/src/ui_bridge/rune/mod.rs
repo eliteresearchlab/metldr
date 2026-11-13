@@ -15,6 +15,7 @@ mod messages;
 mod pi_replies;
 mod preferences;
 mod replies;
+mod secrets;
 mod settings;
 mod sources;
 
@@ -133,6 +134,7 @@ struct State {
     focus_tab_after_titles: Option<String>,
     activities: Activities,
     browser_receipts_open: bool,
+    secret: secrets::SecretEntry,
     answers: answers::Answers,
     thread_rect: ::rune::Live<[f32; 4]>,
     proposed_followup: Option<answers::Followup>,
@@ -163,6 +165,7 @@ impl Default for State {
             focus_tab_after_titles: None,
             activities: Activities::default(),
             browser_receipts_open: false,
+            secret: secrets::SecretEntry::default(),
             answers: answers::Answers::default(),
             thread_rect: ::rune::Live::new([0.0; 4]),
             proposed_followup: None,
@@ -868,6 +871,7 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
     replies::sync(state);
     pi_replies::sync(state);
     corrections::sync(state);
+    secrets::sync(state);
     if let Some(core) = state.core().cloned() {
         state.settings.sync(&core);
         state.sources.sync(&core, &updates);
@@ -1647,7 +1651,11 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     }
     let actions = browser.actions();
     for action in actions.iter().filter(|action| !action.display.receipt) {
-        thread = thread.child(browser_action_view(action, typography));
+        thread = thread.child(if secrets::pending(action) {
+            secrets::card(action, state, typography)
+        } else {
+            browser_action_view(action, typography)
+        });
     }
     let receipts: Vec<_> = actions
         .iter()

@@ -193,6 +193,7 @@ impl Actor {
                     }
                 }
             }
+            Work::WriteSecret { action, job } => self.secret_written(action, job, &value),
             Work::Write { action, job } => {
                 let written =
                     evaluation_value(&value).and_then(|v| Ok(serde_json::from_value::<bool>(v)?));
@@ -329,6 +330,16 @@ impl Actor {
                 job,
                 Outcome::Uncertain {
                     reason: "selection could not be observed after dispatch".into(),
+                },
+            ),
+            Work::WriteSecret { job, .. } => self.value(
+                job,
+                if prevented {
+                    Outcome::Prevented { reason }
+                } else {
+                    Outcome::Uncertain {
+                        reason: "secret entry result was lost".into(),
+                    }
                 },
             ),
             Work::Write { job, .. } => self.value(

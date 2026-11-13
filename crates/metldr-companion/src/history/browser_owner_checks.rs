@@ -1008,3 +1008,182 @@ fn session_grant_auto_approves_bound_tier_one_steps_only() -> crate::Result<()> 
     assert!(!owner.session_grants.contains_key(&run));
     Ok(())
 }
+
+fn secret_intent(reference: &str) -> Intent {
+    Intent::Secret {
+        field_id: "owned-password".into(),
+        field_label: "Password".into(),
+        secret: crate::browser_action::SecretKind::Password,
+        reference: reference.into(),
+        expires_at_ms: crate::browser_owner::now_ms() + crate::browser_action::SECRET_TTL_MS,
+    }
+}
+
+fn secret_entry(owner: &mut Owner, id: &str, action: &str, secret: &str) -> crate::Result<()> {
+    session_command(
+        owner,
+        id,
+        crate::model::ConversationAction::SecretEntry {
+            action: action.into(),
+            revision: 1,
+            secret: serde_json::from_value(serde_json::json!(secret))?,
+        },
+    )
+}
+
+#[test]
+fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Result<()> {
+    use crate::model::ConversationAction::GrantSession;
+    const SECRET: &str = "synthetic-Secret-7f3a";
+    let directory = Directory::new()?;
+    let (mut owner, run) = make_owner_without_plan(&directory)?;
+    let (transport, frames) = Transport::captured();
+    owner.transport = transport;
+    let plan = propose_plan(&mut owner, &run)?;
+    panel_plan_reply(&mut owner, &run, plan.revision, "panel-approve")?;
+    session_command(
+        &mut owner,
+        "panel-grant",
+        GrantSession {
+            run: run.clone(),
+            revision: plan.revision,
+        },
+    )?;
+    let binding = Binding {
+        tab: 17,
+        document: "document-1".into(),
+        target: "target-1".into(),
+        frame: "frame-1".into(),
+        session: "session-1".into(),
+        unique_context: "context-1".into(),
+        grant_revision: 1,
+    };
+    let url = "http://127.0.0.1:4567/article";
+    // Bind the session grant with one approved Tier 1 step.
+    approve_dispatch_settle(
+        &mut owner,
+        proposal(&run, "grant-1", &binding, url, field()),
+        Outcome::Verified {
+            observed: "new@example.invalid".into(),
+        },
+    )?;
+    // An approved plan and a bound grant still leave the secret waiting for the user.
+    let reference = "0123456789abcdef0123456789abcdef";
+    let reply = propose_only(
+        &mut owner,
+        proposal(&run, "secret-1", &binding, url, secret_intent(reference)),
+    )?;
+    let action = owner.browser_approval.as_ref().unwrap().action.clone();
+    assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(owner.browser_decide(&action, 1, true).is_err());
+    let (slot, _events) = crate::browser_io::Slot::new(17);
+    owner.operations.get_mut(&run).unwrap().browser_io = Some(Box::new(slot));
+    secret_entry(&mut owner, "panel-secret", &action, SECRET)?;
+    let approved = reply.recv()?.map_err(std::io::Error::other)?;
+    assert_eq!(approved.state, Phase::Approved);
+    let (ack, reply) = mpsc::sync_channel(1);
+    owner.browser_event(Event::Dispatch {
+        action: action.clone(),
+        revision: approved.revision,
+        ack,
+    })?;
+    let dispatched = reply.recv()?.map_err(std::io::Error::other)?;
+    frames.lock().unwrap().clear();
+    let (ack, _rpc) = tokio::sync::oneshot::channel();
+    owner.browser_io_call(crate::browser_io::Call {
+        run: run.clone(),
+        operation: crate::browser_io::Operation::EnterSecret {
+            action: action.clone(),
+            revision: dispatched.revision,
+            binding: binding.clone(),
+            url: url.into(),
+            session: Some("session-1".into()),
+            params: serde_json::json!({"functionDeclaration":"function(root, secret) {}","arguments":[{"objectId":"root-1"}],"returnByValue":true}),
+        },
+        ack,
+    })?;
+    let sent = String::from_utf8(frames.lock().unwrap().clone())?;
+    assert!(sent.contains(&format!(r#"{{"value":"{SECRET}"}}"#)), "{sent}");
+    assert!(sent.contains(r#""op":"command""#) && !sent.contains("metldr-secret"));
+    // The secret is single use: a replayed entry finds nothing to send.
+    let (ack, rpc) = tokio::sync::oneshot::channel();
+    owner.browser_io_call(crate::browser_io::Call {
+        run: run.clone(),
+        operation: crate::browser_io::Operation::EnterSecret {
+            action: action.clone(),
+            revision: dispatched.revision,
+            binding: binding.clone(),
+            url: url.into(),
+            session: Some("session-1".into()),
+            params: serde_json::json!({"arguments":[{"objectId":"root-1"}]}),
+        },
+        ack,
+    })?;
+    assert!(rpc.blocking_recv()?.is_err());
+    let (ack, reply) = mpsc::sync_channel(1);
+    owner.browser_event(Event::Observed {
+        action: action.clone(),
+        revision: dispatched.revision,
+        outcome: Outcome::SecretEntered {
+            reference: reference.into(),
+        },
+        ack,
+    })?;
+    let settled = reply.recv()?.map_err(std::io::Error::other)?;
+    let Phase::Settled { outcome } = settled.state else {
+        panic!("secret entry did not settle");
+    };
+    let model_result = serde_json::to_string(&outcome)?;
+    assert_eq!(
+        model_result,
+        format!(r#"{{"kind":"secret_entered","reference":"{reference}"}}"#)
+    );
+    drop(owner);
+    let saved = fs::read(directory.0.join("history.redb"))?;
+    assert!(
+        !saved.windows(SECRET.len()).any(|w| w == SECRET.as_bytes()),
+        "history holds the secret"
+    );
+    Ok(())
+}
+
+#[test]
+fn stop_prevents_a_pending_secret_entry_and_drops_a_held_secret() -> crate::Result<()> {
+    let directory = Directory::new()?;
+    let (mut owner, run) = make_owner(&directory)?;
+    let binding = Binding {
+        tab: 17,
+        document: "document-1".into(),
+        target: "target-1".into(),
+        frame: "frame-1".into(),
+        session: "session-1".into(),
+        unique_context: "context-1".into(),
+        grant_revision: 1,
+    };
+    let url = "http://127.0.0.1:4567/article";
+    let (slot, _events) = crate::browser_io::Slot::new(17);
+    owner.operations.get_mut(&run).unwrap().browser_io = Some(Box::new(slot));
+    let reply = propose_only(
+        &mut owner,
+        proposal(&run, "secret-1", &binding, url, secret_intent(&"a".repeat(32))),
+    )?;
+    owner.cancel_browser_approval(&run);
+    assert!(reply.recv()?.is_err(), "a stopped entry must not be approved");
+    assert!(owner.browser_approval.is_none());
+    // An entry approved before Stop loses its secret before dispatch.
+    owner.record_history.edit(|edit| {
+        let execution = edit.execution(&run)?;
+        edit.prevent_browser(&execution, &run, "browser action stopped before dispatch")
+    })?;
+    let reply = propose_only(
+        &mut owner,
+        proposal(&run, "secret-2", &binding, url, secret_intent(&"b".repeat(32))),
+    )?;
+    let action = owner.browser_approval.as_ref().unwrap().action.clone();
+    secret_entry(&mut owner, "panel-secret", &action, "synthetic-held")?;
+    reply.recv()?.map_err(std::io::Error::other)?;
+    owner.cancel_browser_approval(&run);
+    let slot = owner.operations.get_mut(&run).unwrap().browser_io.as_mut().unwrap();
+    assert!(slot.take_secret(None).is_none());
+    Ok(())
+}

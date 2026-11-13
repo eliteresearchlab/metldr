@@ -296,6 +296,12 @@ pub(super) enum ConversationAction {
         revision: u64,
         approve: bool,
     },
+    /// Enters the secret the user typed for one pending secret entry (B3.5).
+    SecretEntry {
+        action: String,
+        revision: u64,
+        secret: crate::browser_owner::SecretText,
+    },
     PlanReply {
         run: String,
         revision: u32,

@@ -34,6 +34,7 @@ impl Owner {
             | Action::Unwatch { .. }
             | Action::Stop { .. }
             | Action::BrowserDecision { .. }
+            | Action::SecretEntry { .. }
             | Action::PlanReply { .. }
             | Action::GrantSession { .. }
             | Action::RevokeSession { .. }

@@ -28,6 +28,49 @@ pub(crate) enum Intent {
     SetNativeControl {
         control: Control,
     },
+    /// One consented secret entry. The record keeps an opaque reference, never the secret.
+    Secret {
+        field_id: String,
+        field_label: String,
+        secret: SecretKind,
+        reference: String,
+        expires_at_ms: u64,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SecretKind {
+    Password,
+    OneTimeCode,
+}
+
+impl SecretKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Password => "password",
+            Self::OneTimeCode => "one_time_code",
+        }
+    }
+}
+
+impl From<metldr_browser_tools::SecretKind> for SecretKind {
+    fn from(kind: metldr_browser_tools::SecretKind) -> Self {
+        match kind {
+            metldr_browser_tools::SecretKind::Password => Self::Password,
+            metldr_browser_tools::SecretKind::OneTimeCode => Self::OneTimeCode,
+        }
+    }
+}
+
+/// How long the user has to type and enter a requested secret.
+pub(crate) const SECRET_TTL_MS: u64 = 120_000;
+
+pub(crate) fn valid_reference(reference: &str) -> bool {
+    reference.len() == 32
+        && reference
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 #[derive(Deserialize)]
@@ -99,6 +142,19 @@ impl Intent {
             Self::SelectOption { selection } if selection.valid() => Ok(()),
             Self::Scroll { scroll } if scroll.valid() => Ok(()),
             Self::SetNativeControl { control } if control.valid() => Ok(()),
+            Self::Secret {
+                field_id,
+                field_label,
+                reference,
+                expires_at_ms,
+                ..
+            } if valid_handle(field_id)
+                && bounded(field_label, 128)
+                && valid_reference(reference)
+                && *expires_at_ms > 0 =>
+            {
+                Ok(())
+            }
             _ => Err("invalid browser action intent".into()),
         }
     }

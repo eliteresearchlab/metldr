@@ -152,18 +152,29 @@ impl SocketTransport {
     }
 
     pub(super) fn emit(&mut self, value: &Value) -> Result<()> {
+        if self.active.is_none() || self.stream.is_none() {
+            return Ok(());
+        }
+        match crate::wire::frame(value) {
+            Ok(frame) => self.emit_sealed(&frame),
+            Err(_) => {
+                if let Some(stream) = &self.stream {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Sends a frame sealed by `wire` in one write.
+    pub(super) fn emit_sealed(&mut self, frame: &[u8]) -> Result<()> {
         if self.active.is_none() {
             return Ok(());
         }
         let Some(stream) = self.stream.as_mut() else {
             return Ok(());
         };
-        let bytes = serde_json::to_vec(value)?;
-        if bytes.is_empty() || bytes.len() > FRAME_MAX {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
-            return Ok(());
-        }
-        if write_raw_deadline(stream, &bytes, Instant::now() + OUTPUT_TIMEOUT).is_err() {
+        if write_all_deadline(stream, frame, Instant::now() + OUTPUT_TIMEOUT).is_err() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
         Ok(())
@@ -236,15 +247,6 @@ fn read_client(mut stream: UnixStream, epoch: u64, tx: SyncSender<Event>) {
     })();
     let _ = result;
     let _ = send(&tx, epoch, SocketInput::Closed);
-}
-
-fn write_raw_deadline(stream: &mut UnixStream, bytes: &[u8], deadline: Instant) -> Result<()> {
-    if bytes.is_empty() || bytes.len() > FRAME_MAX {
-        return Err("outgoing native frame exceeds bound".into());
-    }
-    let header = (bytes.len() as u32).to_ne_bytes();
-    write_all_deadline(stream, &header, deadline)?;
-    write_all_deadline(stream, bytes, deadline)
 }
 
 fn write_all_deadline(

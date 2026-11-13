@@ -106,6 +106,7 @@ struct Log {
     entries: VecDeque<Entry>,
     bytes: usize,
     evicted: usize,
+    paused: bool,
 }
 
 impl Log {
@@ -121,10 +122,16 @@ impl Log {
         }
     }
 
+    /// Whether output from `session` is recorded now. Checked before any redaction work.
+    fn records(&self, session: Option<&str>) -> bool {
+        !self.paused && self.armed.iter().any(|armed| armed.as_deref() == session)
+    }
+
     fn clear(&mut self) {
         self.entries.clear();
         self.bytes = 0;
         self.evicted = 0;
+        self.paused = false;
         self.epoch = self.epoch.wrapping_add(1);
     }
 }
@@ -175,13 +182,26 @@ impl PageLogs {
     pub(super) fn snapshot(&self) -> Result<Value> {
         let log = self.0.lock().map_err(|_| "page log state unavailable")?;
         let entries = serde_json::to_value(&log.entries)?;
-        Ok(json!({
+        let mut result = json!({
             "kind": "page_logs",
             "scope": "local_observation",
             "untrusted": true,
             "evicted": log.evicted,
             "entries": entries,
-        }))
+        });
+        if log.paused {
+            result["capture"] = json!("capture paused after secret entry");
+        }
+        Ok(result)
+    }
+
+    pub(super) fn pause_after_secret(&self) {
+        if let Ok(mut log) = self.0.lock() {
+            log.entries.clear();
+            log.bytes = 0;
+            log.evicted = 0;
+            log.paused = true;
+        }
     }
 
     #[cfg(test)]
@@ -190,6 +210,9 @@ impl PageLogs {
     }
 
     fn console_for(&self, session: Option<&str>, params: &Value) {
+        if !self.0.lock().is_ok_and(|log| log.records(session)) {
+            return;
+        }
         let args = params["args"]
             .as_array()
             .map(Vec::as_slice)
@@ -268,7 +291,7 @@ impl PageLogs {
         let Ok(mut log) = self.0.lock() else {
             return;
         };
-        if !log.armed.contains(&session.map(str::to_owned)) {
+        if !log.records(session) {
             return;
         }
         let entry = Entry {
@@ -363,6 +386,23 @@ pub(super) fn bounded(text: &str, limit: usize) -> String {
 #[cfg(test)]
 mod checks {
     use super::*;
+
+    #[test]
+    fn secret_pause_discards_logs_until_navigation() {
+        let logs = PageLogs::default();
+        logs.arm();
+        logs.console(&json!({"args":[{"value":"before"}]}));
+        logs.pause_after_secret();
+        logs.console(&json!({"args":[{"value":"synthetic secret"}]}));
+        let paused = logs.snapshot().unwrap();
+        assert_eq!(paused["capture"], "capture paused after secret entry");
+        assert_eq!(paused["entries"], json!([]));
+        logs.clear();
+        logs.console(&json!({"args":[{"value":"after"}]}));
+        let resumed = logs.snapshot().unwrap();
+        assert!(resumed.get("capture").is_none());
+        assert_eq!(resumed["entries"].as_array().unwrap().len(), 1);
+    }
 
     fn event(session: Option<&str>, method: &str, params: Value) -> RawEvent {
         RawEvent {

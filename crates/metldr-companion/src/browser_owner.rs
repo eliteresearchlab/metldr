@@ -9,7 +9,11 @@ type Reply = SyncSender<std::result::Result<Action, String>>;
 
 mod grants;
 mod review;
+mod secret;
 pub(crate) use grants::{GRANT_TTL, SessionGrant};
+pub(crate) use secret::{Held as HeldSecret, SecretText};
+#[cfg(test)]
+pub(crate) use secret::now_ms;
 pub(crate) use review::Budget;
 
 pub(super) enum Event {
@@ -81,6 +85,8 @@ pub(super) struct PendingApproval {
     pub ack: Reply,
     review: Option<review::Review>,
     dispatch_revision: Option<u64>,
+    /// Set for a secret entry: when its consent window closes, in Unix milliseconds.
+    secret_expires_ms: Option<u64>,
 }
 
 impl PendingApproval {
@@ -264,12 +270,19 @@ impl Owner {
                         Ok(())
                     }
                     Ok((action, true, review)) => {
+                        let secret_expires_ms = match &action.proposal.intent {
+                            crate::browser_action::Intent::Secret { expires_at_ms, .. } => {
+                                Some(*expires_at_ms)
+                            }
+                            _ => None,
+                        };
                         self.browser_approval = Some(PendingApproval {
                             run: action.proposal.run,
                             action: action.id,
                             ack,
                             review,
                             dispatch_revision: None,
+                            secret_expires_ms,
                         });
                         Ok(())
                     }
@@ -305,6 +318,7 @@ impl Owner {
                         ack,
                         review: None,
                         dispatch_revision: Some(revision),
+                        secret_expires_ms: None,
                     });
                     return Ok(());
                 }
@@ -326,6 +340,9 @@ impl Owner {
                         edit.settle_browser(execution, &action, revision, outcome)
                     })
                 })();
+                if let Ok(record) = &result {
+                    self.drop_secret(&record.proposal.run);
+                }
                 acknowledge(ack, result)
             }
         }
@@ -342,6 +359,9 @@ impl Owner {
             .as_ref()
             .filter(|p| p.action == action && p.dispatch_revision.is_none())
             .ok_or("browser action is not awaiting this approval")?;
+        if approve && pending.secret_expires_ms.is_some() {
+            return Err("type the secret to enter it".into());
+        }
         self.browser_operation(&pending.run)?;
         let run = pending.run.clone();
         let record = self.record_execution(&run, |edit, execution| {
@@ -358,6 +378,7 @@ impl Owner {
 
     pub(super) fn cancel_browser_approval(&mut self, run: &str) {
         self.session_grants.remove(run);
+        self.drop_secret(run);
         if self.plan_hold.as_ref().is_some_and(|p| p.run() == run) {
             if let Some(pending) = self.plan_hold.take() {
                 pending.reject("browser action stopped before dispatch");
