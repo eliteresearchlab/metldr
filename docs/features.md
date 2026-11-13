@@ -8,7 +8,7 @@ Read webpages and PDFs, summarize Gmail, draft replies, look up words and search
 
 The browser agent can read pages, navigate, click controls and fill fields. Approve browser changes, stop tasks and return to saved chats after a restart. An action with an uncertain result is not repeated automatically. Codex, OpenCode and Pi use their existing accounts and permissions. The current browser agent build needs the companion on Linux.
 
-Connect a provider through its API key to run browser tasks or ask about a saved page. The selected provider processes the content needed for the task. Keys stay with the companion, outside page scripts. Supported connections include Messages, Responses, Google Interactions and Chat Completions. A Chat Completions endpoint can also run without a key, with a response timeout from 5 to 600 seconds, and can be a local server over plain HTTP, such as Ollama at `http://127.0.0.1:11434/v1/chat/completions`.
+Connect a provider through its API key to run browser tasks or ask about a saved page. The selected provider processes the content needed for the task. Keys stay with the companion, outside page scripts. Supported connections include Messages, Responses, Google Interactions and Chat Completions. A Chat Completions endpoint can also run without a key, with a response timeout from 5 to 600 seconds, and can be a local server over plain HTTP, such as Ollama at `http://127.0.0.1:11434/v1/chat/completions`. Its settings fill in the endpoint for OpenAI, OpenRouter, Groq, DeepSeek, Mistral, Together, xAI or Ollama.
 
 ## Planned browser and conversation features
 

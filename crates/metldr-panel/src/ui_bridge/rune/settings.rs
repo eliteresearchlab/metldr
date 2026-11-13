@@ -309,6 +309,30 @@ impl Settings {
             .launch(Target::Provider(index), version, work, &updates);
     }
 
+    /// Fills the Chat Completions endpoint from a known provider; the user still saves.
+    fn chat_preset(state: &mut State, index: usize, expected_version: u64, preset: usize) {
+        let Some(core) = state.core().cloned() else {
+            return;
+        };
+        if !core.page.controls_ready() || core.page.settings_blocked() {
+            return;
+        }
+        let (Some(draft), Some((_, endpoint, keyless))) = (
+            state.settings.providers.get_mut(index),
+            crate::model::CHAT_PRESETS.get(preset),
+        ) else {
+            return;
+        };
+        if draft.version != expected_version {
+            return;
+        }
+        replace_if_changed(&mut draft.endpoint, endpoint);
+        draft.keyless = *keyless;
+        draft.key.clear();
+        draft.dirty = true;
+        draft.version = draft.version.wrapping_add(1);
+    }
+
     fn agent_action(state: &mut State, index: usize, expected_version: u64, save: bool) {
         let (Some(core), Some(updates)) = (state.core().cloned(), state.updates.clone()) else {
             return;
@@ -722,6 +746,18 @@ impl Settings {
                     palette,
                 ));
             if draft.protocol == ProviderProtocol::ChatCompletions {
+                let mut presets = ::rune::el::row().flex_wrap().gap(6.0);
+                for (index, &(name, _, _)) in crate::model::CHAT_PRESETS.iter().enumerate() {
+                    presets = presets.child(button(
+                        typography,
+                        name,
+                        format!("Use the {name} endpoint for {label}"),
+                        format!("settings-provider-{i}-preset-{index}"),
+                        enabled,
+                        move |state| Settings::chat_preset(state, i, version, index),
+                    ));
+                }
+                section = section.child(presets);
                 let keyless = draft.keyless;
                 section = section
                     .child(button(
