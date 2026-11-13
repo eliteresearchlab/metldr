@@ -8,7 +8,10 @@ import { recordReceipt, sourceDigest } from './answer-contract.mjs';
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 // Ordered longest first so the parallel pool below finishes as early as it can.
 const crates = [
-  { name: 'metldr-panel', module: 'metldr_panel', pkg: 'crates/metldr-panel/pkg', features: 'rune-ui' },
+  // The service worker, panel.html and the React chat load the plain panel; only rune-chat.html
+  // loads the Rune renderer, so it builds separately.
+  { name: 'metldr-panel', module: 'metldr_panel', pkg: 'crates/metldr-panel/pkg' },
+  { name: 'metldr-panel', variant: 'rune', module: 'metldr_panel', pkg: 'target/wasm/metldr-panel-rune/pkg', features: 'rune-ui' },
   { name: 'metldr-welcome', module: 'welcome_runtime', pkg: 'public/welcome/pkg' },
   { name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg' },
   { name: 'metldr-answer-codec', artifact: 'metldr_answer_codec', module: 'answer_codec', pkg: 'crates/metldr-answer-codec/pkg', features: 'guest' },
@@ -129,7 +132,7 @@ function cargoBuildArgs(crate) {
 }
 
 function wasmTargetDir(crate) {
-  return join(rootTargetDir, 'wasm', crate.name);
+  return join(rootTargetDir, 'wasm', crate.variant ? `${crate.name}-${crate.variant}` : crate.name);
 }
 
 const onInterrupt = () => cancel(Object.assign(new Error('Interrupted by SIGINT'), { exitCode: 130 }));
@@ -171,7 +174,9 @@ try {
       copyFileSync(join(repoRoot, 'crates/metldr-panel/pkg', name), join(destination, name));
     }
     rmSync(join(destination, 'snippets'), { recursive: true, force: true });
-    cpSync(join(repoRoot, 'crates/metldr-panel/pkg/snippets'), join(destination, 'snippets'), { recursive: true });
+    // The plain panel has no inline JS snippets; only the Rune renderer brings them.
+    const snippets = join(repoRoot, 'crates/metldr-panel/pkg/snippets');
+    if (statSync(snippets, { throwIfNoEntry: false })) cpSync(snippets, join(destination, 'snippets'), { recursive: true });
   }
   await runAsync('cargo', [
     isCheck ? 'check' : 'build', '--locked', '--release',
