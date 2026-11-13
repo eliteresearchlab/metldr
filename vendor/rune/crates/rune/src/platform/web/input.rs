@@ -351,40 +351,61 @@ impl<S: 'static> Running<S> {
     }
 
     fn native_raw(&mut self, event: &web_sys::Event, canvas: &web_sys::HtmlCanvasElement, window: &Arc<Window>) {
-        let Some(g) = self.input.getters.as_ref() else { return };
-        let Some(kind) = g.value(&g.kind, event).and_then(|v| v.as_string()) else { return };
-        if kind == "pointerdown" { self.input.candidate = None; }
+        let dropped = |kind: &str, guard: &str| {
+            let _ = canvas.set_attribute("data-rune-native-drop", &format!("{kind}:{guard}"));
+        };
+        let Some(g) = self.input.getters.as_ref() else { dropped("event", "getters"); return };
+        let Some(kind) = g.value(&g.kind, event).and_then(|v| v.as_string()) else { dropped("event", "kind"); return };
+        if kind == "pointerdown" {
+            self.input.candidate = None;
+            let _ = canvas.remove_attribute("data-rune-native-drop");
+        }
         if kind == "blur" {
             if let Some(dom_window) = web_sys::window()
                 && (g.valid(event, "blur", dom_window.as_ref(), dom_window.as_ref())
                     || g.valid(event, "blur", dom_window.as_ref(), canvas.as_ref())) {
+                if self.input.candidate.is_some() { dropped("blur", "candidate"); }
                 self.input.candidate = None;
             }
             return;
         }
-        if kind == "pointercancel" { self.input.candidate = None; return; }
+        if kind == "pointercancel" {
+            if self.input.candidate.is_some() { dropped("pointercancel", "candidate"); }
+            self.input.candidate = None;
+            return;
+        }
         if kind != "pointerdown" && kind != "click" { return; }
         let candidate = if kind == "click" { self.input.candidate.take() } else { None };
         if candidate.is_some() { window.request_redraw(); }
-        let Some(dom_window) = web_sys::window() else { return };
+        let Some(dom_window) = web_sys::window() else { dropped(&kind, "window"); return };
         if !g.in_document(canvas.as_ref())
-            || !g.valid(event, &kind, dom_window.as_ref(), canvas.as_ref()) { return; }
-        let Some(id) = g.value(&g.pointer_id, event).and_then(|v| v.as_f64()).filter(|v| v.fract() == 0.0 && *v >= 0.0 && *v <= i32::MAX as f64).map(|v| v as i32) else { return };
+            || !g.valid(event, &kind, dom_window.as_ref(), canvas.as_ref()) { dropped(&kind, "event"); return; }
+        let Some(id) = g.value(&g.pointer_id, event).and_then(|v| v.as_f64()).filter(|v| v.fract() == 0.0 && *v >= 0.0 && *v <= i32::MAX as f64).map(|v| v as i32) else { dropped(&kind, "pointer"); return };
         if (kind == "pointerdown" && g.value(&g.primary, event).and_then(|v| v.as_bool()) != Some(true))
-            || g.value(&g.button, event).and_then(|v| v.as_f64()) != Some(0.0) { return; }
-        let (Some(x), Some(y)) = (g.value(&g.x, event).and_then(|v| v.as_f64()), g.value(&g.y, event).and_then(|v| v.as_f64())) else { return };
-        if !self.rt.native_geometry_valid { window.request_redraw(); return; }
+            || g.value(&g.button, event).and_then(|v| v.as_f64()) != Some(0.0) { dropped(&kind, "button"); return; }
+        let (Some(x), Some(y)) = (g.value(&g.x, event).and_then(|v| v.as_f64()), g.value(&g.y, event).and_then(|v| v.as_f64())) else { dropped(&kind, "coordinates"); return };
+        if !self.rt.native_geometry_valid { dropped(&kind, "geometry"); window.request_redraw(); return; }
         let rect = canvas.get_bounding_client_rect();
         let target = self.rt.native_primary_target((x - rect.left()) as f32, (y - rect.top()) as f32);
         if kind == "pointerdown" {
-            if let Some((path, key)) = target
-                && self.input.native.iter().any(|r| r.binding.path == path && r.binding.key == key && self.native_registered(&r.binding)) {
+            let Some((path, key)) = target else { dropped(&kind, "target"); return };
+            if self.input.native.iter().any(|r| r.binding.path == path && r.binding.key == key && self.native_registered(&r.binding)) {
                 self.input.candidate = Some((id, path, key));
+            } else {
+                dropped(&kind, "binding");
             }
-        } else if let Some((down_id, path, key)) = candidate
-            && down_id == id && target.as_ref() == Some(&(path.clone(), key.clone()))
-            && self.input.native.iter().any(|r| r.binding.path == path && r.binding.key == key && self.native_registered(&r.binding))
-            && self.rt.native_press(&path, &key) { window.request_redraw(); }
+        } else {
+            let Some((down_id, path, key)) = candidate else {
+                // Keep the original pointerdown failure when it could not arm a click.
+                if canvas.get_attribute("data-rune-native-drop").is_none() { dropped(&kind, "candidate"); }
+                return;
+            };
+            if down_id != id || target.as_ref() != Some(&(path.clone(), key.clone())) { dropped(&kind, "target"); return; }
+            if !self.input.native.iter().any(|r| r.binding.path == path && r.binding.key == key && self.native_registered(&r.binding)) { dropped(&kind, "binding"); return; }
+            if !self.rt.native_press(&path, &key) { dropped(&kind, "press"); return; }
+            let _ = canvas.remove_attribute("data-rune-native-drop");
+            window.request_redraw();
+        }
     }
 
     pub(super) fn sync_input(&mut self, focus: bool) {
