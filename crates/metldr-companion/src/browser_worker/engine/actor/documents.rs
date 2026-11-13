@@ -13,6 +13,12 @@ pub(super) struct Documents(VecDeque<(String, NavigationEvidence)>);
 
 impl Documents {
     pub(super) fn event(&mut self, event: &runtime::RawEvent) {
+        // The method is a cheap string check; most events stop here before any JSON lookup.
+        let request = match event.method.as_ref() {
+            "Network.requestWillBeSent" => true,
+            "Network.responseReceived" => false,
+            _ => return,
+        };
         let params = &event.params;
         if params["type"] != "Document" {
             return;
@@ -23,11 +29,13 @@ impl Documents {
         else {
             return;
         };
-        match event.method.as_ref() {
-            "Network.requestWillBeSent" => {
+        match request {
+            true => {
+                // The chain reaches the model, so query values and fragments are removed:
+                // an OAuth callback code must not leave the page through a redirect.
                 let redirect = params["redirectResponse"]["url"]
                     .as_str()
-                    .map(str::to_owned);
+                    .map(super::super::events::sanitize_url);
                 let entry = self.entry(loader);
                 if let Some(url) = redirect
                     && entry.redirects.len() < REDIRECT_LIMIT
@@ -37,14 +45,13 @@ impl Documents {
                     entry.redirects.push(url);
                 }
             }
-            "Network.responseReceived" => {
+            false => {
                 let status = params["response"]["status"]
                     .as_u64()
                     .and_then(|status| u16::try_from(status).ok())
                     .filter(|status| (100..=599).contains(status));
                 self.entry(loader).status = status;
             }
-            _ => {}
         }
     }
 
@@ -92,7 +99,7 @@ mod tests {
         ));
         documents.event(&event(
             "Network.requestWillBeSent",
-            json!({"type":"Document","loaderId":"L1","redirectResponse":{"url":"http://127.0.0.1/a","status":302}}),
+            json!({"type":"Document","loaderId":"L1","redirectResponse":{"url":"http://127.0.0.1/a?code=secret#f","status":302}}),
         ));
         documents.event(&event(
             "Network.responseReceived",
@@ -104,7 +111,10 @@ mod tests {
         ));
         let evidence = documents.take("L1");
         assert_eq!(evidence.status, Some(200));
-        assert_eq!(evidence.redirects, ["http://127.0.0.1/a"]);
+        assert_eq!(
+            evidence.redirects,
+            ["http://127.0.0.1/a?code=%5Bredacted%5D"]
+        );
         assert!(documents.take("L1").is_empty());
         for index in 0..=LOADER_LIMIT {
             documents.event(&event(
