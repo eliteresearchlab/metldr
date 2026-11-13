@@ -33,6 +33,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Claude Code
+
+`crates/metldr-claude-session` runs the user's installed [Claude Code](https://github.com/anthropics/claude-code) CLI by Anthropic as a separate program. It uses the CLI's documented `--print` stream-json input and output and its `--permission-prompt-tool stdio` control messages, the same interface the Claude Agent SDK uses. No Claude Code or Claude Agent SDK source is copied into metldr, and Claude Code stays under its own license and terms. Reference behaviour: Claude Code 2.1.323.
+
+| Area | metldr files | Use | Behaviour change | Checks |
+| --- | --- | --- | --- | --- |
+| Stream-json session, resume and stdio permission messages | `crates/metldr-claude-session/src/lib.rs` | Interoperability with the installed CLI; implemented independently in Rust | None | `cargo test --manifest-path crates/metldr-claude-session/Cargo.toml` |
+
 ## browse
 
 Browser integration work is informed by [browse](https://github.com/anomalyco/browse). MCP tool discovery follows its use of standard safety annotations, implemented independently in Rust. Reference revision: [ebb6ded](https://github.com/anomalyco/browse/tree/ebb6dedc4cb154c0279e0bb13699f21b507249d1), release 0.0.16.
