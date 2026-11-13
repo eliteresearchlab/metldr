@@ -213,6 +213,8 @@ pub(super) struct Owner {
     pub(super) codex_input: BTreeMap<String, crate::codex_input::State>,
     pub(super) plan_hold: Option<crate::browser_owner::PlanHold>,
     pub(super) session_grants: BTreeMap<String, crate::browser_owner::SessionGrant>,
+    /// Runs whose user stop is already recorded, so a repeated stop needs no second write.
+    pub(super) stopping: std::collections::BTreeSet<String>,
     pub(super) browser_approval: Option<crate::browser_owner::PendingApproval>,
     pub(super) browser_route: Option<crate::https_profile::Profile>,
     pub(super) responses_route: Option<crate::https_profile::Profile>,
@@ -704,6 +706,7 @@ impl Owner {
     ) -> Result<()> {
         // A finished run ends its session grant (decision 09).
         self.session_grants.remove(run);
+        self.stopping.remove(run);
         let mut operation = self.operations.remove(run).ok_or_else(|| {
             if self.operations.is_empty() {
                 "settlement without operation"

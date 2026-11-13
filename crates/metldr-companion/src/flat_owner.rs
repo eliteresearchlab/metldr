@@ -237,24 +237,27 @@ impl Owner {
     }
 
     pub(super) fn stop_run(&mut self, id: &str, run: &str) -> Result<()> {
-        let pending = self.detach_inputs(run);
-        let mut active = false;
-        let saved = self.record_execution(run, |edit, execution| {
-            let mut record = edit.run(execution, run)?;
-            if record.status.terminal() {
-                return Ok(false);
-            }
-            active = true;
-            edit.prevent_browser(execution, run, "user stopped before dispatch")?;
-            record.status = Status::StopRequested;
-            edit.put_run(execution, record)?;
-            Ok(true)
-        });
-        if matches!(saved, Ok(false)) {
-            self.restore_inputs(pending);
+        // The stop is already durable and the run told; repeating it writes nothing.
+        if self.stopping.contains(run) {
+            return self.reply_stop(id, "stopping", run);
+        }
+        let terminal = self.record_change(|edit, scope| {
+            let execution = edit.current_execution(scope, run)?;
+            Ok((edit.run(&execution, run)?.status.terminal(), None))
+        })?;
+        if terminal {
             return self.reply_stop(id, "already_terminal", run);
         }
-        if active && let Some(operation) = self.operations.get(run) {
+        let pending = self.detach_inputs(run);
+        let saved = self.record_change(|edit, scope| {
+            let execution = edit.current_execution(scope, run)?;
+            edit.prevent_browser(&execution, run, "user stopped before dispatch")?;
+            let mut record = edit.run(&execution, run)?;
+            record.status = Status::StopRequested;
+            edit.put_run(&execution, record)?;
+            Ok(((), Some(edit.project(scope, Some(run))?)))
+        });
+        if let Some(operation) = self.operations.get(run) {
             operation.stop.store(true, Ordering::Release);
         }
         if let Err(error) = saved {
@@ -263,6 +266,7 @@ impl Owner {
         }
         self.cancel_browser_approval(run);
         pending.cancel();
+        self.stopping.insert(run.to_owned());
         self.reply_stop(id, "stopping", run)
     }
 }

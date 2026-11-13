@@ -78,6 +78,7 @@ fn owner(
             codex_input: Default::default(),
             plan_hold: None,
             session_grants: BTreeMap::new(),
+            stopping: std::collections::BTreeSet::new(),
             browser_approval: None,
             browser_route: None,
             responses_route: None,
@@ -301,7 +302,10 @@ fn stop_all_stops_the_active_run_ends_its_grant_and_reports_idle() -> Result<()>
     wire.lock().unwrap().clear();
     owner.command("stop-all", Command::StopAll)?;
     assert_eq!(saved(&owner, &run)?.value.status, Status::StopRequested);
-    assert!(owner.session_grants.is_empty(), "stop ends the session grant");
+    assert!(
+        owner.session_grants.is_empty(),
+        "stop ends the session grant"
+    );
     for index in 0..100 {
         owner.command(&format!("stop-again-{index}"), Command::StopAll)?;
     }
