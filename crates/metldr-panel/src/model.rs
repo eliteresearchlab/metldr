@@ -2222,6 +2222,42 @@ fn valid_endpoint_rest(rest: &str) -> bool {
     }
 }
 
+/// Known Chat Completions endpoints: name, endpoint, and whether it runs without a key.
+pub(crate) const CHAT_PRESETS: [(&str, &str, bool); 8] = [
+    (
+        "OpenAI",
+        "https://api.openai.com/v1/chat/completions",
+        false,
+    ),
+    (
+        "OpenRouter",
+        "https://openrouter.ai/api/v1/chat/completions",
+        false,
+    ),
+    (
+        "Groq",
+        "https://api.groq.com/openai/v1/chat/completions",
+        false,
+    ),
+    (
+        "DeepSeek",
+        "https://api.deepseek.com/chat/completions",
+        false,
+    ),
+    (
+        "Mistral",
+        "https://api.mistral.ai/v1/chat/completions",
+        false,
+    ),
+    (
+        "Together",
+        "https://api.together.ai/v1/chat/completions",
+        false,
+    ),
+    ("xAI", "https://api.x.ai/v1/chat/completions", false),
+    ("Ollama", "http://127.0.0.1:11434/v1/chat/completions", true),
+];
+
 /// A Chat Completions endpoint: HTTPS, or plain HTTP to a loopback server such as Ollama.
 pub(crate) fn valid_chat_endpoint(value: &str) -> bool {
     valid_https_endpoint(value)
@@ -2276,6 +2312,9 @@ mod tests {
             assert!(!valid_chat_endpoint(invalid), "{invalid}");
         }
         assert!(!valid_https_endpoint("http://127.0.0.1:11434/v1"));
+        for (_, endpoint, _) in CHAT_PRESETS {
+            assert!(valid_chat_endpoint(endpoint), "{endpoint}");
+        }
     }
 
     const STORE: &str = "0123456789abcdef0123456789abcdef";
