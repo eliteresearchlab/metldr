@@ -223,7 +223,8 @@ impl FlowClient {
                 || value.len() > 4_096
                 || !value.bytes().all(|byte| byte.is_ascii_graphic()))
             || (!chat && (matches!(key, ProviderKey::None) || timeout_secs.is_some()))
-            || timeout_secs.is_some_and(|secs| !crate::model::PROVIDER_TIMEOUT_SECS.contains(&secs))
+            // 0 clears a saved timeout; any other value must be in range.
+            || timeout_secs.is_some_and(|secs| secs != 0 && !crate::model::PROVIDER_TIMEOUT_SECS.contains(&secs))
         {
             return Err(FlowError::InvalidInput(
                 "Provider settings are invalid or exceed their limits.".into(),

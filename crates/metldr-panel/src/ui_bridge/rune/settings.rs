@@ -268,6 +268,13 @@ impl Settings {
             state.settings.message = Some("Enter an API key.");
             return;
         }
+        // Send the timeout only when it changed, so an older companion still accepts other saves.
+        let saved_timeout = row.as_ref().and_then(|row| row.timeout_secs);
+        let timeout = match (timeout, saved_timeout) {
+            (requested, saved) if requested == saved => None,
+            (None, Some(_)) => Some(0),
+            (requested, _) => requested,
+        };
         let key = if save && row.is_some() && chat && draft.keyless {
             crate::model::ProviderKey::None
         } else if save && row.is_some() && !draft.key.text.is_empty() {

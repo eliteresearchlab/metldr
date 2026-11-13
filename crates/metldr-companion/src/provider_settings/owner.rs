@@ -55,8 +55,15 @@ impl Runtime {
                     connection.keyless, connection.timeout_secs,
                 ),
             };
-            json!({"protocol":protocol,"revision":slot.revision,"state":state,"endpoint":endpoint,"model":model,
-                "keyless":keyless,"timeout_secs":timeout})
+            let mut row = json!({"protocol":protocol,"revision":slot.revision,"state":state,"endpoint":endpoint,"model":model});
+            // Sent only when set, so a panel from before these fields still reads every default row.
+            if keyless {
+                row["keyless"] = true.into();
+            }
+            if let Some(timeout) = timeout {
+                row["timeout_secs"] = timeout.into();
+            }
+            row
         }).collect();
         json!({"busy":self.job.is_some(),"pending":settings.pending.as_ref().map(|p|p.protocol),
             "cleanup_pending":!settings.retired.is_empty(),"notice":self.notice,"connections":connections})
@@ -125,10 +132,18 @@ impl Owner {
         }
         let slot = self.state.providers.slot(protocol);
         let previous = match &slot.selection {
-            Selection::Configured { connection } => {
-                Some((connection.credential.clone(), connection.keyless))
-            }
+            Selection::Configured { connection } => Some((
+                connection.credential.clone(),
+                connection.keyless,
+                connection.timeout_secs,
+            )),
             _ => None,
+        };
+        // No timeout field keeps the saved one; 0 returns to the client default.
+        let timeout_secs = match timeout_secs {
+            None => previous.as_ref().and_then(|(_, _, timeout)| *timeout),
+            Some(0) => None,
+            Some(secs) => Some(secs),
         };
         let keyless = match &key {
             KeyChange::None => true,
@@ -141,7 +156,8 @@ impl Owner {
             }
         };
         // Keep reads the saved key only when the previous connection had one.
-        let previous = previous.and_then(|(credential, keyless)| (!keyless).then_some(credential));
+        let previous =
+            previous.and_then(|(credential, keyless, _)| (!keyless).then_some(credential));
         let revision = expected
             .checked_add(1)
             .ok_or("provider revision capacity reached")?;

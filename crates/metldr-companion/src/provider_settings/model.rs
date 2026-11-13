@@ -266,5 +266,14 @@ mod checks {
         };
         assert!(runtime.check_deadline().is_err());
         runtime.job.take().unwrap().join().unwrap();
+        // Older panels deny unknown row fields, so default rows must not carry the new ones.
+        let view = crate::provider_settings::Runtime::default().public(&Settings::default());
+        assert!(
+            view["connections"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| { row.get("keyless").is_none() && row.get("timeout_secs").is_none() })
+        );
     }
 }
