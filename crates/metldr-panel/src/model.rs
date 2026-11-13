@@ -2180,6 +2180,12 @@ impl PageView {
 }
 
 fn valid_browser_intent(intent: &BrowserActionIntent) -> bool {
+    let field = |id: &str, label: &str| {
+        valid_control_id(id)
+            && !label.is_empty()
+            && label.len() <= 128
+            && !label.chars().any(char::is_control)
+    };
     match intent {
         BrowserActionIntent::EnterSecret {
             field_id,
@@ -2188,14 +2194,7 @@ fn valid_browser_intent(intent: &BrowserActionIntent) -> bool {
             expires_at_ms,
             ..
         } => {
-            !field_id.is_empty()
-                && field_id.len() <= 64
-                && field_id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-                && !field_label.is_empty()
-                && field_label.len() <= 128
-                && !field_label.chars().any(char::is_control)
+            field(field_id, field_label)
                 && reference.len() == 32
                 && reference.bytes().all(|b| b.is_ascii_hexdigit())
                 && *expires_at_ms > 0
@@ -2205,18 +2204,7 @@ fn valid_browser_intent(intent: &BrowserActionIntent) -> bool {
             field_label,
             previous_value,
             value,
-        } => {
-            !field_id.is_empty()
-                && field_id.len() <= 64
-                && field_id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-                && !field_label.is_empty()
-                && field_label.len() <= 128
-                && !field_label.chars().any(char::is_control)
-                && value.len() <= 1_024
-                && previous_value.len() <= 1_024
-        }
+        } => field(field_id, field_label) && value.len() <= 1_024 && previous_value.len() <= 1_024,
         BrowserActionIntent::Navigate { destination } => {
             !destination.is_empty()
                 && destination.len() <= 2_048
@@ -2225,16 +2213,7 @@ fn valid_browser_intent(intent: &BrowserActionIntent) -> bool {
         BrowserActionIntent::ActivateButton {
             button_id,
             button_label,
-        } => {
-            !button_id.is_empty()
-                && button_id.len() <= 64
-                && button_id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-                && !button_label.trim().is_empty()
-                && button_label.len() <= 128
-                && !button_label.chars().any(char::is_control)
-        }
+        } => field(button_id, button_label) && !button_label.trim().is_empty(),
         BrowserActionIntent::SelectOption { selection } => selection.valid(),
         BrowserActionIntent::Scroll { scroll } => scroll.valid(),
         BrowserActionIntent::SetNativeControl { control } => control.valid(),

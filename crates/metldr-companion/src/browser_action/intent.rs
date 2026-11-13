@@ -45,6 +45,15 @@ pub(crate) enum SecretKind {
     OneTimeCode,
 }
 
+impl SecretKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Password => "password",
+            Self::OneTimeCode => "one_time_code",
+        }
+    }
+}
+
 impl From<metldr_browser_tools::SecretKind> for SecretKind {
     fn from(kind: metldr_browser_tools::SecretKind) -> Self {
         match kind {

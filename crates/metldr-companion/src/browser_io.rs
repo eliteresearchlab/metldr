@@ -175,6 +175,23 @@ impl Client {
     }
 }
 
+/// Whether `record` is the current dispatch of `run` on the owned tab, bound as approved.
+fn fresh(
+    record: &crate::browser_action::Action,
+    run: &str,
+    revision: u64,
+    binding: &crate::browser_action::Binding,
+    url: &str,
+    tab: i32,
+) -> bool {
+    record.proposal.run == run
+        && record.revision == revision
+        && record.state == crate::browser_action::Phase::Dispatching
+        && &record.proposal.binding == binding
+        && record.proposal.url == url
+        && binding.tab == tab
+}
+
 impl Owner {
     pub(super) fn browser_io_call(&mut self, call: Call) -> Result<()> {
         let result = (|| -> Result<u64> {
@@ -217,13 +234,8 @@ impl Owner {
                     ..
                 } => {
                     let record = saved_action.as_ref().ok_or("unknown navigation action")?;
-                    if record.proposal.run != call.run
-                        || record.revision != *revision
-                        || record.state != crate::browser_action::Phase::Dispatching
-                        || &record.proposal.binding != binding
-                        || &record.proposal.url != url
+                    if !fresh(record, &call.run, *revision, binding, url, slot.tab)
                         || !matches!(&record.proposal.intent,crate::browser_action::Intent::Navigate { destination:approved } if approved==destination)
-                        || binding.tab != slot.tab
                         || !slot.navigations.insert(action.clone())
                     {
                         return Err(
@@ -246,11 +258,7 @@ impl Owner {
                     ..
                 } => {
                     let record = saved_action.as_ref().ok_or("unknown button action")?;
-                    if record.proposal.run != call.run
-                        || record.revision != *revision
-                        || record.state != crate::browser_action::Phase::Dispatching
-                        || &record.proposal.binding != binding
-                        || &record.proposal.url != url
+                    if !fresh(record, &call.run, *revision, binding, url, slot.tab)
                         || !matches!(
                             (&call.operation, &record.proposal.intent),
                             (
@@ -261,7 +269,6 @@ impl Owner {
                                 crate::browser_action::Intent::SetNativeControl { .. }
                             )
                         )
-                        || binding.tab != slot.tab
                         || !slot.buttons.insert(action.clone())
                     {
                         return Err(
@@ -278,16 +285,11 @@ impl Owner {
                     ..
                 } => {
                     let record = saved_action.as_ref().ok_or("unknown secret entry")?;
-                    if record.proposal.run != call.run
-                        || record.revision != *revision
-                        || record.state != crate::browser_action::Phase::Dispatching
-                        || &record.proposal.binding != binding
-                        || &record.proposal.url != url
+                    if !fresh(record, &call.run, *revision, binding, url, slot.tab)
                         || !matches!(
                             &record.proposal.intent,
                             crate::browser_action::Intent::Secret { .. }
                         )
-                        || binding.tab != slot.tab
                         || params["arguments"].as_array().is_none_or(|a| a.len() != 1)
                         || slot.secret.as_ref().is_none_or(|s| &s.action != action)
                     {

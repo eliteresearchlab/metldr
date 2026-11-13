@@ -76,14 +76,10 @@ impl Actor {
             if self.seen.len() == 64 || !self.seen.insert((action.id.clone(), action.revision)) {
                 return Err("browser action was reused or action capacity reached".into());
             }
-            let kind = match secret {
-                SecretKind::Password => "password",
-                SecretKind::OneTimeCode => "one_time_code",
-            };
             Ok((
                 snapshot.context.clone(),
                 snapshot.root.clone(),
-                scripts::write_secret(field.slot, &field.check_label, kind),
+                scripts::write_secret(field.slot, &field.check_label, secret.as_str()),
             ))
         })();
         match setup {
