@@ -310,6 +310,9 @@ pub(super) async fn confirm(
             "Browser navigation confirmation became stale.",
         );
     }
+    if let Err(error) = inject_banner(connection, epoch).await {
+        return invalidate(connection, epoch, &error);
+    }
     Ok(
         json!({"document":document,"url":confirmed_url,"grant_revision":next_revision,"frame":frame,"loader":loader}),
     )

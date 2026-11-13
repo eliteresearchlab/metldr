@@ -136,6 +136,7 @@ pub(super) fn run() -> Result<()> {
         codex_input: Default::default(),
         plan_hold: None,
         session_grants: BTreeMap::new(),
+        stopping: std::collections::BTreeSet::new(),
         browser_approval: None,
         browser_route,
         responses_route,

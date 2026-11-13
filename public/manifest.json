@@ -76,6 +76,12 @@
   ],
   "minimum_chrome_version": "148",
   "commands": {
+    "stop-all-runs": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Stop all runs"
+    },
     "open-browser-agent": {
       "suggested_key": {
         "default": "Alt+Shift+M"

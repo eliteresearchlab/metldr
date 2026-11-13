@@ -237,6 +237,10 @@ impl Owner {
     }
 
     pub(super) fn stop_run(&mut self, id: &str, run: &str) -> Result<()> {
+        // The stop is already durable and the run told; repeating it writes nothing.
+        if self.stopping.contains(run) {
+            return self.reply_stop(id, "stopping", run);
+        }
         let terminal = self.record_change(|edit, scope| {
             let execution = edit.current_execution(scope, run)?;
             Ok((edit.run(&execution, run)?.status.terminal(), None))
@@ -262,6 +266,7 @@ impl Owner {
         }
         self.cancel_browser_approval(run);
         pending.cancel();
+        self.stopping.insert(run.to_owned());
         self.reply_stop(id, "stopping", run)
     }
 }

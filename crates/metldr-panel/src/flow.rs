@@ -149,6 +149,48 @@ impl FlowClient {
         let weak = Rc::downgrade(&inner);
         let listener = Listener::new(&inner.port, "onMessage", move |message| {
             if let Some(inner) = weak.upgrade() {
+                if get(&message, "kind")
+                    .ok()
+                    .and_then(|value| value.as_string())
+                    .as_deref()
+                    == Some("stop_notice")
+                {
+                    if let Some(text) = get(&message, "message")
+                        .ok()
+                        .and_then(|value| value.as_string())
+                    {
+                        if let Some(document) =
+                            web_sys::window().and_then(|window| window.document())
+                        {
+                            if document.get_element_by_id("status").is_some() {
+                                crate::view::status(&document, &text);
+                            } else if let Some(body) = document.body() {
+                                let notice = document.get_element_by_id("metldr-stop-notice").or_else(|| {
+                                    let element = document.create_element("div").ok()?;
+                                    element.set_id("metldr-stop-notice");
+                                    element.set_attribute("role", "status").ok()?;
+                                    element.set_attribute("style", "position:fixed;inset-block-start:12px;inset-inline:12px;z-index:2147483647;padding:12px;border-radius:8px;background:oklch(0.2 0.02 260);color:oklch(1 0 none);font:14px system-ui,sans-serif").ok()?;
+                                    body.append_child(&element).ok()?;
+                                    Some(element)
+                                });
+                                if let Some(notice) = notice {
+                                    notice.set_text_content(Some(&text));
+                                    let timeout = Closure::once_into_js(move || {
+                                        if notice.text_content().as_deref() == Some(&text) {
+                                            notice.remove();
+                                        }
+                                    });
+                                    let _ = call(
+                                        &js_sys::global(),
+                                        "setTimeout",
+                                        &[timeout, 5000.into()],
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
                 let result = decode_frame(message)
                     .and_then(|frame| inner.protocol.borrow_mut().receive(frame));
                 let wakes = match result {
