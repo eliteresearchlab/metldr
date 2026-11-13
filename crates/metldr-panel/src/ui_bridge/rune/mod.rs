@@ -838,7 +838,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         }
     }
     if matches!(state.session, Session::Connecting) {
-        thread = thread.child(typography.text("Opening metldr").label("Opening metldr"));
+        thread = thread.child(typography.text("Connecting").role("status"));
     }
     let Some(core) = state.core() else {
         if matches!(state.session, Session::Failed) {
@@ -856,6 +856,19 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         return col().w_full().h_full().fill(page).color(ink).child(thread);
     };
     let connection = connection::UiConnectionSnapshot::read(core);
+    if state
+        .updates
+        .as_ref()
+        .is_some_and(|updates| updates.presentation.borrow().messages.messages.is_empty())
+    {
+        thread = thread.child(
+            typography
+                .text("Welcome to metldr")
+                .role("heading")
+                .level(1),
+        );
+        thread = thread.child(typography.text("What do you want to do?").wrap());
+    }
     if state.conversations.is_open() {
         return col()
             .w_full()
@@ -1011,6 +1024,10 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     if let Some(menu) = composer::menu(state, cx) {
         composer = composer.child(menu);
     }
+    let error = state
+        .updates
+        .as_ref()
+        .and_then(|updates| updates.presentation.borrow().error.clone());
     col()
         .w_full()
         .h_full()
@@ -1047,6 +1064,37 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                             composer::enter(state, key, tx, State::open_settings)
                         }),
                 ),
+        )
+        .child(
+            typography
+                .text(if connection.stale() {
+                    "The conversation changed. Reload the panel."
+                } else if connection.reconnecting() {
+                    "Reconnecting"
+                } else if !connection.connected() {
+                    "Connection lost"
+                } else if connection.uncertain() {
+                    "Check saved work before starting again"
+                } else if let Some(error) = &error {
+                    error
+                } else if let Some(error) = &state.conversations.error {
+                    error
+                } else if matches!(*core.owner.borrow(), Owner::Capturing) {
+                    "Reading current page"
+                } else if !core.rune_native_requests().0.is_empty()
+                    || core.rune_browser_action().is_some()
+                {
+                    "Waiting for approval"
+                } else if state.running() {
+                    "Running"
+                } else if state.conversations.busy || core.history_loading.get() {
+                    "Loading history"
+                } else {
+                    "Ready"
+                })
+                .key("conversation-status")
+                .role("status")
+                .padding(8.0),
         )
         .child(state.conversations.toolbar(state))
         .child(

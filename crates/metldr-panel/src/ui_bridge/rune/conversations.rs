@@ -16,10 +16,10 @@ pub(super) enum Completion {
 #[derive(Default)]
 pub(super) struct Conversations {
     open: bool,
-    busy: bool,
+    pub(super) busy: bool,
     page: Option<super::super::conversations::Page>,
     older_cursor: Option<String>,
-    error: Option<String>,
+    pub(super) error: Option<String>,
     archive_generation: Rc<Cell<u64>>,
     pending: Rc<RefCell<Option<(Rc<Core>, ResultPage)>>>,
 }
