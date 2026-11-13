@@ -2189,12 +2189,12 @@ pub(crate) fn valid_https_endpoint(value: &str) -> bool {
     value.len() <= 1_024
         && value
             .strip_prefix("https://")
-            .is_some_and(valid_endpoint_rest)
+            .is_some_and(|rest| endpoint_host(rest).is_some())
 }
 
-/// Checks what follows the scheme: no query, fragment, whitespace or control
-/// characters, and a host with an optional port.
-fn valid_endpoint_rest(rest: &str) -> bool {
+/// The host of what follows the scheme, when it has no query, fragment, whitespace or control
+/// characters and a valid optional port.
+fn endpoint_host(rest: &str) -> Option<&str> {
     // One pass; ASCII, the usual case, is checked byte by byte.
     let clean = if rest.is_ascii() {
         rest.bytes()
@@ -2205,26 +2205,21 @@ fn valid_endpoint_rest(rest: &str) -> bool {
             .any(|c| matches!(c, '?' | '#') || c.is_whitespace() || c.is_control())
     };
     if !clean {
-        return false;
+        return None;
     }
     let authority = rest.split('/').next().unwrap_or_default();
-    if authority.starts_with('[') {
-        let Some((host, suffix)) = authority[1..].split_once(']') else {
-            return false;
-        };
-        host.parse::<std::net::Ipv6Addr>().is_ok()
-            && valid_url_port(suffix.strip_prefix(':'))
-            && (suffix.is_empty() || suffix.starts_with(':'))
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        let (host, suffix) = bracketed.split_once(']')?;
+        (host.parse::<std::net::Ipv6Addr>().is_ok()
+            && (suffix.is_empty()
+                || valid_url_port(suffix.strip_prefix(':')) && suffix.starts_with(':')))
+        .then_some(host)
     } else {
         let (host, valid_port) = match authority.split_once(':') {
             Some((host, port)) => (host, valid_url_port(Some(port))),
             None => (authority, true),
         };
-        !host.is_empty()
-            && !host
-                .chars()
-                .any(|character| matches!(character, '@' | '[' | ']' | ':'))
-            && valid_port
+        (!host.is_empty() && !host.contains(['@', '[', ']', ':']) && valid_port).then_some(host)
     }
 }
 
@@ -2268,23 +2263,15 @@ pub(crate) const CHAT_PRESETS: [(&str, &str, bool); 8] = [
 pub(crate) fn valid_chat_endpoint(value: &str) -> bool {
     valid_https_endpoint(value)
         || (value.len() <= 1_024
-            && value.strip_prefix("http://").is_some_and(|rest| {
-                let authority = rest.split('/').next().unwrap_or_default();
-                let host = match authority.strip_prefix('[') {
-                    Some(bracketed) => bracketed.split_once(']').map(|(host, _)| host),
-                    None => Some(
-                        authority
-                            .split_once(':')
-                            .map_or(authority, |(host, _)| host),
-                    ),
-                };
-                host.is_some_and(|host| {
+            && value
+                .strip_prefix("http://")
+                .and_then(endpoint_host)
+                .is_some_and(|host| {
                     host.eq_ignore_ascii_case("localhost")
                         || host
                             .parse::<std::net::IpAddr>()
                             .is_ok_and(|ip| ip.is_loopback())
-                }) && valid_endpoint_rest(rest)
-            }))
+                }))
 }
 
 fn valid_url_port(port: Option<&str>) -> bool {
