@@ -313,6 +313,11 @@ fn keyless_chat_profile_sends_no_key_and_keeps_existing_fingerprints() {
         .public()["fingerprint"]
             .clone()
     };
+    // The fingerprint main computes for the same keyed connection: saved routes stay valid.
+    assert_eq!(
+        keyed(None),
+        "f1eea9c51488c9f9514319c0ad773859b12c3b2a0aa9645eb0579ccc53df92f9"
+    );
     assert_ne!(
         keyed(None),
         keyed(Some(90)),
