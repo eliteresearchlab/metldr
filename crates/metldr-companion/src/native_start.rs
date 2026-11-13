@@ -41,6 +41,15 @@ impl<'a> Input<'a> {
             ConversationAction::OpenCodePrompt { source, text } => {
                 (Kind::Opencode, Origin::Source(source), text)
             }
+            ConversationAction::HarnessPrompt { harness, source, text } if harness == "claude" => {
+                (Kind::Claude, Origin::Source(source), text)
+            }
+            ConversationAction::HarnessFollowUp {
+                harness,
+                workflow,
+                revision,
+                text,
+            } if harness == "claude" => (Kind::Claude, Origin::Workflow(workflow, *revision), text),
             ConversationAction::PiFollowUp {
                 workflow,
                 revision,

@@ -324,7 +324,19 @@ pub(super) fn run() -> Result<()> {
                 run,
                 result,
                 released,
+            }
+            | Event::HarnessSettled {
+                run,
+                result,
+                released,
             } => owner.agent_settled(&run, result, closed, released)?,
+            Event::HarnessBound {
+                run,
+                workflow,
+                session,
+                ack,
+            } => owner.harness_bound(&run, &workflow, session, ack)?,
+            Event::HarnessActivity { run, activity } => owner.harness_activity(&run, activity)?,
         }
     }
     drop(rx);

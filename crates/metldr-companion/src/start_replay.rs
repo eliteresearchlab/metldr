@@ -27,7 +27,9 @@ impl Owner {
             | Action::CodexPrompt { .. }
             | Action::CodexFollowUp { .. }
             | Action::OpenCodePrompt { .. }
-            | Action::OpenCodeFollowUp { .. } => (),
+            | Action::OpenCodeFollowUp { .. }
+            | Action::HarnessPrompt { .. }
+            | Action::HarnessFollowUp { .. } => (),
             Action::Capture { .. }
             | Action::NativeCorrection { .. }
             | Action::Watch { .. }
@@ -127,6 +129,10 @@ impl Owner {
             | (
                 Action::OpenCodePrompt { .. } | Action::OpenCodeFollowUp { .. },
                 Launch::OpenCode { .. },
+            )
+            | (
+                Action::HarnessPrompt { .. } | Action::HarnessFollowUp { .. },
+                Launch::Harness { .. },
             ) => {
                 return self.replay_native_start(request, scope, action);
             }

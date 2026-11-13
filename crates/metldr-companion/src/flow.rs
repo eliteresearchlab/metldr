@@ -154,6 +154,21 @@ pub(super) enum Event {
         result: crate::agent::Outcome,
         released: bool,
     },
+    HarnessBound {
+        run: String,
+        workflow: String,
+        session: String,
+        ack: std::sync::mpsc::SyncSender<std::result::Result<bool, String>>,
+    },
+    HarnessActivity {
+        run: String,
+        activity: crate::agent_model::Activity,
+    },
+    HarnessSettled {
+        run: String,
+        result: crate::agent::Outcome,
+        released: bool,
+    },
 }
 
 /// Collects the streamed deltas for `run` already queued behind `first`, so one owner iteration
@@ -579,6 +594,8 @@ impl Owner {
             | ConversationAction::OpenCodeFollowUp { .. }) => {
                 self.opencode_start(id, scope, command)
             }
+            command @ (ConversationAction::HarnessPrompt { .. }
+            | ConversationAction::HarnessFollowUp { .. }) => self.harness_start(id, scope, command),
             ConversationAction::NativePermission {
                 run,
                 request,

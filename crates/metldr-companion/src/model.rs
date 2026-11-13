@@ -365,6 +365,18 @@ pub(super) enum ConversationAction {
         revision: u64,
         text: String,
     },
+    /// A new turn for a harness on the generic path, named by its registry key.
+    HarnessPrompt {
+        harness: String,
+        source: String,
+        text: String,
+    },
+    HarnessFollowUp {
+        harness: String,
+        workflow: String,
+        revision: u64,
+        text: String,
+    },
     #[serde(rename = "native_permission")]
     NativePermission {
         run: String,

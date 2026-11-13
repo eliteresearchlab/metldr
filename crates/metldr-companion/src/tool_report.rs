@@ -125,6 +125,22 @@ impl Call {
         }
     }
 
+    /// Claude Code reports a tool call as a `tool_use` block and its result as a `tool_result`.
+    pub fn merge_claude(&mut self, title: Option<&str>, input: Option<&Value>, output: Option<&Value>) {
+        if let Some(title) = title {
+            self.title = Some(Preview::text(title, 256));
+        }
+        if let Some(input) = input.filter(|v| !v.is_null()) {
+            self.input = Some(Preview::input(input));
+        }
+        if let Some(output) = output.and_then(|v| match v {
+            Value::String(text) => Some(Preview::text(text, 2_048)),
+            other => Preview::contents(other, true),
+        }) {
+            self.output = Some(output);
+        }
+    }
+
     pub fn valid(&self) -> bool {
         !self.id.is_empty()
             && self.id.len() <= 128
