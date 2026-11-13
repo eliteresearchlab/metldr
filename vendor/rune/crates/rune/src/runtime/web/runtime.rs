@@ -99,7 +99,6 @@ mod tests {
         let key = rt.nodes.iter().find(|n| n.key.as_deref() == Some("input")).unwrap().path.clone();
         rt.set_focus(Some(key.clone()), true);
         rt.web_edit(&json!({"kind":"edit", "key":key, "base":0, "expected":"", "start":0, "end":0, "text":"hello", "anchor":5, "focus":5}));
-        rt.frame(0.0);
         rt.web_key(&json!({"kind":"key", "key":"Enter", "code":"Enter"}));
         rt.frame(0.0);
         assert_eq!((&*rt.state.0.text, rt.state.1), ("hello", 1));
