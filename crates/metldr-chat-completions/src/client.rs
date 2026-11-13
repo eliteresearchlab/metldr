@@ -28,8 +28,9 @@ impl Client {
         timeout_secs: u16,
     ) -> Result<Self> {
         let url = reqwest::Url::parse(endpoint).map_err(|_| "invalid Chat endpoint")?;
+        let loopback = url.scheme() == "http" && loopback_host(&url);
         if endpoint.len() > 1024
-            || url.scheme() != "https"
+            || (url.scheme() != "https" && !loopback)
             || url.host_str().is_none()
             || !url.username().is_empty()
             || url.password().is_some()
@@ -66,6 +67,14 @@ impl Client {
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
             .timeout(std::time::Duration::from_secs(timeout_secs.into()));
+        // A local name must not resolve off the machine.
+        if loopback && url.host_str() == Some("localhost") {
+            let port = url.port_or_known_default().ok_or("invalid Chat endpoint")?;
+            client = client.resolve(
+                "localhost",
+                std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+            );
+        }
         if let Some(pem) = trust_ca_pem {
             if pem.len() > 16_384 {
                 return Err("Chat trust certificate exceeds bound".into());
@@ -214,5 +223,18 @@ pub(super) fn cancelled(stop: &AtomicBool) -> Result<()> {
 async fn wait_for_stop(stop: &AtomicBool) {
     while !stop.load(Ordering::Acquire) {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// True for `localhost` and loopback IP literals: the only hosts plain HTTP may reach.
+pub fn loopback_host(url: &reqwest::Url) -> bool {
+    match url.host_str() {
+        Some(host) if host.eq_ignore_ascii_case("localhost") => true,
+        Some(host) => host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback()),
+        None => false,
     }
 }

@@ -217,7 +217,12 @@ impl FlowClient {
     ) -> Result<PageView> {
         use crate::model::ProviderKey;
         let chat = protocol == ProviderProtocol::ChatCompletions;
-        if !crate::model::valid_https_endpoint(&endpoint)
+        let endpoint_valid = if chat {
+            crate::model::valid_chat_endpoint(&endpoint)
+        } else {
+            crate::model::valid_https_endpoint(&endpoint)
+        };
+        if !endpoint_valid
             || !crate::model::valid_ascii_label(&model, 128)
             || matches!(&key, ProviderKey::Replace(value) if value.is_empty()
                 || value.len() > 4_096

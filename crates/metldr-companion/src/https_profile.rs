@@ -113,8 +113,10 @@ pub(crate) enum Credential {
 
 fn validate_endpoint(endpoint: &str) -> Result<Url> {
     let url = Url::parse(endpoint).map_err(|_| "invalid HTTPS provider endpoint")?;
+    // Plain HTTP only reaches a local server; bind_parts limits it to Chat Completions.
     if endpoint.len() > 1024
-        || url.scheme() != "https"
+        || (url.scheme() != "https"
+            && !(url.scheme() == "http" && metldr_chat_completions::loopback_host(&url)))
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -232,7 +234,11 @@ fn bind_parts(
     protocol: &str,
     timeout_secs: Option<u16>,
 ) -> Result<Profile> {
-    let endpoint = validate_endpoint(&endpoint)?.to_string();
+    let endpoint = validate_endpoint(&endpoint)?;
+    if endpoint.scheme() == "http" && protocol != "chat_completions" {
+        return Err("only Chat Completions connections can use a local HTTP endpoint".into());
+    }
+    let endpoint = endpoint.to_string();
     if (matches!(credential, Credential::None) || timeout_secs.is_some())
         && protocol != "chat_completions"
     {
