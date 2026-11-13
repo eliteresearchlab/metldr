@@ -14,7 +14,6 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, ops::Bound};
 
-const KINDS: [Kind; 3] = [Kind::Pi, Kind::Codex, Kind::Opencode];
 const LIMIT: usize = 16;
 
 #[derive(Default)]
@@ -31,7 +30,7 @@ struct Choice {
 
 impl NativeChoices {
     pub(crate) fn apply(&self, view: &mut Value) -> Result<()> {
-        for kind in KINDS {
+        for kind in Kind::ALL {
             let field = match kind {
                 Kind::Pi => "agent_sessions",
                 Kind::Codex => "codex_sessions",
@@ -252,7 +251,7 @@ impl Reader<'_> {
         {
             return Err("native choices saved source differs".into());
         }
-        for kind in KINDS {
+        for kind in Kind::ALL {
             let Some(fingerprint) = profiles.get(&kind) else {
                 continue;
             };
@@ -395,7 +394,7 @@ fn visit_index(
 ) -> Result<u64> {
     let reader = Reader::Staged(write);
     let mut count = 0u64;
-    for kind in KINDS {
+    for kind in Kind::ALL {
         let mut after: Option<String> = None;
         loop {
             let ids = {
