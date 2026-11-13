@@ -295,6 +295,14 @@ pub(super) enum ConversationAction {
         revision: u32,
         approve: bool,
     },
+    /// Allows Tier 1 steps without asking for 30 minutes, or extends an existing grant.
+    GrantSession {
+        run: String,
+        revision: u32,
+    },
+    RevokeSession {
+        run: String,
+    },
     Summarize {
         page: Page,
     },

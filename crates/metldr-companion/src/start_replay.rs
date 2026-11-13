@@ -35,6 +35,8 @@ impl Owner {
             | Action::Stop { .. }
             | Action::BrowserDecision { .. }
             | Action::PlanReply { .. }
+            | Action::GrantSession { .. }
+            | Action::RevokeSession { .. }
             | Action::NativePermission { .. }
             | Action::PiUiReply { .. }
             | Action::CodexInputReply { .. } => return Ok(false),

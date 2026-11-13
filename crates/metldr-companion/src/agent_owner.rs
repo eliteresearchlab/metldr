@@ -150,6 +150,8 @@ impl Owner {
         disconnected: bool,
         released: bool,
     ) -> Result<()> {
+        // A finished run ends its session grant (decision 09).
+        self.session_grants.remove(run);
         let mut operation = self.operations.remove(run).ok_or_else(|| {
             if self.operations.is_empty() {
                 "agent settlement without operation"
