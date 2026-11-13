@@ -35,6 +35,7 @@ struct Entry {
     refresh_needed: bool,
     refreshing: bool,
     saving: bool,
+    copied: u64,
     pump_allowed: Rc<Cell<bool>>,
 }
 
@@ -109,6 +110,7 @@ impl Activities {
                         refresh_needed: false,
                         refreshing: false,
                         saving: false,
+                        copied: 0,
                         pump_allowed: Rc::new(Cell::new(false)),
                     },
                 );
@@ -324,8 +326,8 @@ impl Activities {
                 self.pie_hover(id, chart, updates),
             )
             .child(self.chart_data(id, entry, chart, updates, typography))
-            .child(self.chart_export(id, updates, typography, false))
-            .child(self.chart_export(id, updates, typography, true)),
+            .child(self.chart_export(id, updates, typography, false, false))
+            .child(self.chart_export(id, updates, typography, true, entry.copied != 0)),
             Value::Generated(frame) => {
                 let completion = match &entry.activity {
                     Activity::Generated(reference) => reference.completion,
@@ -706,6 +708,7 @@ impl Activities {
         updates: &Rc<Updates>,
         typography: super::preferences::Typography,
         copy: bool,
+        copied: bool,
     ) -> El {
         let cache = Rc::downgrade(&self.inner);
         let updates = Rc::downgrade(updates);
@@ -743,11 +746,9 @@ impl Activities {
                         .map_err(|_| crate::err("Invalid chart export."))?;
                     bridge.core.ensure_current().map_err(js_error)?;
                     let current = cache.upgrade().is_some_and(|cache| {
-                        cache
-                            .borrow()
-                            .entries
-                            .get(&id)
-                            .is_some_and(|entry| entry.activity == Activity::Chart(reference))
+                        cache.borrow().entries.get(&id).is_some_and(|entry| {
+                            entry.activity == Activity::Chart(reference.clone())
+                        })
                     });
                     if !current {
                         return Err(crate::err("Chart changed during export."));
@@ -771,6 +772,44 @@ impl Activities {
                     }
                 }
                 .await;
+                if result.is_ok() && copy {
+                    if let Some(cache) = cache.upgrade() {
+                        let token = {
+                            let mut cache = cache.borrow_mut();
+                            cache.next_token = cache.next_token.wrapping_add(1).max(1);
+                            let token = cache.next_token;
+                            if let Some(entry) = cache.entries.get_mut(&id) {
+                                if entry.activity == Activity::Chart(reference) {
+                                    entry.copied = token;
+                                }
+                            }
+                            token
+                        };
+                        if let Some(updates) = updates.upgrade() {
+                            updates.changed();
+                        }
+                        let cache = Rc::downgrade(&cache);
+                        let timer_updates = updates.clone();
+                        let clear = Closure::once_into_js(move || {
+                            if let Some(cache) = cache.upgrade() {
+                                if let Some(entry) = cache.borrow_mut().entries.get_mut(&id) {
+                                    if entry.copied == token {
+                                        entry.copied = 0;
+                                    }
+                                }
+                                if let Some(updates) = timer_updates.upgrade() {
+                                    updates.changed();
+                                }
+                            }
+                        });
+                        if let Some(window) = web_sys::window() {
+                            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                clear.unchecked_ref(),
+                                1800,
+                            );
+                        }
+                    }
+                }
                 if result.is_err()
                     && let Some(updates) = updates.upgrade()
                 {
@@ -787,7 +826,9 @@ impl Activities {
         });
         let press = Rc::clone(&action);
         typography
-            .text(if copy {
+            .text(if copy && copied {
+                "Copied!"
+            } else if copy {
                 "Copy to clipboard"
             } else {
                 "Save chart"
