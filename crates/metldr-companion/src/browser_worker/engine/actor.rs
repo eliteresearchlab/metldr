@@ -40,6 +40,9 @@ struct Initialization {
     page: bool,
     step: usize,
     deadline: Instant,
+    /// Page setup commands still unanswered. They are sent together because the
+    /// browser runs one session's commands in arrival order.
+    remaining: Option<Arc<std::sync::atomic::AtomicUsize>>,
 }
 struct Pending {
     work: Work,

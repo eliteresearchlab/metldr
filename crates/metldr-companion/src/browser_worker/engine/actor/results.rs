@@ -36,13 +36,12 @@ impl Actor {
             );
         }
         match pending.work {
-            Work::Init(mut init) => {
+            Work::Init(init) => {
                 if init.page && init.step == 1 {
                     self.contexts
                         .tree(init.session.as_deref(), &value["frameTree"])?;
                 }
-                init.step += 1;
-                self.initialize_step(init)
+                self.initialized(init)
             }
             Work::CreateWorld => Ok(()),
             Work::Capture { generation, job } => {
