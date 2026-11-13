@@ -30,6 +30,8 @@ pub(crate) fn display(action: &BrowserActionView) -> Display {
         BrowserActionIntent::Scroll { .. } => "Page scroll",
         BrowserActionIntent::SetNativeControl { .. } if pending => "Approve control change",
         BrowserActionIntent::SetNativeControl { .. } => "Control change",
+        BrowserActionIntent::EnterSecret { .. } if pending => "Enter a secret",
+        BrowserActionIntent::EnterSecret { .. } => "Secret entry",
     };
     let mut details = Vec::new();
     let mut add = |part, label, value: String| details.push(Detail { part, label, value });
@@ -44,6 +46,15 @@ pub(crate) fn display(action: &BrowserActionView) -> Display {
             add("field", "Field", field_label.clone());
             add("previous-value", "Previous value", previous_value.clone());
             add("value", "Proposed value", value.clone());
+        }
+        BrowserActionIntent::EnterSecret {
+            field_label,
+            secret,
+            ..
+        } => {
+            add("destination", "Site", origin(&action.url));
+            add("field", "Field", field_label.clone());
+            add("secret", "Kind", secret.label().to_owned());
         }
         BrowserActionIntent::Navigate { destination } => {
             add(
@@ -183,6 +194,7 @@ pub(crate) fn display(action: &BrowserActionView) -> Display {
         }) => "No movement observed".to_owned(),
         Some(BrowserActionOutcome::ScrollObserved) => "Scroll position observed".to_owned(),
         Some(BrowserActionOutcome::ControlObserved) => "Control state observed on this page".to_owned(),
+        Some(BrowserActionOutcome::SecretEntered) => "Secret entered on this page".to_owned(),
         _ => format!("{}{}{}", action.phase,
             action.outcome.map(|outcome| format!(" ({outcome})")).unwrap_or_default(),
             action.reason.as_ref().map(|reason| format!(": {reason}")).unwrap_or_default()),
@@ -223,4 +235,13 @@ fn radio_choice(member: &crate::model::RadioMember) -> String {
         if member.hidden { ", hidden" } else { "" },
         if member.disabled { ", disabled" } else { "" }
     )
+}
+
+/// The scheme, host and port of `url`, which is all a secret entry card shows of the page.
+pub(crate) fn origin(url: &str) -> String {
+    let rest = url.find("://").map_or(0, |at| at + 3);
+    let end = url[rest..]
+        .find(['/', '?', '#'])
+        .map_or(url.len(), |at| rest + at);
+    url[..end].to_owned()
 }

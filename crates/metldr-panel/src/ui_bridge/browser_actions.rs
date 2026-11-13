@@ -1,6 +1,6 @@
 use super::*;
 use crate::browser_action_display::{self, Display};
-use crate::model::{BrowserActionId, BrowserActionPhase, BrowserActionView};
+use crate::model::{BrowserActionId, BrowserActionIntent, BrowserActionPhase, BrowserActionView};
 
 mod observe;
 pub(super) use observe::Observer;
@@ -40,6 +40,12 @@ impl DecisionKey {
             u8::from(self.approve)
         )
     }
+}
+
+/// An answer to a pending browser action. A secret entry is approved only with its secret.
+pub(super) enum Answer {
+    Decide(bool),
+    Secret(String),
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -308,7 +314,7 @@ impl UiBrowserActions {
             .ok_or_else(|| crate::err("Invalid browser action revision."))?;
         let work = self
             .core
-            .reserve_browser_decision(Key { id, revision }, approve)
+            .reserve_browser_decision(Key { id, revision }, Answer::Decide(approve))
             .map_err(js_error)?;
         Ok(future_to_promise(async move {
             work.await.map(|()| JsValue::UNDEFINED).map_err(js_error)
@@ -355,33 +361,78 @@ impl Core {
                 id: decision.id,
                 revision: decision.revision,
             },
-            decision.approve,
+            Answer::Decide(decision.approve),
+        )
+    }
+
+    /// Enters the secret typed in the Rune consent card for one pending entry.
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn enter_secret_from_rune(
+        self: &Rc<Self>,
+        decision: DecisionKey,
+        secret: String,
+        tx: &mut ::rune::Tx,
+    ) -> Result<impl Future<Output = Result<(), FlowError>> + 'static, FlowError> {
+        if decision.revision == 0
+            || !decision.approve
+            || !tx.consume_activation(&decision.element_key())
+        {
+            return Err(FlowError::InvalidInput(
+                "Use a current action to answer the request.".into(),
+            ));
+        }
+        self.reserve_browser_decision(
+            Key {
+                id: decision.id,
+                revision: decision.revision,
+            },
+            Answer::Secret(secret),
         )
     }
 
     fn reserve_browser_decision(
         self: &Rc<Self>,
         key: Key,
-        approve: bool,
+        answer: Answer,
     ) -> Result<impl Future<Output = Result<(), FlowError>> + 'static, FlowError> {
         let state = State::read(self);
-        if !state
+        let approve = !matches!(answer, Answer::Decide(false));
+        let Some(row) = state
             .actions
             .iter()
-            .any(|row| key.offered(row) && state.enabled(row, approve))
-        {
+            .find(|row| key.offered(row) && state.enabled(row, approve))
+        else {
             return Err(FlowError::InvalidInput(
                 "This browser action is no longer available.".into(),
             ));
+        };
+        let secret = matches!(row.intent, BrowserActionIntent::EnterSecret { .. });
+        match &answer {
+            Answer::Decide(true) if secret => {
+                return Err(FlowError::InvalidInput("Type the secret to enter it.".into()));
+            }
+            Answer::Secret(_) if !secret => {
+                return Err(FlowError::InvalidInput(
+                    "This browser action does not take a secret.".into(),
+                ));
+            }
+            _ => {}
         }
         *self.browser_operation.borrow_mut() = Operation::Sending(key.clone());
         self.notify_browser_actions();
         let core = Rc::clone(self);
         Ok(async move {
-            let result = core
-                .flow()
-                .decide_browser_action(core.scope.clone(), key.id.clone(), key.revision, approve)
-                .await;
+            let flow = core.flow();
+            let result = match answer {
+                Answer::Decide(approve) => {
+                    flow.decide_browser_action(core.scope.clone(), key.id.clone(), key.revision, approve)
+                        .await
+                }
+                Answer::Secret(secret) => {
+                    flow.enter_secret(core.scope.clone(), key.id.clone(), key.revision, secret)
+                        .await
+                }
+            };
             let result = match result {
                 Ok(view) => match core.accept(view) {
                     Ok(_) => {
@@ -436,7 +487,6 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::BrowserActionIntent;
 
     #[cfg(feature = "rune-ui")]
     #[test]

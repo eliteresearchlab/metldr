@@ -987,6 +987,61 @@ impl FlowClient {
         }
     }
 
+    /// Approves one pending secret entry with the secret the user typed. The secret goes only
+    /// into this request and is not kept.
+    pub(crate) async fn enter_secret(
+        &self,
+        scope: metldr_history_pages::Scope,
+        action: BrowserActionId,
+        revision: u64,
+        secret: String,
+    ) -> Result<PageView> {
+        if secret.is_empty() || secret.len() > 1024 || secret.chars().any(char::is_control) {
+            return Err(FlowError::InvalidInput(
+                "Enter a secret of at most 1024 bytes on one line.".into(),
+            ));
+        }
+        let latest = self
+            .inner
+            .protocol
+            .borrow()
+            .latest
+            .clone()
+            .ok_or(FlowError::NoSource)?;
+        if !self.is_connected() {
+            return Err(FlowError::Disconnected);
+        }
+        let checked = self.check_source(latest).await;
+        if !checked.browser_actions.iter().any(|item| {
+            item.id == action
+                && item.revision == revision
+                && matches!(
+                    item.intent,
+                    crate::model::BrowserActionIntent::EnterSecret { .. }
+                )
+                && checked.can_approve(item, self.source_epoch())
+        }) {
+            return Err(FlowError::InvalidInput(
+                "The secret entry is no longer current.".into(),
+            ));
+        }
+        match self
+            .request(
+                conversation(
+                    &scope,
+                    json!({"op":"secret_entry","action":action,"revision":revision,"secret":secret}),
+                ),
+                ReplyKind::SelectedPage(scope),
+            )
+            .await?
+        {
+            Reply::Page(view) => Ok(self.check_source(view).await),
+            _ => Err(FlowError::Protocol(
+                "Expected the updated browser action view.".into(),
+            )),
+        }
+    }
+
     async fn request(&self, command: Value, kind: ReplyKind) -> Result<Reply> {
         self.request_with_id(self.inner.request_id()?, command, kind)
             .await
