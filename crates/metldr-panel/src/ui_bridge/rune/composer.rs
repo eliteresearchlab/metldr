@@ -145,11 +145,11 @@ fn close(state: &mut State, _: &mut Tx) {
     state.source_engaged = false;
 }
 
-pub(super) fn enter(
-    state: &mut State,
+pub(super) fn enter<S>(
+    state: &mut S,
     key: &KeyEvent,
     tx: &mut Tx,
-    action: fn(&mut State, &mut Tx),
+    action: fn(&mut S, &mut Tx),
 ) -> bool {
     if key.key != Key::Enter {
         return false;
