@@ -842,25 +842,6 @@ mod tests {
     }
 
     #[test]
-    fn live_messages_preserve_roles_across_updates() {
-        fn view(phase: &usize, _: &mut Cx<usize>) -> El {
-            crate::text(["Saving", "Save failed", "Saved"][*phase])
-                .key("notice")
-                .role(["status", "alert", "text"][*phase])
-        }
-        let mut rt = Runtime::new(0, view, (480.0, 320.0), Env::default());
-        for (phase, role) in ["status", "alert", "text"].into_iter().enumerate() {
-            rt.state = phase;
-            rt.invalidate();
-            rt.frame(0.0);
-            let items: Vec<Value> = serde_json::from_str(&rt.a11y_json()).unwrap();
-            assert_eq!(items.len(), 1);
-            assert_eq!(items[0]["k"], role);
-            assert_eq!(items[0]["t"], ["Saving", "Save failed", "Saved"][phase]);
-        }
-    }
-
-    #[test]
     fn table_mirror_preserves_semantic_parents() {
         fn view(_: &(), _: &mut Cx<()>) -> El {
             let header = crate::row()

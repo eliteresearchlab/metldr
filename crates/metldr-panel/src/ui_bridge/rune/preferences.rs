@@ -552,6 +552,24 @@ mod checks {
     use super::*;
 
     #[test]
+    fn live_messages_preserve_roles_across_updates() {
+        fn view(phase: &usize, _: &mut Cx<usize>) -> El {
+            ::rune::text(["Saving", "Save failed", "Saved"][*phase])
+                .key("notice")
+                .role(["status", "alert", "text"][*phase])
+        }
+        let mut rt = ::rune::Runtime::new(0, view, (480.0, 320.0), ::rune::Env::default());
+        for (phase, role) in ["status", "alert", "text"].into_iter().enumerate() {
+            rt.update(|state, _| *state = phase);
+            rt.frame(0.0);
+            let items: Vec<serde_json::Value> = serde_json::from_str(&rt.a11y_json()).unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0]["k"], role);
+            assert_eq!(items[0]["t"], ["Saving", "Save failed", "Saved"][phase]);
+        }
+    }
+
+    #[test]
     fn preference_status_returns_focus_without_overriding_another_control() {
         fn view(state: &State, _: &mut Cx<State>) -> El {
             let waiting = state.preferences.parking.is_some();
