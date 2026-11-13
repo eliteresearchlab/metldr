@@ -109,6 +109,12 @@ impl Engine {
         events: mpsc::Receiver<Notice>,
         stop: Arc<AtomicBool>,
     ) -> std::result::Result<Self, AttachFailure> {
+        if crate::model::protected_page(&source.url) {
+            return Err(AttachFailure {
+                message: "protected browser page is not accessible".into(),
+                released: true,
+            });
+        }
         let deadline = Instant::now() + TIMEOUT;
         let setup = async {
             if stop.load(Ordering::Acquire) {

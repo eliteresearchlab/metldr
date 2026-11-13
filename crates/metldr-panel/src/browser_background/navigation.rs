@@ -81,6 +81,9 @@ pub(super) async fn navigate(
     destination: String,
     params: Value,
 ) -> Result<Value, String> {
+    if web_sys::Url::new(&destination).is_ok_and(|url| crate::site::protected(&url)) {
+        return Err("protected browser page is not accessible".into());
+    }
     let typed: NavigateParams = serde_json::from_value(params.clone())
         .map_err(|_| "Invalid Page.navigate parameters.".to_owned())?;
     let destination_site = crate::site::permission(&destination)

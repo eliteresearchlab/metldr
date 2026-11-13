@@ -28,6 +28,45 @@ pub(super) fn validate_page_url(value: &str) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn protected_page(value: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(value) else {
+        return false;
+    };
+    matches!(
+        url.scheme(),
+        "chrome" | "chrome-extension" | "devtools" | "view-source"
+    ) || matches!(url.scheme(), "http" | "https")
+        && (url.host_str() == Some("chromewebstore.google.com")
+            || url.host_str() == Some("chrome.google.com")
+                && (url.path() == "/webstore" || url.path().starts_with("/webstore/")))
+}
+
+#[cfg(test)]
+mod protected_page_checks {
+    use super::protected_page;
+
+    #[test]
+    fn refuses_browser_pages_and_store_without_matching_other_sites() {
+        for url in [
+            "chrome://settings/",
+            "chrome-extension://abc/page",
+            "devtools://devtools/",
+            "view-source:https://example.com/",
+            "https://chromewebstore.google.com/",
+            "https://chrome.google.com/webstore/detail/test",
+        ] {
+            assert!(protected_page(url), "{url}");
+        }
+        for url in [
+            "https://example.com/",
+            "https://chromewebstore.google.com.example.com/",
+            "https://chrome.google.com/webstorefront",
+        ] {
+            assert!(!protected_page(url), "{url}");
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(super) struct Source {
     pub(super) id: String,

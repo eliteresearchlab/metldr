@@ -3,6 +3,11 @@ use web_sys::Url;
 
 pub(super) fn permission(url: &str) -> Result<String, FlowError> {
     let parsed = Url::new(url).map_err(|_| invalid())?;
+    if protected(&parsed) {
+        return Err(FlowError::InvalidInput(
+            "protected browser page is not accessible".into(),
+        ));
+    }
     if url.len() > 2_048
         || url.chars().any(char::is_control)
         || !matches!(parsed.protocol().as_str(), "http:" | "https:")
@@ -16,6 +21,17 @@ pub(super) fn permission(url: &str) -> Result<String, FlowError> {
     }
     // Chrome's host grant covers every port; each operation still pins the exact page URL.
     Ok(format!("{}//{}/*", parsed.protocol(), parsed.hostname()))
+}
+
+pub(super) fn protected(parsed: &Url) -> bool {
+    matches!(
+        parsed.protocol().as_str(),
+        "chrome:" | "chrome-extension:" | "devtools:" | "view-source:"
+    ) || matches!(parsed.protocol().as_str(), "http:" | "https:")
+        && (parsed.hostname() == "chromewebstore.google.com"
+            || parsed.hostname() == "chrome.google.com"
+                && (parsed.pathname() == "/webstore"
+                    || parsed.pathname().starts_with("/webstore/")))
 }
 
 fn invalid() -> FlowError {
