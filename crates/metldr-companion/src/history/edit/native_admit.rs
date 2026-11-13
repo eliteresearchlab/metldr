@@ -55,8 +55,8 @@ impl Edit<'_> {
         {
             return Err("invalid native task admission".into());
         }
-        if storage(|| Ok(self.write.open_table(ACTIVE_RUNS)?.len()? != 0))? {
-            return Err("another run is active".into());
+        if storage(|| Ok(self.write.open_table(ACTIVE_RUNS)?.len()? >= 16))? {
+            return Err("active run capacity reached".into());
         }
         let exists = storage(|| {
             Ok(self.write.open_table(PI)?.get(name)?.is_some()

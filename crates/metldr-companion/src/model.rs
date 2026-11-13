@@ -165,6 +165,10 @@ pub(super) struct Request {
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Command {
+    StopAll,
+    StopRun {
+        run: String,
+    },
     Conversation {
         scope: crate::history_io::Scope,
         action: ConversationAction,

@@ -346,6 +346,25 @@ impl Owner {
     }
     pub(super) fn command(&mut self, id: &str, command: Command) -> Result<()> {
         match command {
+            Command::StopRun { run } => {
+                if !self.operations.contains_key(&run) {
+                    return Err("run is not active".into());
+                }
+                self.stop_run(id, &run)
+            }
+            Command::StopAll => {
+                let runs: Vec<_> = self.operations.keys().cloned().collect();
+                let mut stopped = 0;
+                let mut failed = 0;
+                let prefix: String = id.chars().take(40).collect();
+                for run in runs {
+                    match self.stop_run(&format!("{prefix}-run-{stopped}-{failed}"), &run) {
+                        Ok(()) => stopped += 1,
+                        Err(_) => failed += 1,
+                    }
+                }
+                self.emit(json!({"v":crate::WIRE_VERSION,"request":id,"kind":"stop_all","stopped":stopped,"failed":failed}))
+            }
             Command::HistoryCurrent => self.history_current(id),
             Command::ConversationChange { scope, change } => {
                 self.conversation_change(id, scope, change)

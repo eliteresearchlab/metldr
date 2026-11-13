@@ -169,9 +169,6 @@ impl Owner {
             return Ok(());
         }
         self.require_conversation(scope)?;
-        if !self.operations.is_empty() {
-            return Err("another run is active".into());
-        }
         let (run, body) = self.record_change(|edit, _| {
             let (kind, question) = match start {
                 ConversationAction::Summarize { page } => {
@@ -237,21 +234,19 @@ impl Owner {
     }
 
     pub(super) fn stop_run(&mut self, id: &str, run: &str) -> Result<()> {
-        let terminal = self.record_change(|edit, scope| {
-            let execution = edit.current_execution(scope, run)?;
-            Ok((edit.run(&execution, run)?.status.terminal(), None))
+        let terminal = self.record_execution(run, |edit, execution| {
+            Ok(edit.run(execution, run)?.status.terminal())
         })?;
         if terminal {
             return self.reply_stop(id, "already_terminal", run);
         }
         let pending = self.detach_inputs(run);
-        let saved = self.record_change(|edit, scope| {
-            let execution = edit.current_execution(scope, run)?;
-            edit.prevent_browser(&execution, run, "user stopped before dispatch")?;
-            let mut record = edit.run(&execution, run)?;
+        let saved = self.record_execution(run, |edit, execution| {
+            edit.prevent_browser(execution, run, "user stopped before dispatch")?;
+            let mut record = edit.run(execution, run)?;
             record.status = Status::StopRequested;
-            edit.put_run(&execution, record)?;
-            Ok(((), Some(edit.project(scope, Some(run))?)))
+            edit.put_run(execution, record)?;
+            Ok(())
         });
         if let Some(operation) = self.operations.get(run) {
             operation.stop.store(true, Ordering::Release);
