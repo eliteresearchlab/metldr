@@ -888,6 +888,10 @@ fn install_listeners() -> Result<(), JsValue> {
         else {
             return;
         };
+        // A protected page never gets the banner, whatever its site access.
+        if web_sys::Url::new(&url).is_ok_and(|url| crate::site::protected(&url)) {
+            return;
+        }
         let Ok(site) = crate::site::permission(&url) else {
             return;
         };
