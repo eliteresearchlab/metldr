@@ -4,7 +4,7 @@ use crate::ag_ui::{Activity, AgUiMessage};
 use metldr_conversation::{Chart, ChartKind, Table};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::{Rc, Weak},
 };
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
@@ -27,6 +27,8 @@ struct Entry {
     activity: Activity,
     value: Value,
     offset: u32,
+    open: HashSet<String>,
+    hovered: Option<usize>,
     rect: ::rune::Live<[f32; 4]>,
     height: f32,
     token: u64,
@@ -98,6 +100,8 @@ impl Activities {
                         activity: activity.clone(),
                         value: Value::Pending,
                         offset: 0,
+                        open: HashSet::new(),
+                        hovered: None,
                         rect: ::rune::Live::new([0.0; 4]),
                         height: 200.0,
                         token,
@@ -281,19 +285,28 @@ impl Activities {
             return typography.text("Loading activity");
         };
         match &entry.value {
-            Value::Pending | Value::Loading => typography.text("Loading activity"),
+            Value::Pending | Value::Loading => typography.text("Loading activity").role("status"),
             Value::Waiting(_) => typography.text("Waiting for the current answer"),
             Value::Failed => {
-                let mut content = col()
-                    .gap(8.0)
-                    .child(typography.text("The activity could not be loaded.").wrap());
+                let mut content = col().gap(8.0).child(
+                    typography
+                        .text("The activity could not be loaded.")
+                        .role("alert")
+                        .wrap(),
+                );
                 content = content.child(self.button(id, "Retry", None, updates, typography));
                 content
             }
             Value::Table(table) => table_view(table, typography),
-            Value::Chart(chart) => {
-                chart_view(chart, typography).child(self.chart_export(id, updates, typography))
-            }
+            Value::Chart(chart) => chart_view(
+                chart,
+                typography,
+                entry.hovered,
+                self.pie_hover(id, chart, updates),
+            )
+            .child(self.chart_data(id, entry, chart, updates, typography))
+            .child(self.chart_export(id, updates, typography, false))
+            .child(self.chart_export(id, updates, typography, true)),
             Value::Generated(frame) => col()
                 .gap(8.0)
                 .child(typography.text("Interactive answer"))
@@ -335,10 +348,36 @@ impl Activities {
                 .child(self.answer_export(id, updates, typography)),
             Value::Tools(tools) => match tools.page(entry.offset) {
                 Ok(page) => {
-                    let mut out = col()
-                        .gap(8.0)
-                        .child(typography.text(format!("Tools · {}", tools.run_status())));
+                    let open = !entry.open.contains("tools-closed");
+                    let mut out = col().gap(8.0).child(self.disclosure(
+                        id,
+                        "tools-closed",
+                        format!(
+                            "{} tool calls, {} retained reports",
+                            tools.tool_count(),
+                            tools.report_count()
+                        ),
+                        open,
+                        updates,
+                        typography,
+                    ));
+                    if !open {
+                        return out;
+                    }
                     for tool in page.tools() {
+                        let tool_key = format!("tool:{}", tool.id());
+                        let tool_open = entry.open.contains(&tool_key);
+                        out = out.child(self.disclosure(
+                            id,
+                            &tool_key,
+                            tool.name().unwrap_or_else(|| tool.id()),
+                            tool_open,
+                            updates,
+                            typography,
+                        ));
+                        if !tool_open {
+                            continue;
+                        }
                         let mut line = col()
                             .gap(3.0)
                             .child(typography.text(tool.name().unwrap_or_else(|| tool.id())))
@@ -368,6 +407,8 @@ impl Activities {
                                 );
                             }
                         }
+                        line = line
+                            .child(typography.text(format!("{} retained reports", tool.reports())));
                         for report in tool.history() {
                             line = line.child(
                                 typography
@@ -399,16 +440,35 @@ impl Activities {
                         details.route(),
                         details.status()
                     )));
-                    for report in page.reports() {
-                        out = out.child(
-                            typography
-                                .text(format!(
-                                    "{} · {} {}",
-                                    report.tool(),
-                                    report.phase(),
-                                    report.outcome().unwrap_or_default()
-                                ))
-                                .wrap(),
+                    let open = entry.open.contains("reports");
+                    out = out.child(self.disclosure(
+                        id,
+                        "reports",
+                        format!("{} retained reports", details.report_count()),
+                        open,
+                        updates,
+                        typography,
+                    ));
+                    if open {
+                        for report in page.reports() {
+                            out = out.child(
+                                typography
+                                    .text(format!(
+                                        "{} · {} {}",
+                                        report.tool(),
+                                        report.phase(),
+                                        report.outcome().unwrap_or_default()
+                                    ))
+                                    .wrap(),
+                            );
+                        }
+                        out = self.paging(
+                            out,
+                            id,
+                            entry.offset,
+                            page.next_offset(),
+                            updates,
+                            typography,
                         );
                     }
                     if let Ok(receipts) = details.corrections() {
@@ -420,18 +480,116 @@ impl Activities {
                             );
                         }
                     }
-                    self.paging(
-                        out,
-                        id,
-                        entry.offset,
-                        page.next_offset(),
-                        updates,
-                        typography,
-                    )
+                    out
                 }
                 Err(_) => typography.text("Run details are no longer available."),
             },
         }
+    }
+
+    fn disclosure(
+        &self,
+        id: &str,
+        key: &str,
+        label: String,
+        expanded: bool,
+        updates: &Rc<Updates>,
+        typography: super::preferences::Typography,
+    ) -> El {
+        let cache = Rc::downgrade(&self.inner);
+        let updates = Rc::downgrade(updates);
+        let id = id.to_owned();
+        let key = key.to_owned();
+        typography
+            .text(label)
+            .key(format!("activity:{id}:{key}"))
+            .role("button")
+            .focusable(true)
+            .expanded(expanded)
+            .native_activation()
+            .on_press_tx(move |state: &mut State, _| {
+                state.sound(crate::interaction_audio::Cue::Press);
+                if let Some(cache) = cache.upgrade()
+                    && let Some(entry) = cache.borrow_mut().entries.get_mut(&id)
+                {
+                    if !entry.open.remove(&key) {
+                        entry.open.insert(key.clone());
+                    }
+                }
+                if let Some(updates) = updates.upgrade() {
+                    updates.changed();
+                }
+            })
+    }
+
+    fn pie_hover(
+        &self,
+        id: &str,
+        chart: &Chart,
+        updates: &Rc<Updates>,
+    ) -> Rc<dyn Fn(Option<(f32, f32)>)> {
+        let values: Vec<f64> = chart
+            .data()
+            .iter()
+            .map(|p| p.value.as_f64().unwrap_or(0.0))
+            .collect();
+        let cache = Rc::downgrade(&self.inner);
+        let updates = Rc::downgrade(updates);
+        let id = id.to_owned();
+        Rc::new(move |point| {
+            let hovered = point.and_then(|(x, y)| pie_point(&values, x, y));
+            if let Some(cache) = cache.upgrade()
+                && let Some(entry) = cache.borrow_mut().entries.get_mut(&id)
+                && entry.hovered != hovered
+            {
+                entry.hovered = hovered;
+                if let Some(updates) = updates.upgrade() {
+                    updates.changed();
+                }
+            }
+        })
+    }
+
+    fn chart_data(
+        &self,
+        id: &str,
+        entry: &Entry,
+        chart: &Chart,
+        updates: &Rc<Updates>,
+        typography: super::preferences::Typography,
+    ) -> El {
+        let mut out = col().gap(6.0);
+        if chart.data().is_empty() {
+            return out;
+        }
+        let open = entry.open.contains("chart-data");
+        out = out.child(self.disclosure(
+            id,
+            "chart-data",
+            "View chart data".into(),
+            open,
+            updates,
+            typography,
+        ));
+        if open {
+            let mut table = col().role("table").label("Chart data");
+            table = table.child(
+                ::rune::row()
+                    .role("row")
+                    .child(typography.text("Label").role("columnheader"))
+                    .child(typography.text("Value").role("columnheader")),
+            );
+            for point in chart.data() {
+                table = table.child(
+                    ::rune::row()
+                        .role("row")
+                        .child(typography.text(&point.label).role("rowheader"))
+                        .child(typography.text(point.value.to_string()).role("cell")),
+                );
+            }
+            out = out.child(table);
+        }
+        out
     }
 
     fn paging(
@@ -503,9 +661,11 @@ impl Activities {
         id: &str,
         updates: &Rc<Updates>,
         typography: super::preferences::Typography,
+        copy: bool,
     ) -> El {
         let cache = Rc::downgrade(&self.inner);
         let updates = Rc::downgrade(updates);
+        let control_key = format!("chart-export:{id}:{copy}");
         let id = id.to_owned();
         let action = Rc::new(move |_: &mut State, _: &mut Tx| {
             let Some(cache) = cache.upgrade() else { return };
@@ -548,40 +708,53 @@ impl Activities {
                     if !current {
                         return Err(crate::err("Chart changed during export."));
                     }
-                    download(
-                        result["filename"]
-                            .as_str()
-                            .ok_or_else(|| crate::err("Chart filename unavailable."))?,
-                        result["html"]
-                            .as_str()
-                            .ok_or_else(|| crate::err("Chart export unavailable."))?,
-                    )
+                    let html = result["html"]
+                        .as_str()
+                        .ok_or_else(|| crate::err("Chart export unavailable."))?;
+                    if copy {
+                        let navigator = crate::get(&js_sys::global(), "navigator")?;
+                        let clipboard = crate::get(&navigator, "clipboard")?;
+                        crate::promise(crate::call(&clipboard, "writeText", &[html.into()])?)?
+                            .await?;
+                        Ok(())
+                    } else {
+                        download(
+                            result["filename"]
+                                .as_str()
+                                .ok_or_else(|| crate::err("Chart filename unavailable."))?,
+                            html,
+                        )
+                    }
                 }
                 .await;
                 if result.is_err()
                     && let Some(updates) = updates.upgrade()
                 {
-                    updates.finish(Err(FlowError::Host("The chart could not be saved.".into())));
+                    updates.finish(Err(FlowError::Host(
+                        if copy {
+                            "The chart could not be copied."
+                        } else {
+                            "The chart could not be saved."
+                        }
+                        .into(),
+                    )));
                 }
             });
         });
         let press = Rc::clone(&action);
         typography
-            .text("Save chart")
+            .text(if copy {
+                "Copy to clipboard"
+            } else {
+                "Save chart"
+            })
+            .key(control_key)
             .role("button")
             .focusable(true)
+            .native_activation()
             .on_press_tx(move |s: &mut State, tx| {
                 s.sound(crate::interaction_audio::Cue::Press);
                 press(s, tx)
-            })
-            .on_key(move |s: &mut State, key, tx| {
-                if key.key == ::rune::Key::Enter {
-                    s.sound(crate::interaction_audio::Cue::Press);
-                    action(s, tx);
-                    true
-                } else {
-                    false
-                }
             })
     }
 
@@ -770,7 +943,12 @@ fn table_view(table: &Table, typography: super::preferences::Typography) -> El {
     out.child(typography.text(table.source()).wrap())
 }
 
-fn chart_view(chart: &Chart, typography: super::preferences::Typography) -> El {
+fn chart_view(
+    chart: &Chart,
+    typography: super::preferences::Typography,
+    hovered: Option<usize>,
+    hover: Rc<dyn Fn(Option<(f32, f32)>)>,
+) -> El {
     let mut out = col()
         .gap(6.0)
         .child(typography.text(chart.title()).role("heading").wrap())
@@ -828,7 +1006,8 @@ fn chart_view(chart: &Chart, typography: super::preferences::Typography) -> El {
                         ::rune::canvas(shape.view_box(200.0, 16.0))
                             .w_full()
                             .h(16.0)
-                            .label(format!("{}: {}", point.label, point.value)),
+                            .label(format!("{}: {}", point.label, point.value))
+                            .help(format!("{}: {}", point.label, point.value)),
                     );
                 }
             }
@@ -862,7 +1041,25 @@ fn chart_view(chart: &Chart, typography: super::preferences::Typography) -> El {
                     }
                     angle = end;
                 }
-                out = out.child(::rune::canvas(shape).size(160.0, 160.0).label("Pie chart"));
+                let leave = Rc::clone(&hover);
+                out = out.child(
+                    ::rune::canvas(shape)
+                        .size(160.0, 160.0)
+                        .label("Pie chart")
+                        .on_pointer_move_any(move |point, _| hover(Some((point.x, point.y))))
+                        .on_hover_change_any(move |inside, _| {
+                            if !inside {
+                                leave(None);
+                            }
+                        }),
+                );
+                if let Some(point) = hovered.and_then(|index| chart.data().get(index)) {
+                    out = out.child(
+                        typography
+                            .text(format!("{}: {}", point.label, point.value))
+                            .role("tooltip"),
+                    );
+                }
             } else if !chart.data().is_empty() {
                 out = out.child(typography.text("All values are zero."));
             }
@@ -890,6 +1087,23 @@ fn chart_view(chart: &Chart, typography: super::preferences::Typography) -> El {
         out = out.child(typography.text("No data to display."));
     }
     out.child(typography.text(chart.source()))
+}
+
+fn pie_point(values: &[f64], x: f32, y: f32) -> Option<usize> {
+    let (x, y) = (f64::from(x) - 80.0, f64::from(y) - 80.0);
+    if x * x + y * y > 72.0 * 72.0 {
+        return None;
+    }
+    let total: f64 = values.iter().sum();
+    if total <= 0.0 {
+        return None;
+    }
+    let angle = (y.atan2(x) + std::f64::consts::FRAC_PI_2).rem_euclid(std::f64::consts::TAU);
+    let mut end = 0.0;
+    values.iter().position(|value| {
+        end += std::f64::consts::TAU * value / total;
+        angle < end
+    })
 }
 
 fn chart_scale(value: f64) -> String {
