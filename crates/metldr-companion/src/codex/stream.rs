@@ -262,10 +262,14 @@ pub(super) async fn run(
                     }
                     continue;
                 }
-                let outcome = outcome?;
-                session
-                    .reply_tool(call, &serde_json::to_string(&outcome)?, true)
-                    .await?;
+                let (text, success) = match outcome {
+                    Ok(value) => (serde_json::to_string(&value)?, true),
+                    Err(error) if error.is::<crate::browser_worker::PlanRefusal>() => {
+                        (error.to_string(), false)
+                    }
+                    Err(error) => return Err(error),
+                };
+                session.reply_tool(call, &text, success).await?;
             }
             NativeEvent::Finished { status, .. } => {
                 corrections.close()?;
