@@ -259,7 +259,23 @@ impl State {
         });
     }
 
-    fn use_followup(&mut self, tx: &mut Tx) {
+    fn add_followup(&mut self, tx: &mut Tx) {
+        self.sound(crate::interaction_audio::Cue::Press);
+        self.use_followup(true, tx);
+    }
+
+    fn dismiss_followup(&mut self, tx: &mut Tx) {
+        self.sound(crate::interaction_audio::Cue::Release);
+        self.use_followup(false, tx);
+    }
+
+    fn use_followup(&mut self, add: bool, tx: &mut Tx) {
+        if add && self.draft.preedit.is_some() {
+            self.fail(FlowError::InvalidInput(
+                "Finish composing your draft first.".into(),
+            ));
+            return;
+        }
         let Some(followup) = self.proposed_followup.take() else {
             return;
         };
@@ -277,11 +293,21 @@ impl State {
             });
         match result {
             Ok(()) => {
-                self.replace_draft(followup.text);
-                self.menu = None;
-                tx.focus("rune-composer-field");
+                if add {
+                    let text = if self.draft.text.is_empty() {
+                        followup.text
+                    } else {
+                        format!("{}\n\n{}", self.draft.text, followup.text)
+                    };
+                    self.replace_draft(text);
+                    self.menu = None;
+                    tx.focus("rune-composer-field");
+                }
             }
-            Err(error) => self.fail(error),
+            Err(error) => {
+                self.proposed_followup = Some(followup);
+                self.fail(error);
+            }
         }
     }
 
@@ -747,9 +773,6 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
     let followup = updates.presentation.borrow_mut().followup.take();
     if let Some(followup) = followup {
         state.proposed_followup = Some(followup);
-        if !state.settings_open && state.draft.text.is_empty() && state.draft.preedit.is_none() {
-            state.use_followup(tx);
-        }
     }
     if state
         .proposed_followup
@@ -759,6 +782,74 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
         state.proposed_followup = None;
     }
     true
+}
+
+fn followup_controls<S: 'static>(
+    typography: preferences::Typography,
+    add: fn(&mut S, &mut Tx),
+    dismiss: fn(&mut S, &mut Tx),
+) -> El {
+    let mut actions = row().gap(8.0);
+    for (label, action) in [("Add to draft", add), ("Dismiss", dismiss)] {
+        actions = actions.child(
+            typography
+                .text(label)
+                .key(label)
+                .role("button")
+                .focusable(true)
+                .native_activation()
+                .press(typography.ink.alpha(0.12))
+                .on_press_tx(action)
+                .on_key(move |state: &mut S, key, tx| composer::enter(state, key, tx, action)),
+        );
+    }
+    actions
+}
+
+#[cfg(test)]
+mod followup_tests {
+    use super::*;
+    use ::rune::{Env, Key, KeyEvent, Mods, Runtime};
+
+    #[test]
+    fn enter_activates_each_followup_once_and_ignores_repeat() {
+        fn view(_: &[u32; 2], _: &mut Cx<[u32; 2]>) -> El {
+            followup_controls(
+                preferences::Typography {
+                    scale: 1.0,
+                    ink: oklch(0.5, 0.0, 0.0),
+                },
+                |counts: &mut [u32; 2], _| counts[0] += 1,
+                |counts: &mut [u32; 2], _| counts[1] += 1,
+            )
+        }
+        let mut rt = Runtime::new([0, 0], view, (640.0, 100.0), Env::default());
+        rt.set_tab_visits_controls(true);
+        rt.frame(0.0);
+        for (label, expected) in [("Add to draft", [1, 0]), ("Dismiss", [1, 1])] {
+            rt.key(KeyEvent {
+                key: Key::Tab,
+                mods: Mods::default(),
+            });
+            rt.frame(0.0);
+            assert_eq!(
+                rt.elements()
+                    .into_iter()
+                    .find(|el| el.focused)
+                    .and_then(|el| el.key)
+                    .as_deref(),
+                Some(label)
+            );
+            let enter = KeyEvent {
+                key: Key::Enter,
+                mods: Mods::default(),
+            };
+            rt.key(enter.clone());
+            rt.repeat_key(enter);
+            rt.frame(0.0);
+            assert_eq!(rt.state, expected);
+        }
+    }
 }
 
 fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
@@ -989,23 +1080,11 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             col()
                 .gap(8.0)
                 .child(typography.text(&followup.text).wrap())
-                .child(
-                    typography
-                        .text("Replace draft with followup")
-                        .role("button")
-                        .focusable(true)
-                        .press(ink.alpha(0.12))
-                        .on_press_tx(|state: &mut State, tx| {
-                            state.sound(crate::interaction_audio::Cue::Press);
-                            state.use_followup(tx);
-                        })
-                        .on_key(|state: &mut State, key, tx| {
-                            composer::enter(state, key, tx, |state, tx| {
-                                state.sound(crate::interaction_audio::Cue::Press);
-                                state.use_followup(tx);
-                            })
-                        }),
-                ),
+                .child(followup_controls(
+                    typography,
+                    State::add_followup,
+                    State::dismiss_followup,
+                )),
         );
     }
     thread = thread.child(state.sources.view(typography));

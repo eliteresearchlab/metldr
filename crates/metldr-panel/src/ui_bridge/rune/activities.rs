@@ -34,6 +34,7 @@ struct Entry {
     token: u64,
     refresh_needed: bool,
     refreshing: bool,
+    saving: bool,
     pump_allowed: Rc<Cell<bool>>,
 }
 
@@ -84,7 +85,7 @@ impl Activities {
                         && old.run_id == new.run_id
                         && old.artifact_id == new.artifact_id
                     {
-                        if new.revision.0 > old.revision.0 {
+                        if new.revision.0 > old.revision.0 || new.completion != old.completion {
                             entry.activity = activity.clone();
                             entry.refresh_needed = true;
                             entry.pump_allowed.set(false);
@@ -107,6 +108,7 @@ impl Activities {
                         token,
                         refresh_needed: false,
                         refreshing: false,
+                        saving: false,
                         pump_allowed: Rc::new(Cell::new(false)),
                     },
                 );
@@ -196,9 +198,6 @@ impl Activities {
                     }
                 }
             }
-            if let Some(updates) = updates.upgrade() {
-                updates.changed();
-            }
         });
     }
 
@@ -286,7 +285,27 @@ impl Activities {
         };
         match &entry.value {
             Value::Pending | Value::Loading => typography.text("Loading activity").role("status"),
-            Value::Waiting(_) => typography.text("Waiting for the current answer"),
+            Value::Waiting(_) => {
+                let completion = match &entry.activity {
+                    Activity::Generated(reference) => reference.completion,
+                    _ => unreachable!(),
+                };
+                let mut answer = col().child(
+                    typography
+                        .text(
+                            if completion == metldr_conversation::ArtifactCompletion::Streaming {
+                                "Creating answer"
+                            } else {
+                                "The saved answer is unfinished."
+                            },
+                        )
+                        .role("status"),
+                );
+                if completion == metldr_conversation::ArtifactCompletion::Interrupted {
+                    answer = answer.child(typography.text("Generation stopped"));
+                }
+                answer
+            }
             Value::Failed => {
                 let mut content = col().gap(8.0).child(
                     typography
@@ -307,45 +326,70 @@ impl Activities {
             .child(self.chart_data(id, entry, chart, updates, typography))
             .child(self.chart_export(id, updates, typography, false))
             .child(self.chart_export(id, updates, typography, true)),
-            Value::Generated(frame) => col()
-                .gap(8.0)
-                .child(typography.text("Interactive answer"))
-                .child({
-                    let id = id.to_owned();
-                    let key = format!("answer-open:{id}");
-                    let action = Rc::new(move |state: &mut State, _: &mut Tx| {
-                        state.sound(crate::interaction_audio::Cue::Press);
-                        if state.answers.focus(&id).is_err() {
-                            state.fail(FlowError::Host("The answer could not be focused.".into()));
-                        }
+            Value::Generated(frame) => {
+                let completion = match &entry.activity {
+                    Activity::Generated(reference) => reference.completion,
+                    _ => unreachable!(),
+                };
+                let mut answer = col()
+                    .gap(8.0)
+                    .child(typography.text("Interactive answer"))
+                    .child({
+                        let id = id.to_owned();
+                        let key = format!("answer-open:{id}");
+                        let action = Rc::new(move |state: &mut State, _: &mut Tx| {
+                            state.sound(crate::interaction_audio::Cue::Press);
+                            if state.answers.focus(&id).is_err() {
+                                state.fail(FlowError::Host(
+                                    "The answer could not be focused.".into(),
+                                ));
+                            }
+                        });
+                        let press = Rc::clone(&action);
+                        typography
+                            .text("Interact with answer")
+                            .key(key)
+                            .role("button")
+                            .focusable(true)
+                            .press(oklch(0.6, 0.0, 0.0).alpha(0.2))
+                            .on_press_tx(move |state: &mut State, tx| press(state, tx))
+                            .on_key(move |state: &mut State, key, tx| {
+                                if key.key != ::rune::Key::Enter {
+                                    return false;
+                                }
+                                if !tx.key_repeat() {
+                                    action(state, tx);
+                                }
+                                true
+                            })
+                    })
+                    .child(if frame.has_content() {
+                        ::rune::row()
+                            .w_full()
+                            .h(entry.height)
+                            .drawn_rect_into(&entry.rect)
+                    } else {
+                        typography
+                            .text(
+                                if completion == metldr_conversation::ArtifactCompletion::Streaming
+                                {
+                                    "Creating answer"
+                                } else {
+                                    "The saved answer is unfinished."
+                                },
+                            )
+                            .role("status")
                     });
-                    let press = Rc::clone(&action);
-                    typography
-                        .text("Interact with answer")
-                        .key(key)
-                        .role("button")
-                        .focusable(true)
-                        .press(oklch(0.6, 0.0, 0.0).alpha(0.2))
-                        .on_press_tx(move |state: &mut State, tx| press(state, tx))
-                        .on_key(move |state: &mut State, key, tx| {
-                            if key.key != ::rune::Key::Enter {
-                                return false;
-                            }
-                            if !tx.key_repeat() {
-                                action(state, tx);
-                            }
-                            true
-                        })
-                })
-                .child(if frame.has_content() {
-                    ::rune::row()
-                        .w_full()
-                        .h(entry.height)
-                        .drawn_rect_into(&entry.rect)
-                } else {
-                    typography.text("Waiting for answer content")
-                })
-                .child(self.answer_export(id, updates, typography)),
+                if completion == metldr_conversation::ArtifactCompletion::Completed
+                    && frame.completion() == "completed"
+                {
+                    answer =
+                        answer.child(self.answer_export(id, entry.saving, updates, typography));
+                } else if completion == metldr_conversation::ArtifactCompletion::Interrupted {
+                    answer = answer.child(typography.text("Generation stopped"));
+                }
+                answer
+            }
             Value::Tools(tools) => match tools.page(entry.offset) {
                 Ok(page) => {
                     let open = !entry.open.contains("tools-closed");
@@ -761,6 +805,7 @@ impl Activities {
     fn answer_export(
         &self,
         id: &str,
+        saving: bool,
         updates: &Rc<Updates>,
         typography: super::preferences::Typography,
     ) -> El {
@@ -770,16 +815,23 @@ impl Activities {
         let action = Rc::new(move |_: &mut State, _: &mut Tx| {
             let Some(cache) = cache.upgrade() else { return };
             let frame = {
-                let cache = cache.borrow();
-                let Some(Entry {
-                    value: Value::Generated(frame),
-                    ..
-                }) = cache.entries.get(&id)
-                else {
+                let mut cache = cache.borrow_mut();
+                let Some(entry) = cache.entries.get_mut(&id) else {
                     return;
                 };
-                Rc::clone(frame)
+                if entry.saving {
+                    return;
+                }
+                let Value::Generated(frame) = &entry.value else {
+                    return;
+                };
+                let frame = Rc::clone(frame);
+                entry.saving = true;
+                frame
             };
+            if let Some(updates) = updates.upgrade() {
+                updates.changed();
+            }
             let id = id.clone();
             let updates = updates.clone();
             let cache = Rc::downgrade(&cache);
@@ -792,6 +844,15 @@ impl Activities {
                     if let Some(html) = html { download("metldr-answer.html", &html)?; }
                     Ok::<(), JsValue>(())
                 }.await;
+                if let Some(cache) = cache.upgrade()
+                    && let Some(entry) = cache.borrow_mut().entries.get_mut(&id)
+                    && matches!(&entry.value, Value::Generated(now) if Rc::ptr_eq(now, &frame))
+                {
+                    entry.saving = false;
+                }
+                if let Some(updates) = updates.upgrade() {
+                    updates.changed();
+                }
                 if result.is_err()
                     && let Some(updates) = updates.upgrade()
                 {
@@ -801,24 +862,25 @@ impl Activities {
                 }
             });
         });
-        let press = Rc::clone(&action);
-        typography
-            .text("Save answer")
+        let button = typography
+            .text(if saving {
+                "Saving answer"
+            } else {
+                "Save answer"
+            })
             .role("button")
-            .focusable(true)
-            .on_press_tx(move |s: &mut State, tx| {
-                s.sound(crate::interaction_audio::Cue::Press);
-                press(s, tx)
-            })
-            .on_key(move |s: &mut State, key, tx| {
-                if key.key == ::rune::Key::Enter {
+            .focusable(!saving)
+            .disabled(saving);
+        if saving {
+            button
+        } else {
+            button
+                .native_activation()
+                .on_press_tx(move |s: &mut State, tx| {
                     s.sound(crate::interaction_audio::Cue::Press);
-                    action(s, tx);
-                    true
-                } else {
-                    false
-                }
-            })
+                    action(s, tx)
+                })
+        }
     }
 }
 
