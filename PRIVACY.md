@@ -1,14 +1,21 @@
 # Privacy
 
-Updated 22 October 2026.
+Updated 13 November 2026.
 
 ## Where content goes
 
-Local models process content on your computer. Ollama can also offer cloud models, so check the model you select.
+Each route sends content only to the destination listed for it.
 
-Provider connections send task instructions, page content and relevant prior answers to your configured endpoint. Installed agents receive task instructions and supplied page context, using their configured accounts and models. Their tools and metldr's browser tools can provide additional access, subject to the agent's permissions and metldr's browser approvals. Your provider's and agent's policies apply to that processing.
+| Route | Destination |
+| --- | --- |
+| Chrome built-in AI and the bundled local models | Your computer |
+| Ollama | The Ollama server on your computer, at 127.0.0.1:11434. Ollama can also offer cloud models, so check the model you select. |
+| Provider connections (Messages, Responses, Google Interactions, Chat Completions) | The endpoint you configure. It receives task instructions, page content, browser observations and relevant prior answers. |
+| Installed agents (Codex, Pi, OpenCode) | The agent on your computer, which sends what it needs to the account and model you configured for it |
+| Dictionary lookups | The selected word goes to api.dictionaryapi.dev. Dictionary data files come from media.githubusercontent.com. |
+| Gmail features | The InboxSDK library runs on mail.google.com. It sends its own error reports and usage events to inboxsdk.com. |
 
-Dictionary lookups can send selected words to dictionaryapi.dev. Downloads contact the services that supply the requested files.
+Installed agents' tools and metldr's browser tools can provide additional access, subject to the agent's permissions and metldr's browser approvals. Your provider's and agent's policies apply to their processing. Downloads you start contact the services that supply the requested files.
 
 ## What stays saved
 
