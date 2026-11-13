@@ -105,12 +105,22 @@ struct CensusField {
     slot: usize,
     label: String,
     check_label: String,
+    #[serde(default)]
+    secret: Option<SecretKind>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum SecretKind {
+    Password,
+    OneTimeCode,
 }
 
 pub(super) struct Field {
     pub(super) slot: usize,
     pub(super) label: String,
     pub(super) check_label: String,
+    pub(super) secret: Option<SecretKind>,
 }
 
 pub(super) struct Snapshot {
@@ -169,9 +179,14 @@ impl Snapshot {
                     slot: field.slot,
                     label: field.label.clone(),
                     check_label: field.check_label.clone(),
+                    secret: field.secret,
                 },
             );
-            observed_fields.push(json!({ "handle": handle, "label": field.label.clone() }));
+            let mut observed = json!({ "handle": handle, "label": field.label });
+            if let Some(secret) = field.secret {
+                observed["secret"] = json!(secret);
+            }
+            observed_fields.push(observed);
         }
         let mut buttons = BTreeMap::new();
         let mut observed_buttons = Vec::with_capacity(census.buttons.len());
@@ -183,6 +198,7 @@ impl Snapshot {
                     slot: button.slot,
                     label: button.label.clone(),
                     check_label: button.check_label.clone(),
+                    secret: None,
                 },
             );
             observed_buttons.push(json!({"handle":handle,"label":button.label}));
@@ -295,6 +311,7 @@ impl Snapshot {
     pub(super) fn field(&self, handle: &str) -> Result<&Field> {
         self.fields
             .get(handle)
+            .filter(|field| field.secret.is_none())
             .ok_or_else(|| "stale browser field ref; observe the page again".into())
     }
     pub(super) fn button(&self, handle: &str) -> Result<&Field> {
@@ -436,6 +453,7 @@ mod checks {
             slot: 0,
             label: "Decoy".into(),
             check_label: "Decoy".into(),
+            secret: None,
         });
         assert!(census.validate().is_err());
         census.fields.pop();

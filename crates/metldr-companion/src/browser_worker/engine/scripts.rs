@@ -7,7 +7,7 @@ pub(super) use buttons::{arm_button, button_receipt, check_button};
 /// The secret metadata pattern. The page capture script and the Rust log redaction both read it from here.
 macro_rules! secret_metadata_pattern {
     () => {
-        r"password|passcode|one[ -]?time[ -]?code|\botp\b|token|secret|api[ _-]?key|payment[ _-]?card|credit[ _-]?card|card[ _-]?(number|cvc|cvv)|\bcc-|cc[ _-]?(number|name|exp|csc|cvc|cvv)|\b(cvc|cvv)\b|social[ _-]?security|\bssn\b"
+        r"password|passcode|one[ _-]?time[ _-]?code|(^|[^a-z0-9])otp($|[^a-z0-9])|token|secret|api[ _-]?key|payment|bank|card|cc-|cc[ _-]?(number|name|exp|csc|cvc|cvv)|(^|[^a-z0-9])(cvc|cvv|ssn)($|[^a-z0-9])|social[ _-]?security"
     };
 }
 pub(super) const SECRET_METADATA_PATTERN: &str = secret_metadata_pattern!();
@@ -103,6 +103,18 @@ const safeLabel = element => {
   const metadata = metadataValues.join(' ').toLowerCase();
   if (secretMetadataPattern.test(metadata)) return null;
   return accessible;
+};
+const secretKind = element => {
+  if (!(element instanceof HTMLInputElement) || !['text','password','tel','number'].includes(element.type) || element.matches(':disabled') || element.readOnly || !visible(element)) return null;
+  const accessible = label(element);
+  if (accessible === null) return null;
+  const values = [element.autocomplete, element.name, element.id, accessible, element.placeholder];
+  if (values.some(value => String(value || '').length > 512)) return null;
+  const metadata = values.join(' ').toLowerCase();
+  if (/card|payment|bank|cc-|cc[ _-]?(number|name|exp|csc|cvc|cvv)|(^|[^a-z0-9])(cvc|cvv|ssn)($|[^a-z0-9])|social[ _-]?security|api[ _-]?key|token|secret/.test(metadata)) return null;
+  if (/one[ _-]?time[ _-]?code|(^|[^a-z0-9])otp($|[^a-z0-9])/.test(metadata)) return 'one_time_code';
+  if (element.type === 'password') return 'password';
+  return null;
 };
 const refElement = saved => {
   const element = saved?.element || saved;
@@ -214,7 +226,13 @@ while ((current = first || nextNode())) {
         summary.buttons.push({ slot, label: bounded(buttonLabel, 128)[0], check_label: buttonLabel });
       }
     }
-    if (textField(node)) {
+    const secret = secretKind(node);
+    if (secret) {
+      if (summary.fields.length === 32) { summary.fields_truncated = true; continue; }
+      const accessible = label(node);
+      const slot = snapshot.push(remember(node)) - 1;
+      summary.fields.push({ slot, label: bounded(accessible || 'Secret field', 128)[0], check_label: accessible, secret });
+    } else if (textField(node)) {
       if (node.readOnly && visible(node)) {
         const accessible = safeLabel(node);
         if (accessible !== null && readonlyFields.length < 32) readonlyFields.push({label:bounded(accessible || 'Read-only field', 128)[0], value:bounded(node.value, 1024)[0]});
