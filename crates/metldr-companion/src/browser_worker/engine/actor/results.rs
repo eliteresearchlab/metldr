@@ -28,6 +28,13 @@ impl Actor {
             Ok(value) => value,
             Err(e) => return self.failed(pending.work, e.to_string(), false),
         };
+        if let Some(reason) = ref_error(&value) {
+            return self.failed(
+                pending.work,
+                format!("{reason}; observe the page again"),
+                true,
+            );
+        }
         match pending.work {
             Work::Init(mut init) => {
                 if init.page && init.step == 1 {
@@ -38,10 +45,6 @@ impl Actor {
                 self.initialize_step(init)
             }
             Work::CreateWorld => Ok(()),
-            Work::ReleaseObserve { generation, job } => {
-                self.snapshot = None;
-                self.capture(self.context()?, generation, job)
-            }
             Work::Capture { generation, job } => {
                 let context = context.ok_or("capture lost its context")?;
                 let root = match evaluation(&value).and_then(|o| {
@@ -49,10 +52,7 @@ impl Actor {
                         .ok_or_else(|| "browser observation did not retain its snapshot".into())
                 }) {
                     Ok(root) => root,
-                    Err(e) => {
-                        self.finish(job, Err(e));
-                        return Ok(());
-                    }
+                    Err(e) => return self.abort_observation(job, e),
                 };
                 self.snapshot = Some(Snapshot {
                     context: context.clone(),
@@ -81,7 +81,11 @@ impl Actor {
                     Snapshot::from_census(
                         provisional.context.clone(),
                         provisional.root.clone(),
-                        &self.client.run,
+                        &if self.contexts.main_context().as_ref() == Some(&provisional.context) {
+                            self.client.run.clone()
+                        } else {
+                            format!("{}:{}", self.client.run, provisional.context.frame_id())
+                        },
                         generation,
                         value,
                     )
@@ -89,8 +93,9 @@ impl Actor {
                 match parsed {
                     Ok((snapshot, observation)) => {
                         self.snapshot = Some(snapshot);
-                        self.finish(job, Ok(observation));
-                        Ok(())
+                        self.observation_bytes += observation.to_string().len();
+                        self.observation_results.push(observation);
+                        self.capture_next(generation, job)
                     }
                     Err(e) => {
                         if self.contexts.validate(&provisional.context).is_ok() {
@@ -103,8 +108,7 @@ impl Actor {
                                 None,
                             )?;
                         }
-                        self.finish(job, Err(e));
-                        Ok(())
+                        self.abort_observation(job, e)
                     }
                 }
             }
@@ -351,10 +355,10 @@ impl Actor {
                 self.finish(nav.job, Err(reason.into()));
                 Ok(())
             }
-            Work::ReleaseObserve { job, .. }
-            | Work::Capture { job, .. }
-            | Work::Census { job, .. }
-            | Work::ReadField { job, .. }
+            Work::Capture { job, .. } | Work::Census { job, .. } => {
+                self.abort_observation(job, reason.into())
+            }
+            Work::ReadField { job, .. }
             | Work::ReadButton { job, .. }
             | Work::ReadControl { job, .. }
             | Work::ReadSelection { job, .. }
@@ -369,7 +373,18 @@ impl Actor {
         }
     }
 }
-fn evaluation(value: &Value) -> Result<RemoteObject> {
+fn ref_error(value: &Value) -> Option<&'static str> {
+    let description = value["exceptionDetails"]["exception"]["description"].as_str()?;
+    [
+        "removed snapshot ref",
+        "renamed snapshot ref",
+        "stale snapshot ref",
+    ]
+    .into_iter()
+    .find(|reason| description.lines().next() == Some(format!("Error: {reason}").as_str()))
+}
+
+pub(super) fn evaluation(value: &Value) -> Result<RemoteObject> {
     if value.get("exceptionDetails").is_some() {
         return Err("browser script failed".into());
     }
@@ -388,6 +403,23 @@ pub(super) fn evaluation_value(value: &Value) -> Result<Value> {
 #[cfg(test)]
 mod checks {
     use super::*;
+
+    #[test]
+    fn ref_failure_reports_only_known_reasons_without_page_text() {
+        for reason in ["removed", "renamed", "stale"] {
+            let value = json!({"exceptionDetails":{"exception":{"description":format!("Error: {reason} snapshot ref\nsecret page stack")}}});
+            assert_eq!(
+                ref_error(&value),
+                Some(format!("{reason} snapshot ref").as_str())
+            );
+        }
+        assert_eq!(
+            ref_error(
+                &json!({"exceptionDetails":{"exception":{"description":"Error: password=secret"}}})
+            ),
+            None
+        );
+    }
 
     #[test]
     fn unavailable_control_keeps_cdp_null_distinct_from_missing_value() {

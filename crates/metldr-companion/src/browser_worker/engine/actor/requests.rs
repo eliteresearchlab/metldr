@@ -9,7 +9,53 @@ impl Actor {
             return Ok(());
         }
         self.busy = true;
+        if let Some(handle) = kind.handle() {
+            self.select_snapshot(handle);
+        }
+        if matches!(
+            &kind,
+            Kind::Change(_)
+                | Kind::ActivateButton(_)
+                | Kind::SetNativeControl(_)
+                | Kind::SelectOption(_)
+                | Kind::Scroll(_)
+        ) {
+            match self.child_action() {
+                Ok(true) => {
+                    return self.value(
+                        job,
+                        Outcome::Prevented {
+                            reason: "actions inside frames are not supported yet".into(),
+                        },
+                    );
+                }
+                Err(error) => {
+                    return self.value(
+                        job,
+                        Outcome::Prevented {
+                            reason: error.to_string(),
+                        },
+                    );
+                }
+                Ok(false) => {}
+            }
+        }
         match kind {
+            Kind::ActionScope { handle } => match if self
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.contains(&handle))
+            {
+                self.child_action()
+            } else {
+                Ok(false)
+            } {
+                Ok(child) => self.value(job, child),
+                Err(error) => {
+                    self.finish(job, Err(error));
+                    Ok(())
+                }
+            },
             Kind::PageLogs => match self.page_logs.snapshot() {
                 Ok(snapshot) => self.value(job, snapshot),
                 Err(error) => {
@@ -38,34 +84,7 @@ impl Actor {
             Kind::Scroll(action) => self.scroll(action, job),
             Kind::PrepareButton { tool, handle } => self.prepare_button(tool, handle, job),
             Kind::ActivateButton(action) => self.arm_button(action, job),
-            Kind::Observe { generation } => {
-                if generation <= self.generation {
-                    self.finish(job, Err("observation generation was reused".into()));
-                    return Ok(());
-                }
-                self.generation = generation;
-                let context = match self.context() {
-                    Ok(c) => c,
-                    Err(e) => {
-                        self.finish(job, Err(e));
-                        return Ok(());
-                    }
-                };
-                if let Some(snapshot) = &self.snapshot {
-                    if snapshot.context == context {
-                        return self.queue(
-                            "Runtime.releaseObject",
-                            session(&context),
-                            json!({"objectId":snapshot.root}),
-                            Work::ReleaseObserve { generation, job },
-                            Some(context),
-                            Some(snapshot.root.clone()),
-                        );
-                    }
-                }
-                self.snapshot = None;
-                self.capture(context, generation, job)
-            }
+            Kind::Observe { generation, within } => self.observe(generation, within, job),
             Kind::PrepareChange {
                 tool,
                 handle,
@@ -224,6 +243,6 @@ impl Actor {
         generation: u64,
         job: Job,
     ) -> Result<()> {
-        self.queue("Runtime.evaluate",session(&context),json!({"expression":format!("({})()",scripts::capture()),"returnByValue":false,"awaitPromise":true,"uniqueContextId":context.unique_context_id()}),Work::Capture{generation,job},Some(context),None)
+        self.queue("Runtime.evaluate",session(&context),json!({"expression":format!("({})()",scripts::capture(None)),"returnByValue":false,"awaitPromise":true,"uniqueContextId":context.unique_context_id()}),Work::Capture{generation,job},Some(context),None)
     }
 }
