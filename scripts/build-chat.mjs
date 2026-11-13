@@ -1,5 +1,5 @@
 import { build, context } from 'esbuild';
-import { copyFile, cp, mkdir, readFile, rm } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkReceipt, watchPaths } from './answer-contract.mjs';
@@ -93,6 +93,17 @@ async function copyBindings() {
   }
   await rm(join(destination, 'snippets'), { recursive: true, force: true });
   await cp(join(root, 'crates/metldr-panel/pkg/snippets'), join(destination, 'snippets'), { recursive: true }).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  // Only rune-chat.html loads the Rune renderer and its fonts; they ship beside it, not in the wasm.
+  await cp(join(root, 'target/wasm/metldr-panel-rune/pkg'), join(output, 'rune'), { recursive: true });
+  const source = await readFile(join(root, 'crates/metldr-panel/src/ui_bridge/rune/fonts.rs'), 'utf8');
+  const names = [...source.slice(source.indexOf('NAMES'), source.indexOf('];')).matchAll(/"([^"]+\.tt[fc])"/g)].map(match => match[1]);
+  const fonts = join(output, 'fonts');
+  await mkdir(fonts, { recursive: true });
+  for (const name of names) {
+    const local = join(root, 'crates/metldr-panel/assets/fonts', name);
+    await copyFile(local, join(fonts, name)).catch(() => copyFile(join(root, 'crates/metldr-panel/assets/fonts/fallback', name), join(fonts, name)));
+  }
+  await writeFile(join(fonts, 'manifest.json'), JSON.stringify({ fonts: names }));
 }
 
 export async function buildChat() {

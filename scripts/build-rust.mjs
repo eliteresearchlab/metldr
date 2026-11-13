@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordReceipt, sourceDigest } from './answer-contract.mjs';
@@ -177,20 +177,6 @@ try {
     // The plain panel has no inline JS snippets; only the Rune renderer brings them.
     const snippets = join(repoRoot, 'crates/metldr-panel/pkg/snippets');
     if (statSync(snippets, { throwIfNoEntry: false })) cpSync(snippets, join(destination, 'snippets'), { recursive: true });
-    const rune = join(repoRoot, 'public/chat/rune');
-    rmSync(rune, { recursive: true, force: true });
-    cpSync(join(repoRoot, 'target/wasm/metldr-panel-rune/pkg'), rune, { recursive: true });
-    // The chat fonts ship beside the wasm, not inside it, in the order fonts.rs expects.
-    const fontSource = readFileSync(join(repoRoot, 'crates/metldr-panel/src/ui_bridge/rune/fonts.rs'), 'utf8');
-    const fontNames = [...fontSource.slice(fontSource.indexOf('NAMES'), fontSource.indexOf('];')).matchAll(/"([^"]+\.tt[fc])"/g)].map(match => match[1]);
-    const fonts = join(repoRoot, 'public/chat/fonts');
-    rmSync(fonts, { recursive: true, force: true });
-    mkdirSync(fonts, { recursive: true });
-    for (const name of fontNames) {
-      const local = join(repoRoot, 'crates/metldr-panel/assets/fonts', name);
-      copyFileSync(statSync(local, { throwIfNoEntry: false }) ? local : join(repoRoot, 'crates/metldr-panel/assets/fonts/fallback', name), join(fonts, name));
-    }
-    writeFileSync(join(fonts, 'manifest.json'), JSON.stringify({ fonts: fontNames }));
   }
   await runAsync('cargo', [
     isCheck ? 'check' : 'build', '--locked', '--release',
