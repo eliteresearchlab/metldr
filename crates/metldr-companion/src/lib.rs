@@ -35,6 +35,7 @@ mod native_permission;
 mod native_records;
 mod native_start;
 mod opencode;
+mod harness_model;
 mod opencode_model;
 mod opencode_owner;
 mod page_text;
