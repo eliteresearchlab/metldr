@@ -2,6 +2,7 @@ mod engine;
 mod fields;
 mod protocol;
 
+pub(super) use fields::PlanRefusal;
 pub(crate) use fields::Tools;
 pub(crate) use metldr_browser_tools::{BROWSER_POLICY, Call, decode_call, definitions};
 
@@ -270,9 +271,14 @@ async fn execute(
         let Some(invocation) = invocation else {
             return Ok(());
         };
-        let result = tools
+        let result = match tools
             .dispatch(&invocation.id, invocation.call, stop, None)
-            .await?;
+            .await
+        {
+            Ok(result) => result,
+            Err(error) if error.is::<PlanRefusal>() => json!({"error": error.to_string()}),
+            Err(error) => return Err(error),
+        };
         protocol.continuation(&result)?;
     }
     Err("browser task step limit reached".into())

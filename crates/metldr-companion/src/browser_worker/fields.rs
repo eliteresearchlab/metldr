@@ -19,6 +19,23 @@ use std::{
     time::Duration,
 };
 
+#[derive(Debug)]
+pub(crate) struct PlanRefusal(&'static str);
+impl std::fmt::Display for PlanRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for PlanRefusal {}
+
+fn owner_error(error: String) -> Box<dyn std::error::Error + Send + Sync> {
+    match error.as_str() {
+        "task plan declined" => Box::new(PlanRefusal("task plan declined")),
+        "call propose_task_plan first" => Box::new(PlanRefusal("call propose_task_plan first")),
+        _ => error.into(),
+    }
+}
+
 mod navigation;
 pub(crate) struct Tools {
     engine: Option<Engine>,
@@ -179,11 +196,7 @@ impl Tools {
                             }
                             match rx.try_recv() {
                                 Ok(result) => {
-                                    result.map_err(
-                                        |e| -> Box<dyn std::error::Error + Send + Sync> {
-                                            e.into()
-                                        },
-                                    )?;
+                                    result.map_err(owner_error)?;
                                     break;
                                 }
                                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -469,7 +482,7 @@ async fn action(
         .map_err(|_| "browser owner channel unavailable")?;
     loop {
         match rx.try_recv() {
-            Ok(value) => return value.map_err(Into::into),
+            Ok(value) => return value.map_err(owner_error),
             Err(mpsc::TryRecvError::Disconnected) => {
                 return Err("browser approval owner ended".into());
             }
@@ -498,6 +511,16 @@ mod failed_attach_check {
     use super::*;
     use crate::{browser_io::Operation, flow::Event as FlowEvent, model::Page};
     use std::sync::mpsc;
+
+    #[test]
+    fn only_plan_refusals_allow_the_run_to_continue() {
+        for message in ["task plan declined", "call propose_task_plan first"] {
+            let error = owner_error(message.into());
+            assert!(error.is::<PlanRefusal>());
+            assert_eq!(error.to_string(), message);
+        }
+        assert!(!owner_error("browser dispatch failed".into()).is::<PlanRefusal>());
+    }
 
     fn source() -> Page {
         Page {
