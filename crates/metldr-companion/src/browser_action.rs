@@ -61,6 +61,8 @@ pub(super) enum Outcome {
     ControlObserved {
         receipt: ControlReceipt,
     },
+    /// One trusted key press reached the approved field.
+    KeyPressObserved,
     /// The page field holds the consented secret. Only the opaque reference is reported.
     SecretEntered {
         reference: String,
@@ -234,6 +236,9 @@ impl Action {
                     Outcome::ButtonClickObserved => {
                         self.revision == 4
                             && matches!(&self.proposal.intent, Intent::ActivateButton { .. })
+                    }
+                    Outcome::KeyPressObserved => {
+                        self.revision == 4 && matches!(&self.proposal.intent, Intent::PressKey { .. })
                     }
                     Outcome::SecretEntered { .. } => {
                         self.revision == 4 && matches!(&self.proposal.intent, Intent::Secret { .. })
@@ -462,7 +467,8 @@ fn validate_outcome(outcome: &Outcome, proposal: &Proposal) -> Result<()> {
         (Outcome::Verified { observed }, Intent::Field { value, .. }) if observed == value => {
             Ok(())
         }
-        (Outcome::ButtonClickObserved, Intent::ActivateButton { .. }) => Ok(()),
+        (Outcome::ButtonClickObserved, Intent::ActivateButton { .. })
+        | (Outcome::KeyPressObserved, Intent::PressKey { .. }) => Ok(()),
         (Outcome::SecretEntered { reference }, Intent::Secret { reference: approved, .. })
             if reference == approved =>
         {
@@ -574,11 +580,13 @@ pub(super) fn reject_control_actions(
 pub(super) fn reject_control_action(action: &Action) -> Result<()> {
     if matches!(
         &action.proposal.intent,
-        Intent::SetNativeControl { .. } | Intent::Secret { .. }
+        Intent::SetNativeControl { .. } | Intent::Secret { .. } | Intent::PressKey { .. }
     ) || matches!(
         &action.state,
         Phase::Settled {
-            outcome: Outcome::ControlObserved { .. } | Outcome::SecretEntered { .. }
+            outcome: Outcome::ControlObserved { .. }
+                | Outcome::SecretEntered { .. }
+                | Outcome::KeyPressObserved
         }
     )
     {

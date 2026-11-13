@@ -144,6 +144,21 @@ impl Actor {
                 self.control_gestured(action, job)
             }
             Work::Gesture { job, .. } => self.button_gestured(job),
+            Work::ArmKey { action, job } => self.key_armed(action, job, &value),
+            Work::KeyGesture { job, .. } => self.key_pressed(job),
+            Work::KeyReceipt { job } => {
+                let delivered = evaluation_value(&value).is_ok_and(|v| v == Value::Bool(true));
+                self.value(
+                    job,
+                    if delivered {
+                        Outcome::KeyPressObserved
+                    } else {
+                        Outcome::Uncertain {
+                            reason: "approved key press could not be verified".into(),
+                        }
+                    },
+                )
+            }
             Work::ControlReceipt { action, job } => self.control_receipt(action, job, value),
             Work::ButtonReceipt { job } => {
                 let delivered = evaluation_value(&value).is_ok_and(|v| v == Value::Bool(true));
@@ -292,6 +307,23 @@ impl Actor {
                 job,
                 Outcome::Uncertain {
                     reason: "approved button click could not be verified".into(),
+                },
+            ),
+            Work::ArmKey { job, .. } => self.value(job, Outcome::Prevented { reason }),
+            Work::KeyGesture { job, .. } => self.value(
+                job,
+                if prevented {
+                    Outcome::Prevented { reason }
+                } else {
+                    Outcome::Uncertain {
+                        reason: "key input result was lost".into(),
+                    }
+                },
+            ),
+            Work::KeyReceipt { job } => self.value(
+                job,
+                Outcome::Uncertain {
+                    reason: "approved key press could not be verified".into(),
                 },
             ),
             Work::ControlReceipt { job, .. } => self.value(

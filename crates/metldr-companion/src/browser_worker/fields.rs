@@ -151,6 +151,7 @@ impl Tools {
         let handle = match &call {
             Call::Change { handle, .. }
             | Call::EnterSecret { handle, .. }
+            | Call::PressKey { handle, .. }
             | Call::ActivateButton { handle }
             | Call::SelectOption { handle, .. }
             | Call::Scroll { handle, .. }
@@ -222,6 +223,15 @@ impl Tools {
             }
             Call::Change { handle, value } => {
                 self.change(call_id, handle, value, stop, budget).await?
+            }
+            Call::PressKey { handle, key } => {
+                let proposal = self
+                    .engine
+                    .as_ref()
+                    .ok_or("browser is not attached")?
+                    .prepare_key(call_id, handle, *key)
+                    .await?;
+                self.perform(proposal, stop, budget).await?
             }
             Call::EnterSecret { handle, kind } => {
                 let proposal = self
@@ -414,6 +424,7 @@ impl Tools {
                 let outcome = match &dispatched.proposal.intent {
                     Intent::Field { .. } => engine.change(&dispatched).await,
                     Intent::Secret { .. } => engine.enter_secret(&dispatched).await,
+                    Intent::PressKey { .. } => engine.press_key(&dispatched).await,
                     Intent::ActivateButton { .. } => engine.activate_button(&dispatched).await,
                     Intent::SelectOption { .. } => engine.select_option(&dispatched).await,
                     Intent::Scroll { .. } => engine.scroll(&dispatched).await,
@@ -469,6 +480,8 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
         Call::Navigate { .. } => Err("invalid browser navigation URL".into()),
         Call::Change { handle, value } if valid_handle(handle) && value.len() <= 1024 => Ok(()),
         Call::Change { .. } => Err("invalid browser field change".into()),
+        Call::PressKey { handle, .. } if valid_handle(handle) => Ok(()),
+        Call::PressKey { .. } => Err("invalid key target handle".into()),
         Call::EnterSecret { handle, .. } if valid_handle(handle) => Ok(()),
         Call::EnterSecret { .. } => Err("invalid secret field handle".into()),
         Call::ActivateButton { handle } if valid_handle(handle) => Ok(()),
@@ -791,3 +804,4 @@ mod failed_attach_check {
         );
     }
 }
+

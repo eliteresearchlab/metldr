@@ -28,6 +28,12 @@ pub(crate) enum Intent {
     SetNativeControl {
         control: Control,
     },
+    /// One trusted key press in an observed text field.
+    PressKey {
+        field_id: String,
+        field_label: String,
+        key: String,
+    },
     /// One consented secret entry. The record keeps an opaque reference, never the secret.
     Secret {
         field_id: String,
@@ -142,6 +148,16 @@ impl Intent {
             Self::SelectOption { selection } if selection.valid() => Ok(()),
             Self::Scroll { scroll } if scroll.valid() => Ok(()),
             Self::SetNativeControl { control } if control.valid() => Ok(()),
+            Self::PressKey {
+                field_id,
+                field_label,
+                key,
+            } if valid_handle(field_id)
+                && bounded(field_label, 128)
+                && metldr_browser_tools::Key::parse(key).is_some() =>
+            {
+                Ok(())
+            }
             Self::Secret {
                 field_id,
                 field_label,

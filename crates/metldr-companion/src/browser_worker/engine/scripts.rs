@@ -1,8 +1,10 @@
 mod buttons;
+mod keys;
 pub(super) mod controls;
 pub(super) mod scroll;
 pub(super) mod selects;
 pub(super) use buttons::{arm_button, button_receipt, check_button};
+pub(super) use keys::{arm_key, key_receipt};
 
 /// The secret metadata pattern. The page capture script and the Rust log redaction both read it from here.
 macro_rules! secret_metadata_pattern {

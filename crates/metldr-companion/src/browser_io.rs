@@ -45,6 +45,13 @@ pub(super) enum Operation {
         url: String,
         params: Value,
     },
+    PressKey {
+        action: String,
+        revision: u64,
+        binding: crate::browser_action::Binding,
+        url: String,
+        params: Value,
+    },
     ConfirmNavigation {
         action: String,
         revision: u64,
@@ -200,6 +207,7 @@ impl Owner {
                 | Operation::EnterSecret { action, .. }
                 | Operation::ActivateButton { action, .. }
                 | Operation::ActivateControl { action, .. }
+                | Operation::PressKey { action, .. }
                 | Operation::ConfirmNavigation { action, .. } => {
                     Some(self.saved_browser_action(action)?)
                 }
@@ -274,6 +282,26 @@ impl Owner {
                         return Err(
                             "button dispatch does not match a fresh durable approval".into()
                         );
+                    }
+                }
+                Operation::PressKey {
+                    action,
+                    revision,
+                    binding,
+                    url,
+                    params,
+                } => {
+                    let record = saved_action.as_ref().ok_or("unknown key action")?;
+                    if !fresh(record, &call.run, *revision, binding, url, slot.tab)
+                        || !matches!(
+                            &record.proposal.intent,
+                            crate::browser_action::Intent::PressKey { key, .. }
+                                if params.as_object().is_some_and(|p| p.len() == 1)
+                                    && params["key"] == key.as_str()
+                        )
+                        || !slot.buttons.insert(action.clone())
+                    {
+                        return Err("key dispatch does not match a fresh durable approval".into());
                     }
                 }
                 Operation::EnterSecret {

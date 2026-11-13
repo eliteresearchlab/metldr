@@ -930,6 +930,7 @@ mod tests {
                             ("propose_task_plan", false, false, false),
                             ("network_requests", true, false, true),
                             ("enter_secret", false, true, false),
+                            ("press_key", false, true, false),
                         ];
                         assert_eq!(
                             tools.len(),

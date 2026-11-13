@@ -57,6 +57,16 @@ pub(super) fn browser_actions(actions: &BTreeMap<String, crate::browser_action::
                         value["kind"] = json!("set_native_control");
                         value["control"] = json!(control);
                     }
+                    crate::browser_action::Intent::PressKey {
+                        field_id,
+                        field_label,
+                        key,
+                    } => {
+                        value["kind"] = json!("press_key");
+                        value["field_id"] = json!(field_id);
+                        value["field_label"] = json!(field_label);
+                        value["key"] = json!(key);
+                    }
                     crate::browser_action::Intent::Secret {
                         field_id,
                         field_label,
@@ -81,6 +91,7 @@ pub(super) fn browser_actions(actions: &BTreeMap<String, crate::browser_action::
                         Outcome::ScrollObserved { .. } => "scroll_observed",
                         Outcome::ControlObserved { .. } => "control_observed",
                         Outcome::SecretEntered { .. } => "secret_entered",
+                        Outcome::KeyPressObserved => "key_observed",
                         Outcome::Prevented { .. } => "prevented",
                         Outcome::Uncertain { .. } => "uncertain",
                     });

@@ -86,6 +86,13 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
         }
     );
     assert_eq!(
+        decode_call("press_key", json!({"handle":"field_2","key":"Enter"})).unwrap(),
+        Call::PressKey {
+            handle: "field_2".into(),
+            key: metldr_browser_tools::Key::Enter
+        }
+    );
+    assert_eq!(
         decode_call(CONTROL_TOOL, json!({"handle":"radio_2","checked":false})).unwrap(),
         Call::SetNativeControl {
             handle: "radio_2".into(),
@@ -213,6 +220,8 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             json!({"handle":"select_1","option":"option_1","approve":true}),
         ),
         ("enter_secret", json!({"handle":"field_1","kind":"card_number"})),
+        ("press_key", json!({"handle":"field_1","key":"a"})),
+        ("press_key", json!({"handle":"field_1","key":"Enter","count":2})),
         (
             "enter_secret",
             json!({"handle":"field_1","kind":"password","value":"hunter2"}),
@@ -273,7 +282,8 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             "settings",
             "propose_task_plan",
             "network_requests",
-            "enter_secret"
+            "enter_secret",
+            "press_key"
         ]
     );
     assert!(
