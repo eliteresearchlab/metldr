@@ -108,9 +108,9 @@ impl Registration {
 
         let name = serde_json::to_string(&server.name)?;
         let url = serde_json::to_string(&format!("http://{}/mcp", server.address))?;
-        write!(
+        writeln!(
             file,
-            "export default (pi) => pi.registerMcpServer({name}, {{ url: {url}, headers: {{ Authorization: 'Bearer ${{METLDR_PI_BROWSER_TOKEN}}', Connection: 'close' }}, exposure: 'direct', timeout: 30 }});\n"
+            "export default (pi) => pi.registerMcpServer({name}, {{ url: {url}, headers: {{ Authorization: 'Bearer ${{METLDR_PI_BROWSER_TOKEN}}', Connection: 'close' }}, exposure: 'direct', timeout: 30 }});"
         )?;
         file.flush()?;
         Ok(registration)
