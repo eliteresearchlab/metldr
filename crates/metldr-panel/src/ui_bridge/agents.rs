@@ -1,6 +1,7 @@
 use super::settings::{Family, Work};
 use super::*;
 use crate::model::{AgentKind, AgentSettingState, AgentSettingView};
+use std::future::Future;
 use wasm_bindgen_futures::future_to_promise_typed;
 
 mod profile;
@@ -14,6 +15,13 @@ pub struct UiAgentSettings {
 impl UiAgentSettings {
     pub(super) fn new(page: Rc<PageSession>) -> Self {
         Self { page }
+    }
+    pub(super) fn refresh_work(
+        &self,
+    ) -> Result<impl Future<Output = Result<js_sys::Undefined, FlowError>> + 'static, FlowError>
+    {
+        let work = Work::begin(Rc::clone(&self.page), Family::Agents, true)?;
+        Ok(async move { work.refresh().await })
     }
 }
 
@@ -48,9 +56,9 @@ impl UiAgentSettings {
 
     #[wasm_bindgen(unchecked_return_type = "Promise<undefined>")]
     pub fn refresh(&self) -> Result<Promise<js_sys::Undefined>, JsValue> {
-        let work = Work::begin(Rc::clone(&self.page), Family::Agents, true).map_err(js_error)?;
+        let work = self.refresh_work().map_err(js_error)?;
         Ok(future_to_promise_typed(async move {
-            work.refresh().await.map_err(js_error)
+            work.await.map_err(js_error)
         }))
     }
 }
@@ -79,6 +87,49 @@ impl UiAgentConfiguration {
             return Err(FlowError::HistoryStale);
         }
         Work::begin(Rc::clone(&self.page), Family::Agents, false)
+    }
+
+    pub(super) fn save_work(
+        &self,
+        profile: crate::model::AgentProfile,
+    ) -> Result<impl Future<Output = Result<js_sys::Undefined, FlowError>> + 'static, FlowError>
+    {
+        if profile.agent() != self.row.agent || !crate::model::valid_agent_profile(&profile) {
+            return Err(FlowError::InvalidInput(
+                "Agent paths or model settings are invalid or exceed their limits.".into(),
+            ));
+        }
+        let work = self.begin()?;
+        let revision = self.row.revision;
+        Ok(async move {
+            let result = async {
+                work.current_flow()
+                    .await?
+                    .agent_save(revision, profile)
+                    .await
+            }
+            .await;
+            work.finish(result)
+        })
+    }
+
+    pub(super) fn remove_work(
+        &self,
+    ) -> Result<impl Future<Output = Result<js_sys::Undefined, FlowError>> + 'static, FlowError>
+    {
+        let work = self.begin()?;
+        let agent = self.row.agent;
+        let revision = self.row.revision;
+        Ok(async move {
+            let result = async {
+                work.current_flow()
+                    .await?
+                    .agent_remove(agent, revision)
+                    .await
+            }
+            .await;
+            work.finish(result)
+        })
     }
 }
 
@@ -122,35 +173,17 @@ impl UiAgentConfiguration {
                 "The profile belongs to another installed agent.",
             ));
         }
-        let profile = profile.profile.clone();
-        let work = self.begin().map_err(js_error)?;
-        let revision = self.row.revision;
+        let work = self.save_work(profile.profile.clone()).map_err(js_error)?;
         Ok(future_to_promise_typed(async move {
-            let result = async {
-                work.current_flow()
-                    .await?
-                    .agent_save(revision, profile)
-                    .await
-            }
-            .await;
-            work.finish(result).map_err(js_error)
+            work.await.map_err(js_error)
         }))
     }
 
     #[wasm_bindgen(unchecked_return_type = "Promise<undefined>")]
     pub fn remove(&self) -> Result<Promise<js_sys::Undefined>, JsValue> {
-        let work = self.begin().map_err(js_error)?;
-        let agent = self.row.agent;
-        let revision = self.row.revision;
+        let work = self.remove_work().map_err(js_error)?;
         Ok(future_to_promise_typed(async move {
-            let result = async {
-                work.current_flow()
-                    .await?
-                    .agent_remove(agent, revision)
-                    .await
-            }
-            .await;
-            work.finish(result).map_err(js_error)
+            work.await.map_err(js_error)
         }))
     }
 }

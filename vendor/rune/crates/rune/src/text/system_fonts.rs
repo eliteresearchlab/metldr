@@ -21,7 +21,7 @@ pub(super) const SYMBOL_FONT_FILES: &[&str] = &["seguisym", "seguiemj"];
 // DejaVu Sans lacks ⎋ (U+238B), which DejaVu Sans Mono has; `dejavusans` loads both files.
 #[cfg(not(any(target_vendor = "apple", windows)))]
 pub(super) const SYMBOL_FAMILIES: &[&str] =
-    &["DejaVu Sans", "Noto Sans Symbols2", "Noto Sans Symbols", "DejaVu Sans Mono", "Noto Color Emoji"];
+    &["DejaVu Sans", "Noto Sans Symbols 2", "Noto Sans Symbols", "DejaVu Sans Mono", "Noto Color Emoji"];
 #[cfg(not(any(target_vendor = "apple", windows)))]
 pub(super) const SYMBOL_FONT_FILES: &[&str] = &["dejavusans", "notosanssymbols", "notocoloremoji"];
 
@@ -117,17 +117,21 @@ pub(super) const CJK_FONT_FILES: [&str; 30] = [
     "applegothic",
 ];
 
-/// Makes text in scripts the app's fonts don't cover render instead of drawing tofu. Families
-/// the app registered beyond its sans and mono (`AppSpec::fonts`) come first, then the CJK fonts
+/// Registers supplied fonts for supported scripts and CJK instead of drawing missing glyphs.
+/// Families the app registered beyond its sans and mono (`AppSpec::fonts`) come first, then CJK fonts
 /// installed on the system (found by file name in the platform's font directories, including
 /// `$XDG_DATA_HOME/fonts` and `$XDG_DATA_DIRS/*/fonts`, and on Linux every file `fc-list` names).
-pub(super) fn register_cjk_fallbacks(collection: &mut Collection, loaded: &mut LoadedFiles, registered: &[FamilyId], families: (&str, &str)) {
+pub(super) fn register_fallbacks(collection: &mut Collection, loaded: &mut LoadedFiles, registered: &[FamilyId], families: (&str, &str)) {
     let primary = [collection.family_id(families.0), collection.family_id(families.1)];
     let mut fallbacks: Vec<FamilyId> = Vec::new();
     for id in registered {
         if !primary.contains(&Some(*id)) && !fallbacks.contains(id) {
             fallbacks.push(*id);
         }
+    }
+    // Browsers cannot discover system fonts; supplied fallbacks must cover these scripts too.
+    for fonts in fallback::SCRIPT_FONTS {
+        collection.append_fallbacks(FallbackKey::new(Script::from_bytes(*fonts.script), None), fallbacks.iter().copied());
     }
     // Memory-mapped, so a 20 MB CJK collection costs a mapping, not a read.
     for id in load_files(collection, loaded, system_font_files(&CJK_FONT_FILES).into_iter().take(16)) {

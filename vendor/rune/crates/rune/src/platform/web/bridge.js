@@ -62,8 +62,9 @@ function browserShortcut(event) {
         || (event.altKey && ['i', 'j', 'u'].includes(k));
 }
 
-export function mount(canvas, callback, raw, embedded, fitHeight) {
+export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
     const textarea = document.createElement('textarea');
+    fieldReady(textarea);
     textarea.setAttribute('aria-label', 'Text input');
     textarea.setAttribute('autocapitalize', 'sentences');
     const password = document.createElement('input');
@@ -243,10 +244,13 @@ export function syncA11y(h, json, revision) {
     h.restoreFocus ||= ownsFieldFocus(h);
     const items = JSON.parse(json);
     const seen = new Set();
-    let cursor = h.a11y.firstElementChild;
+    const cursors = new Map();
+    const focused = document.activeElement;
+    let restoreNativeFocus = false;
     for (const item of items) {
-        const tag = item.k === 'input' ? 'div' : item.k === 'heading' ? `h${item.l || 2}` : item.k === 'button' ? 'button' : 'p';
-        const key = item.k === 'input' ? `input:${item.p}` : `${tag}:${item.p}`;
+        const group = ['table', 'row', 'columnheader', 'cell'].includes(item.k);
+        const tag = group || item.k === 'input' ? 'div' : item.k === 'heading' ? `h${item.l || 2}` : item.k === 'button' ? 'button' : 'p';
+        const key = group ? `semantic:${item.p}` : item.k === 'input' ? `input:${item.p}` : `${tag}:${item.p}`;
         seen.add(key);
         let el = h.a11yNodes.get(key);
         if (!el) {
@@ -272,7 +276,22 @@ export function syncA11y(h, json, revision) {
         }
         const [x, y, w, bh] = item.r;
         const fs = item.s || 14;
-        el.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${bh}px;margin:0;padding:0;border:0;background:transparent;color:transparent;font:${fs}px/1.25 sans-serif;overflow:hidden;white-space:pre-wrap;pointer-events:none;`;
+        el.style.cssText = group
+            ? 'position:static;margin:0;padding:0;border:0;pointer-events:none;'
+            : `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${bh}px;margin:0;padding:0;border:0;background:transparent;color:transparent;font:${fs}px/1.25 sans-serif;overflow:hidden;white-space:pre-wrap;pointer-events:none;`;
+        if (group) {
+            el.setAttribute('role', item.k);
+            setOptionalAttribute(el, 'aria-label', item.t);
+        }
+        if (item.k === 'status' || item.k === 'alert') {
+            el.setAttribute('role', item.k);
+            el.setAttribute('aria-live', item.k === 'alert' ? 'assertive' : 'polite');
+            el.setAttribute('aria-atomic', 'true');
+        } else if (tag === 'p') {
+            el.removeAttribute('role');
+            el.removeAttribute('aria-live');
+            el.removeAttribute('aria-atomic');
+        }
         if (item.k === 'input') {
             el._item = item;
             el.setAttribute('aria-label', item.name);
@@ -290,7 +309,7 @@ export function syncA11y(h, json, revision) {
             else el.removeAttribute('aria-expanded');
         }
         const sig = item.k === 'input' ? item.value ?? '' : item.u?.length ? JSON.stringify(item.u) : item.t ?? '';
-        if (el._sig !== sig) {
+        if (!group && el._sig !== sig) {
             el._sig = sig;
             el.replaceChildren();
             if (item.u?.length) {
@@ -319,8 +338,14 @@ export function syncA11y(h, json, revision) {
                 el.textContent = item.k === 'input' ? item.value ?? '' : item.t ?? '';
             }
         }
-        if (cursor !== el) h.a11y.insertBefore(el, cursor);
-        else cursor = cursor.nextElementSibling;
+        const parent = item.parent ? h.a11yNodes.get(`semantic:${item.parent}`) ?? h.a11y : h.a11y;
+        const previous = cursors.get(parent);
+        const cursor = previous ? previous.nextElementSibling : parent.firstElementChild;
+        if (cursor !== el) {
+            if (nativeButtons.has(focused) && (focused === el || el.contains(focused))) restoreNativeFocus = true;
+            parent.insertBefore(el, cursor);
+        }
+        cursors.set(parent, el);
     }
     for (const [key, el] of h.a11yNodes) {
         if (!seen.has(key)) {
@@ -329,6 +354,8 @@ export function syncA11y(h, json, revision) {
             h.a11yNodes.delete(key);
         }
     }
+    if (restoreNativeFocus && focused.isConnected && document.activeElement !== focused)
+        focused.focus({ preventScroll: true });
 }
 
 function setOptionalAttribute(el, name, value) {

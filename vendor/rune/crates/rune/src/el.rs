@@ -90,6 +90,8 @@ impl Drag {
 
 pub(crate) type PressFn = Rc<dyn Fn(crate::states::States<'_>, &mut Tx)>;
 pub(crate) type InputKeyFn = Rc<dyn Fn(crate::states::States<'_>, &crate::KeyEvent, &mut Tx) -> bool>;
+#[cfg(target_arch = "wasm32")]
+pub(crate) type NativeSubmitFn = Rc<dyn Fn(crate::states::States<'_>, &web_sys::Event, &mut Tx) -> bool>;
 pub(crate) type StepFn = Rc<dyn Fn(crate::states::States<'_>, i32, &mut Tx)>;
 pub(crate) type StepLimitFn = Rc<dyn Fn(crate::states::States<'_>, bool, &mut Tx)>;
 
@@ -189,6 +191,8 @@ pub struct InputSpec {
     pub(crate) pill_style: Option<PillStyleFn>,
     pub(crate) access: Option<EditFn>,
     pub(crate) submit: Option<PressFn>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) native_submit: Option<(String, NativeSubmitFn)>,
     pub(crate) key: Option<InputKeyFn>,
     pub(crate) change: Option<PressFn>,
     pub(crate) paste: Option<InputPasteFn>,
@@ -698,6 +702,8 @@ pub fn text_input(edit: &TextEdit, style: TextStyle) -> El {
         pill_style: None,
         access: None,
         submit: None,
+        #[cfg(target_arch = "wasm32")]
+        native_submit: None,
         key: None,
         change: None,
         paste: None,

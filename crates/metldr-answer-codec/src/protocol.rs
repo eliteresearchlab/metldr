@@ -114,6 +114,10 @@ pub enum ChildMessage {
     Height {
         height: f64,
     },
+    Wheel {
+        dx: f64,
+        dy: f64,
+    },
     Followup {
         text: String,
     },
@@ -214,8 +218,9 @@ pub fn encode_host(binding: &Binding, message: HostMessage) -> Result<String, St
     encode_envelope(binding, message, MAX_HOST_BYTES)
 }
 
-pub fn encode_child(binding: &Binding, message: ChildMessage) -> Result<String, String> {
+pub fn encode_child(binding: &Binding, mut message: ChildMessage) -> Result<String, String> {
     validate_child(&message)?;
+    clamp_wheel(&mut message);
     encode_envelope(binding, message, MAX_CHILD_BYTES)
 }
 
@@ -233,12 +238,13 @@ pub fn decode_child(encoded: &str, expected: &Binding) -> Result<ChildMessage, S
     if encoded.len() > MAX_CHILD_BYTES {
         return Err("answer child message exceeds its limit".into());
     }
-    let received: Envelope<Binding, ChildMessage> =
+    let mut received: Envelope<Binding, ChildMessage> =
         serde_json::from_str(encoded).map_err(|_| "invalid answer child message".to_owned())?;
     if &received.binding != expected {
         return Err("answer binding does not match".into());
     }
     validate_child(&received.message)?;
+    clamp_wheel(&mut received.message);
     Ok(received.message)
 }
 
@@ -284,10 +290,20 @@ fn validate_host(message: &HostMessage) -> Result<(), String> {
     }
 }
 
+fn clamp_wheel(message: &mut ChildMessage) {
+    if let ChildMessage::Wheel { dx, dy } = message {
+        *dx = dx.clamp(-1200.0, 1200.0);
+        *dy = dy.clamp(-1200.0, 1200.0);
+    }
+}
+
 fn validate_child(message: &ChildMessage) -> Result<(), String> {
     match message {
         ChildMessage::Height { height } if !height.is_finite() => {
             Err("answer height is invalid".into())
+        }
+        ChildMessage::Wheel { dx, dy } if !dx.is_finite() || !dy.is_finite() => {
+            Err("answer wheel delta is invalid".into())
         }
         ChildMessage::Followup { text }
             if text.trim().is_empty() || text.len() > MAX_FOLLOWUP_BYTES =>

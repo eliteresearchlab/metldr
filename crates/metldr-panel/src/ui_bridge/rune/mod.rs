@@ -1,14 +1,24 @@
 use super::*;
 use ::rune::{
-    App, AppHandle, AppSpec, Cx, El, ScrollSpec, TextEdit, TextStyle, Tx, col, oklch, text,
+    App, AppHandle, AppSpec, Cx, El, ScrollSpec, TextEdit, TextStyle, Tx, col, oklch, row, text,
 };
 use wasm_bindgen_futures::spawn_local;
 
+mod activities;
+mod answers;
 mod composer;
+mod conversations;
+mod corrections;
 mod fonts;
 mod glimm;
 mod messages;
+mod pi_replies;
+mod preferences;
+mod replies;
+mod settings;
+mod sources;
 
+use activities::Activities;
 use messages::Messages;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -31,9 +41,11 @@ enum Session {
 
 struct Presentation {
     messages: Messages,
+    older_cursor: Option<String>,
     connected: Option<Result<Rc<Core>, FlowError>>,
     accepted_draft: Option<String>,
     error: Option<String>,
+    followup: Option<answers::Followup>,
 }
 
 struct Updates {
@@ -41,9 +53,27 @@ struct Updates {
     dirty: Cell<bool>,
     closed: Cell<bool>,
     wake: ::rune::Waker,
+    archive_epoch: Rc<Cell<u64>>,
 }
 
 impl Updates {
+    fn new(wake: ::rune::Waker, archive_epoch: Rc<Cell<u64>>) -> Rc<Self> {
+        Rc::new(Self {
+            presentation: RefCell::new(Presentation {
+                messages: Messages::new(),
+                older_cursor: None,
+                connected: None,
+                accepted_draft: None,
+                error: None,
+                followup: None,
+            }),
+            dirty: Cell::new(false),
+            closed: Cell::new(false),
+            wake,
+            archive_epoch,
+        })
+    }
+
     fn changed(&self) {
         self.dirty.set(true);
         (self.wake)();
@@ -67,6 +97,8 @@ impl Updates {
             presentation.error = Some(message.clone());
         }
         presentation.messages.apply(event)?;
+        self.archive_epoch
+            .set(self.archive_epoch.get().wrapping_add(1));
         drop(presentation);
         self.changed();
         Ok(())
@@ -78,11 +110,24 @@ struct State {
     updates: Option<Rc<Updates>>,
     observation: Option<Rc<active::Active>>,
     draft: TextEdit,
+    draft_version: u64,
+    corrections: corrections::Corrections,
     menu: Option<Menu>,
     source_engaged: bool,
     selection: String,
     mode: Mode,
     celebration: u32,
+    replies: replies::Replies,
+    pi_replies: pi_replies::PiReplies,
+    settings: settings::Settings,
+    sources: sources::Sources,
+    preferences: preferences::Preferences,
+    settings_open: bool,
+    conversations: conversations::Conversations,
+    activities: Activities,
+    answers: answers::Answers,
+    thread_rect: ::rune::Live<[f32; 4]>,
+    proposed_followup: Option<answers::Followup>,
 }
 
 impl Default for State {
@@ -92,16 +137,151 @@ impl Default for State {
             updates: None,
             observation: None,
             draft: TextEdit::default(),
+            draft_version: 0,
+            corrections: corrections::Corrections::default(),
             menu: None,
             source_engaged: false,
             selection: String::new(),
             mode: Mode::Configured,
             celebration: 0,
+            replies: replies::Replies::default(),
+            pi_replies: pi_replies::PiReplies::default(),
+            settings: settings::Settings::default(),
+            sources: sources::Sources::default(),
+            preferences: preferences::Preferences::default(),
+            settings_open: false,
+            conversations: conversations::Conversations::default(),
+            activities: Activities::default(),
+            answers: answers::Answers::default(),
+            thread_rect: ::rune::Live::new([0.0; 4]),
+            proposed_followup: None,
         }
     }
 }
 
 impl State {
+    fn sound(&self, cue: crate::interaction_audio::Cue) {
+        let _ = crate::interaction_audio::rune(cue, self.preferences.snapshot());
+    }
+
+    fn preference(&mut self, action: preferences::Action, tx: &mut Tx) {
+        if matches!(action, preferences::Action::RetrySetup) {
+            if let Some(updates) = &self.updates {
+                self.preferences.retry_setup(updates.wake.clone(), tx);
+            }
+        } else {
+            self.sound(crate::interaction_audio::Cue::Tick);
+            self.preferences.apply(action, tx);
+        }
+    }
+    fn draft_changed(&mut self) {
+        self.draft_version = self
+            .draft_version
+            .checked_add(1)
+            .expect("draft version exhausted");
+    }
+
+    fn replace_draft(&mut self, text: impl Into<String>) {
+        self.draft_changed();
+        self.draft.replace_text(text);
+    }
+
+    fn clear_draft(&mut self) {
+        self.draft_changed();
+        self.draft.clear();
+    }
+
+    fn open_settings(&mut self, tx: &mut Tx) {
+        self.sound(crate::interaction_audio::Cue::Press);
+        if self.conversations.is_open() {
+            self.conversations.close(tx);
+        }
+        self.menu = None;
+        self.source_engaged = false;
+        self.settings_open = true;
+        tx.focus("settings-back");
+    }
+
+    fn close_settings(&mut self, tx: &mut Tx) {
+        self.sound(crate::interaction_audio::Cue::Press);
+        self.settings.clear_keys();
+        self.settings_open = false;
+        tx.focus("settings-open");
+    }
+
+    fn open_conversations(&mut self, tx: &mut Tx) {
+        let (Some(core), Some(updates)) = (self.core().cloned(), self.updates.clone()) else {
+            return;
+        };
+        self.settings.clear_keys();
+        self.sound(crate::interaction_audio::Cue::Press);
+        self.settings_open = false;
+        self.menu = None;
+        self.source_engaged = false;
+        self.conversations.open(&core, &updates, tx);
+    }
+
+    fn switch_core(&mut self, core: Rc<Core>, previous: &Rc<Updates>) {
+        previous.closed.set(true);
+        if let Some(active) = self.observation.take() {
+            active.detach();
+        }
+        if let Some(old) = self.core() {
+            old.page.changed.borrow_mut().take();
+        }
+        self.answers = answers::Answers::default();
+        self.activities = Activities::default();
+        self.replies = replies::Replies::default();
+        self.pi_replies = pi_replies::PiReplies::default();
+        self.corrections = corrections::Corrections::default();
+        self.settings = settings::Settings::default();
+        self.sources = sources::Sources::default();
+        self.conversations = conversations::Conversations::default();
+        self.proposed_followup = None;
+        self.menu = None;
+        self.source_engaged = false;
+        self.settings_open = false;
+        self.selection.clear();
+        self.mode = Mode::Configured;
+        self.clear_draft();
+        self.session = Session::Connecting;
+        let updates = Updates::new(previous.wake.clone(), self.conversations.archive_epoch());
+        self.updates = Some(Rc::clone(&updates));
+        spawn_local(async move {
+            let connected = prepare_core(core, &updates).await;
+            if !updates.closed.get() {
+                updates.presentation.borrow_mut().connected = Some(connected);
+                updates.changed();
+            }
+        });
+    }
+
+    fn use_followup(&mut self, tx: &mut Tx) {
+        let Some(followup) = self.proposed_followup.take() else {
+            return;
+        };
+        if !followup.is_current(&self.activities) {
+            return;
+        }
+        let result = self
+            .core()
+            .ok_or(FlowError::Disconnected)
+            .and_then(|core| core.ensure_current())
+            .and_then(|()| {
+                self.answers.consume_followup(&followup).map_err(|_| {
+                    FlowError::Host("The answer followup is no longer available.".into())
+                })
+            });
+        match result {
+            Ok(()) => {
+                self.replace_draft(followup.text);
+                self.menu = None;
+                tx.focus("rune-composer-field");
+            }
+            Err(error) => self.fail(error),
+        }
+    }
+
     fn core(&self) -> Option<&Rc<Core>> {
         match &self.session {
             Session::Ready(core) => Some(core),
@@ -160,10 +340,19 @@ impl State {
     }
 
     fn decide_browser_action(&mut self, decision: browser_actions::DecisionKey, tx: &mut Tx) {
-        let Some(core) = self.core().cloned() else { return };
-        let Some(updates) = self.updates.clone() else { return };
+        let Some(core) = self.core().cloned() else {
+            return;
+        };
+        let Some(updates) = self.updates.clone() else {
+            return;
+        };
         match core.decide_from_rune(decision, tx) {
-            Ok(work) => spawn_local(async move { updates.finish(work.await); }),
+            Ok(work) => {
+                self.sound(crate::interaction_audio::Cue::Press);
+                spawn_local(async move {
+                    updates.finish(work.await);
+                });
+            }
             Err(error) => self.fail(error),
         }
     }
@@ -186,6 +375,7 @@ impl State {
                     self.celebration = self.celebration.wrapping_add(1);
                 }
                 self.selection = value;
+                self.sound(crate::interaction_audio::Cue::Tick);
                 self.menu = None;
                 self.draft.focused = true;
             }
@@ -227,6 +417,8 @@ impl State {
         })();
         match admitted {
             Ok(running) => {
+                self.sound(crate::interaction_audio::Cue::Pulse);
+                self.conversations.invalidate_archive();
                 updates.presentation.borrow_mut().error = None;
                 self.menu = None;
                 spawn_local(async move {
@@ -244,6 +436,7 @@ impl State {
         };
         match core.capture() {
             Ok(capturing) => {
+                self.sound(crate::interaction_audio::Cue::Press);
                 self.menu = None;
                 self.draft.focused = true;
                 spawn_local(async move {
@@ -260,9 +453,12 @@ impl State {
         };
         if let Some(active) = &self.observation {
             match active.stop() {
-                Ok(stopping) => spawn_local(async move {
-                    updates.finish(stopping.await.map(|_| ()));
-                }),
+                Ok(stopping) => {
+                    self.sound(crate::interaction_audio::Cue::Release);
+                    spawn_local(async move {
+                        updates.finish(stopping.await.map(|_| ()));
+                    });
+                }
                 Err(error) => self.fail(error),
             }
             return;
@@ -273,9 +469,12 @@ impl State {
             _ => return,
         };
         match core.stop(&ui) {
-            Ok(stopping) => spawn_local(async move {
-                updates.finish(stopping.await.map(|_| ()));
-            }),
+            Ok(stopping) => {
+                self.sound(crate::interaction_audio::Cue::Release);
+                spawn_local(async move {
+                    updates.finish(stopping.await.map(|_| ()));
+                });
+            }
             Err(error) => self.fail(error),
         }
     }
@@ -326,6 +525,7 @@ impl State {
 
 impl Drop for State {
     fn drop(&mut self) {
+        self.preferences.close();
         if let Some(updates) = &self.updates {
             updates.closed.set(true);
         }
@@ -359,42 +559,35 @@ fn identity() -> Result<String, FlowError> {
         .ok_or_else(|| FlowError::Protocol("Request identity is unavailable.".into()))
 }
 
+async fn prepare_core(core: Rc<Core>, updates: &Rc<Updates>) -> Result<Rc<Core>, FlowError> {
+    let history = core.history(None).await?;
+    if updates.closed.get() {
+        return Err(FlowError::Disconnected);
+    }
+    {
+        let mut presentation = updates.presentation.borrow_mut();
+        presentation.messages.replace_archive(history.messages)?;
+        presentation.older_cursor = history.older_cursor;
+    }
+    let weak = Rc::downgrade(updates);
+    *core.page.changed.borrow_mut() = Some(Rc::new(move || {
+        if let Some(updates) = weak.upgrade() {
+            updates.changed();
+        }
+    }));
+    Ok(core)
+}
+
 fn setup(state: &mut State, wake: ::rune::Waker) {
-    let updates = Rc::new(Updates {
-        presentation: RefCell::new(Presentation {
-            messages: Messages::new(),
-            connected: None,
-            accepted_draft: None,
-            error: None,
-        }),
-        dirty: Cell::new(false),
-        closed: Cell::new(false),
-        wake,
-    });
+    state.preferences.setup(wake.clone());
+    let updates = Updates::new(wake, state.conversations.archive_epoch());
     state.updates = Some(Rc::clone(&updates));
     spawn_local(async move {
         let connected = async {
             let flow = FlowClient::connect().await?;
             let view = flow.current_page().await?;
             let core = UiBridge::from_view(flow, view)?.core;
-            let history = core.history(None).await?;
-            if updates.closed.get() {
-                return Err(FlowError::Disconnected);
-            }
-            updates
-                .presentation
-                .borrow_mut()
-                .messages
-                .apply(Event::MessagesSnapshot {
-                    messages: history.messages,
-                })?;
-            let weak = Rc::downgrade(&updates);
-            *core.page.changed.borrow_mut() = Some(Rc::new(move || {
-                if let Some(updates) = weak.upgrade() {
-                    updates.changed();
-                }
-            }));
-            Ok(core)
+            prepare_core(core, &updates).await
         }
         .await;
         if !updates.closed.get() {
@@ -404,17 +597,21 @@ fn setup(state: &mut State, wake: ::rune::Waker) {
     });
 }
 
-fn poll(state: &mut State, _: f64, _: &mut Tx) -> bool {
+fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
+    let appearance_changed = state.preferences.poll();
     let Some(updates) = state.updates.clone() else {
-        return false;
+        return appearance_changed;
     };
     if !updates.dirty.replace(false) {
-        return false;
+        return appearance_changed;
     }
     let connected = updates.presentation.borrow_mut().connected.take();
     if let Some(connected) = connected {
         match connected {
             Ok(core) => {
+                state
+                    .conversations
+                    .set_older_cursor(updates.presentation.borrow_mut().older_cursor.take());
                 let key = format!("metldr:review-draft:{}", core.scope.conversation);
                 let restored = web_sys::window()
                     .ok_or(())
@@ -425,7 +622,7 @@ fn poll(state: &mut State, _: f64, _: &mut Tx) -> bool {
                     });
                 match restored {
                     Ok((storage, Some(draft))) => {
-                        state.draft.replace_text(draft);
+                        state.replace_draft(draft);
                         if storage.remove_item(&key).is_err() {
                             state.fail(FlowError::Host(
                                 "Your draft is shown, but its saved copy could not be cleared."
@@ -459,6 +656,7 @@ fn poll(state: &mut State, _: f64, _: &mut Tx) -> bool {
                     .find(|run| !run.status.is_terminal())
                     .map(|run| Rc::new(active::Active::new(Rc::clone(&core), run)));
                 state.session = Session::Ready(core);
+                tx.focus("rune-composer-field");
                 if let Some(active) = active {
                     let observing = identity().and_then(|id| {
                         let events = Rc::clone(&updates);
@@ -482,10 +680,34 @@ fn poll(state: &mut State, _: f64, _: &mut Tx) -> bool {
             }
         }
     }
+    if let Some(core) = state.core().cloned() {
+        let running = state.running();
+        match state.conversations.poll(&core, running) {
+            Some(conversations::Completion::Navigation(core)) => {
+                state.switch_core(core, &updates);
+                return true;
+            }
+            Some(conversations::Completion::Archive(page)) => {
+                let replaced = updates
+                    .presentation
+                    .borrow_mut()
+                    .messages
+                    .replace_archive(page.messages);
+                match replaced {
+                    Ok(()) => {
+                        state.conversations.invalidate_archive();
+                        state.conversations.set_older_cursor(page.older_cursor);
+                    }
+                    Err(error) => state.fail(error),
+                }
+            }
+            None => {}
+        }
+    }
     let accepted = updates.presentation.borrow_mut().accepted_draft.take();
     if let Some(accepted) = accepted {
         if state.draft.text == accepted {
-            state.draft.clear();
+            state.clear_draft();
         }
     }
     if !state.running() {
@@ -496,11 +718,54 @@ fn poll(state: &mut State, _: f64, _: &mut Tx) -> bool {
             state.selection = choice.value;
         }
     }
+    replies::sync(state);
+    pi_replies::sync(state);
+    corrections::sync(state);
+    if let Some(core) = state.core().cloned() {
+        state.settings.sync(&core);
+        state.sources.sync(&core, &updates);
+        let presentation = updates.presentation.borrow();
+        state
+            .activities
+            .sync(&core, &presentation.messages.messages, &updates);
+        if state
+            .answers
+            .sync(&state.activities, &presentation.messages.messages, &updates)
+            .is_err()
+        {
+            drop(presentation);
+            state.fail(FlowError::Host(
+                "The interactive answer could not be opened.".into(),
+            ));
+        }
+    } else {
+        state.settings.clear_keys();
+    }
+    let followup = updates.presentation.borrow_mut().followup.take();
+    if let Some(followup) = followup {
+        state.proposed_followup = Some(followup);
+        if !state.settings_open && state.draft.text.is_empty() && state.draft.preedit.is_none() {
+            state.use_followup(tx);
+        }
+    }
+    if state
+        .proposed_followup
+        .as_ref()
+        .is_some_and(|followup| !followup.is_current(&state.activities))
+    {
+        state.proposed_followup = None;
+    }
     true
 }
 
-fn key(state: &mut State, key: &::rune::KeyEvent, _: &mut Tx) -> bool {
-    if key.key == ::rune::Key::Escape && state.menu.is_some() {
+fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
+    if key.key == ::rune::Key::Escape && state.conversations.is_open() {
+        state.conversations.close(tx);
+        true
+    } else if key.key == ::rune::Key::Escape && state.settings_open {
+        state.close_settings(tx);
+        true
+    } else if key.key == ::rune::Key::Escape && state.menu.is_some() {
         state.menu = None;
         state.source_engaged = false;
         true
@@ -510,38 +775,53 @@ fn key(state: &mut State, key: &::rune::KeyEvent, _: &mut Tx) -> bool {
 }
 
 fn view(state: &State, cx: &mut Cx<State>) -> El {
-    let (ink, page) = if cx.system_dark() {
-        (oklch(0.964, 0.002, 247.839), oklch(0.209, 0.004, 264.477))
-    } else {
-        (oklch(0.247, 0.006, 258.361), oklch(0.985, 0.001, 286.376))
-    };
+    let palette = state.preferences.palette();
+    let (ink, page) = (palette.ink, palette.page);
+    let typography = state.preferences.typography();
     let mut thread = col().key("messages").w_full().gap(16.0).padding(16.0);
     if let Some(updates) = &state.updates {
         let presentation = updates.presentation.borrow();
         for message in &presentation.messages.messages {
             if let Some(content) = message.text() {
                 thread = thread.child(
-                    text(content)
+                    typography
+                        .text(content)
                         .key(message.id())
                         .w_full()
                         .wrap()
-                        .font(TextStyle::new(14.0, 400.0).lh(21.0))
+                        .font(typography.font(14.0, 400.0).lh(21.0 * typography.scale))
                         .color(ink)
                         .selectable(true),
+                );
+            } else if let crate::ag_ui::AgUiMessage::Activity { id, .. } = message {
+                thread = thread.child(
+                    state
+                        .activities
+                        .view(id, updates, typography)
+                        .key(id)
+                        .w_full(),
                 );
             }
         }
         if let Some(error) = &presentation.error {
-            thread = thread.child(text(error).key("error").w_full().wrap().label(error));
+            thread = thread.child(
+                typography
+                    .text(error)
+                    .key("error")
+                    .w_full()
+                    .wrap()
+                    .label(error),
+            );
         }
     }
     if matches!(state.session, Session::Connecting) {
-        thread = thread.child(text("Opening metldr").label("Opening metldr"));
+        thread = thread.child(typography.text("Opening metldr").label("Opening metldr"));
     }
     let Some(core) = state.core() else {
         if matches!(state.session, Session::Failed) {
             thread = thread.child(
-                text("Reload")
+                typography
+                    .text("Reload")
                     .role("button")
                     .focusable(true)
                     .on_press_tx(|state: &mut State, tx| state.review(tx))
@@ -553,24 +833,135 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         return col().w_full().h_full().fill(page).color(ink).child(thread);
     };
     let connection = connection::UiConnectionSnapshot::read(core);
+    if state.conversations.is_open() {
+        return col()
+            .w_full()
+            .h_full()
+            .min_h(0.0)
+            .fill(page)
+            .color(ink)
+            .child(
+                state
+                    .conversations
+                    .view(state)
+                    .padding(16.0)
+                    .grow(1.0)
+                    .min_h(0.0)
+                    .scroll(ScrollSpec {
+                        stick_bottom: false,
+                    }),
+            );
+    }
+    if state.settings_open {
+        return col()
+            .w_full()
+            .h_full()
+            .min_h(0.0)
+            .fill(page)
+            .color(ink)
+            .child(
+                typography
+                    .text("Back to chat")
+                    .key("settings-back")
+                    .role("button")
+                    .focusable(true)
+                    .padding(12.0)
+                    .press(ink.alpha(0.12))
+                    .on_press_tx(|state: &mut State, tx| state.close_settings(tx))
+                    .on_key(|state: &mut State, key, tx| {
+                        composer::enter(state, key, tx, State::close_settings)
+                    }),
+            )
+            .child(
+                col()
+                    .gap(16.0)
+                    .child(state.preferences.view(State::preference))
+                    .child(state.settings.view(core, cx, typography, palette))
+                    .padding(16.0)
+                    .grow(1.0)
+                    .min_h(0.0)
+                    .scroll(ScrollSpec {
+                        stick_bottom: false,
+                    }),
+            );
+    }
+    if let Some(followup) = &state.proposed_followup {
+        thread = thread.child(
+            col()
+                .gap(8.0)
+                .child(typography.text(&followup.text).wrap())
+                .child(
+                    typography
+                        .text("Replace draft with followup")
+                        .role("button")
+                        .focusable(true)
+                        .press(ink.alpha(0.12))
+                        .on_press_tx(|state: &mut State, tx| {
+                            state.sound(crate::interaction_audio::Cue::Press);
+                            state.use_followup(tx);
+                        })
+                        .on_key(|state: &mut State, key, tx| {
+                            composer::enter(state, key, tx, |state, tx| {
+                                state.sound(crate::interaction_audio::Cue::Press);
+                                state.use_followup(tx);
+                            })
+                        }),
+                ),
+        );
+    }
+    thread = thread.child(state.sources.view(typography));
+    for reply in replies::view(state, core) {
+        thread = thread.child(reply);
+    }
+    for reply in pi_replies::view(state, core) {
+        thread = thread.child(reply);
+    }
+    for correction in corrections::view(state, core) {
+        thread = thread.child(correction);
+    }
     if let Some((action, can_approve, can_decline)) = core.rune_browser_action() {
         let display = crate::browser_action_display::display(&action);
-        let mut approval = col().key("browser-approval").w_full().gap(8.0)
-            .child(text(display.title).wrap());
+        let mut approval = col()
+            .key("browser-approval")
+            .w_full()
+            .gap(8.0)
+            .child(typography.text(display.title).wrap());
         for detail in display.details {
-            approval = approval.child(text(format!("{}: {}", detail.label, detail.value)).wrap());
+            approval = approval.child(
+                typography
+                    .text(format!("{}: {}", detail.label, detail.value))
+                    .wrap(),
+            );
         }
-        for (approve, enabled, label) in [(true, can_approve, "Approve"), (false, can_decline, "Decline")] {
-            let decision = browser_actions::DecisionKey { id: action.id.clone(), revision: action.revision, approve };
-            approval = approval.child(text(label).key(decision.element_key()).role("button")
-                .focusable(true).disabled(!enabled).label(label).native_activation()
-                .on_press_tx(move |state: &mut State, tx| state.decide_browser_action(decision.clone(), tx)));
+        for (approve, enabled, label) in [
+            (true, can_approve, "Approve"),
+            (false, can_decline, "Decline"),
+        ] {
+            let decision = browser_actions::DecisionKey {
+                id: action.id.clone(),
+                revision: action.revision,
+                approve,
+            };
+            approval = approval.child(
+                typography
+                    .text(label)
+                    .key(decision.element_key())
+                    .role("button")
+                    .focusable(true)
+                    .disabled(!enabled)
+                    .label(label)
+                    .native_activation()
+                    .on_press_tx(move |state: &mut State, tx| {
+                        state.decide_browser_action(decision.clone(), tx)
+                    }),
+            );
         }
         thread = thread.child(approval);
     }
     if !connection.connected() {
         thread = thread.child(
-            text("Reconnect")
+            typography
+                .text("Reconnect")
                 .role("button")
                 .focusable(true)
                 .disabled(!connection.can_reconnect())
@@ -582,7 +973,8 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     }
     if connection.uncertain() || connection.stale() {
         thread = thread.child(
-            text("Review saved work")
+            typography
+                .text("Review saved work")
                 .role("button")
                 .focusable(true)
                 .disabled(connection.reconnecting())
@@ -603,7 +995,40 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .fill(page)
         .color(ink)
         .child(
+            row()
+                .w_full()
+                .padding(8.0)
+                .child(
+                    typography
+                        .text("Saved chats")
+                        .key("saved-chats-open")
+                        .role("button")
+                        .focusable(true)
+                        .padding(6.0)
+                        .press(ink.alpha(0.12))
+                        .on_press_tx(|state: &mut State, tx| state.open_conversations(tx))
+                        .on_key(|state: &mut State, key, tx| {
+                            composer::enter(state, key, tx, State::open_conversations)
+                        }),
+                )
+                .child(
+                    typography
+                        .text("Settings")
+                        .key("settings-open")
+                        .role("button")
+                        .focusable(true)
+                        .padding(6.0)
+                        .press(ink.alpha(0.12))
+                        .on_press_tx(|state: &mut State, tx| state.open_settings(tx))
+                        .on_key(|state: &mut State, key, tx| {
+                            composer::enter(state, key, tx, State::open_settings)
+                        }),
+                ),
+        )
+        .child(state.conversations.toolbar(state))
+        .child(
             thread
+                .drawn_rect_into(&state.thread_rect)
                 .grow(1.0)
                 .min_h(0.0)
                 .scroll(ScrollSpec { stick_bottom: true }),
@@ -637,6 +1062,21 @@ pub fn start_rune_chat(capture: Function) -> Result<(), JsValue> {
             .canvas_id("metldr-rune-chat")
             .full_viewport()
             .tab_visits_controls(true)
+            .on_frame_drawn(|runtime| {
+                if let Some(updates) = &runtime.state.updates {
+                    runtime.state.answers.drawn(
+                        if runtime.state.settings_open || runtime.state.conversations.is_open() {
+                            [0.0; 4]
+                        } else {
+                            runtime.state.thread_rect.get()
+                        },
+                        updates,
+                        &runtime.state.activities,
+                        runtime.state.preferences.palette(),
+                        runtime.state.preferences.typography(),
+                    );
+                }
+            })
             .compositor(glimm::Glimm::default());
         let handle = app.handle();
         app.try_run().map_err(|error| crate::err(&error))?;

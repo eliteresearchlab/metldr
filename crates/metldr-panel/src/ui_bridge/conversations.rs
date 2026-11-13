@@ -103,3 +103,32 @@ mod tests {
         assert!(decode_cursor(&" ".repeat(MAX_CURSOR + 1)).is_err());
     }
 }
+
+impl super::Core {
+    pub(super) async fn conversation_page(&self, cursor: Option<&str>) -> Result<Page, FlowError> {
+        let _read = self.begin_read()?;
+        page(&self.flow(), &self.scope, cursor).await
+    }
+
+    pub(super) fn start_conversation_navigation(
+        &self,
+        change: crate::history::Change,
+    ) -> Result<(), FlowError> {
+        if let crate::history::Change::Select { conversation } = &change {
+            let scope = Scope {
+                conversation: conversation.clone(),
+                ..self.scope.clone()
+            };
+            scope
+                .validate()
+                .map_err(|_| FlowError::InvalidInput("Invalid conversation.".into()))?;
+        }
+        self.begin_navigation(change)
+    }
+
+    pub(super) async fn continue_conversation_navigation(
+        &self,
+    ) -> Result<super::UiBridge, FlowError> {
+        self.navigate().await
+    }
+}

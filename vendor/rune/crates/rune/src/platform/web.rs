@@ -87,6 +87,7 @@ struct Running<S: 'static> {
     shared: Arc<crate::app::Shared<S>>,
     clock: crate::frame::clock::FrameClock,
     compositor: Option<Box<dyn crate::Compositor<S>>>,
+    on_frame_drawn: Option<crate::frame::encoded::OnFrameDrawn<S>>,
     suspended: bool,
     embedded: bool,
     cursor: crate::cursor::os::OsCursor,
@@ -296,6 +297,7 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
             };
             let mut app = self.app.take().expect("one canvas initialization");
             let compositor = app.compositor.take();
+            let on_frame_drawn = app.on_frame_drawn.take();
             let (on_focus, modifier_keys, srgb_blend) = (app.on_focus, app.modifier_keys, app.srgb_blend);
             let (font_smoothing, fit_height) = (app.font_smoothing, app.fit_content_height);
             let tab_visits_controls = app.tab_visits_controls;
@@ -370,7 +372,7 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
             let input = input::Bridge::new(&window.canvas().unwrap(), Rc::downgrade(&self.running), window.clone(), self.embedded, fit_height);
             *self.running.borrow_mut() = Some(Running { gpu, surface, config, renderer, rt, shared, input, clipboard,
                 clock: crate::frame::clock::FrameClock::new(now), compositor, suspended: false, embedded: self.embedded,
-                cursor, _menus: menus, shortcuts });
+                cursor, _menus: menus, shortcuts, on_frame_drawn });
         }
         if let Some(r) = &mut *self.running.borrow_mut() {
             r.shortcuts.drain();
@@ -381,6 +383,7 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
                 || requests.position.is_some() || requests.place.is_some() || requests.minimize {
                 web_sys::console::warn_1(&"Native window management is ignored on web.".into());
             }
+            for (key, dx, dy) in requests.relay_wheel { r.accept_relay_wheel(key, dx, dy); }
             let had_updates = !requests.updates.is_empty();
             for update in requests.updates { r.rt.update_if(update); }
             if !had_updates { r.rt.invalidate(); }
@@ -405,6 +408,7 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
             }
             WindowEvent::ThemeChanged(theme) => { r.rt.set_system_dark(theme == winit::window::Theme::Dark); window.request_redraw(); }
             WindowEvent::RedrawRequested if !r.suspended => {
+                r.apply_relay_wheel();
                 let now = Instant::now();
                 let (animating, dt) = r.clock.advance(&mut r.rt, now, r.compositor.as_ref().is_some_and(|c| c.animating()));
                 r.apply_frame_requests(window);
@@ -449,6 +453,9 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
                 r.gpu.queue.present(frame);
                 r.rt.native_geometry_valid = true;
                 r.reconcile_native(window);
+                if let Some(on_frame_drawn) = &mut r.on_frame_drawn {
+                    on_frame_drawn(&r.rt);
+                }
                 if r.rt.shell_request.take().is_some() { self.end(event_loop); return; }
                 if animating || r.rt.has_pending_input() || r.rt.live_pending() || r.compositor.as_ref().is_some_and(|c| c.animating()) {
                     window.request_redraw();

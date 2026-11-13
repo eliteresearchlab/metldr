@@ -149,3 +149,48 @@ fn initialization_shape_is_shared_and_strict() {
     let extra = encoded.trim_end_matches('}').to_owned() + ",\"extra\":true}";
     assert!(decode_initialize(&extra).is_err());
 }
+
+#[test]
+fn wheel_is_finite_bounded_and_bound_to_the_frame() {
+    let b = binding();
+    assert!(
+        encode_child(
+            &b,
+            ChildMessage::Wheel {
+                dx: f64::NAN,
+                dy: 0.0
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        encode_child(
+            &b,
+            ChildMessage::Wheel {
+                dx: 0.0,
+                dy: f64::INFINITY
+            }
+        )
+        .is_err()
+    );
+    let encoded = encode_child(
+        &b,
+        ChildMessage::Wheel {
+            dx: 5000.0,
+            dy: -5000.0,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        decode_child(&encoded, &b),
+        Ok(ChildMessage::Wheel {
+            dx: 1200.0,
+            dy: -1200.0
+        })
+    ));
+    let mut other = b.clone();
+    other
+        .set_frame_id("ffffffffffffffffffffffffffffffff".into())
+        .unwrap();
+    assert!(decode_child(&encoded, &other).is_err());
+}

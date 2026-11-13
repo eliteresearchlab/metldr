@@ -18,6 +18,7 @@ pub enum AnswerEventKind {
     Ready,
     Ack,
     Height,
+    Wheel,
     Followup,
     Failed,
     RuntimeFailed,
@@ -30,6 +31,7 @@ impl AnswerEvent {
             ChildMessage::Ready {} => AnswerEventKind::Ready,
             ChildMessage::Ack { .. } => AnswerEventKind::Ack,
             ChildMessage::Height { .. } => AnswerEventKind::Height,
+            ChildMessage::Wheel { .. } => AnswerEventKind::Wheel,
             ChildMessage::Followup { .. } => AnswerEventKind::Followup,
             ChildMessage::Failed { .. } => AnswerEventKind::Failed,
             ChildMessage::RuntimeFailed { .. } => AnswerEventKind::RuntimeFailed,
@@ -49,6 +51,19 @@ impl AnswerEvent {
         match &self.0 {
             ChildMessage::Height { height } => Ok(*height),
             _ => Err(js_error("height is not available")),
+        }
+    }
+
+    pub fn wheel_dx(&self) -> Result<f64, JsValue> {
+        match self.0 {
+            ChildMessage::Wheel { dx, .. } => Ok(dx),
+            _ => Err(js_error("wheel delta is not available")),
+        }
+    }
+    pub fn wheel_dy(&self) -> Result<f64, JsValue> {
+        match self.0 {
+            ChildMessage::Wheel { dy, .. } => Ok(dy),
+            _ => Err(js_error("wheel delta is not available")),
         }
     }
 

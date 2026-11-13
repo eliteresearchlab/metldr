@@ -101,7 +101,7 @@ use line_break::break_lines_with_blocks;
 use span::PILL_BOX;
 use system_fonts::{
     LoadedFiles, SYMBOL_FAMILIES, SYMBOL_FONT_FILES, family_list, load_families, load_system_mono, names_system_mono,
-    register_cjk_fallbacks, register_script_fallbacks,
+    register_fallbacks, register_script_fallbacks,
 };
 #[cfg(any(test, not(target_arch = "wasm32")))]
 use system_fonts::system_font_files;
@@ -265,7 +265,7 @@ impl TextSystem {
             registered.extend(added);
         }
         let mut font_files = LoadedFiles::new();
-        register_cjk_fallbacks(&mut collection, &mut font_files, &registered, families);
+        register_fallbacks(&mut collection, &mut font_files, &registered, families);
         let symbol_families = load_families(&mut collection, SYMBOL_FONT_FILES, SYMBOL_FAMILIES);
         let emoji = symbol_families.iter().copied().find(|f| f.contains("Emoji"));
         #[cfg(target_arch = "wasm32")]
