@@ -399,6 +399,45 @@ impl State {
         }
     }
 
+    fn decide_plan(&mut self, plan: crate::model::TaskPlanView, approve: bool, tx: &mut Tx) {
+        let key = plan_key(&plan, approve);
+        if !tx.consume_activation(&key) {
+            return;
+        }
+        let Some(core) = self.core().cloned() else {
+            return;
+        };
+        let Some(updates) = self.updates.clone() else {
+            return;
+        };
+        let valid = core.ensure_current().is_ok()
+            && core.flow().is_connected()
+            && !core.page.recovery.borrow().active()
+            && !core.page.settings.borrow().blocked()
+            && !core.page.navigating.get()
+            && core.page.view.borrow().task_plan.as_ref() == Some(&plan)
+            && core.page.view.borrow().active_run() == Some(&plan.run)
+            && plan.state == crate::model::PlanState::Proposed;
+        if !valid {
+            return;
+        }
+        let mut pending = core.plan_operation.borrow_mut();
+        if pending.as_ref() == Some(&(plan.run.clone(), plan.revision)) {
+            return;
+        }
+        *pending = Some((plan.run.clone(), plan.revision));
+        drop(pending);
+        self.sound(crate::interaction_audio::Cue::Press);
+        spawn_local(async move {
+            let result = core
+                .flow()
+                .decide_plan(core.scope.clone(), plan.run, plan.revision, approve)
+                .await
+                .and_then(|view| core.accept(view).map(|_| ()));
+            updates.finish(result);
+        });
+    }
+
     fn select(&mut self, value: String, _: &mut Tx) {
         let result = (|| {
             let core = self.core().ok_or(FlowError::Disconnected)?;
@@ -846,6 +885,49 @@ mod followup_tests {
     use super::*;
     use ::rune::{Env, Key, KeyEvent, Mods, Runtime};
 
+    fn sample_plan(state: crate::model::PlanState) -> crate::model::TaskPlanView {
+        crate::model::TaskPlanView {
+            run: serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:1"))
+                .unwrap(),
+            goal: "Find information".into(),
+            intended_effects: vec!["Open a page".into()],
+            scope: "One site".into(),
+            revision: 7,
+            state,
+        }
+    }
+
+    #[test]
+    fn declined_plan_has_no_buttons_and_untrusted_input_is_ignored() {
+        fn view(_: &State, _: &mut Cx<State>) -> El {
+            plan_view(
+                &sample_plan(crate::model::PlanState::Declined),
+                true,
+                preferences::Typography {
+                    scale: 1.0,
+                    ink: oklch(0.5, 0.0, 0.0),
+                },
+            )
+        }
+        let mut rt = Runtime::new(State::default(), view, (640.0, 300.0), Env::default());
+        rt.frame(0.0);
+        let elements = rt.elements();
+        assert!(
+            elements
+                .iter()
+                .any(|el| el.role == "group" && el.label.as_deref() == Some("Task plan"))
+        );
+        assert!(
+            elements
+                .iter()
+                .any(|el| el.text.as_deref() == Some("Declined"))
+        );
+        assert!(!elements.iter().any(|el| el.role == "button"));
+        let plan = sample_plan(crate::model::PlanState::Proposed);
+        assert!(!Tx::default().consume_activation(&plan_key(&plan, true)));
+        assert_ne!(plan_key(&plan, true), plan_key(&plan, false));
+    }
+
     #[test]
     fn message_roles_and_startup_error_match_the_reference() {
         let updates = Updates::new(std::sync::Arc::new(|| {}), Rc::new(Cell::new(0)));
@@ -952,6 +1034,69 @@ fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
 
 fn toggle_browser_receipts(state: &mut State, _: &mut Tx) {
     state.browser_receipts_open = !state.browser_receipts_open;
+}
+
+fn plan_key(plan: &crate::model::TaskPlanView, approve: bool) -> String {
+    format!(
+        "plan:{}:{}:{}",
+        plan.run.as_str(),
+        plan.revision,
+        u8::from(approve)
+    )
+}
+
+fn plan_view(
+    plan: &crate::model::TaskPlanView,
+    enabled: bool,
+    typography: preferences::Typography,
+) -> El {
+    use crate::model::PlanState;
+    let mut card = col()
+        .key(format!("task-plan:{}", plan.run.as_str()))
+        .role("group")
+        .label("Task plan")
+        .w_full()
+        .gap(8.0)
+        .child(typography.text("Task plan").wrap())
+        .child(typography.text(format!("Goal: {}", plan.goal)).wrap());
+    for effect in &plan.intended_effects {
+        card = card.child(typography.text(format!("Effect: {effect}")).wrap());
+    }
+    card = card.child(typography.text(format!("Scope: {}", plan.scope)).wrap());
+    match plan.state {
+        PlanState::Approved => card.child(typography.text("Approved")),
+        PlanState::Declined => card.child(typography.text("Declined")),
+        PlanState::Proposed => {
+            for (approve, label) in [(true, "Approve"), (false, "Decline")] {
+                let press_plan = plan.clone();
+                let key_plan = plan.clone();
+                card = card.child(
+                    typography
+                        .text(label)
+                        .key(plan_key(plan, approve))
+                        .role("button")
+                        .label(label)
+                        .focusable(enabled)
+                        .disabled(!enabled)
+                        .native_activation()
+                        .press(typography.ink.alpha(0.12))
+                        .on_press_tx(move |state: &mut State, tx| {
+                            state.decide_plan(press_plan.clone(), approve, tx)
+                        })
+                        .on_key(move |state: &mut State, key, tx| {
+                            if key.key != ::rune::Key::Enter {
+                                return false;
+                            }
+                            if !tx.key_repeat() {
+                                state.decide_plan(key_plan.clone(), approve, tx);
+                            }
+                            true
+                        }),
+                );
+            }
+            card
+        }
+    }
 }
 
 fn browser_action_view(
@@ -1085,6 +1230,13 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         return col().w_full().h_full().fill(page).color(ink).child(thread);
     };
     let connection = connection::UiConnectionSnapshot::read(core);
+    if let Some(plan) = core.page.view.borrow().task_plan.as_ref() {
+        let enabled = core.ensure_current().is_ok()
+            && core.flow().is_connected()
+            && core.page.view.borrow().active_run() == Some(&plan.run)
+            && core.plan_operation.borrow().as_ref() != Some(&(plan.run.clone(), plan.revision));
+        thread = thread.child(plan_view(plan, enabled, typography));
+    }
     if !core.history_loading.get()
         && state
             .updates

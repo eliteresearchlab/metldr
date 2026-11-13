@@ -135,6 +135,8 @@ struct Core {
     native_operation: RefCell<native_permissions::Operation>,
     native_subscriptions: RefCell<Vec<std::rc::Weak<native_permissions::Observer>>>,
     browser_operation: RefCell<browser_actions::Operation>,
+    #[cfg(feature = "rune-ui")]
+    plan_operation: RefCell<Option<(RunId, u32)>>,
     browser_subscriptions: RefCell<Vec<std::rc::Weak<browser_actions::Observer>>>,
     pi_operation: RefCell<pi_ui::Operation>,
     pi_subscriptions: RefCell<Vec<std::rc::Weak<pi_ui::Observer>>>,
@@ -267,6 +269,8 @@ impl UiBridge {
                 native_operation: RefCell::new(native_permissions::Operation::default()),
                 native_subscriptions: RefCell::new(Vec::new()),
                 browser_operation: RefCell::new(browser_actions::Operation::default()),
+                #[cfg(feature = "rune-ui")]
+                plan_operation: RefCell::new(None),
                 browser_subscriptions: RefCell::new(Vec::new()),
                 pi_operation: RefCell::new(pi_ui::Operation::default()),
                 pi_subscriptions: RefCell::new(Vec::new()),

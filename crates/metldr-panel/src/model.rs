@@ -180,6 +180,7 @@ pub(crate) struct PageView {
     pub(crate) pi_ui: Option<PiUiView>,
     pub(crate) codex_input: Option<CodexInputView>,
     pub(crate) browser_actions: Vec<BrowserActionView>,
+    pub(crate) task_plan: Option<TaskPlanView>,
     pub(crate) browser_route: Option<BrowserRouteView>,
     pub(crate) chat_route: Option<ChatRouteView>,
     pub(crate) responses_route: Option<ResponsesRouteView>,
@@ -188,6 +189,25 @@ pub(crate) struct PageView {
     pub(crate) agent_settings: AgentSettingsView,
     pub(crate) source_status: SourceStatus,
     pub(crate) source_epoch: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TaskPlanView {
+    pub(crate) run: RunId,
+    pub(crate) goal: String,
+    pub(crate) intended_effects: Vec<String>,
+    pub(crate) scope: String,
+    pub(crate) revision: u32,
+    pub(crate) state: PlanState,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PlanState {
+    Proposed,
+    Approved,
+    Declined,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -1320,6 +1340,8 @@ struct WireView {
     codex_input: Option<CodexInputView>,
     #[serde(default)]
     browser_actions: Vec<BrowserActionView>,
+    #[serde(default)]
+    task_plan: Option<TaskPlanView>,
     #[serde(default, deserialize_with = "Option::deserialize")]
     browser_route: Option<BrowserRouteView>,
     #[serde(default, deserialize_with = "Option::deserialize")]
@@ -1500,6 +1522,17 @@ impl PageView {
                 .as_ref()
                 .is_some_and(|ui| ui.pending.len() > 8)
             || wire.browser_actions.len() > MAX_BROWSER_ACTIONS
+            || wire.task_plan.as_ref().is_some_and(|plan| {
+                let valid = |s: &str, max| {
+                    !s.is_empty() && s.len() <= max && !s.chars().any(char::is_control)
+                };
+                plan.revision == 0
+                    || !valid(&plan.goal, 1024)
+                    || !valid(&plan.scope, 1024)
+                    || plan.intended_effects.len() > 16
+                    || plan.intended_effects.iter().any(|s| !valid(s, 512))
+                    || !wire.runs.iter().any(|run| run.id == plan.run)
+            })
         {
             return Err(FlowError::Protocol(
                 "invalid view identity or run count".into(),
@@ -2006,6 +2039,7 @@ impl PageView {
             pi_ui: wire.pi_ui,
             codex_input: wire.codex_input,
             browser_actions: wire.browser_actions,
+            task_plan: wire.task_plan,
             browser_route: wire.browser_route,
             chat_route: wire.chat_route,
             responses_route: wire.responses_route,
@@ -2158,6 +2192,23 @@ mod tests {
 
     const STORE: &str = "0123456789abcdef0123456789abcdef";
     const VALID: &str = r#"{"sequence":2,"store":"0123456789abcdef0123456789abcdef","selection":{"store":"0123456789abcdef0123456789abcdef","conversation":"0123456789abcdef0123456789abcdef:100","epoch":"1"},"source":{"id":"0123456789abcdef0123456789abcdef:1","tab":4,"document":"doc-1","url":"http://127.0.0.1:43123/article","title":"North report","text":"The North project reports an amount of 17 units."},"runs":[{"id":"0123456789abcdef0123456789abcdef:2","source":"0123456789abcdef0123456789abcdef:1","kind":"summary","question":null,"status":"complete","output":"North reports 17 units.","conversation":[],"error":null,"route":{"kind":"fixture"},"activity":[],"corrections":{"total":0,"entries":[]}}],"native_correction":null,"pi_profile":null,"agent_sessions":[],"browser_route":null}"#;
+
+    #[test]
+    fn task_plan_decodes_only_for_a_current_run() {
+        assert!(
+            PageView::decode(VALID.as_bytes())
+                .unwrap()
+                .task_plan
+                .is_none()
+        );
+        let mut view: serde_json::Value = serde_json::from_str(VALID).unwrap();
+        view["task_plan"] = serde_json::json!({"run":"0123456789abcdef0123456789abcdef:2", "revision":7,
+            "goal":"Find information", "intended_effects":["Open a page"], "scope":"One site", "state":"proposed"});
+        let decoded = PageView::decode(&serde_json::to_vec(&view).unwrap()).unwrap();
+        assert_eq!(decoded.task_plan.unwrap().revision, 7);
+        view["task_plan"]["run"] = serde_json::json!("0123456789abcdef0123456789abcdef:3");
+        assert!(PageView::decode(&serde_json::to_vec(&view).unwrap()).is_err());
+    }
 
     #[test]
     fn decodes_host_view_and_rejects_invalid_boundary_data() {
