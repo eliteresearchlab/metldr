@@ -46,6 +46,9 @@ pub(super) enum Outcome {
         binding: Binding,
         url: String,
         loader: String,
+        /// Status and redirect chain of the new main document, when the browser reported them.
+        #[serde(default, skip_serializing_if = "no_evidence")]
+        evidence: Box<NavigationEvidence>,
     },
     ButtonClickObserved,
     SelectionObserved {
@@ -63,6 +66,39 @@ pub(super) enum Outcome {
     Uncertain {
         reason: String,
     },
+}
+
+fn no_evidence(evidence: &NavigationEvidence) -> bool {
+    evidence.is_empty()
+}
+
+/// Most redirect hops kept for one navigation.
+pub(crate) const REDIRECT_LIMIT: usize = 20;
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NavigationEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    /// URLs that answered with a redirect, in order, before the final document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirects: Vec<String>,
+}
+
+impl NavigationEvidence {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.status.is_none() && self.redirects.is_empty()
+    }
+
+    fn valid(&self) -> bool {
+        self.status
+            .is_none_or(|status| (100..=599).contains(&status))
+            && self.redirects.len() <= REDIRECT_LIMIT
+            && self
+                .redirects
+                .iter()
+                .all(|url| url.len() <= 2048 && crate::model::validate_page_url(url).is_ok())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -435,9 +471,11 @@ fn validate_outcome(outcome: &Outcome, proposal: &Proposal) -> Result<()> {
                 binding,
                 url,
                 loader,
+                evidence,
             },
             Intent::Navigate { .. },
         ) if crate::model::validate_page_url(url).is_ok()
+            && evidence.valid()
             && bounded(loader, 128)
             && binding.tab == proposal.binding.tab
             && binding.target == proposal.binding.target

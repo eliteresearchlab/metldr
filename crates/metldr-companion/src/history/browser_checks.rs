@@ -276,6 +276,7 @@ fn codex_browser_follow_up_uses_the_verified_destination() {
                     binding: binding.clone(),
                     url: destination.clone(),
                     loader: "destination-loader".into(),
+                    evidence: Default::default(),
                 },
             )
             .unwrap();
@@ -1107,7 +1108,8 @@ fn navigation_requires_durable_destination_before_a_new_field_proposal() {
                     Outcome::Navigated {
                         binding: wrong,
                         url: destination.clone(),
-                        loader: "loader".into()
+                        loader: "loader".into(),
+                        evidence: Default::default(),
                     }
                 )
                 .is_err()
@@ -1121,6 +1123,7 @@ fn navigation_requires_durable_destination_before_a_new_field_proposal() {
                     binding: target.clone(),
                     url: destination.clone(),
                     loader: "loader".into(),
+                    evidence: Default::default(),
                 },
                 ack,
             })

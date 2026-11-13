@@ -322,6 +322,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
             binding: next_binding.clone(),
             url: destination.into(),
             loader: "loader-2".into(),
+            evidence: Default::default(),
         },
     )?;
     assert!(matches!(
