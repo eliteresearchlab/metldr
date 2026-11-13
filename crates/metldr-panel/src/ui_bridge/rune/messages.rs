@@ -18,6 +18,14 @@ enum DisplayScope {
 }
 
 impl Messages {
+    pub(super) fn waiting(&self) -> bool {
+        match self.messages.last() {
+            Some(AgUiMessage::Activity { .. }) => false,
+            Some(AgUiMessage::Assistant { content, .. }) => content.is_empty(),
+            Some(AgUiMessage::User { .. }) => true,
+            None => false,
+        }
+    }
     pub(super) fn new() -> Self {
         Self {
             messages: vec![],
@@ -267,6 +275,30 @@ mod tests {
             thread_id: "thread".into(),
             run_id: "run".into(),
         }
+    }
+
+    #[test]
+    fn waiting_ends_when_response_or_activity_arrives() {
+        let mut state = Messages::new();
+        assert!(!state.waiting());
+        state.messages.push(user("u"));
+        assert!(state.waiting());
+        state.messages.push(AgUiMessage::Assistant {
+            id: "a".into(),
+            content: String::new(),
+        });
+        assert!(state.waiting());
+        state.messages.pop();
+        state.messages.push(AgUiMessage::Assistant {
+            id: "a".into(),
+            content: "answer".into(),
+        });
+        assert!(!state.waiting());
+        state.messages.push(AgUiMessage::Activity {
+            id: "t".into(),
+            activity: activity("table"),
+        });
+        assert!(!state.waiting());
     }
 
     #[test]
