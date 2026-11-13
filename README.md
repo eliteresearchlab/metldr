@@ -8,15 +8,13 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/App-free-75659a?style=flat-square" alt="Free app"></a>
 </p>
 
-metldr helps you read pages and get work done in Chrome with the AI you choose.
+metldr is a free AI assistant for Chrome that reads, researches and does real browser work for you, with your approval, using the AI you choose: your API keys, the coding agents you already use, or fully local models.
 
 > [!WARNING]
 > **Work in progress: new version.** metldr is being rebuilt in Rust with a new Rune-based interface, a native companion, and expanded browser control. Features, interfaces and data formats may change, and some parts are not finished yet. The current extension remains the reference until each replacement reaches parity.
 
-* Summarize pages, PDFs and Gmail.
-* Run approved tasks and restore chats.
-* Choose APIs, installed agents or local AI.
-* Look up words and search pages.
+* Summarize pages, PDFs and Gmail, look up words and search pages.
+* Run approved tasks, restore chats, and choose APIs, installed agents or local AI.
 
 ## Planned features
 
@@ -24,157 +22,71 @@ Some features are available today, and the full list is planned.
 
 ### Browser work and conversations
 
-* Work in your allowed signed in tabs.
-* Read pages and inspect their controls.
-* Capture screenshots and inspect page layouts.
-* Navigate pages, history and multiple tabs.
-* Group tabs by task or conversation.
-* Track new tabs and browser popups.
-* Click, hover and open context menus.
-* Use single and double clicks.
-* Drag, drop, scroll and select.
-* Use keyboard shortcuts and the clipboard.
-* Fill forms across several pages.
-* Upload files and edit rich text.
-* Run approved page scripts for complex tasks.
-* Use page tools through WebMCP.
-* Review plans and scoped approval rules.
-* Set scoped automatic approvals for each session.
-* Stop, pause and resume tasks.
-* Verify results, redirects and dead links.
-* See when browser control is active.
-* Keep chats, attachments and live activity.
-* Get contextual suggestions while browsing.
-* Restore conversations and interrupted results.
-* Send selected content to the sidebar.
-* Open website prompts in the sidebar.
+* Work in your allowed signed in tabs: read pages, inspect controls and layouts, and capture screenshots.
+* Navigate pages, history and tabs, track new tabs and popups, and group tabs by task or conversation.
+* Click, double click, hover, drag, drop, scroll and select, with context menus, keyboard shortcuts and the clipboard.
+* Fill forms across pages, upload files, edit rich text, and run approved page scripts or WebMCP page tools.
+* Review plans, set scoped approval rules and automatic approvals for each session, and see when browser control is active.
+* Stop, pause and resume tasks, and verify results, redirects and dead links.
+* Keep and restore chats, attachments, live activity and interrupted results, and continue work across conversations.
+* Send selected content and website prompts to the sidebar, and get contextual suggestions while browsing.
 * Organize projects, goals and working directories.
-* Continue work across multiple conversations.
 
 ### Tasks you can complete
 
-* Summarize pages, emails, PDFs and video transcripts.
-* Triage inboxes and flag urgent messages.
-* Draft follow up messages for unanswered threads.
-* Research companies, suppliers and products.
-* Compare prices, quotes and sources with citations.
-* Find, qualify and track leads.
-* Draft outreach and connection requests.
-* Complete applications and surveys from documents.
-* Extract invoices and reconcile payments.
-* Screen applicants and update recruitment systems.
-* Plan agendas, appointments and invitations.
-* Build recurring reports across dashboards.
-* Query BigQuery and connected data warehouses.
-* Explain code, contracts and research.
-* Create study notes and flashcards.
+* Summarize pages, emails, PDFs and video transcripts, explain code, contracts and research, and create study notes and flashcards.
+* Triage inboxes, flag urgent messages and draft follow ups for unanswered threads.
+* Research companies, suppliers and products, and compare prices, quotes and sources with citations.
+* Find, qualify and track leads, and draft outreach and connection requests.
+* Complete applications and surveys from documents, and extract invoices and reconcile payments.
+* Screen applicants, update recruitment systems, and plan agendas, appointments and invitations.
+* Build recurring reports across dashboards and query BigQuery and other connected data warehouses.
 * Track orders, bookings and price changes.
 
 ### Workflows, Skills and memory
 
-* Teach workflows through instructions or demonstrations.
-* Save versioned workflows and reusable templates.
-* Set workflow inputs, outputs and approval rules.
-* Run workflows manually or on schedules.
-* Run workflows and Skills through slash commands.
-* Set timezones, exceptions and overlap rules.
-* Trigger workflows from page title changes.
-* Pause, resume or remove scheduled work.
-* Recover missed and interrupted scheduled runs.
-* Keep tasks running with the panel closed.
-* Track tasks, exceptions and run histories.
-* Start and manage tasks from a dashboard.
-* Create, import and share Skills.
-* Import Skills from URLs or ZIP files.
-* Browse built in, site and plugin Skills.
-* Manage context files and editable preference memory.
-* Inspect, edit, disable or delete stored memory.
-* Scope corrections to projects or workflows.
-* Optionally sync memory, projects, workflows and preferences.
-* Manage team workspaces and member access.
-* Set shared and individual usage budgets.
-* Preview, edit and undo site scripts.
-* List and remove saved site scripts.
-* Run scripts automatically on matching pages.
-* Reuse learned site tools and cached prompts.
-* Add custom tools and dashboards to pages.
-* Apply reading preferences and page shortcuts.
+* Teach workflows through instructions or demonstrations, and save them as versioned templates with inputs, outputs and approval rules.
+* Run workflows and Skills manually, through slash commands, on schedules with timezones, exceptions and overlap rules, or when a page title changes.
+* Pause, resume or remove scheduled work, recover missed and interrupted runs, and keep tasks running with the panel closed.
+* Start, track and manage tasks, exceptions and run histories from a dashboard.
+* Create, share and browse built in, site and plugin Skills, and import them from URLs or ZIP files.
+* Manage context files and editable memory: inspect, edit, disable or delete it, and scope corrections to projects or workflows.
+* Optionally sync memory, projects, workflows and preferences, and manage team workspaces, member access and shared or individual budgets.
+* Preview, edit, undo, list and remove site scripts, and run them automatically on matching pages.
+* Reuse learned site tools and cached prompts, add custom tools and dashboards to pages, and apply reading preferences and page shortcuts.
 * Receive completion alerts and approval requests.
 
 ### Files and interactive answers
 
-* Pin local files and folders to chats.
-* Browse and manage approved working directories.
-* Read and write files within approved locations.
-* Edit Excel, CSV and browser spreadsheets.
-* Read and write Google Sheets cell blocks.
-* Format and edit browser documents.
-* Preserve formulas and unrelated document content.
-* Search chats, pages, files and documents.
-* Read and edit Word documents.
-* Use PDF text, OCR and dictionary lookup.
-* Preview PDFs, images and generated files.
-* Zoom and navigate PDF documents.
-* Attach files, clipboard images and selected text.
-* Copy images between allowed websites.
-* Read large pages and files in chunks.
-* Keep screenshot history during long tasks.
-* Download folders as ZIP files.
-* Download all task outputs together.
-* Get tables, charts, diagrams, calculators and maps.
-* Use interactive explanations and local controls.
-* Stream answers and save reusable artifacts.
-* Export results with screenshots.
-* Record approved task videos for replay.
-* Print pages and answers to PDF.
+* Pin local files and folders to chats, and browse, read and write within approved working directories.
+* Edit Excel, CSV, browser spreadsheets, Google Sheets cell blocks, Word and browser documents while preserving formulas and unrelated content.
+* Search chats, pages, files and documents, and read large pages and files in chunks.
+* Use PDF text, OCR and dictionary lookup, and preview, zoom and navigate PDFs, images and generated files.
+* Attach files, clipboard images and selected text, and copy images between allowed websites.
+* Get streamed answers with tables, charts, diagrams, calculators, maps, interactive explanations and local controls, and save them as reusable artifacts.
+* Keep screenshot history during long tasks, record approved task videos for replay, and export results with screenshots or print them to PDF.
+* Download all task outputs together, or folders as ZIP files.
 
 ### Email, voice and remote control
 
-* Draft, reply, forward and send Gmail.
-* Verify sent mail and approval outcomes.
-* Read, search and manage WhatsApp chats.
-* Send approved messages, files and reactions.
-* Manage group members, roles and invite links.
-* Control read status and conversation history.
-* Dictate prompts and edit voice transcripts.
-* Review or cancel voice recordings.
-* Receive tasks through Telegram or WhatsApp.
-* Send remote voice notes, photos and files.
-* Receive results, screenshots and status updates.
-* Approve remote actions and cancel work.
-* Pair, switch and revoke devices or profiles.
-* Let authorized MCP clients control tasks.
+* Draft, reply, forward and send Gmail, and verify sent mail and approval outcomes.
+* Read, search and manage WhatsApp chats: send approved messages, files and reactions, manage members, roles and invite links, and control read status and history.
+* Dictate prompts, and review, edit or cancel voice recordings and transcripts.
+* Send tasks, voice notes, photos and files through Telegram or WhatsApp, and receive results, screenshots and status updates.
+* Approve or cancel remote actions, pair, switch and revoke devices or profiles, and let authorized MCP clients control tasks.
 
 ### Model choice and reliability
 
-* Choose popular APIs and custom endpoints.
-* Use local AI and browser models.
-* Connect approved local and network model servers.
-* Use API keys or supported account sign ins.
-* Connect servers without keys where supported.
-* Set model timeouts and connection settings.
-* Switch models with visible capability limits.
-* Run Codex, OpenCode, Pi and Claude Code.
-* Keep agent accounts, tools, permissions and sessions.
-* Connect remote MCP servers and tools.
-* Select browser profiles through a CLI.
-* Inspect token usage and estimated costs.
-* Manage context with /compact and /usage.
-* Recover connections without silent provider switching.
-* Choose separate speech and task providers.
-* Use multilingual and accessible interface controls.
-* Set themes, text size and sound preferences.
-* Keep site, tab and file permissions explicit.
-* Isolate generated answers from browser authority.
-* Export, delete and recover saved data.
-* Preserve data through upgrades and interrupted work.
-* Review uncertain writes before any repeat attempt.
-* Keep local inference local unless you approve.
-* Show model data destinations and access limits.
-* Bound storage, memory and background work.
-* Target Linux, Windows and macOS companions.
-* Target Chrome, Edge, Brave and Chromebooks.
-* Use every feature without an app subscription.
+* Choose popular APIs, custom endpoints, local and browser models, or approved local and network model servers, using API keys, supported account sign ins, or no key where supported.
+* Run Codex, OpenCode, Pi and Claude Code with their accounts, tools, permissions and sessions, and connect remote MCP servers and tools.
+* Switch models with visible capability limits, set timeouts and connection settings, and choose separate speech and task providers.
+* Inspect token usage and estimated costs, manage context with /compact and /usage, and select browser profiles through a CLI.
+* Recover connections without silent provider switching, and review uncertain writes before any repeat attempt.
+* Keep site, tab and file permissions explicit, isolate generated answers from browser authority, and keep local inference local unless you approve.
+* See model data destinations and access limits, with bounded storage, memory and background work.
+* Export, delete and recover saved data, preserved through upgrades and interrupted work.
+* Use multilingual and accessible controls with themes, text size and sound preferences.
+* Use Chrome, Edge, Brave and Chromebooks with Linux, Windows and macOS companions, and every feature without an app subscription.
 
 See the [feature guide](docs/features.md) for current availability, planned details and compatibility limits.
 
