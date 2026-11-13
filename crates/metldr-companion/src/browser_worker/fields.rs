@@ -73,6 +73,15 @@ impl Tools {
         if self.completed.len() == super::MAX_TOOL_CALLS {
             return Err("browser task step limit reached".into());
         }
+        if matches!(&call, Call::Navigate { destination } if crate::model::protected_page(destination))
+        {
+            let result = serde_json::to_value(Outcome::Prevented {
+                reason: "protected browser page is not accessible".into(),
+            })?;
+            self.completed
+                .insert(call_id.to_owned(), (call, result.clone()));
+            return Ok(result);
+        }
         // Reads run before attachment, so reporting state never attaches the browser.
         if matches!(call, Call::Status | Call::Settings) {
             let result = self.read(&call, stop).await?;
@@ -400,6 +409,33 @@ mod failed_attach_check {
             document: "document".into(),
             text: "page text".into(),
         }
+    }
+
+    #[tokio::test]
+    async fn protected_navigation_is_refused_before_attachment() {
+        let call = Call::Navigate {
+            destination: "chrome://settings/".into(),
+        };
+        let (tx, rx) = mpsc::sync_channel::<FlowEvent>(8);
+        let (_notices, events) = tokio::sync::mpsc::channel(1);
+        let mut tools = Tools::new(
+            Client {
+                run: "run".into(),
+                tx,
+            },
+            Target::from(&source()),
+            events,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let result = tools
+            .dispatch("tool", call, &AtomicBool::new(false), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({"kind":"prevented","reason":"protected browser page is not accessible"})
+        );
+        assert!(rx.try_recv().is_err());
     }
 
     #[tokio::test]

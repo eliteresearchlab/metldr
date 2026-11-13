@@ -287,6 +287,9 @@ async fn attach(
     document: String,
     url: String,
 ) -> Result<Value, String> {
+    if web_sys::Url::new(&url).is_ok_and(|url| crate::site::protected(&url)) {
+        return Err("protected browser page is not accessible".into());
+    }
     if tab < 0 || !bounded_id(&document, 128) || validate_url(&url).is_err() {
         return Err("Invalid browser attachment target.".into());
     }
@@ -1158,6 +1161,9 @@ mod checks {
         assert!(allowed_method("Runtime.callFunctionOn"));
         assert!(allowed_method("Runtime.releaseObject"));
         assert!(!allowed_method("Browser.close"));
+        assert!(!allowed_method("Target.activateTarget"));
+        assert!(!allowed_method("Page.bringToFront"));
+        assert!(!allowed_method("Browser.setWindowBounds"));
         let console = json!({"type":"log","executionContextId":17});
         assert!(valid_event("Runtime.consoleAPICalled", &console));
         let sessions = BTreeMap::from([("child".to_owned(), None)]);

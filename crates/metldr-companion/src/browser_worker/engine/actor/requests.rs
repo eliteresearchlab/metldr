@@ -155,6 +155,9 @@ impl Actor {
             Kind::PrepareNavigation { tool, destination } => {
                 let result = (|| -> Result<Value> {
                     let context = self.context()?;
+                    if crate::model::protected_page(&destination) {
+                        return Err("protected browser page is not accessible".into());
+                    }
                     if crate::model::validate_page_url(&destination).is_err() {
                         return Err("navigation destination is not permitted".into());
                     }
@@ -176,6 +179,9 @@ impl Actor {
                     let Intent::Navigate { destination } = &action.proposal.intent else {
                         return Err("not a navigation action".into());
                     };
+                    if crate::model::protected_page(destination) {
+                        return Err("protected browser page is not accessible".into());
+                    }
                     if crate::model::validate_page_url(destination).is_err() {
                         return Err("navigation destination is not permitted".into());
                     }

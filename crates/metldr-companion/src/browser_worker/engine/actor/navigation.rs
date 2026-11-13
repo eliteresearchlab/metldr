@@ -92,7 +92,8 @@ impl Actor {
                 if frame["id"] == nav.frame
                     && frame["loaderId"] == nav.loader
                     && nav.frame == context.frame_id()
-                    && crate::model::validate_page_url(&url).is_ok() =>
+                    && crate::model::validate_page_url(&url).is_ok()
+                    && !crate::model::protected_page(&url) =>
             {
                 url
             }
