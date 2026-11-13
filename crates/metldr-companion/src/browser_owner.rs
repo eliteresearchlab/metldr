@@ -7,7 +7,9 @@ use std::sync::{atomic::Ordering, mpsc::SyncSender};
 
 type Reply = SyncSender<std::result::Result<Action, String>>;
 
+mod grants;
 mod review;
+pub(crate) use grants::{GRANT_TTL, SessionGrant};
 pub(crate) use review::Budget;
 
 pub(super) enum Event {
@@ -213,6 +215,14 @@ impl Owner {
                     Err(error) => return acknowledge(ack, Err(error)),
                     _ => {}
                 }
+                let now = std::time::Instant::now();
+                let auto = match &plan {
+                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Approved => self
+                        .session_grants
+                        .get(&proposal.run)
+                        .is_some_and(|grant| grant.covers(&proposal, plan.revision, now)),
+                    _ => false,
+                };
                 let result = (|| -> Result<(Action, bool, Option<review::Review>)> {
                     if let Some(existing) =
                         self.saved_browser_tool(&proposal.run, &proposal.tool_use_id)?
@@ -236,6 +246,12 @@ impl Owner {
                         let (action, created) = edit.propose_browser(execution, proposal)?;
                         if !created {
                             return Ok((action, false, None));
+                        }
+                        if auto {
+                            // A session grant approves this Tier 1 step without asking.
+                            let approved =
+                                edit.decide_browser(execution, &action.id, action.revision, true)?;
+                            return Ok((approved, false, None));
                         }
                         // A failed pause must reject the edit, not orphan the action.
                         let review = budget.as_ref().map(Budget::pause).transpose()?;
@@ -331,6 +347,9 @@ impl Owner {
         let record = self.record_execution(&run, |edit, execution| {
             edit.decide_browser(execution, action, revision, approve)
         })?;
+        if approve && let Some(grant) = self.session_grants.get_mut(&run) {
+            grant.bind(&record.proposal, std::time::Instant::now());
+        }
         if let Some(pending) = self.browser_approval.take() {
             pending.reply(Ok(record));
         }
@@ -338,6 +357,7 @@ impl Owner {
     }
 
     pub(super) fn cancel_browser_approval(&mut self, run: &str) {
+        self.session_grants.remove(run);
         if self.plan_hold.as_ref().is_some_and(|p| p.run() == run) {
             if let Some(pending) = self.plan_hold.take() {
                 pending.reject("browser action stopped before dispatch");

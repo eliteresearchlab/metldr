@@ -72,6 +72,7 @@ fn owner(disk: Disk, state: Store, history: History) -> Owner {
         pi_ui: Default::default(),
         codex_input: Default::default(),
         plan_hold: None,
+        session_grants: BTreeMap::new(),
         browser_approval: None,
         browser_route: None,
         responses_route: None,

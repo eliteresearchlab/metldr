@@ -77,6 +77,7 @@ fn owner(
             pi_ui: Default::default(),
             codex_input: Default::default(),
             plan_hold: None,
+            session_grants: BTreeMap::new(),
             browser_approval: None,
             browser_route: None,
             responses_route: None,
