@@ -812,6 +812,53 @@ mod followup_tests {
     use ::rune::{Env, Key, KeyEvent, Mods, Runtime};
 
     #[test]
+    fn message_roles_and_startup_error_match_the_reference() {
+        let updates = Updates::new(std::sync::Arc::new(|| {}), Rc::new(Cell::new(0)));
+        {
+            let mut presentation = updates.presentation.borrow_mut();
+            presentation.error = Some("Connection failed".into());
+            presentation
+                .messages
+                .replace_archive(vec![
+                    crate::ag_ui::AgUiMessage::User {
+                        id: "user".into(),
+                        content: "Question".into(),
+                    },
+                    crate::ag_ui::AgUiMessage::Assistant {
+                        id: "assistant".into(),
+                        content: "Answer".into(),
+                    },
+                ])
+                .unwrap();
+        }
+        let mut state = State::default();
+        state.session = Session::Failed;
+        state.updates = Some(updates);
+        let mut rt = Runtime::new(state, view, (640.0, 600.0), Env::default());
+        rt.frame(0.0);
+        let elements = rt.elements();
+        let user = elements
+            .iter()
+            .find(|el| el.key.as_deref() == Some("user"))
+            .unwrap();
+        let assistant = elements
+            .iter()
+            .find(|el| el.key.as_deref() == Some("assistant"))
+            .unwrap();
+        assert_eq!((user.role, user.label.as_deref()), ("none", None));
+        assert_eq!(
+            (assistant.role, assistant.label.as_deref()),
+            ("article", None)
+        );
+        let errors: Vec<_> = elements
+            .iter()
+            .filter(|el| el.text.as_deref() == Some("Connection failed"))
+            .collect();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].role, "status");
+    }
+
+    #[test]
     fn enter_activates_each_followup_once_and_ignores_repeat() {
         fn view(_: &[u32; 2], _: &mut Cx<[u32; 2]>) -> El {
             followup_controls(
@@ -957,16 +1004,12 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 } else {
                     col().max_w(620.0).child(body)
                 };
-                thread = thread.child(
-                    message
-                        .key(id)
-                        .role(if user { "group" } else { "article" })
-                        .label(if user {
-                            "User message"
-                        } else {
-                            "Assistant message"
-                        }),
-                );
+                let message = message.key(id);
+                thread = thread.child(if user {
+                    message.role("none")
+                } else {
+                    message.role("article")
+                });
             } else if let crate::ag_ui::AgUiMessage::Activity { id, .. } = message {
                 thread = thread.child(
                     state
@@ -980,22 +1023,19 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         if state.running() && presentation.messages.waiting() {
             thread = thread.child(typography.text("Working").key("working").role("status"));
         }
-        if let Some(error) = &presentation.error {
-            thread = thread.child(
-                typography
-                    .text(error)
-                    .key("error")
-                    .w_full()
-                    .wrap()
-                    .label(error),
-            );
-        }
     }
     if matches!(state.session, Session::Connecting) {
         thread = thread.child(typography.text("Connecting").role("status"));
     }
     let Some(core) = state.core() else {
         if matches!(state.session, Session::Failed) {
+            if let Some(error) = state
+                .updates
+                .as_ref()
+                .and_then(|updates| updates.presentation.borrow().error.clone())
+            {
+                thread = thread.child(typography.text(error).role("status").wrap());
+            }
             thread = thread.child(
                 typography
                     .text("Reload")
@@ -1010,10 +1050,11 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         return col().w_full().h_full().fill(page).color(ink).child(thread);
     };
     let connection = connection::UiConnectionSnapshot::read(core);
-    if state
-        .updates
-        .as_ref()
-        .is_some_and(|updates| updates.presentation.borrow().messages.messages.is_empty())
+    if !core.history_loading.get()
+        && state
+            .updates
+            .as_ref()
+            .is_some_and(|updates| updates.presentation.borrow().messages.messages.is_empty())
     {
         thread = thread.child(
             typography
