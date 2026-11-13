@@ -134,6 +134,7 @@ export default defineConfig({
         side_panel: 'index.html',
         panel: 'panel.html',
         chat: 'chat.html',
+        rune_chat: 'rune-chat.html',
         welcome: 'welcome.html',
         background: 'src/background/index.ts',
       },

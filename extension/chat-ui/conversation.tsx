@@ -418,6 +418,9 @@ function App({ initial, destination, bridge, recovery, initialChoices, settings,
     <dialog className="chat-settings" ref={settingsDialog}>
       <header><h2>Settings</h2><button type="button" onClick={() => settingsDialog.current?.close()}>Close</button></header>
       <PreferenceSettings preferences={preferences} view={preferencesView} />
+      <details data-settings-editor><summary>Experimental chat</summary><div data-settings-body>
+        <button type="button" onClick={() => location.assign("rune-chat.html")}>Open Rune chat</button>
+      </div></details>
       <ProviderSettings settings={settings} onConnectionsChange={controlsChanged} />
       <AgentSettings settings={agentSettings} onConfigurationsChange={controlsChanged} />
     </dialog></>;

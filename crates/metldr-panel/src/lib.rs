@@ -1225,7 +1225,7 @@ fn js_message(error: &JsValue) -> String {
 
 fn panel_url_allowed(origin: &str, url: &str) -> bool {
     url.strip_prefix(origin)
-        .is_some_and(|path| matches!(path, "/panel.html" | "/chat.html"))
+        .is_some_and(|path| matches!(path, "/panel.html" | "/chat.html" | "/rune-chat.html"))
 }
 
 #[cfg(test)]
@@ -1233,7 +1233,7 @@ mod panel_url_checks {
     #[test]
     fn only_exact_owned_application_pages_are_allowed() {
         let origin = "chrome-extension://owned";
-        for page in ["panel.html", "chat.html"] {
+        for page in ["panel.html", "chat.html", "rune-chat.html"] {
             assert!(super::panel_url_allowed(
                 origin,
                 &format!("{origin}/{page}")
@@ -1241,6 +1241,8 @@ mod panel_url_checks {
         }
         for url in [
             "chrome-extension://other/chat.html",
+            "chrome-extension://other/rune-chat.html",
+            "chrome-extension://owned/rune-chat.html?route=panel",
             "chrome-extension://owned/sandbox.html",
             "chrome-extension://owned/chat.html?route=panel",
             "chrome-extension://owned/chat.html#answer",
