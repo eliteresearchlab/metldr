@@ -39,6 +39,8 @@ pub(crate) enum A11yKind {
     Row,
     ColumnHeader,
     Cell,
+    Group,
+    Article,
 }
 
 #[derive(Debug, PartialEq)]
@@ -82,6 +84,12 @@ impl A11yItem {
             }
             A11yKind::Cell => {
                 obj.insert("k".into(), json!("cell"));
+            }
+            A11yKind::Group => {
+                obj.insert("k".into(), json!("group"));
+            }
+            A11yKind::Article => {
+                obj.insert("k".into(), json!("article"));
             }
             A11yKind::Text => {
                 obj.insert("k".into(), json!("text"));
@@ -344,10 +352,29 @@ impl<S: 'static> Runtime<S> {
             let rect = rect4(b);
             let parent_kind = parent_group.map(|index| &out[index].kind);
             let group = if n.input.is_none() && n.handlers.on_press.is_none() {
+                let labelled = n
+                    .label
+                    .as_deref()
+                    .is_some_and(|label| !label.trim().is_empty());
                 match (n.role, parent_kind) {
-                    ("table", None | Some(A11yKind::Cell | A11yKind::ColumnHeader)) => {
-                        Some(A11yKind::Table)
-                    }
+                    (
+                        "table",
+                        None
+                        | Some(
+                            A11yKind::Cell
+                            | A11yKind::ColumnHeader
+                            | A11yKind::Group
+                            | A11yKind::Article,
+                        ),
+                    ) => Some(A11yKind::Table),
+                    (
+                        "group",
+                        None | Some(A11yKind::Cell | A11yKind::Group | A11yKind::Article),
+                    ) if labelled => Some(A11yKind::Group),
+                    (
+                        "article",
+                        None | Some(A11yKind::Cell | A11yKind::Group | A11yKind::Article),
+                    ) => Some(A11yKind::Article),
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
                     ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
@@ -356,7 +383,12 @@ impl<S: 'static> Runtime<S> {
             } else {
                 None
             };
-            if group.is_none() && matches!(n.role, "table" | "row" | "columnheader" | "cell") {
+            if group.is_none()
+                && matches!(
+                    n.role,
+                    "table" | "row" | "columnheader" | "cell" | "article"
+                )
+            {
                 groups[i] = None;
             }
             if let Some(kind) = group {
@@ -374,7 +406,15 @@ impl<S: 'static> Runtime<S> {
                 last_flow_parent = None;
             }
             let content_parent = groups[i]
-                .filter(|&index| matches!(out[index].kind, A11yKind::Cell | A11yKind::ColumnHeader))
+                .filter(|&index| {
+                    matches!(
+                        out[index].kind,
+                        A11yKind::Cell
+                            | A11yKind::ColumnHeader
+                            | A11yKind::Group
+                            | A11yKind::Article
+                    )
+                })
                 .map(|index| out[index].path.clone());
             if let Some(input) = n.input.as_deref() {
                 if rect[2] > 0.0 && rect[3] > 0.0 {
@@ -884,6 +924,46 @@ mod tests {
             );
         }
         assert!(!rt.web_a11y_action(&json!({"kind":"a11y_press", "path":table.path})));
+    }
+
+    #[test]
+    fn labelled_articles_and_groups_keep_their_text_inside() {
+        fn view(_: &(), _: &mut Cx<()>) -> El {
+            crate::col().w_full().children([
+                crate::col()
+                    .role("group")
+                    .label("User message")
+                    .child(crate::text("Find my notes")),
+                crate::col()
+                    .role("article")
+                    .label("Assistant message")
+                    .child(crate::text("Here they are")),
+                crate::col().role("group").child(crate::text("Plain")),
+            ])
+        }
+        let mut rt = Runtime::new((), view, (480.0, 320.0), Env::default());
+        rt.frame(0.0);
+        let items = rt.web_a11y_items();
+        let inside = |kind: A11yKind, label: &str, text: &str| {
+            let group = items.iter().find(|item| item.kind == kind).unwrap();
+            assert_eq!(group.text, label);
+            assert!(items.iter().any(|item| {
+                item.kind == A11yKind::Text
+                    && item.text == text
+                    && item.parent.as_ref() == Some(&group.path)
+            }));
+        };
+        inside(A11yKind::Group, "User message", "Find my notes");
+        inside(A11yKind::Article, "Assistant message", "Here they are");
+        assert_eq!(
+            items
+                .iter()
+                .filter(|item| item.kind == A11yKind::Group)
+                .count(),
+            1
+        );
+        let plain = items.iter().find(|item| item.text == "Plain").unwrap();
+        assert_eq!(plain.parent, None);
     }
 
     #[test]
