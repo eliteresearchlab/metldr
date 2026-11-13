@@ -8,9 +8,6 @@ impl Tools {
         stop: &AtomicBool,
         budget: Option<&browser_owner::Budget>,
     ) -> Result<Value> {
-        if crate::model::protected_page(destination) {
-            return Err("protected browser page is not accessible".into());
-        }
         if crate::model::validate_page_url(destination).is_err() {
             return Err("invalid browser navigation URL".into());
         }
