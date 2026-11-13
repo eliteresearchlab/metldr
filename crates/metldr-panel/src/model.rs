@@ -2195,10 +2195,16 @@ pub(crate) fn valid_https_endpoint(value: &str) -> bool {
 /// Checks what follows the scheme: no query, fragment, whitespace or control
 /// characters, and a host with an optional port.
 fn valid_endpoint_rest(rest: &str) -> bool {
-    if rest.contains(['?', '#'])
-        || rest.chars().any(char::is_whitespace)
-        || rest.chars().any(char::is_control)
-    {
+    // One pass; ASCII, the usual case, is checked byte by byte.
+    let clean = if rest.is_ascii() {
+        rest.bytes()
+            .all(|b| b > b' ' && b != 0x7f && b != b'?' && b != b'#')
+    } else {
+        !rest
+            .chars()
+            .any(|c| matches!(c, '?' | '#') || c.is_whitespace() || c.is_control())
+    };
+    if !clean {
         return false;
     }
     let authority = rest.split('/').next().unwrap_or_default();
