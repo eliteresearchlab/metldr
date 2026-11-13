@@ -301,6 +301,19 @@ fn stop_all_stops_two_admitted_runs() -> Result<()> {
     assert_eq!(saved(&owner, &first)?.value.status, Status::StopRequested);
     assert_eq!(saved(&owner, &second)?.value.status, Status::StopRequested);
     assert_eq!(frames(&wire)?.last().unwrap()["stopped"], 2);
+    for index in 0..100 {
+        owner.command(&format!("stop-again-{index}"), Command::StopAll)?;
+    }
+    let reports: Vec<_> = frames(&wire)?
+        .into_iter()
+        .filter(|frame| frame["kind"] == "stop_all")
+        .collect();
+    assert_eq!(reports.len(), 101);
+    assert!(
+        reports
+            .iter()
+            .all(|report| report["stopped"] == 2 && report["failed"] == 0)
+    );
     drop((first_socket, second_socket));
     for _ in 0..2 {
         let Event::Settled { run, result } = rx.recv_timeout(Duration::from_secs(3))? else {
