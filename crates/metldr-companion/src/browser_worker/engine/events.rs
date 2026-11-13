@@ -306,7 +306,7 @@ fn argument(arg: &Value) -> Cow<'_, str> {
     )
 }
 
-fn sanitize_url(value: &str) -> String {
+pub(super) fn sanitize_url(value: &str) -> String {
     let Ok(mut url) = reqwest::Url::parse(value) else {
         return REDACTED.to_owned();
     };
