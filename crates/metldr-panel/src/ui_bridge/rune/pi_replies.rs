@@ -9,6 +9,7 @@ use wasm_bindgen_futures::spawn_local;
 pub(super) struct PiReplies {
     edits: HashMap<String, TextEdit>,
     selected: HashMap<String, String>,
+    suggestion_open: bool,
 }
 
 fn edit_key(run: &RunId, request: &RunId) -> String {
@@ -370,12 +371,25 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
             .as_deref()
             .is_some_and(|workflow| destination == "pi" || destination == workflow)
         {
-            result.push(typography.text("Suggested text").wrap());
             result.push(
-                typography
-                    .text(crate::pi_ui::display_plain(&editor.text))
-                    .wrap(),
+                button(
+                    typography,
+                    "Suggested text".into(),
+                    "pi-suggestion-disclosure".into(),
+                    true,
+                    |state, _| {
+                        state.pi_replies.suggestion_open = !state.pi_replies.suggestion_open;
+                    },
+                )
+                .expanded(state.pi_replies.suggestion_open),
             );
+            if state.pi_replies.suggestion_open {
+                result.push(
+                    typography
+                        .text(crate::pi_ui::display_plain(&editor.text))
+                        .wrap(),
+                );
+            }
             let key = pi_suggestion_key(&ui.run, editor.revision, &destination);
             let run = ui.run.clone();
             let revision = editor.revision;
