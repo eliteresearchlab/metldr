@@ -34,6 +34,7 @@ impl Owner {
             | Action::Unwatch { .. }
             | Action::Stop { .. }
             | Action::BrowserDecision { .. }
+            | Action::PlanReply { .. }
             | Action::NativePermission { .. }
             | Action::PiUiReply { .. }
             | Action::CodexInputReply { .. } => return Ok(false),

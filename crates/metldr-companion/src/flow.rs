@@ -476,6 +476,24 @@ impl Owner {
                 self.browser_decide(&action, revision, approve)?;
                 self.reply_view(Some(id), "view", true)
             }
+            ConversationAction::PlanReply {
+                run,
+                revision,
+                approve,
+            } => {
+                self.require_conversation(scope)?;
+                self.browser_operation(&run)?;
+                self.record_history.edit(|edit| {
+                    let execution = edit.current_execution(scope, &run)?;
+                    edit.review_reply(&execution, revision, approve, id)
+                })?;
+                if approve {
+                    self.release_plan_dispatch(&run)?;
+                } else {
+                    self.fail_plan_dispatch(&run)?;
+                }
+                self.reply_view(Some(id), "view", true)
+            }
             command @ (ConversationAction::PiPrompt { .. }
             | ConversationAction::PiFollowUp { .. }) => self.pi_start(id, scope, command),
             command @ (ConversationAction::CodexPrompt { .. }

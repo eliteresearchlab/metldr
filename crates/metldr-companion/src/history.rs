@@ -10,6 +10,7 @@ mod artifacts;
 mod context;
 pub(crate) use artifacts::Artifact;
 mod edit;
+pub(crate) use edit::plans::PlanError;
 pub(crate) use edit::{
     Commit, ConversationBusy, ConversationChange, Cursor, Edit, Execution, NativeChoices,
     NativeWorkflow, Observed, Selection,

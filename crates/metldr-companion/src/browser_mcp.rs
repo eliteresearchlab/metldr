@@ -724,6 +724,17 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    #[test]
+    fn plan_reply_is_not_a_browser_tool() {
+        assert!(
+            decode_call(
+                "plan_reply",
+                json!({"run":"run", "revision":1, "approve":true})
+            )
+            .is_err()
+        );
+    }
+
     #[derive(Clone, Copy)]
     enum Expect {
         Status,

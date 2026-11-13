@@ -110,6 +110,7 @@ impl Edit<'_> {
         let result = (|| {
             let action = self.browser_action(execution, id)?;
             self.browser_running(execution, execution.run())?;
+            self.require_approved_plan(execution)?;
             let next = action.dispatch(revision)?;
             self.put_browser(execution, next)
         })();
