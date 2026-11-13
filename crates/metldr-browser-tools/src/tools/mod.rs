@@ -16,6 +16,7 @@ pub mod observe;
 pub mod plan;
 mod schema;
 pub mod scroll;
+pub mod secret;
 pub mod select;
 pub mod settings;
 pub mod status;
@@ -67,7 +68,7 @@ const LOCAL_READ: Annotations = Annotations {
 };
 
 /// Every browser tool, in advertised order.
-pub static TOOLS: [Tool; 12] = [
+pub static TOOLS: [Tool; 13] = [
     Tool {
         name: observe::NAME,
         order: observe::ORDER,
@@ -167,6 +168,13 @@ pub static TOOLS: [Tool; 12] = [
         definition: network::definition,
         decode: network::decode,
     },
+    Tool {
+        name: secret::NAME,
+        order: secret::ORDER,
+        annotations: WRITE,
+        definition: secret::definition,
+        decode: secret::decode,
+    },
 ];
 
 /// The registered tool with this name.
@@ -175,6 +183,6 @@ pub fn find(name: &str) -> Option<&'static Tool> {
 }
 
 /// Every definition in advertised order.
-pub fn definitions() -> [Definition; 12] {
+pub fn definitions() -> [Definition; 13] {
     TOOLS.each_ref().map(|tool| (tool.definition)())
 }

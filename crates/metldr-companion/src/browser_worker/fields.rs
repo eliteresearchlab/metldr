@@ -150,6 +150,7 @@ impl Tools {
         }
         let handle = match &call {
             Call::Change { handle, .. }
+            | Call::EnterSecret { handle, .. }
             | Call::ActivateButton { handle }
             | Call::SelectOption { handle, .. }
             | Call::Scroll { handle, .. }
@@ -221,6 +222,15 @@ impl Tools {
             }
             Call::Change { handle, value } => {
                 self.change(call_id, handle, value, stop, budget).await?
+            }
+            Call::EnterSecret { handle, kind } => {
+                let proposal = self
+                    .engine
+                    .as_ref()
+                    .ok_or("browser is not attached")?
+                    .prepare_secret(call_id, handle, (*kind).into())
+                    .await?;
+                self.perform(proposal, stop, budget).await?
             }
             Call::ActivateButton { handle } => {
                 let proposal = self
@@ -403,6 +413,7 @@ impl Tools {
                 let engine = self.engine.as_ref().ok_or("browser is not attached")?;
                 let outcome = match &dispatched.proposal.intent {
                     Intent::Field { .. } => engine.change(&dispatched).await,
+                    Intent::Secret { .. } => engine.enter_secret(&dispatched).await,
                     Intent::ActivateButton { .. } => engine.activate_button(&dispatched).await,
                     Intent::SelectOption { .. } => engine.select_option(&dispatched).await,
                     Intent::Scroll { .. } => engine.scroll(&dispatched).await,
@@ -458,6 +469,8 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
         Call::Navigate { .. } => Err("invalid browser navigation URL".into()),
         Call::Change { handle, value } if valid_handle(handle) && value.len() <= 1024 => Ok(()),
         Call::Change { .. } => Err("invalid browser field change".into()),
+        Call::EnterSecret { handle, .. } if valid_handle(handle) => Ok(()),
+        Call::EnterSecret { .. } => Err("invalid secret field handle".into()),
         Call::ActivateButton { handle } if valid_handle(handle) => Ok(()),
         Call::ActivateButton { .. } => Err("invalid browser button handle".into()),
         Call::SelectOption { handle, option }

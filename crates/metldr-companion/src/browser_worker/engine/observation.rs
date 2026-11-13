@@ -1,7 +1,7 @@
 use super::runtime::FrameContext;
 mod controls;
 use crate::Result;
-use crate::browser_action::{Choice, Point, ScrollKind};
+use crate::browser_action::{Choice, Point, ScrollKind, SecretKind};
 use chromiumoxide::cdp::js_protocol::runtime::RemoteObjectId;
 pub(super) use controls::{NativeControl, NativeState};
 use serde::Deserialize;
@@ -107,13 +107,6 @@ struct CensusField {
     check_label: String,
     #[serde(default)]
     secret: Option<SecretKind>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, serde::Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum SecretKind {
-    Password,
-    OneTimeCode,
 }
 
 pub(super) struct Field {
@@ -313,6 +306,13 @@ impl Snapshot {
             .get(handle)
             .filter(|field| field.secret.is_none())
             .ok_or_else(|| "stale browser field ref; observe the page again".into())
+    }
+    /// A password or one-time code field from this snapshot; plain fields are refused.
+    pub(super) fn secret_field(&self, handle: &str) -> Result<(&Field, SecretKind)> {
+        self.fields
+            .get(handle)
+            .and_then(|field| field.secret.map(|kind| (field, kind)))
+            .ok_or_else(|| "not a secret field from the latest observation".into())
     }
     pub(super) fn button(&self, handle: &str) -> Result<&Field> {
         self.buttons

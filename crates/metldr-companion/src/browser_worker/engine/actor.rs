@@ -34,6 +34,7 @@ mod observation;
 mod requests;
 mod results;
 mod scroll;
+mod secrets;
 mod selects;
 
 struct Initialization {
@@ -129,6 +130,10 @@ enum Work {
         job: Job,
     },
     Write {
+        action: Action,
+        job: Job,
+    },
+    WriteSecret {
         action: Action,
         job: Job,
     },
@@ -418,6 +423,7 @@ impl Actor {
             }
             match &pending.work {
                 Work::Write { action, .. }
+                | Work::WriteSecret { action, .. }
                 | Work::WriteSelection { action, .. }
                 | Work::WriteScroll { action, .. }
                 | Work::Navigate { action, .. }
@@ -461,6 +467,14 @@ impl Actor {
                 url: action.proposal.url.clone(),
                 params: command.params,
             },
+            Work::WriteSecret { action, .. } => Operation::EnterSecret {
+                action: action.id.clone(),
+                revision: action.revision,
+                binding: action.proposal.binding.clone(),
+                url: action.proposal.url.clone(),
+                session: command.session,
+                params: command.params,
+            },
             Work::Navigate { action, .. } => {
                 let Intent::Navigate { destination } = &action.proposal.intent else {
                     return Err("invalid navigation intent".into());
@@ -483,6 +497,7 @@ impl Actor {
         };
         let reply = match &pending.work {
             Work::Write { job, .. }
+            | Work::WriteSecret { job, .. }
             | Work::WriteSelection { job, .. }
             | Work::WriteScroll { job, .. }
             | Work::Navigate { job, .. }
@@ -560,6 +575,7 @@ impl Work {
             | Self::Gesture { job, .. }
             | Self::ButtonReceipt { job }
             | Self::Write { job, .. }
+            | Self::WriteSecret { job, .. }
             | Self::Verify { job, .. }
             | Self::Navigate { job, .. } => Some(job),
             Self::FrameTree(nav) => Some(&nav.job),

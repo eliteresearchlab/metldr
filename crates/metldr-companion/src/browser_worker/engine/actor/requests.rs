@@ -15,6 +15,7 @@ impl Actor {
         if matches!(
             &kind,
             Kind::Change(_)
+                | Kind::EnterSecret(_)
                 | Kind::ActivateButton(_)
                 | Kind::SetNativeControl(_)
                 | Kind::SelectOption(_)
@@ -76,6 +77,10 @@ impl Actor {
                 checked,
             } => self.prepare_control(tool, handle, checked, job),
             Kind::SetNativeControl(action) => self.arm_control(action, job),
+            Kind::PrepareSecret { tool, handle, kind } => {
+                self.prepare_secret(tool, handle, kind, job)
+            }
+            Kind::EnterSecret(action) => self.enter_secret(action, job),
             Kind::PrepareSelection {
                 tool,
                 handle,

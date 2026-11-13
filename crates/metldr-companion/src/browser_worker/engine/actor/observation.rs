@@ -5,16 +5,18 @@ impl Kind {
         match self {
             Self::ActionScope { handle }
             | Self::PrepareChange { handle, .. }
+            | Self::PrepareSecret { handle, .. }
             | Self::PrepareButton { handle, .. }
             | Self::PrepareControl { handle, .. }
             | Self::PrepareSelection { handle, .. }
             | Self::PrepareScroll { handle, .. } => Some(handle),
             Self::Change(action)
+            | Self::EnterSecret(action)
             | Self::ActivateButton(action)
             | Self::SetNativeControl(action)
             | Self::SelectOption(action)
             | Self::Scroll(action) => match &action.proposal.intent {
-                Intent::Field { field_id, .. } => Some(field_id),
+                Intent::Field { field_id, .. } | Intent::Secret { field_id, .. } => Some(field_id),
                 Intent::ActivateButton { button_id, .. } => Some(button_id),
                 Intent::SelectOption { selection } => Some(&selection.control_id),
                 Intent::SetNativeControl { control } => match control {

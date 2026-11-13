@@ -174,6 +174,7 @@ pub(super) fn run() -> Result<()> {
     let mut carried: Option<Event> = None;
     loop {
         owner.expire_history();
+        owner.expire_secret_entry()?;
         owner.settings.check_deadline()?;
         if closed
             && carried.is_none()

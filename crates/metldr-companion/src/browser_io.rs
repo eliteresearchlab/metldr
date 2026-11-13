@@ -52,6 +52,17 @@ pub(super) enum Operation {
         frame: String,
         loader: String,
     },
+    /// Types an approved secret. The owner adds the secret and sends it as a debugger command,
+    /// so this operation itself never goes on the wire.
+    #[serde(skip)]
+    EnterSecret {
+        action: String,
+        revision: u64,
+        binding: crate::browser_action::Binding,
+        url: String,
+        session: Option<String>,
+        params: Value,
+    },
     Detach {
         tab: i32,
     },
@@ -84,6 +95,7 @@ pub(super) struct Slot {
     next: u64,
     navigations: std::collections::BTreeSet<String>,
     buttons: std::collections::BTreeSet<String>,
+    secret: Option<crate::browser_owner::HeldSecret>,
 }
 
 impl Slot {
@@ -98,12 +110,29 @@ impl Slot {
                 next: 0,
                 navigations: Default::default(),
                 buttons: Default::default(),
+                secret: None,
             },
             rx,
         )
     }
 
+    pub(super) fn hold_secret(&mut self, secret: crate::browser_owner::HeldSecret) {
+        self.secret = Some(secret);
+    }
+
+    /// Takes the held secret, only for `action` when one is given. Dropping it wipes it.
+    pub(super) fn take_secret(
+        &mut self,
+        action: Option<&str>,
+    ) -> Option<crate::browser_owner::HeldSecret> {
+        if action.is_some_and(|action| self.secret.as_ref().is_none_or(|s| s.action != action)) {
+            return None;
+        }
+        self.secret.take()
+    }
+
     fn end(&mut self) {
+        self.secret = None;
         self.events.take();
         for (_, ack) in std::mem::take(&mut self.pending) {
             let _ = ack.send(Err("browser transport ended".into()));
@@ -151,6 +180,7 @@ impl Owner {
         let result = (|| -> Result<u64> {
             let saved_action = match &call.operation {
                 Operation::Navigate { action, .. }
+                | Operation::EnterSecret { action, .. }
                 | Operation::ActivateButton { action, .. }
                 | Operation::ActivateControl { action, .. }
                 | Operation::ConfirmNavigation { action, .. } => {
@@ -239,6 +269,33 @@ impl Owner {
                         );
                     }
                 }
+                Operation::EnterSecret {
+                    action,
+                    revision,
+                    binding,
+                    url,
+                    params,
+                    ..
+                } => {
+                    let record = saved_action.as_ref().ok_or("unknown secret entry")?;
+                    if record.proposal.run != call.run
+                        || record.revision != *revision
+                        || record.state != crate::browser_action::Phase::Dispatching
+                        || &record.proposal.binding != binding
+                        || &record.proposal.url != url
+                        || !matches!(
+                            &record.proposal.intent,
+                            crate::browser_action::Intent::Secret { .. }
+                        )
+                        || binding.tab != slot.tab
+                        || params["arguments"].as_array().is_none_or(|a| a.len() != 1)
+                        || slot.secret.as_ref().is_none_or(|s| &s.action != action)
+                    {
+                        return Err(
+                            "secret entry does not match a fresh durable approval".into()
+                        );
+                    }
+                }
                 Operation::ConfirmNavigation {
                     action,
                     revision,
@@ -295,10 +352,32 @@ impl Owner {
             slot.end();
         }
         slot.pending.insert(id, call.ack);
-        if let Err(error) = self.emit(
-            json!({"v":crate::WIRE_VERSION,"kind":"browser_rpc","call":id,
-            "run":call.run,"operation":call.operation}),
-        ) {
+        let sent = if let Operation::EnterSecret {
+            action,
+            binding,
+            session,
+            mut params,
+            ..
+        } = call.operation
+        {
+            let (Some(secret), Some(arguments)) =
+                (slot.take_secret(Some(&action)), params["arguments"].as_array_mut())
+            else {
+                if let Some(ack) = slot.pending.remove(&id) {
+                    let _ = ack.send(Err("secret entry lost its secret".into()));
+                }
+                return Ok(());
+            };
+            arguments.push(json!({"value": crate::wire::SECRET_SENTINEL}));
+            let message = json!({"v":crate::WIRE_VERSION,"kind":"browser_rpc","call":id,
+                "run":call.run,"operation":{"op":"command","tab":binding.tab,"session":session,
+                "method":"Runtime.callFunctionOn","params":params}});
+            self.transport.emit_secret(&message, &secret.value)
+        } else {
+            self.emit(json!({"v":crate::WIRE_VERSION,"kind":"browser_rpc","call":id,
+                "run":call.run,"operation":call.operation}))
+        };
+        if let Err(error) = sent {
             self.browser_io_finish(&call.run);
             return Err(error);
         }

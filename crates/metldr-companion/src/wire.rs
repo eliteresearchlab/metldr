@@ -53,6 +53,30 @@ pub(crate) fn write_raw(writer: &mut impl Write, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Stands in for a secret while its message is serialized. The NUL bytes keep it apart from any
+/// page text, which reaches the message only inside escaped script source.
+pub(crate) const SECRET_SENTINEL: &str = "\u{0}metldr-secret\u{0}";
+
+/// Serializes `value` with the one sentinel replaced by `secret`. Every buffer that holds the
+/// secret is wiped when dropped.
+pub(crate) fn secret_frame(value: &Value, secret: &str) -> Result<Zeroizing<Vec<u8>>> {
+    let bytes = serde_json::to_vec(value)?;
+    let marker = serde_json::to_vec(SECRET_SENTINEL)?;
+    let mut found = bytes
+        .windows(marker.len())
+        .enumerate()
+        .filter(|(_, window)| *window == marker.as_slice())
+        .map(|(at, _)| at);
+    let (Some(at), None) = (found.next(), found.next()) else {
+        return Err("secret message must hold exactly one secret".into());
+    };
+    let mut frame = Zeroizing::new(Vec::with_capacity(bytes.len() + secret.len() * 2));
+    frame.extend_from_slice(&bytes[..at]);
+    serde_json::to_writer(&mut *frame, secret)?;
+    frame.extend_from_slice(&bytes[at + marker.len()..]);
+    Ok(frame)
+}
+
 pub(crate) fn write_frame(writer: &mut impl Write, value: &Value) -> Result<()> {
     let bytes = serde_json::to_vec(value)?;
     write_raw(writer, &bytes)

@@ -152,18 +152,21 @@ impl SocketTransport {
     }
 
     pub(super) fn emit(&mut self, value: &Value) -> Result<()> {
+        self.emit_bytes(&serde_json::to_vec(value)?)
+    }
+
+    pub(super) fn emit_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         if self.active.is_none() {
             return Ok(());
         }
         let Some(stream) = self.stream.as_mut() else {
             return Ok(());
         };
-        let bytes = serde_json::to_vec(value)?;
         if bytes.is_empty() || bytes.len() > FRAME_MAX {
             let _ = stream.shutdown(std::net::Shutdown::Both);
             return Ok(());
         }
-        if write_raw_deadline(stream, &bytes, Instant::now() + OUTPUT_TIMEOUT).is_err() {
+        if write_raw_deadline(stream, bytes, Instant::now() + OUTPUT_TIMEOUT).is_err() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
         Ok(())

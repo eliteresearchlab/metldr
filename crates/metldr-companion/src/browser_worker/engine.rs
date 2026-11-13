@@ -57,6 +57,12 @@ enum Kind {
         value: String,
     },
     Change(Action),
+    PrepareSecret {
+        tool: String,
+        handle: String,
+        kind: crate::browser_action::SecretKind,
+    },
+    EnterSecret(Action),
     PrepareSelection {
         tool: String,
         handle: String,
@@ -308,6 +314,26 @@ impl Engine {
         self.effect(
             Kind::Change(action.clone()),
             "field dispatch result was lost",
+        )
+        .await
+    }
+    pub(super) async fn prepare_secret(
+        &self,
+        tool: &str,
+        handle: &str,
+        kind: crate::browser_action::SecretKind,
+    ) -> Result<Proposal> {
+        self.request(Kind::PrepareSecret {
+            tool: tool.into(),
+            handle: handle.into(),
+            kind,
+        })
+        .await
+    }
+    pub(super) async fn enter_secret(&self, action: &Action) -> Outcome {
+        self.effect(
+            Kind::EnterSecret(action.clone()),
+            "secret entry result was lost",
         )
         .await
     }

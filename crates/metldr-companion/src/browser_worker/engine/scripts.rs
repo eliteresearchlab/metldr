@@ -331,6 +331,17 @@ pub(super) fn write_value(slot: usize, check_label: &str, previous: &str, value:
     ))
 }
 
+/// Types the secret the owner passes as the second call argument. The secret never appears in
+/// this source and the result is only whether the field now holds it.
+pub(super) fn write_secret(slot: usize, check_label: &str, kind: &str) -> String {
+    let slot = serde_json::to_string(&slot).expect("usize serializes");
+    let label = serde_json::to_string(check_label).expect("string serializes");
+    let kind = serde_json::to_string(kind).expect("string serializes");
+    format!(
+        "function(root, secret) {{ {HELPERS} const element = root[{slot}]; if (!element || !element.isConnected || element.ownerDocument !== document || secretKind(element) !== {kind} || label(element) !== {label} || typeof secret !== 'string') return false; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(element, secret); element.dispatchEvent(new Event('input', {{ bubbles: true }})); element.dispatchEvent(new Event('change', {{ bubbles: true }})); return element.value === secret; }}"
+    )
+}
+
 pub(super) fn verify_value(slot: usize, check_label: &str, value: &str) -> String {
     let slot = serde_json::to_string(&slot).expect("usize serializes");
     let label = serde_json::to_string(check_label).expect("string serializes");

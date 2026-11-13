@@ -57,6 +57,20 @@ pub(super) fn browser_actions(actions: &BTreeMap<String, crate::browser_action::
                         value["kind"] = json!("set_native_control");
                         value["control"] = json!(control);
                     }
+                    crate::browser_action::Intent::Secret {
+                        field_id,
+                        field_label,
+                        secret,
+                        reference,
+                        expires_at_ms,
+                    } => {
+                        value["kind"] = json!("enter_secret");
+                        value["field_id"] = json!(field_id);
+                        value["field_label"] = json!(field_label);
+                        value["secret"] = json!(secret);
+                        value["reference"] = json!(reference);
+                        value["expires_at_ms"] = json!(expires_at_ms);
+                    }
                 }
                 if let crate::browser_action::Phase::Settled { outcome } = &action.state {
                     use crate::browser_action::Outcome;
@@ -66,6 +80,7 @@ pub(super) fn browser_actions(actions: &BTreeMap<String, crate::browser_action::
                         Outcome::SelectionObserved { .. } => "selection_observed",
                         Outcome::ScrollObserved { .. } => "scroll_observed",
                         Outcome::ControlObserved { .. } => "control_observed",
+                        Outcome::SecretEntered { .. } => "secret_entered",
                         Outcome::Prevented { .. } => "prevented",
                         Outcome::Uncertain { .. } => "uncertain",
                     });

@@ -10,6 +10,7 @@ mod selection;
 mod target;
 pub(crate) use control::{CheckboxState, Control, ControlReceipt, RadioGroup};
 pub(super) use intent::Intent;
+pub(crate) use intent::{SECRET_TTL_MS, SecretKind};
 pub(crate) use scroll::{Direction, Point, Scroll, ScrollKind};
 pub(crate) use selection::{Choice, Selection};
 pub(super) use target::Target;
@@ -59,6 +60,10 @@ pub(super) enum Outcome {
     },
     ControlObserved {
         receipt: ControlReceipt,
+    },
+    /// The page field holds the consented secret. Only the opaque reference is reported.
+    SecretEntered {
+        reference: String,
     },
     Prevented {
         reason: String,
@@ -229,6 +234,9 @@ impl Action {
                     Outcome::ButtonClickObserved => {
                         self.revision == 4
                             && matches!(&self.proposal.intent, Intent::ActivateButton { .. })
+                    }
+                    Outcome::SecretEntered { .. } => {
+                        self.revision == 4 && matches!(&self.proposal.intent, Intent::Secret { .. })
                     }
                     Outcome::Prevented { .. } => (2..=4).contains(&self.revision),
                 };
@@ -455,6 +463,11 @@ fn validate_outcome(outcome: &Outcome, proposal: &Proposal) -> Result<()> {
             Ok(())
         }
         (Outcome::ButtonClickObserved, Intent::ActivateButton { .. }) => Ok(()),
+        (Outcome::SecretEntered { reference }, Intent::Secret { reference: approved, .. })
+            if reference == approved =>
+        {
+            Ok(())
+        }
         (Outcome::ScrollObserved { after }, Intent::Scroll { .. }) if after.valid() => Ok(()),
         (Outcome::ControlObserved { receipt }, Intent::SetNativeControl { control })
             if control.matches(receipt) =>
@@ -559,13 +572,15 @@ pub(super) fn reject_control_actions(
 }
 
 pub(super) fn reject_control_action(action: &Action) -> Result<()> {
-    if matches!(&action.proposal.intent, Intent::SetNativeControl { .. })
-        || matches!(
-            &action.state,
-            Phase::Settled {
-                outcome: Outcome::ControlObserved { .. }
-            }
-        )
+    if matches!(
+        &action.proposal.intent,
+        Intent::SetNativeControl { .. } | Intent::Secret { .. }
+    ) || matches!(
+        &action.state,
+        Phase::Settled {
+            outcome: Outcome::ControlObserved { .. } | Outcome::SecretEntered { .. }
+        }
+    )
     {
         return Err("legacy browser store contains native control action data".into());
     }
