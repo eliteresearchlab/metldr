@@ -11,6 +11,19 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
         Call::Observe
     );
     assert_eq!(
+        decode_call("observe_page", json!({"within":"r1-2-0"})).unwrap(),
+        Call::ObserveWithin {
+            within: "r1-2-0".into()
+        }
+    );
+    for input in [
+        json!({"within":""}),
+        json!({"within":1}),
+        json!({"within":"r1", "extra":true}),
+    ] {
+        assert!(decode_call("observe_page", input).is_err());
+    }
+    assert_eq!(
         decode_call(
             SCROLL_TOOL,
             json!({"handle":"r1-2-0","direction":"left","pixels":2000})
