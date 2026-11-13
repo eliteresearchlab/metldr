@@ -1335,7 +1335,7 @@ thread_local! {
 }
 
 #[wasm_bindgen]
-pub fn start_rune_chat(capture: Function) -> Result<(), JsValue> {
+pub fn start_rune_chat(capture: Function, fonts: js_sys::Array) -> Result<(), JsValue> {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if host.is_some() {
@@ -1343,9 +1343,14 @@ pub fn start_rune_chat(capture: Function) -> Result<(), JsValue> {
                 "Rune already owns this document. Reload to reopen it.",
             ));
         }
+        let fonts: Vec<Vec<u8>> = fonts
+            .iter()
+            .map(|font| js_sys::Uint8Array::new(&font).to_vec())
+            .collect();
+        fonts::validate(&fonts).map_err(|error| crate::err(&error))?;
         crate::flow::install_capture(capture);
         let spec = AppSpec {
-            fonts: fonts::FONTS,
+            fonts: fonts::retain(fonts),
             families: fonts::FAMILIES,
             setup: Some(setup),
             poll: Some(poll),
