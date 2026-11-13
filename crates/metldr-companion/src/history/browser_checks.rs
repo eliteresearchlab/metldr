@@ -125,6 +125,14 @@ fn with_owner_seed(
     let mut history =
         crate::history::History::import_new(&root.join("history.redb"), &original, disk.lease())
             .unwrap();
+    if state
+        .view
+        .runs
+        .iter()
+        .any(|item| item.id == run && item.status == Status::Running)
+    {
+        super::browser_owner_checks::approve_fixture_plan(&mut history, &run).unwrap();
+    }
     let selection = history.selection().unwrap();
     state = history
         .edit(|edit| edit.project(&selection, Some(&run)))
@@ -158,6 +166,7 @@ fn with_owner_seed(
         native_permissions: BTreeMap::new(),
         pi_ui: Default::default(),
         codex_input: Default::default(),
+        plan_hold: None,
         browser_approval: None,
         browser_route: None,
         responses_route: None,

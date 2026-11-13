@@ -487,7 +487,13 @@ async fn process_message(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            if serde_json::to_vec(&arguments)?.len() > 8 * 1024 {
+            if serde_json::to_vec(&arguments)?.len()
+                > if name == "propose_task_plan" {
+                    22 * 1024
+                } else {
+                    8 * 1024
+                }
+            {
                 return Ok(Some(rpc_error(
                     id,
                     -32602,
@@ -921,6 +927,7 @@ mod tests {
                             ("page_logs", true, false, true),
                             ("status", true, false, true),
                             ("settings", true, false, true),
+                            ("propose_task_plan", false, false, false),
                         ];
                         assert_eq!(
                             tools.len(),

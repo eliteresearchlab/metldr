@@ -134,6 +134,7 @@ pub(super) fn run() -> Result<()> {
         native_permissions: BTreeMap::new(),
         pi_ui: Default::default(),
         codex_input: Default::default(),
+        plan_hold: None,
         browser_approval: None,
         browser_route,
         responses_route,
