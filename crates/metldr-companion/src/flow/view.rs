@@ -91,6 +91,7 @@ impl View<'_> {
         browser_actions: &BTreeMap<String, crate::browser_action::Action>,
         selection: &Selection,
         choices: &NativeChoices,
+        plan: Option<Value>,
     ) -> Result<Value> {
         let mut view = crate::public_view::render(
             state,
@@ -115,6 +116,7 @@ impl View<'_> {
             view["browser_actions"] = crate::public_view::browser_actions(browser_actions);
         }
         view["selection"] = serde_json::to_value(crate::history_io::Scope::from(selection))?;
+        view["task_plan"] = plan.into();
         view["native_correction"] = self.correction(state);
         view["provider_settings"] = self.settings.public(&state.providers);
         view["agent_settings"] = self.agent_runtime.public(
@@ -132,6 +134,7 @@ impl View<'_> {
         actions: &BTreeMap<String, crate::browser_action::Action>,
         selection: &Selection,
         choices: &NativeChoices,
+        plan: Option<Value>,
     ) -> Result<()> {
         self.reply(
             state,
@@ -141,6 +144,7 @@ impl View<'_> {
             actions,
             selection,
             choices,
+            plan,
         )?;
         Ok(())
     }

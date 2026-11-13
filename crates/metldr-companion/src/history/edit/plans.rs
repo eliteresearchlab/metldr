@@ -59,6 +59,27 @@ impl std::fmt::Display for PlanError {
 impl std::error::Error for PlanError {}
 
 impl Edit<'_> {
+    pub(crate) fn plan_view(
+        &self,
+        scope: &super::Selection,
+        state: &crate::model::Store,
+    ) -> Result<Option<serde_json::Value>> {
+        let run = state
+            .view
+            .runs
+            .iter()
+            .find(|run| !run.status.terminal())
+            .or_else(|| state.view.runs.last());
+        let Some(run) = run else { return Ok(None) };
+        let execution = self.current_execution(scope, &run.id)?;
+        Ok(self.task_plan(&execution)?.map(|plan| {
+            serde_json::json!({
+                "run": run.id, "goal": plan.goal, "intended_effects": plan.intended_effects,
+                "scope": plan.scope, "revision": plan.revision, "state": plan.state
+            })
+        }))
+    }
+
     pub(crate) fn task_plan(&self, execution: &Execution) -> Result<Option<TaskPlan>> {
         self.require_execution(execution, execution.run())?;
         let saved: Option<Record<TaskPlan>> =
