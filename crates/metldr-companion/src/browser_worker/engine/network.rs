@@ -23,6 +23,9 @@ const FIELD_LIMIT: usize = 64;
 struct Entry {
     #[serde(skip)]
     id: String,
+    /// The document load this request belongs to.
+    #[serde(skip)]
+    loader: Option<String>,
     method: String,
     url: String,
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
@@ -52,6 +55,42 @@ struct Log {
     entries: VecDeque<Entry>,
     bytes: usize,
     evicted: usize,
+}
+
+impl Log {
+    /// Drops the oldest entries until both caps hold.
+    fn trim(&mut self) {
+        while self.entries.len() > ENTRY_LIMIT || self.bytes > BYTE_LIMIT {
+            let Some(oldest) = self.entries.pop_front() else {
+                break;
+            };
+            self.bytes -= oldest.size();
+            self.evicted += 1;
+        }
+    }
+}
+
+/// `%XX` sequences decoded; invalid ones stay as written.
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        if bytes[index] == b'%'
+            && let (Some(high), Some(low)) = (
+                bytes.get(index + 1).and_then(|b| hex(*b)),
+                bytes.get(index + 2).and_then(|b| hex(*b)),
+            )
+        {
+            out.push((high * 16 + low) as u8);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[derive(Clone, Default)]
@@ -94,7 +133,8 @@ impl NetworkLog {
         let log = self.clone();
         subscriptions.subscribe("Page.frameNavigated", move |event| {
             if event.session.is_none() && event.params["frame"].get("parentId").is_none() {
-                log.clear();
+                // Chrome reports the new document's own request before this event: keep it.
+                log.navigated(event.params["frame"]["loaderId"].as_str());
             }
         });
     }
@@ -123,13 +163,20 @@ impl NetworkLog {
         if !matches!(url.scheme(), "http" | "https") {
             return;
         }
-        let url = if secret(url.path()) || CREDENTIAL.is_match(raw) {
+        // Labels can hide behind percent encoding, so the decoded path is checked too.
+        let decoded = percent_decoded(url.path());
+        let url = if secret(url.path())
+            || secret(&decoded)
+            || CREDENTIAL.is_match(raw)
+            || CREDENTIAL.is_match(&decoded)
+        {
             REDACTED.to_owned()
         } else {
             bounded(&sanitize_url(raw), URL_LIMIT)
         };
         let entry = Entry {
             id,
+            loader: field(params, "loaderId"),
             method: field(&params["request"], "method").unwrap_or_else(|| "GET".into()),
             url,
             kind: field(params, "type"),
@@ -148,13 +195,7 @@ impl NetworkLog {
         }
         log.bytes += entry.size();
         log.entries.push_back(entry);
-        while log.entries.len() > ENTRY_LIMIT || log.bytes > BYTE_LIMIT {
-            let Some(oldest) = log.entries.pop_front() else {
-                break;
-            };
-            log.bytes -= oldest.size();
-            log.evicted += 1;
-        }
+        log.trim();
     }
 
     fn response(&self, params: &Value) {
@@ -183,11 +224,20 @@ impl NetworkLog {
         change(&mut log.entries[index]);
         let after = log.entries[index].size();
         log.bytes = log.bytes - before + after;
+        log.trim();
     }
 
+    #[cfg(test)]
     fn clear(&self) {
+        self.navigated(None);
+    }
+
+    fn navigated(&self, loader: Option<&str>) {
         if let Ok(mut log) = self.0.lock() {
-            *log = Log::default();
+            log.entries
+                .retain(|entry| loader.is_some() && entry.loader.as_deref() == loader);
+            log.bytes = log.entries.iter().map(Entry::size).sum();
+            log.evicted = 0;
         }
     }
 }
@@ -243,6 +293,34 @@ mod checks {
                 .as_array()
                 .unwrap()
                 .is_empty()
+        );
+        log.request(
+            &json!({"requestId":"e","request":{"url":"https://shop.example/%70assword/hunter2"}}),
+        );
+        assert_eq!(
+            log.snapshot().unwrap()["requests"][0]["url"],
+            REDACTED,
+            "an encoded label is still a secret"
+        );
+        log.request(&json!({"requestId":"doc","loaderId":"new","type":"Document","request":{"url":"https://shop.example/next"}}));
+        log.navigated(Some("new"));
+        let kept = log.snapshot().unwrap();
+        assert_eq!(
+            kept["requests"].as_array().unwrap().len(),
+            1,
+            "the new document request survives its navigation"
+        );
+        for index in 0..ENTRY_LIMIT {
+            log.request(&json!({"requestId":format!("b{index}"),"request":{"url":"https://shop.example/y"}}));
+        }
+        for index in 0..ENTRY_LIMIT {
+            log.update(&json!({"requestId":format!("b{index}")}), |entry| {
+                entry.mime = Some("x".repeat(64))
+            });
+        }
+        assert!(
+            log.0.lock().unwrap().bytes <= BYTE_LIMIT,
+            "updates keep the byte cap"
         );
     }
 }
