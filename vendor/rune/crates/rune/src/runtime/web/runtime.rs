@@ -88,6 +88,23 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn edit_then_enter_without_a_render_submits_once() {
+        fn view(state: &(crate::TextEdit, usize), _: &mut Cx<(crate::TextEdit, usize)>) -> El {
+            crate::text_input(&state.0, crate::tok::type_::BODY).key("input")
+                .on_edit(|s: &mut (crate::TextEdit, usize)| &mut s.0)
+                .on_submit(|s: &mut (crate::TextEdit, usize), _| s.1 += 1)
+        }
+        let mut rt = Runtime::new((crate::TextEdit::default(), 0), view, (300.0, 100.0), Env::default());
+        rt.frame(0.0);
+        let key = rt.nodes.iter().find(|n| n.key.as_deref() == Some("input")).unwrap().path.clone();
+        rt.set_focus(Some(key.clone()), true);
+        rt.web_edit(&json!({"kind":"edit", "key":key, "base":0, "expected":"", "start":0, "end":0, "text":"hello", "anchor":5, "focus":5}));
+        rt.web_key(&json!({"kind":"key", "key":"Enter", "code":"Enter"}));
+        rt.frame(0.0);
+        assert_eq!((&*rt.state.0.text, rt.state.1), ("hello", 1));
+    }
+
+    #[test]
     fn utf16_replacement_preserves_callbacks_and_rejects_stale_context() {
         fn view(state: &(crate::TextEdit, usize), _: &mut Cx<(crate::TextEdit, usize)>) -> El {
             crate::text_input(&state.0, crate::tok::type_::BODY).key("input")
