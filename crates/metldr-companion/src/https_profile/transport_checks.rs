@@ -746,3 +746,84 @@ fn public_responses_presentation_preserves_text_and_opaque_tool_continuation_ove
     assert!(rx.try_iter().next().is_none());
     assert_eq!(server.join().unwrap().len(), 1);
 }
+
+#[test]
+fn local_http_chat_endpoint_reaches_loopback_only() {
+    for (scheme_host, protocol) in [
+        ("http://example.com", "chat_completions"),
+        ("http://10.0.0.1", "chat_completions"),
+        ("http://127.0.0.1:1", "messages"),
+    ] {
+        let endpoint = format!("{scheme_host}/v1/chat/completions");
+        assert!(
+            Profile::keyless(&endpoint, "model", 1, None, protocol, None).is_err(),
+            "{endpoint} {protocol}"
+        );
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0];
+            while !request.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            let headers = String::from_utf8(request).unwrap().to_ascii_lowercase();
+            assert!(
+                !headers.contains("\r\nauthorization:"),
+                "a keyless request sends no key"
+            );
+            let length: usize = headers
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("content-length:")
+                        .map(|n| n.trim().parse().unwrap())
+                })
+                .unwrap();
+            let mut body = vec![0; length];
+            stream.read_exact(&mut body).unwrap();
+            seen.push(headers.lines().next().unwrap().to_owned());
+            let chunk = json!({"id":"chat","choices":[{"index":0,"delta":{"role":"assistant","content":"local"},"finish_reason":"stop"}]});
+            let sse = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+            stream
+                .write_all(format!("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{sse}", sse.len()).as_bytes())
+                .unwrap();
+        }
+        seen
+    });
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    for host in ["127.0.0.1", "localhost"] {
+        let endpoint = format!("http://{host}:{port}/v1/chat/completions");
+        let profile = Profile::keyless(&endpoint, "model", 1, None, "chat_completions", None)
+            .unwrap()
+            .pin()
+            .unwrap();
+        let mut text = String::new();
+        runtime
+            .block_on(
+                profile
+                    .chat_client(&stop)
+                    .unwrap()
+                    .text("system", "input", &stop, |event| {
+                        if let metldr_chat_completions::TextEvent::Delta(delta) = event {
+                            text.push_str(&delta);
+                        }
+                        Ok(())
+                    }),
+            )
+            .unwrap();
+        assert_eq!(text, "local");
+    }
+    assert_eq!(
+        server.join().unwrap(),
+        ["post /v1/chat/completions http/1.1"; 2]
+    );
+}

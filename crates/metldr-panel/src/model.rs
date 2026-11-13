@@ -1937,7 +1937,7 @@ impl PageView {
                 revision,
                 fingerprint,
             } => {
-                !valid_https_endpoint(endpoint)
+                !valid_chat_endpoint(endpoint)
                     || !valid_ascii_label(model, 128)
                     || *revision == 0
                     || !valid_fingerprint(fingerprint)
@@ -1994,10 +1994,13 @@ impl PageView {
                         | ProviderConnectionState::Unavailable => {
                             connection.revision == 0
                                 || !has_metadata
-                                || !connection
-                                    .endpoint
-                                    .as_deref()
-                                    .is_some_and(valid_https_endpoint)
+                                || !connection.endpoint.as_deref().is_some_and(|endpoint| {
+                                    if connection.protocol == ProviderProtocol::ChatCompletions {
+                                        valid_chat_endpoint(endpoint)
+                                    } else {
+                                        valid_https_endpoint(endpoint)
+                                    }
+                                })
                                 || !connection
                                     .model
                                     .as_deref()
@@ -2211,6 +2214,28 @@ pub(crate) fn valid_https_endpoint(value: &str) -> bool {
     }
 }
 
+/// A Chat Completions endpoint: HTTPS, or plain HTTP to a loopback server such as Ollama.
+pub(crate) fn valid_chat_endpoint(value: &str) -> bool {
+    valid_https_endpoint(value)
+        || value.strip_prefix("http://").is_some_and(|rest| {
+            let authority = rest.split('/').next().unwrap_or_default();
+            let host = match authority.strip_prefix('[') {
+                Some(bracketed) => bracketed.split_once(']').map(|(host, _)| host),
+                None => Some(
+                    authority
+                        .split_once(':')
+                        .map_or(authority, |(host, _)| host),
+                ),
+            };
+            host.is_some_and(|host| {
+                host.eq_ignore_ascii_case("localhost")
+                    || host
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|ip| ip.is_loopback())
+            }) && valid_https_endpoint(&format!("https://{rest}"))
+        })
+}
+
 fn valid_url_port(port: Option<&str>) -> bool {
     port.is_none_or(|port| {
         !port.is_empty()
@@ -2222,6 +2247,27 @@ fn valid_url_port(port: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_endpoints_allow_plain_http_only_on_loopback() {
+        for valid in [
+            "https://api.example/v1/chat/completions",
+            "http://127.0.0.1:11434/v1/chat/completions",
+            "http://localhost:8080/v1/chat/completions",
+            "http://[::1]:8080/v1",
+        ] {
+            assert!(valid_chat_endpoint(valid), "{valid}");
+        }
+        for invalid in [
+            "http://example.com/v1",
+            "http://10.0.0.1:11434/v1",
+            "http://127.0.0.1.example.com/v1",
+            "http://user@127.0.0.1/v1",
+        ] {
+            assert!(!valid_chat_endpoint(invalid), "{invalid}");
+        }
+        assert!(!valid_https_endpoint("http://127.0.0.1:11434/v1"));
+    }
 
     const STORE: &str = "0123456789abcdef0123456789abcdef";
     const VALID: &str = r#"{"sequence":2,"store":"0123456789abcdef0123456789abcdef","selection":{"store":"0123456789abcdef0123456789abcdef","conversation":"0123456789abcdef0123456789abcdef:100","epoch":"1"},"source":{"id":"0123456789abcdef0123456789abcdef:1","tab":4,"document":"doc-1","url":"http://127.0.0.1:43123/article","title":"North report","text":"The North project reports an amount of 17 units."},"runs":[{"id":"0123456789abcdef0123456789abcdef:2","source":"0123456789abcdef0123456789abcdef:1","kind":"summary","question":null,"status":"complete","output":"North reports 17 units.","conversation":[],"error":null,"route":{"kind":"fixture"},"activity":[],"corrections":{"total":0,"entries":[]}}],"native_correction":null,"pi_profile":null,"agent_sessions":[],"browser_route":null}"#;

@@ -2,8 +2,8 @@ use metldr_conversation::{Display, ProjectedEntry, Projection};
 
 use super::{
     ActivityOutcome, ActivityPhase, FlowError, MAX_ACTIVITY, MAX_PAGE_TEXT, RunId, RunKind,
-    RunRoute, RunView, WireRun, parse_identity, valid_ascii_label, valid_correction_receipt,
-    valid_fingerprint, valid_https_endpoint, valid_label,
+    RunRoute, RunView, WireRun, parse_identity, valid_ascii_label, valid_chat_endpoint,
+    valid_correction_receipt, valid_fingerprint, valid_https_endpoint, valid_label,
 };
 
 const MAX_RUN_DOCUMENT: usize = 2 * 1024 * 1024;
@@ -147,13 +147,13 @@ impl WireRun {
             || matches!(&self.route, RunRoute::HttpsMessages { endpoint, model, revision, fingerprint }
                 if !valid_https_endpoint(endpoint) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
             || matches!(&self.route, RunRoute::HttpsChatCompletions { endpoint, model, revision, fingerprint }
-                if !valid_https_endpoint(endpoint) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
+                if !valid_chat_endpoint(endpoint) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
             || matches!(&self.route, RunRoute::HttpsResponses { endpoint, model, revision, fingerprint }
                 if !valid_https_endpoint(endpoint) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
             || matches!(&self.route, RunRoute::HttpsGoogleInteractions { endpoint, model, revision, fingerprint }
                 if !valid_https_endpoint(endpoint) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
-            || matches!(&self.route, RunRoute::Text { endpoint, model, revision, fingerprint, .. }
-                if !valid_https_endpoint(endpoint) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
+            || matches!(&self.route, RunRoute::Text { protocol, endpoint, model, revision, fingerprint, .. }
+                if !(if *protocol == super::ProviderProtocol::ChatCompletions { valid_chat_endpoint(endpoint) } else { valid_https_endpoint(endpoint) }) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
             || (matches!(self.kind, RunKind::Agent)
                 != matches!(
                     &self.route,
