@@ -278,7 +278,7 @@ impl Wire {
             if bytes.is_empty() {
                 return Err(invalid("OpenCode stdout closed"));
             }
-            let end = bytes.iter().position(|b| *b == b'\n').map(|i| i + 1);
+            let end = memchr::memchr(b'\n', bytes).map(|i| i + 1);
             let count = end.unwrap_or(bytes.len());
             if self.frame.len() + count > FRAME_LIMIT {
                 return Err(invalid("OpenCode output exceeds frame limit"));

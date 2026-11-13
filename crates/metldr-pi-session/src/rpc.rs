@@ -32,10 +32,7 @@ pub(crate) fn read_stdout(reader: impl Read, tx: Sender<Result<Value>>) {
                 let _ = tx.send(Err(invalid("Pi RPC output ended inside a frame")));
                 return;
             }
-            let take = available
-                .iter()
-                .position(|&b| b == b'\n')
-                .map_or(available.len(), |i| i + 1);
+            let take = memchr::memchr(b'\n', available).map_or(available.len(), |i| i + 1);
             if line.len() + take > MAX_LINE || total + take > MAX_TOTAL {
                 let _ = tx.send(Err(invalid("Pi RPC output exceeded its size limit")));
                 return;

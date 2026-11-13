@@ -321,7 +321,7 @@ impl Wire {
                     invalid("Codex stdout closed during a frame")
                 });
             }
-            let end = bytes.iter().position(|b| *b == b'\n').map(|i| i + 1);
+            let end = memchr::memchr(b'\n', bytes).map(|i| i + 1);
             let count = end.unwrap_or(bytes.len());
             if self.frame.len() + count > FRAME_LIMIT {
                 return Err(invalid("Codex output exceeds frame limit"));

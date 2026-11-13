@@ -969,6 +969,7 @@ dependencies = [
 name = "metldr-codex-session"
 version = "0.1.0"
 dependencies = [
+ "memchr",
  "serde_json",
  "tokio",
 ]
@@ -1067,6 +1068,7 @@ dependencies = [
 name = "metldr-opencode-session"
 version = "0.1.0"
 dependencies = [
+ "memchr",
  "serde_json",
  "tokio",
 ]
@@ -1075,6 +1077,7 @@ dependencies = [
 name = "metldr-pi-session"
 version = "0.1.0"
 dependencies = [
+ "memchr",
  "serde_json",
 ]
 
