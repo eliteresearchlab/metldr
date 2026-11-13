@@ -92,7 +92,7 @@ async function copyBindings() {
     await copyFile(join(root, 'crates/metldr-panel/pkg', name), join(destination, name));
   }
   await rm(join(destination, 'snippets'), { recursive: true, force: true });
-  await cp(join(root, 'crates/metldr-panel/pkg/snippets'), join(destination, 'snippets'), { recursive: true });
+  await cp(join(root, 'crates/metldr-panel/pkg/snippets'), join(destination, 'snippets'), { recursive: true }).catch(error => { if (error.code !== 'ENOENT') throw error; });
 }
 
 export async function buildChat() {

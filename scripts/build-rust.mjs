@@ -174,7 +174,9 @@ try {
       copyFileSync(join(repoRoot, 'crates/metldr-panel/pkg', name), join(destination, name));
     }
     rmSync(join(destination, 'snippets'), { recursive: true, force: true });
-    cpSync(join(repoRoot, 'crates/metldr-panel/pkg/snippets'), join(destination, 'snippets'), { recursive: true });
+    // The plain panel has no inline JS snippets; only the Rune renderer brings them.
+    const snippets = join(repoRoot, 'crates/metldr-panel/pkg/snippets');
+    if (statSync(snippets, { throwIfNoEntry: false })) cpSync(snippets, join(destination, 'snippets'), { recursive: true });
     const rune = join(repoRoot, 'public/chat/rune');
     rmSync(rune, { recursive: true, force: true });
     cpSync(join(repoRoot, 'target/wasm/metldr-panel-rune/pkg'), rune, { recursive: true });
