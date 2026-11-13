@@ -53,6 +53,7 @@ pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
         ("pi", "execution-pi", "Pi, new session"),
         ("codex", "execution-codex", "Codex, new session"),
         ("opencode", "execution-opencode", "OpenCode, new session"),
+        ("claude", "execution-claude", "Claude Code, new session"),
     ]
     .into_iter()
     .map(|(value, element, label)| Choice {
@@ -134,6 +135,7 @@ pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
         (AgentKind::Pi, &view.agent_sessions),
         (AgentKind::Codex, &view.codex_sessions),
         (AgentKind::Opencode, &view.opencode_sessions),
+        (AgentKind::Claude, &view.claude_sessions),
     ] {
         let name = agent.label();
         for session in sessions {
@@ -147,6 +149,7 @@ pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
                 AgentKind::Pi => ready(view, session),
                 AgentKind::Codex => codex_ready(view, session),
                 AgentKind::Opencode => opencode_ready(view, session),
+                AgentKind::Claude => claude_ready(view, session),
             };
             if available {
                 choices.push(Choice {
@@ -188,6 +191,7 @@ mod checks {
             "pi",
             "codex",
             "opencode",
+            "claude",
         ];
         let unavailable = list(None);
         assert_eq!(
@@ -246,20 +250,25 @@ mod checks {
         view.agent_sessions.push(session.clone());
         view.codex_sessions.push(session.clone());
         view.opencode_sessions.push(session);
+        for row in &mut view.agent_settings.agents {
+            if row.agent == AgentKind::Claude {
+                row.state = crate::model::AgentSettingState::Ready;
+            }
+        }
         let choices = list(Some(&view));
-        assert_eq!(choices.len(), 15);
+        assert_eq!(choices.len(), 16);
         assert!(choices.iter().all(|choice| choice.enabled));
         assert_eq!(
             choices[6].label,
             "Page questions, OpenAI Responses, online-model, https://api.example.test/v1"
         );
-        assert_eq!(choices[12].value, "0123456789abcdef0123456789abcdef:20");
+        assert_eq!(choices[13].value, "0123456789abcdef0123456789abcdef:20");
         assert_eq!(
-            choices[13].value,
+            choices[14].value,
             "codex:0123456789abcdef0123456789abcdef:20"
         );
         assert_eq!(
-            choices[14].value,
+            choices[15].value,
             "opencode:0123456789abcdef0123456789abcdef:20"
         );
         assert!(
@@ -286,7 +295,7 @@ mod checks {
             }
             assert_eq!(
                 list(Some(&view)).len(),
-                12,
+                13,
                 "unavailable native session phase {phase}"
             );
         }

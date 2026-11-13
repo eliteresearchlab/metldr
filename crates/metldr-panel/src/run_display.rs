@@ -24,6 +24,10 @@ pub(crate) fn route(route: &RunRoute) -> String {
             (Some(provider), Some(model)) => format!("Codex configured provider {provider}, model {model}. Codex manages its endpoint, account, tools and permissions."),
             _ => "Codex native session. Codex manages its provider, endpoint, account, tools and permissions.".to_string(),
         },
+        RunRoute::Harness { harness, .. } if harness == "claude" => {
+            "Claude Code native session. Claude Code manages its model, account, tools and permissions.".to_string()
+        }
+        RunRoute::Harness { .. } => "Native agent session.".to_string(),
         RunRoute::OpenCode { model, mode, .. } => format!(
             "OpenCode native session{}{}.",
             model.as_ref().map(|value| format!(" using model {value}")).unwrap_or_default(),

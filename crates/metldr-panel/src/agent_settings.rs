@@ -536,6 +536,10 @@ fn read_profile(document: &Document, agent: AgentKind) -> AgentProfile {
             executable: get("executable"),
             workspace: get("workspace"),
         },
+        AgentKind::Claude => AgentProfile::Claude {
+            executable: get("executable"),
+            workspace: get("workspace"),
+        },
         AgentKind::Pi => AgentProfile::Pi {
             executable: get("executable"),
             workspace: get("workspace"),
@@ -584,6 +588,13 @@ fn write_profile(document: &Document, profile: &AgentProfile) {
         } => {
             set_value(document, AgentKind::Opencode, "executable", executable);
             set_value(document, AgentKind::Opencode, "workspace", workspace);
+        }
+        AgentProfile::Claude {
+            executable,
+            workspace,
+        } => {
+            set_value(document, AgentKind::Claude, "executable", executable);
+            set_value(document, AgentKind::Claude, "workspace", workspace);
         }
     }
 }
