@@ -783,15 +783,35 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         let presentation = updates.presentation.borrow();
         for message in &presentation.messages.messages {
             if let Some(content) = message.text() {
+                let id = message.id();
+                let user = matches!(message, crate::ag_ui::AgUiMessage::User { .. });
+                let body = typography
+                    .text(content)
+                    .wrap()
+                    .font(typography.font(14.0, 400.0).lh(21.0 * typography.scale))
+                    .color(ink)
+                    .selectable(true);
+                let message = if user {
+                    row().w_full().justify_end().child(
+                        col()
+                            .max_w(620.0)
+                            .padding(12.0)
+                            .radius(12.0)
+                            .fill(palette.field)
+                            .child(body),
+                    )
+                } else {
+                    col().max_w(620.0).child(body)
+                };
                 thread = thread.child(
-                    typography
-                        .text(content)
-                        .key(message.id())
-                        .w_full()
-                        .wrap()
-                        .font(typography.font(14.0, 400.0).lh(21.0 * typography.scale))
-                        .color(ink)
-                        .selectable(true),
+                    message
+                        .key(id)
+                        .role(if user { "group" } else { "article" })
+                        .label(if user {
+                            "User message"
+                        } else {
+                            "Assistant message"
+                        }),
                 );
             } else if let crate::ag_ui::AgUiMessage::Activity { id, .. } = message {
                 thread = thread.child(
@@ -802,6 +822,9 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                         .w_full(),
                 );
             }
+        }
+        if state.running() && presentation.messages.waiting() {
+            thread = thread.child(typography.text("Working").key("working").role("status"));
         }
         if let Some(error) = &presentation.error {
             thread = thread.child(
