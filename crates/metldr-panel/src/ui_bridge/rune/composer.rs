@@ -223,7 +223,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
             if supports_plan(&choice.value) && state.mode == Mode::Plan {
                 format!("Plan mode, {}", choice.label)
             } else {
-                choice.label.clone()
+                choice.label.to_string()
             }
         },
     );
@@ -629,7 +629,7 @@ pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
                                     .press(p.strong)
                                     .on_press_tx(move |state: &mut State, tx| {
                                         if !state.running() {
-                                            state.select(choice.value.clone(), tx);
+                                            state.select(choice.value.to_string(), tx);
                                         }
                                     });
                         }

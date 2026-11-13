@@ -615,7 +615,7 @@ pub(super) fn render(panel: &Panel) -> Result<(), JsValue> {
                 let existing = (0..select.children().length())
                     .filter_map(|index| select.children().item(index))
                     .find(|option| {
-                        option.get_attribute("value").as_deref() == Some(choice.value.as_str())
+                        option.get_attribute("value").as_deref() == Some(&*choice.value)
                     });
                 let option = match existing {
                     Some(option) => option,
