@@ -135,6 +135,7 @@ pub(super) fn run() -> Result<()> {
         pi_ui: Default::default(),
         codex_input: Default::default(),
         plan_hold: None,
+        session_grants: BTreeMap::new(),
         browser_approval: None,
         browser_route,
         responses_route,

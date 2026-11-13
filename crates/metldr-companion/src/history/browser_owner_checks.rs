@@ -130,6 +130,7 @@ fn make_owner_without_plan(directory: &Directory) -> crate::Result<(Owner, Strin
             pi_ui: Default::default(),
             codex_input: Default::default(),
             plan_hold: None,
+            session_grants: BTreeMap::new(),
             browser_approval: None,
             browser_route: None,
             responses_route: None,
@@ -884,5 +885,124 @@ fn declining_plan_releases_held_action_and_allows_replanning() -> crate::Result<
         reply.recv()?.map_err(std::io::Error::other)?.state,
         Phase::Dispatching
     );
+    Ok(())
+}
+
+fn session_command(
+    owner: &mut Owner,
+    id: &str,
+    action: crate::model::ConversationAction,
+) -> crate::Result<()> {
+    let scope = crate::history_io::Scope::from(&owner.record_history.selection()?);
+    owner.command(id, Command::Conversation { scope, action })
+}
+
+fn propose_only(
+    owner: &mut Owner,
+    proposal: Proposal,
+) -> crate::Result<mpsc::Receiver<std::result::Result<crate::browser_action::Action, String>>> {
+    let (ack, reply) = mpsc::sync_channel(1);
+    owner.browser_event(Event::Proposed {
+        proposal,
+        ack,
+        budget: None,
+    })?;
+    Ok(reply)
+}
+
+#[test]
+fn session_grant_auto_approves_bound_tier_one_steps_only() -> crate::Result<()> {
+    use crate::model::ConversationAction::{GrantSession, RevokeSession};
+    let directory = Directory::new()?;
+    let (mut owner, run) = make_owner_without_plan(&directory)?;
+    let plan = propose_plan(&mut owner, &run)?;
+    panel_plan_reply(&mut owner, &run, plan.revision, "panel-approve")?;
+    // A grant for a stale revision is refused.
+    assert!(
+        session_command(
+            &mut owner,
+            "panel-grant-stale",
+            GrantSession {
+                run: run.clone(),
+                revision: plan.revision + 1,
+            },
+        )
+        .is_err()
+    );
+    session_command(
+        &mut owner,
+        "panel-grant",
+        GrantSession {
+            run: run.clone(),
+            revision: plan.revision,
+        },
+    )?;
+    let binding = Binding {
+        tab: 17,
+        document: "document-1".into(),
+        target: "target-1".into(),
+        frame: "frame-1".into(),
+        session: "session-1".into(),
+        unique_context: "context-1".into(),
+        grant_revision: 1,
+    };
+    let url = "http://127.0.0.1:4567/article";
+    let verified = || Outcome::Verified {
+        observed: "new@example.invalid".into(),
+    };
+    // The first Tier 1 step still asks; approving it binds the grant.
+    approve_dispatch_settle(
+        &mut owner,
+        proposal(&run, "grant-1", &binding, url, field()),
+        verified(),
+    )?;
+    // The next Tier 1 step on the same session and target is approved without asking.
+    let reply = propose_only(
+        &mut owner,
+        proposal(&run, "grant-2", &binding, url, field()),
+    )?;
+    assert!(owner.browser_approval.is_none());
+    let auto = reply.recv()?.map_err(std::io::Error::other)?;
+    assert_eq!(auto.state, Phase::Approved);
+    let (ack, reply) = mpsc::sync_channel(1);
+    owner.browser_event(Event::Dispatch {
+        action: auto.id.clone(),
+        revision: auto.revision,
+        ack,
+    })?;
+    let dispatched = reply.recv()?.map_err(std::io::Error::other)?;
+    let (ack, reply) = mpsc::sync_channel(1);
+    owner.browser_event(Event::Observed {
+        action: auto.id,
+        revision: dispatched.revision,
+        outcome: verified(),
+        ack,
+    })?;
+    reply.recv()?.map_err(std::io::Error::other)?;
+    // A button is Tier 2 and always asks.
+    let button = Intent::ActivateButton {
+        button_id: "owned-button".into(),
+        button_label: "Send".into(),
+    };
+    let reply = propose_only(&mut owner, proposal(&run, "grant-3", &binding, url, button))?;
+    assert!(owner.browser_approval.is_some());
+    assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    owner.cancel_browser_approval(&run);
+    // Stop ended the grant, so a later Tier 1 step asks again.
+    assert!(!owner.session_grants.contains_key(&run));
+    session_command(
+        &mut owner,
+        "panel-grant-again",
+        GrantSession {
+            run: run.clone(),
+            revision: plan.revision,
+        },
+    )?;
+    session_command(
+        &mut owner,
+        "panel-revoke",
+        RevokeSession { run: run.clone() },
+    )?;
+    assert!(!owner.session_grants.contains_key(&run));
     Ok(())
 }
