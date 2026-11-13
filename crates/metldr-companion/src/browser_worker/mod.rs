@@ -175,12 +175,8 @@ impl Owner {
             return Ok(());
         }
         self.require_conversation(scope)?;
-        if self
-            .operations
-            .values()
-            .any(|operation| operation.browser_io.is_some())
-        {
-            return Err("another browser run is active".into());
+        if !self.operations.is_empty() {
+            return Err("another run is active".into());
         }
         if text.trim().is_empty() || text.len() > 1024 {
             return Err("invalid browser task instruction".into());

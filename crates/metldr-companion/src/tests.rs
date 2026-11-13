@@ -626,40 +626,6 @@ mod tests {
             );
         }
 
-        owner.operations.insert(
-            second_run.clone(),
-            Operation {
-                stop: second_stop.clone(),
-                worker: thread::spawn(|| {}),
-                correction: None,
-                browser_io: None,
-            },
-        );
-        let (stop_request, queued) = offer_pi_ui(
-            &mut owner,
-            &second_run,
-            3,
-            crate::agent::ui::Dialog::Confirm {
-                title: "Stop check".into(),
-                message: "Confirm?".into(),
-            },
-        );
-        owner.session_grants.insert(
-            second_run.clone(),
-            crate::browser_owner::SessionGrant::new(1, std::time::Instant::now()),
-        );
-        owner
-            .command(
-                "banner-stop",
-                Command::StopRun {
-                    run: second_run.clone(),
-                },
-            )
-            .unwrap();
-        assert!(second_stop.load(std::sync::atomic::Ordering::Acquire));
-        assert!(!stop.load(std::sync::atomic::Ordering::Acquire));
-        assert!(!owner.session_grants.contains_key(&second_run));
-
         let (disconnect_request, abandoned) = offer_pi_ui(
             &mut owner,
             &run,
@@ -685,38 +651,41 @@ mod tests {
             Err(mpsc::TryRecvError::Disconnected)
         ));
 
-        for active in [&run, &second_run] {
-            owner.session_grants.insert(
-                active.clone(),
-                crate::browser_owner::SessionGrant::new(1, std::time::Instant::now()),
-            );
-        }
-        stop.store(false, std::sync::atomic::Ordering::Release);
-        second_stop.store(false, std::sync::atomic::Ordering::Release);
-        owner.command("stop-all", Command::StopAll).unwrap();
-        let bytes = frames.lock().unwrap().clone();
-        let mut reader = bytes.as_slice();
-        let mut report = None;
-        while let Some(frame) = crate::wire::read_raw(&mut reader, FRAME_MAX).unwrap() {
-            report = Some(serde_json::from_slice::<serde_json::Value>(&frame).unwrap());
-        }
-        assert_eq!(
-            report.unwrap(),
-            json!({"v":crate::WIRE_VERSION,"request":"stop-all","kind":"stop_all","stopped":2,"failed":0})
-        );
-        assert!(stop.load(std::sync::atomic::Ordering::Acquire));
-        assert!(second_stop.load(std::sync::atomic::Ordering::Acquire));
-        assert!(owner.session_grants.is_empty());
-        for active in [&run, &second_run] {
-            assert_eq!(saved_run(&mut owner, active).status, Status::StopRequested);
-        }
         owner
             .agent_settled(&run, crate::agent::Outcome::Cancelled, false, true)
             .unwrap();
+        owner.operations.insert(
+            second_run.clone(),
+            Operation {
+                stop: second_stop.clone(),
+                worker: thread::spawn(|| {}),
+                correction: None,
+                browser_io: None,
+            },
+        );
 
+        let (stop_request, queued) = offer_pi_ui(
+            &mut owner,
+            &second_run,
+            3,
+            crate::agent::ui::Dialog::Confirm {
+                title: "Stop check".into(),
+                message: "Confirm?".into(),
+            },
+        );
+        owner
+            .pi_ui_reply(
+                "queued-answer",
+                &second_run,
+                &stop_request,
+                crate::agent::ui::Answer::Confirm(true),
+            )
+            .unwrap();
+        owner.stop_run("stop", &second_run).unwrap();
+        assert!(second_stop.load(std::sync::atomic::Ordering::Acquire));
         assert!(matches!(
             queued.try_recv(),
-            Err(mpsc::TryRecvError::Disconnected)
+            Ok(crate::agent::ui::Answer::Confirm(true))
         ));
         assert!(
             owner

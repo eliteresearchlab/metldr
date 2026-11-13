@@ -483,8 +483,9 @@ impl Edit<'_> {
         {
             return Err("invalid new run admission".into());
         }
-        if storage(|| Ok(self.write.open_table(ACTIVE_RUNS)?.len()? >= 16))? {
-            return Err("active run capacity reached".into());
+        let idle = storage(|| Ok(self.write.open_table(ACTIVE_RUNS)?.len()? == 0))?;
+        if !idle {
+            return Err("another run is active".into());
         }
         if self.saved_run(&run.id)?.is_some() {
             return Err("run identity already exists".into());

@@ -84,7 +84,11 @@ impl Owner {
             return Ok(());
         }
         self.require_conversation(scope)?;
+        let unavailable = !self.operations.is_empty();
         let (run, input) = self.record_change(|edit, _| {
+            if unavailable {
+                return Err("another run is active".into());
+            }
             let source = edit
                 .selected_source(scope)?
                 .filter(|source| source.id == source_id)

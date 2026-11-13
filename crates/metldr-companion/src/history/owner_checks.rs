@@ -284,23 +284,24 @@ fn reopen_projection(
 }
 
 #[test]
-fn stop_all_stops_two_admitted_runs() -> Result<()> {
+fn stop_all_stops_the_active_run_ends_its_grant_and_reports_idle() -> Result<()> {
     let directory = Directory::new()?;
     let listener = TcpListener::bind("127.0.0.1:0")?;
     listener.set_nonblocking(true)?;
     let (mut owner, rx, wire) = setup(&directory, listener.local_addr()?)?;
+    owner.command("stop-idle", Command::StopAll)?;
+    assert_eq!(frames(&wire)?.last().unwrap()["stopped"], 0);
     owner.request(ask(&owner, "first"))?;
-    let first = owner.state.view.runs[0].id.clone();
-    let (first_socket, _) = receive_request(&listener)?;
-    owner.request(ask(&owner, "second"))?;
-    let second = owner.state.view.runs[0].id.clone();
-    let (second_socket, _) = receive_request(&listener)?;
-    assert_ne!(first, second);
+    let run = owner.state.view.runs[0].id.clone();
+    let (socket, _) = receive_request(&listener)?;
+    owner.session_grants.insert(
+        run.clone(),
+        crate::browser_owner::SessionGrant::new(1, std::time::Instant::now()),
+    );
     wire.lock().unwrap().clear();
     owner.command("stop-all", Command::StopAll)?;
-    assert_eq!(saved(&owner, &first)?.value.status, Status::StopRequested);
-    assert_eq!(saved(&owner, &second)?.value.status, Status::StopRequested);
-    assert_eq!(frames(&wire)?.last().unwrap()["stopped"], 2);
+    assert_eq!(saved(&owner, &run)?.value.status, Status::StopRequested);
+    assert!(owner.session_grants.is_empty(), "stop ends the session grant");
     for index in 0..100 {
         owner.command(&format!("stop-again-{index}"), Command::StopAll)?;
     }
@@ -312,15 +313,13 @@ fn stop_all_stops_two_admitted_runs() -> Result<()> {
     assert!(
         reports
             .iter()
-            .all(|report| report["stopped"] == 2 && report["failed"] == 0)
+            .all(|report| report["stopped"] == 1 && report["failed"] == 0)
     );
-    drop((first_socket, second_socket));
-    for _ in 0..2 {
-        let Event::Settled { run, result } = rx.recv_timeout(Duration::from_secs(3))? else {
-            return Err("unexpected event after stop".into());
-        };
-        owner.settled(&run, result, false)?;
-    }
+    drop(socket);
+    let Event::Settled { run, result } = rx.recv_timeout(Duration::from_secs(3))? else {
+        return Err("unexpected event after stop".into());
+    };
+    owner.settled(&run, result, false)?;
     Ok(())
 }
 

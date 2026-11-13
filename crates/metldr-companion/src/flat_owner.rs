@@ -169,6 +169,9 @@ impl Owner {
             return Ok(());
         }
         self.require_conversation(scope)?;
+        if !self.operations.is_empty() {
+            return Err("another run is active".into());
+        }
         let (run, body) = self.record_change(|edit, _| {
             let (kind, question) = match start {
                 ConversationAction::Summarize { page } => {
