@@ -259,7 +259,8 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             "page_logs",
             "status",
             "settings",
-            "propose_task_plan"
+            "propose_task_plan",
+            "network_requests"
         ]
     );
     assert!(

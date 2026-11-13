@@ -261,6 +261,13 @@ impl Tools {
                     .page_logs()
                     .await?
             }
+            Call::NetworkRequests => {
+                self.engine
+                    .as_ref()
+                    .ok_or("browser is not attached")?
+                    .network_requests()
+                    .await?
+            }
             Call::Status | Call::Settings | Call::ProposeTaskPlan { .. } => {
                 return Err("read-only browser call reached the attached path".into());
             }
@@ -465,7 +472,7 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
             Ok(())
         }
         Call::Scroll { .. } => Err("invalid browser scroll request".into()),
-        Call::PageLogs => Ok(()),
+        Call::PageLogs | Call::NetworkRequests => Ok(()),
         Call::Status | Call::Settings | Call::ProposeTaskPlan { .. } => Ok(()),
     }
 }
