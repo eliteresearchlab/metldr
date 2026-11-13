@@ -70,7 +70,7 @@ async fn respond(message: Value, reply: Option<std::result::Result<Value, String
         if let Some(reply) = reply
             && let Some(Inbound::Call(request)) = rx.recv().await
         {
-            let _ = request.reply.send(reply);
+            let _ = request.reply.send(reply.map(Arc::new));
         }
     };
     let message = process_message(message, "owned:2", tx, active, None);
