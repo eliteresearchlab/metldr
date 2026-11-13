@@ -431,9 +431,10 @@ impl State {
         spawn_local(async move {
             let result = core
                 .flow()
-                .decide_plan(core.scope.clone(), plan.run, plan.revision, approve)
+                .decide_plan(core.scope.clone(), plan.run.clone(), plan.revision, approve)
                 .await
                 .and_then(|view| core.accept(view).map(|_| ()));
+            finish_plan(&core.plan_operation, &plan.run, plan.revision);
             updates.finish(result);
         });
     }
@@ -907,6 +908,7 @@ mod followup_tests {
                     scale: 1.0,
                     ink: oklch(0.5, 0.0, 0.0),
                 },
+                State::decide_plan,
             )
         }
         let mut rt = Runtime::new(State::default(), view, (640.0, 300.0), Env::default());
@@ -926,6 +928,96 @@ mod followup_tests {
         let plan = sample_plan(crate::model::PlanState::Proposed);
         assert!(!Tx::default().consume_activation(&plan_key(&plan, true)));
         assert_ne!(plan_key(&plan, true), plan_key(&plan, false));
+    }
+
+    #[derive(Default)]
+    struct PlanTest {
+        pending: RefCell<Option<(RunId, u32)>>,
+        replies: Vec<serde_json::Value>,
+    }
+
+    fn test_plan_view(state: &PlanTest, _: &mut Cx<PlanTest>) -> El {
+        let plan = sample_plan(crate::model::PlanState::Proposed);
+        let enabled = state.pending.borrow().as_ref() != Some(&(plan.run.clone(), plan.revision));
+        plan_view(
+            &plan,
+            enabled,
+            preferences::Typography {
+                scale: 1.0,
+                ink: oklch(0.5, 0.0, 0.0),
+            },
+            |state: &mut PlanTest, plan, approve, _| {
+                *state.pending.borrow_mut() = Some((plan.run.clone(), plan.revision));
+                state
+                    .replies
+                    .push(crate::flow::plan_reply(&plan.run, plan.revision, approve));
+            },
+        )
+    }
+
+    #[test]
+    fn enter_approves_the_displayed_revision_once() {
+        let mut rt = Runtime::new(
+            PlanTest::default(),
+            test_plan_view,
+            (640.0, 300.0),
+            Env::default(),
+        );
+        rt.set_tab_visits_controls(true);
+        rt.frame(0.0);
+        rt.key(KeyEvent {
+            key: Key::Tab,
+            mods: Mods::default(),
+        });
+        rt.frame(0.0);
+        let plan = sample_plan(crate::model::PlanState::Proposed);
+        assert_eq!(
+            rt.elements()
+                .iter()
+                .find(|el| el.focused)
+                .and_then(|el| el.key.as_deref()),
+            Some(plan_key(&plan, true).as_str())
+        );
+        let enter = KeyEvent {
+            key: Key::Enter,
+            mods: Mods::default(),
+        };
+        rt.key(enter.clone());
+        rt.repeat_key(enter);
+        rt.frame(0.0);
+        assert_eq!(
+            rt.state.replies,
+            vec![
+                serde_json::json!({"op":"plan_reply", "run":plan.run, "revision":7, "approve":true})
+            ]
+        );
+    }
+
+    #[test]
+    fn failed_reply_reenables_buttons_without_clearing_newer_work() {
+        let plan = sample_plan(crate::model::PlanState::Proposed);
+        let state = PlanTest::default();
+        *state.pending.borrow_mut() = Some((plan.run.clone(), plan.revision));
+        let mut rt = Runtime::new(state, test_plan_view, (640.0, 300.0), Env::default());
+        rt.frame(0.0);
+        assert!(
+            rt.elements()
+                .iter()
+                .filter(|el| el.role == "button")
+                .all(|el| !el.focusable)
+        );
+        finish_plan(&rt.state.pending, &plan.run, plan.revision + 1);
+        assert!(rt.state.pending.borrow().is_some());
+        finish_plan(&rt.state.pending, &plan.run, plan.revision);
+        let mut rt = Runtime::new(rt.state, test_plan_view, (640.0, 300.0), Env::default());
+        rt.frame(0.0);
+        let buttons: Vec<_> = rt
+            .elements()
+            .into_iter()
+            .filter(|el| el.role == "button")
+            .collect();
+        assert_eq!(buttons.len(), 2);
+        assert!(buttons.iter().all(|el| el.focusable));
     }
 
     #[test]
@@ -1045,10 +1137,21 @@ fn plan_key(plan: &crate::model::TaskPlanView, approve: bool) -> String {
     )
 }
 
-fn plan_view(
+fn finish_plan(pending: &RefCell<Option<(RunId, u32)>>, run: &RunId, revision: u32) {
+    let mut pending = pending.borrow_mut();
+    if pending
+        .as_ref()
+        .is_some_and(|key| key.0 == *run && key.1 == revision)
+    {
+        *pending = None;
+    }
+}
+
+fn plan_view<S: 'static>(
     plan: &crate::model::TaskPlanView,
     enabled: bool,
     typography: preferences::Typography,
+    decide: fn(&mut S, crate::model::TaskPlanView, bool, &mut Tx),
 ) -> El {
     use crate::model::PlanState;
     let mut card = col()
@@ -1080,15 +1183,15 @@ fn plan_view(
                         .disabled(!enabled)
                         .native_activation()
                         .press(typography.ink.alpha(0.12))
-                        .on_press_tx(move |state: &mut State, tx| {
-                            state.decide_plan(press_plan.clone(), approve, tx)
+                        .on_press_tx(move |state: &mut S, tx| {
+                            decide(state, press_plan.clone(), approve, tx)
                         })
-                        .on_key(move |state: &mut State, key, tx| {
+                        .on_key(move |state: &mut S, key, tx| {
                             if key.key != ::rune::Key::Enter {
                                 return false;
                             }
                             if !tx.key_repeat() {
-                                state.decide_plan(key_plan.clone(), approve, tx);
+                                decide(state, key_plan.clone(), approve, tx);
                             }
                             true
                         }),
@@ -1235,7 +1338,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             && core.flow().is_connected()
             && core.page.view.borrow().active_run() == Some(&plan.run)
             && core.plan_operation.borrow().as_ref() != Some(&(plan.run.clone(), plan.revision));
-        thread = thread.child(plan_view(plan, enabled, typography));
+        thread = thread.child(plan_view(plan, enabled, typography, State::decide_plan));
     }
     if !core.history_loading.get()
         && state

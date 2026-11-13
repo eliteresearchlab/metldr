@@ -27,6 +27,11 @@ pub(crate) use protocol::StopReceipt;
 use protocol::{Protocol, Reply, ReplyCell, ReplyKind, WatchCell};
 type Result<T> = std::result::Result<T, FlowError>;
 
+#[cfg(feature = "rune-ui")]
+pub(crate) fn plan_reply(run: &RunId, revision: u32, approve: bool) -> Value {
+    json!({"op":"plan_reply", "run":run, "revision":revision, "approve":approve})
+}
+
 pub(crate) enum PageTextPrompt {
     Summary,
     Answer(UserText),
@@ -817,6 +822,7 @@ impl FlowClient {
         }
     }
 
+    #[cfg(feature = "rune-ui")]
     pub(crate) async fn decide_plan(
         &self,
         scope: metldr_history_pages::Scope,
@@ -847,10 +853,7 @@ impl FlowClient {
         }
         match self
             .request(
-                conversation(
-                    &scope,
-                    json!({"op":"plan_reply", "run":run, "revision":revision, "approve":approve}),
-                ),
+                conversation(&scope, plan_reply(&run, revision, approve)),
                 ReplyKind::SelectedPage(scope),
             )
             .await?
