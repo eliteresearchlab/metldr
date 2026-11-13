@@ -2181,19 +2181,22 @@ pub(crate) fn valid_ascii_label(value: &str, max: usize) -> bool {
 }
 
 pub(crate) fn valid_https_endpoint(value: &str) -> bool {
-    if value.len() > 1_024
-        || value.contains(['?', '#'])
-        || value.chars().any(char::is_whitespace)
-        || value.chars().any(char::is_control)
+    value.len() <= 1_024
+        && value
+            .strip_prefix("https://")
+            .is_some_and(valid_endpoint_rest)
+}
+
+/// Checks what follows the scheme: no query, fragment, whitespace or control
+/// characters, and a host with an optional port.
+fn valid_endpoint_rest(rest: &str) -> bool {
+    if rest.contains(['?', '#'])
+        || rest.chars().any(char::is_whitespace)
+        || rest.chars().any(char::is_control)
     {
         return false;
     }
-    let Some(authority) = value
-        .strip_prefix("https://")
-        .and_then(|rest| rest.split('/').next())
-    else {
-        return false;
-    };
+    let authority = rest.split('/').next().unwrap_or_default();
     if authority.starts_with('[') {
         let Some((host, suffix)) = authority[1..].split_once(']') else {
             return false;
@@ -2217,23 +2220,24 @@ pub(crate) fn valid_https_endpoint(value: &str) -> bool {
 /// A Chat Completions endpoint: HTTPS, or plain HTTP to a loopback server such as Ollama.
 pub(crate) fn valid_chat_endpoint(value: &str) -> bool {
     valid_https_endpoint(value)
-        || value.strip_prefix("http://").is_some_and(|rest| {
-            let authority = rest.split('/').next().unwrap_or_default();
-            let host = match authority.strip_prefix('[') {
-                Some(bracketed) => bracketed.split_once(']').map(|(host, _)| host),
-                None => Some(
-                    authority
-                        .split_once(':')
-                        .map_or(authority, |(host, _)| host),
-                ),
-            };
-            host.is_some_and(|host| {
-                host.eq_ignore_ascii_case("localhost")
-                    || host
-                        .parse::<std::net::IpAddr>()
-                        .is_ok_and(|ip| ip.is_loopback())
-            }) && valid_https_endpoint(&format!("https://{rest}"))
-        })
+        || (value.len() <= 1_024
+            && value.strip_prefix("http://").is_some_and(|rest| {
+                let authority = rest.split('/').next().unwrap_or_default();
+                let host = match authority.strip_prefix('[') {
+                    Some(bracketed) => bracketed.split_once(']').map(|(host, _)| host),
+                    None => Some(
+                        authority
+                            .split_once(':')
+                            .map_or(authority, |(host, _)| host),
+                    ),
+                };
+                host.is_some_and(|host| {
+                    host.eq_ignore_ascii_case("localhost")
+                        || host
+                            .parse::<std::net::IpAddr>()
+                            .is_ok_and(|ip| ip.is_loopback())
+                }) && valid_endpoint_rest(rest)
+            }))
 }
 
 fn valid_url_port(port: Option<&str>) -> bool {
