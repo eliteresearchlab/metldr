@@ -144,8 +144,13 @@ pub(super) fn focus(state: &State, _: &mut Tx) -> bool {
     let Some(core) = state.core() else {
         return false;
     };
-    let (run, _) = core.rune_correction_offer();
-    if run.is_none() {
+    let (run, available) = core.rune_correction_offer();
+    if run.is_none()
+        || !available
+        || state.corrections.submitted.is_some()
+        || state.draft.preedit.is_some()
+        || UserText::try_from(state.draft.text.as_str()).is_err()
+    {
         return false;
     }
     state.fail(FlowError::InvalidInput(RETRY_MESSAGE.into()));
