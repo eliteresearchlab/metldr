@@ -174,6 +174,29 @@ pub(super) fn native_message(message: JsValue) {
     if browser_background::receive(&message) {
         return;
     }
+    if let Some(request) = get(&message, "request")
+        .ok()
+        .and_then(|value| value.as_string())
+    {
+        if BACKGROUND.with(|state| state.borrow_mut().stop_requests.remove(&request)) {
+            let stopped = get(&message, "stopped")
+                .ok()
+                .and_then(|value| value.as_f64());
+            let failed = get(&message, "failed")
+                .ok()
+                .and_then(|value| value.as_f64());
+            match (kind.as_str(), stopped, failed) {
+                ("stop_all", Some(count), Some(0.0)) if count >= 0.0 => {
+                    crate::stop_report(
+                        &format!("Companion stopped {count} runs."),
+                        &format!("{count}"),
+                    );
+                }
+                _ => crate::stop_report("Stop did not reach every run.", "ERR"),
+            }
+            return;
+        }
+    }
     let Ok(raw) = js_sys::JSON::stringify(&message) else {
         return;
     };

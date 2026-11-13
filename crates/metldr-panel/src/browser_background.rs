@@ -38,6 +38,7 @@ struct Attachment {
     run: String,
     tab: i32,
     document: String,
+    banner_document: String,
     url: String,
     epoch: u64,
     fence: u64,
@@ -314,6 +315,7 @@ async fn attach(
             run: run.clone(),
             tab,
             document: document.clone(),
+            banner_document: document.clone(),
             url: url.clone(),
             epoch,
             fence,
@@ -377,6 +379,10 @@ async fn attach(
             if !set_attached(connection, epoch) {
                 let _ = cleanup_pending(tab, fence, attached).await;
                 return Err("Browser attachment became stale.".into());
+            }
+            if let Err(error) = inject_banner(connection, epoch).await {
+                clear_attachment(connection, epoch);
+                return Err(error);
             }
             Ok(
                 json!({"targetInfo":info.get("targetInfo").cloned().unwrap_or(info),"grant_revision":1}),
@@ -693,6 +699,74 @@ fn release_fence(tab: i32, fence: u64) {
     });
 }
 
+async fn inject_banner(connection: u64, epoch: u64) -> Result<(), String> {
+    verify(connection, epoch).await?;
+    let (tab, document, _) = attachment(connection, epoch)?;
+    let scripting = chrome_api("scripting").map_err(message)?;
+    await_call(
+        &scripting,
+        "executeScript",
+        &[parse(&json!({
+            "target":{"tabId":tab,"documentIds":[document]},
+            "files":["stop-banner.js"]
+        }))
+        .map_err(message)?],
+    )
+    .await
+    .map_err(message)?;
+    if let Err(error) = ensure_epoch(connection, epoch) {
+        remove_banner_document(tab, &document);
+        return Err(error);
+    }
+    STATE.with(|state| {
+        if let Some(active) = state
+            .borrow_mut()
+            .active
+            .as_mut()
+            .filter(|active| active.epoch == epoch)
+        {
+            active.banner_document = document;
+        }
+    });
+    Ok(())
+}
+
+fn remove_banner(tab: i32) {
+    if let Ok(tabs) = chrome_api("tabs") {
+        if let Ok(message) = parse(&json!({"kind":"metldr-banner-remove"})) {
+            let _ = call(
+                &tabs,
+                "sendMessage",
+                &[JsValue::from_f64(tab as f64), message],
+            );
+        }
+    }
+}
+
+fn remove_banner_document(tab: i32, document: &str) {
+    if STATE.with(|state| {
+        state
+            .borrow()
+            .active
+            .as_ref()
+            .is_some_and(|active| active.tab == tab && active.banner_document == document)
+    }) {
+        return;
+    }
+    if let Ok(tabs) = chrome_api("tabs")
+        && let (Ok(message), Ok(options)) = (
+            parse(&json!({"kind":"metldr-banner-remove"})),
+            parse(&json!({"documentId":document})),
+        )
+    {
+        let _ = call(
+            &tabs,
+            "sendMessage",
+            &[JsValue::from_f64(tab as f64), message, options],
+        );
+    }
+}
+
 fn detach_later(tab: i32) -> Option<js_sys::Promise> {
     let fence = STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -733,6 +807,7 @@ async fn cleanup_pending(tab: i32, fence: u64, attached: bool) -> Result<(), Str
     )
     .await;
     result.map_err(message)?;
+    remove_banner(tab);
     release_fence(tab, fence);
     Ok(())
 }
@@ -742,6 +817,142 @@ fn install_listeners() -> Result<(), JsValue> {
     if !install {
         return Ok(());
     }
+    let runtime = chrome_api("runtime")?;
+    let event = get(&runtime, "onMessage")?;
+    let add = get(&event, "addListener")?.dyn_into::<Function>()?;
+    let listener = Closure::<dyn FnMut(JsValue, JsValue, JsValue)>::new(|message, sender, _| {
+        if get(&message, "kind")
+            .ok()
+            .and_then(|value| value.as_string())
+            .as_deref()
+            != Some("metldr-banner-stop")
+        {
+            return;
+        }
+        let tab = get(&sender, "tab")
+            .ok()
+            .and_then(|tab| get(&tab, "id").ok())
+            .and_then(|id| id.as_f64());
+        let document = get(&sender, "documentId")
+            .ok()
+            .and_then(|value| value.as_string());
+        let frame = get(&sender, "frameId")
+            .ok()
+            .and_then(|value| value.as_f64());
+        let target = STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            let active = state.active.as_ref()?;
+            if active.attaching
+                || tab != Some(active.tab as f64)
+                || frame != Some(0.0)
+                || document.as_deref() != Some(active.banner_document.as_str())
+            {
+                return None;
+            }
+            let run = active.run.clone();
+            state.serial = state.serial.wrapping_add(1).max(1);
+            Some((state.connection, state.serial, run))
+        });
+        if let Some((connection, serial, run)) = target {
+            post_native(
+                connection,
+                format!("banner-stop-{serial}"),
+                json!({"op":"stop_run","run":run}),
+            );
+        }
+    });
+    add.call1(&event, listener.as_ref())?;
+    listener.forget();
+    let navigation = chrome_api("webNavigation")?;
+    let event = get(&navigation, "onCommitted")?;
+    let add = get(&event, "addListener")?.dyn_into::<Function>()?;
+    let listener = Closure::<dyn FnMut(JsValue)>::new(|details| {
+        let tab = get(&details, "tabId").ok().and_then(|value| value.as_f64());
+        let frame = get(&details, "frameId")
+            .ok()
+            .and_then(|value| value.as_f64());
+        let document = get(&details, "documentId")
+            .ok()
+            .and_then(|value| value.as_string());
+        let url = get(&details, "url")
+            .ok()
+            .and_then(|value| value.as_string());
+        let active =
+            STATE.with(|state| {
+                let state = state.borrow();
+                let active = state.active.as_ref()?;
+                (tab == Some(active.tab as f64) && frame == Some(0.0) && !active.attaching)
+                    .then_some((state.connection, active.epoch, active.tab))
+            });
+        let (Some((connection, epoch, tab)), Some(document), Some(url)) = (active, document, url)
+        else {
+            return;
+        };
+        let Ok(site) = crate::site::permission(&url) else {
+            return;
+        };
+        spawn_local(async move {
+            if !has_site_access(connection, epoch, &site)
+                .await
+                .unwrap_or(false)
+            {
+                return;
+            }
+            let Ok(navigation) = chrome_api("webNavigation") else {
+                return;
+            };
+            let Ok(target) = parse(&json!({"tabId":tab,"frameId":0})) else {
+                return;
+            };
+            let Ok(frame) = await_call(&navigation, "getFrame", &[target]).await else {
+                return;
+            };
+            if get(&frame, "documentId")
+                .ok()
+                .and_then(|value| value.as_string())
+                .as_deref()
+                != Some(&document)
+                || get(&frame, "url")
+                    .ok()
+                    .and_then(|value| value.as_string())
+                    .as_deref()
+                    != Some(&url)
+                || ensure_epoch(connection, epoch).is_err()
+            {
+                return;
+            }
+            let Ok(scripting) = chrome_api("scripting") else {
+                return;
+            };
+            let Ok(target) = parse(
+                &json!({"target":{"tabId":tab,"documentIds":[document]},"files":["stop-banner.js"]}),
+            ) else {
+                return;
+            };
+            if await_call(&scripting, "executeScript", &[target])
+                .await
+                .is_err()
+            {
+                return;
+            }
+            if ensure_epoch(connection, epoch).is_err() {
+                remove_banner_document(tab, &document);
+                return;
+            }
+            STATE.with(|state| {
+                if let Some(active) = state
+                    .borrow_mut()
+                    .active
+                    .as_mut()
+                    .filter(|active| active.epoch == epoch)
+                {
+                    active.banner_document = document;
+                }
+            });
+        });
+    });
+    add.call1(&event, listener.as_ref())?;
+    listener.forget();
     let debugger = chrome_api("debugger")?;
     let event = get(&debugger, "onEvent")?;
     let add = get(&event, "addListener")?.dyn_into::<Function>()?;
@@ -787,6 +998,7 @@ fn on_detach(source: JsValue) {
         attachment
     });
     if let Some(active) = attachment {
+        remove_banner(active.tab);
         post_event(
             active.run,
             active.tab,

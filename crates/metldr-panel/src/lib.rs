@@ -1,6 +1,6 @@
 use metldr_history_pages::WIRE_VERSION;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
 use js_sys::{Array, Function, Object, Promise, Reflect};
 use serde_json::{Value, json};
@@ -55,6 +55,93 @@ struct Background {
     panels: Vec<JsValue>,
     watches: Vec<PanelWatch>,
     next_cleanup: u64,
+    stop_requests: BTreeSet<String>,
+    stop_badge_epoch: u64,
+}
+
+#[wasm_bindgen]
+pub fn stop_all_runs() {
+    if let Err(error) = request_stop_all() {
+        stop_report(
+            &format!("Stop could not reach the companion: {}", js_message(&error)),
+            "ERR",
+        );
+    }
+}
+
+fn request_stop_all() -> Result<(), JsValue> {
+    if BACKGROUND.with(|state| state.borrow().native.is_none()) {
+        connect_native()?;
+    }
+    let request = next_cleanup_request().ok_or_else(|| err("Stop request identity exhausted."))?;
+    let frame = js_sys::JSON::parse(
+        &json!({"v":WIRE_VERSION,"request":request,"command":{"op":"stop_all"}}).to_string(),
+    )?;
+    let (native, ready) = BACKGROUND
+        .with(|state| {
+            let mut state = state.borrow_mut();
+            let native = state.native.clone().ok_or(())?;
+            let ready = state.readiness.queue(frame.clone())?;
+            state.stop_requests.insert(request.clone());
+            Ok::<_, ()>((native, ready))
+        })
+        .map_err(|_| err("Companion request queue is unavailable."))?;
+    if ready && let Err(error) = call(&native, "postMessage", &[frame]) {
+        BACKGROUND.with(|state| {
+            state.borrow_mut().stop_requests.remove(&request);
+        });
+        return Err(error);
+    }
+    stop_report("Sending stop request.", "...");
+    let timeout = Closure::once_into_js(move || {
+        if BACKGROUND.with(|state| state.borrow_mut().stop_requests.remove(&request)) {
+            stop_report("Stop delivery was not confirmed.", "ERR");
+        }
+    });
+    call(&js_sys::global(), "setTimeout", &[timeout, 6000.into()])?;
+    Ok(())
+}
+
+fn stop_report(message: &str, badge: &str) {
+    let epoch = BACKGROUND.with(|state| {
+        let mut state = state.borrow_mut();
+        state.stop_badge_epoch = state.stop_badge_epoch.wrapping_add(1);
+        state.stop_badge_epoch
+    });
+    if let Ok(action) = chrome_api("action") {
+        let _ = call(
+            &action,
+            "setBadgeText",
+            &[js_sys::JSON::parse(&json!({"text":badge}).to_string()).unwrap_or(JsValue::NULL)],
+        );
+        let _ = call(
+            &action,
+            "setTitle",
+            &[js_sys::JSON::parse(&json!({"title":message}).to_string()).unwrap_or(JsValue::NULL)],
+        );
+    }
+    forward_panel(
+        &json!({"v":WIRE_VERSION,"request":"stop-notice","kind":"stop_notice","message":message}),
+    );
+    if badge != "..." {
+        let timeout = Closure::once_into_js(move || {
+            if BACKGROUND.with(|state| state.borrow().stop_badge_epoch == epoch)
+                && let Ok(action) = chrome_api("action")
+            {
+                let _ = call(
+                    &action,
+                    "setBadgeText",
+                    &[js_sys::JSON::parse(r#"{"text":""}"#).unwrap()],
+                );
+                let _ = call(
+                    &action,
+                    "setTitle",
+                    &[js_sys::JSON::parse(r#"{"title":"Open metldr"}"#).unwrap()],
+                );
+            }
+        });
+        let _ = call(&js_sys::global(), "setTimeout", &[timeout, 5000.into()]);
+    }
 }
 
 struct PanelWatch {
