@@ -928,6 +928,7 @@ mod tests {
                             ("status", true, false, true),
                             ("settings", true, false, true),
                             ("propose_task_plan", false, false, false),
+                            ("network_requests", true, false, true),
                         ];
                         assert_eq!(
                             tools.len(),

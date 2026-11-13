@@ -63,6 +63,13 @@ impl Actor {
                     Ok(())
                 }
             },
+            Kind::NetworkRequests => match self.network.snapshot() {
+                Ok(snapshot) => self.value(job, snapshot),
+                Err(error) => {
+                    self.finish(job, Err(error));
+                    Ok(())
+                }
+            },
             Kind::PrepareControl {
                 tool,
                 handle,

@@ -59,24 +59,24 @@ const ENTRY_LIMIT: usize = 50;
 const BYTE_LIMIT: usize = 16 * 1024;
 /// Longest text kept for one entry. Longer text is cut at a character boundary.
 const TEXT_LIMIT: usize = 512;
-const URL_LIMIT: usize = 256;
+pub(super) const URL_LIMIT: usize = 256;
 /// Console arguments read for one message.
 const ARGUMENT_LIMIT: usize = 32;
-const REDACTED: &str = "[redacted]";
+pub(super) const REDACTED: &str = "[redacted]";
 
 static SECRET: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(&format!("(?i:{SECRET_METADATA_PATTERN})")).ok());
 static URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)https?://[^\s<>"]+"#).unwrap());
 static PEM: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----").unwrap());
-static CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
     r"(?i)\b(?:bearer|basic)\s+[a-z0-9+/_.=-]+|\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[a-zA-Z0-9_-]{16,}|gh[pousr]_[a-zA-Z0-9_]{16,}|github_pat_[a-zA-Z0-9_]{16,}|AKIA[A-Z0-9]{16})\b"
 ).unwrap()
 });
 
 /// Whether text carries a secret label. An unreadable pattern counts as a match, so nothing leaks.
-fn secret(text: &str) -> bool {
+pub(super) fn secret(text: &str) -> bool {
     SECRET.as_ref().is_none_or(|pattern| pattern.is_match(text))
 }
 
@@ -306,7 +306,7 @@ fn argument(arg: &Value) -> Cow<'_, str> {
     )
 }
 
-fn sanitize_url(value: &str) -> String {
+pub(super) fn sanitize_url(value: &str) -> String {
     let Ok(mut url) = reqwest::Url::parse(value) else {
         return REDACTED.to_owned();
     };
@@ -343,15 +343,16 @@ fn sanitize(text: &str) -> String {
 }
 
 /// The longest prefix of `text` within `limit` bytes that ends on a character boundary.
-fn bounded(text: &str, limit: usize) -> String {
+pub(super) fn bounded(text: &str, limit: usize) -> String {
     let mut end = text.len().min(limit);
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    if let Some(start) = text[..end].rfind('[') {
-        if text[start..].starts_with(REDACTED) && start + REDACTED.len() > end {
-            end = start;
-        }
+    if let Some(start) = text[..end].rfind('[')
+        && text[start..].starts_with(REDACTED)
+        && start + REDACTED.len() > end
+    {
+        end = start;
     }
     text[..end].to_owned()
 }

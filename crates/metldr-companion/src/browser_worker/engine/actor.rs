@@ -187,6 +187,7 @@ pub(super) struct Actor {
     documents: documents::Documents,
     subscriptions: Subscriptions,
     page_logs: PageLogs,
+    network: super::network::NetworkLog,
 }
 impl Actor {
     pub(super) fn new(
@@ -204,6 +205,8 @@ impl Actor {
         let page_logs = PageLogs::default();
         let mut subscriptions = Subscriptions::default();
         page_logs.register(&mut subscriptions);
+        let network = super::network::NetworkLog::default();
+        network.register(&mut subscriptions);
         Self {
             client,
             source,
@@ -235,6 +238,7 @@ impl Actor {
             documents: documents::Documents::default(),
             subscriptions,
             page_logs,
+            network,
         }
     }
     pub(super) async fn run(mut self) -> (Result<()>, Result<()>) {

@@ -21,6 +21,7 @@ use tokio::{
 mod actor;
 mod admission;
 mod events;
+mod network;
 mod observation;
 mod runtime;
 mod scripts;
@@ -80,6 +81,7 @@ enum Kind {
     },
     Scroll(Action),
     PageLogs,
+    NetworkRequests,
 }
 
 pub(super) struct AttachFailure {
@@ -239,6 +241,10 @@ impl Engine {
     }
     pub(super) async fn page_logs(&self) -> Result<Value> {
         self.request(Kind::PageLogs).await
+    }
+
+    pub(super) async fn network_requests(&self) -> Result<Value> {
+        self.request(Kind::NetworkRequests).await
     }
     pub(super) async fn prepare_control(
         &self,
