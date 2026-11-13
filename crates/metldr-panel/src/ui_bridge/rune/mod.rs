@@ -54,6 +54,7 @@ struct Updates {
     closed: Cell<bool>,
     wake: ::rune::Waker,
     archive_epoch: Rc<Cell<u64>>,
+    titles_dirty: Cell<bool>,
 }
 
 impl Updates {
@@ -71,6 +72,7 @@ impl Updates {
             closed: Cell::new(false),
             wake,
             archive_epoch,
+            titles_dirty: Cell::new(false),
         })
     }
 
@@ -95,6 +97,9 @@ impl Updates {
         let mut presentation = self.presentation.borrow_mut();
         if let Event::RunError { message, .. } = &event {
             presentation.error = Some(message.clone());
+        }
+        if matches!(event, Event::RunFinished { .. } | Event::RunError { .. }) {
+            self.titles_dirty.set(true);
         }
         presentation.messages.apply(event)?;
         self.archive_epoch
@@ -124,6 +129,8 @@ struct State {
     preferences: preferences::Preferences,
     settings_open: bool,
     conversations: conversations::Conversations,
+    tabs: conversations::Tabs,
+    focus_tab_after_titles: Option<String>,
     activities: Activities,
     browser_receipts_open: bool,
     answers: answers::Answers,
@@ -152,6 +159,8 @@ impl Default for State {
             preferences: preferences::Preferences::default(),
             settings_open: false,
             conversations: conversations::Conversations::default(),
+            tabs: conversations::Tabs::default(),
+            focus_tab_after_titles: None,
             activities: Activities::default(),
             browser_receipts_open: false,
             answers: answers::Answers::default(),
@@ -224,6 +233,10 @@ impl State {
     }
 
     fn switch_core(&mut self, core: Rc<Core>, previous: &Rc<Updates>) {
+        if let Some(old) = self.core() {
+            let id = old.scope.conversation.clone();
+            self.tabs.save_draft(&id, &self.draft.text);
+        }
         previous.closed.set(true);
         if let Some(active) = self.observation.take() {
             active.detach();
@@ -638,6 +651,7 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
     if let Some(connected) = connected {
         match connected {
             Ok(core) => {
+                let (draft, focus_tab) = state.tabs.arrive(&core.scope.conversation);
                 state
                     .conversations
                     .set_older_cursor(updates.presentation.borrow_mut().older_cursor.take());
@@ -664,6 +678,9 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
                         "Your saved draft could not be opened.".into(),
                     )),
                 }
+                if let Some(draft) = draft.filter(|draft| !draft.is_empty()) {
+                    state.replace_draft(draft);
+                }
                 state.selection = core
                     .page
                     .execution_preference
@@ -685,7 +702,15 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
                     .find(|run| !run.status.is_terminal())
                     .map(|run| Rc::new(active::Active::new(Rc::clone(&core), run)));
                 state.session = Session::Ready(core);
-                tx.focus("rune-composer-field");
+                if let Some(core) = state.core().cloned() {
+                    state.conversations.refresh_titles(&core, &updates);
+                }
+                if focus_tab {
+                    let id = &state.core().unwrap().scope.conversation;
+                    state.focus_tab_after_titles = Some(format!("chat-tab-{id}"));
+                } else {
+                    tx.focus("rune-composer-field");
+                }
                 if let Some(active) = active {
                     let observing = identity().and_then(|id| {
                         let events = Rc::clone(&updates);
@@ -731,6 +756,16 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
                 }
             }
             None => {}
+        }
+        state.conversations.update_titles(&mut state.tabs);
+        if updates.titles_dirty.get() && !state.conversations.busy && !state.running() {
+            updates.titles_dirty.set(false);
+            state.conversations.refresh_titles(&core, &updates);
+        }
+        if !state.conversations.busy
+            && let Some(key) = state.focus_tab_after_titles.take()
+        {
+            tx.focus(key);
         }
     }
     let accepted = updates.presentation.borrow_mut().accepted_draft.take();
@@ -1283,6 +1318,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .role("status")
                 .padding(8.0),
         )
+        .child(state.conversations.tabs(state, core))
         .child(state.conversations.toolbar(state))
         .child(
             thread
