@@ -11,16 +11,18 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{HashSet, VecDeque},
     sync::{Arc, LazyLock, Mutex},
 };
 
 type Handler = Box<dyn FnMut(&RawEvent) + Send>;
 
 /// Handlers by CDP method. Features register once, when the actor is built.
+/// A few methods are subscribed, so a scan beats a map: `==` on `str` rejects
+/// most unsubscribed methods by length alone.
 #[derive(Default)]
 pub(super) struct Subscriptions {
-    handlers: BTreeMap<&'static str, Vec<Handler>>,
+    handlers: Vec<(&'static str, Vec<Handler>)>,
 }
 
 impl Subscriptions {
@@ -29,10 +31,11 @@ impl Subscriptions {
         method: &'static str,
         handler: impl FnMut(&RawEvent) + Send + 'static,
     ) {
-        self.handlers
-            .entry(method)
-            .or_default()
-            .push(Box::new(handler));
+        let handler: Handler = Box::new(handler);
+        match self.handlers.iter_mut().find(|(name, _)| *name == method) {
+            Some((_, handlers)) => handlers.push(handler),
+            None => self.handlers.push((method, vec![handler])),
+        }
     }
 
     /// Offers an event to the handlers for its method. Returns `false` when the
@@ -40,7 +43,7 @@ impl Subscriptions {
     /// it. A method without handlers returns `true`, so the caller handles it as usual.
     pub(super) fn offer(&mut self, event: &RawEvent, owned: impl Fn(Option<&str>) -> bool) -> bool {
         let method: &str = &event.method;
-        let Some(handlers) = self.handlers.get_mut(method) else {
+        let Some((_, handlers)) = self.handlers.iter_mut().find(|(name, _)| *name == method) else {
             return true;
         };
         if !owned(event.session.as_deref()) {
