@@ -10,8 +10,9 @@ let stop = AtomicBool::new(false);
 let client = Client::new(
     "https://api.example.test/v1/chat/completions",
     "configured-model",
-    "example-token",
+    Some("example-token"),
     None,
+    metldr_chat_completions::DEFAULT_TIMEOUT_SECS,
 )?;
 let mut conversation = client.start(Prompt {
     instruction: "Read the current page.",
@@ -32,7 +33,7 @@ use std::sync::atomic::AtomicBool;
 
 # async fn example() -> Result<()> {
 let client = Client::new("https://api.example.test/v1/chat/completions", "configured-model",
-    &std::env::var("MODEL_API_KEY")?, None)?;
+    Some(&std::env::var("MODEL_API_KEY")?), None, metldr_chat_completions::DEFAULT_TIMEOUT_SECS)?;
 client.text("Answer using the supplied source.", "The report lists 17 units.",
     &AtomicBool::new(false), |event| {
         if let TextEvent::Delta(text) = event { print!("{text}"); }
@@ -48,6 +49,10 @@ events, followed by one `Final` snapshot after successful validation. Partial
 text can arrive before an error. The caller owns source selection, history and
 the final run status.
 The same transport bounds and cancellation behavior apply to both paths.
+
+The key is optional. Pass `None` for an endpoint that runs without one, and the
+client sends no authorization header. The response timeout is in seconds and
+must be within `TIMEOUT_SECS` (5 to 600). `DEFAULT_TIMEOUT_SECS` is 45.
 
 For browser tasks, call `next` with Stop, the remaining browser call budget and a `TextEvent` callback. It returns one validated `Invocation` at a time. Execute it through the application's browser authority and submit its actual result with `submit_tool_result`. Every sibling in a model response must validate and fit the remaining budget before the first call is returned. All results must arrive before another HTTP request. `usage` reports optional token counts for the latest completed response.
 

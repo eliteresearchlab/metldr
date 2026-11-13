@@ -205,6 +205,8 @@ pub(super) enum Command {
         endpoint: String,
         model: String,
         key: crate::provider_settings::KeyChange,
+        #[serde(default)]
+        timeout_secs: Option<u16>,
     },
     ProviderRemove {
         protocol: crate::provider_settings::Protocol,

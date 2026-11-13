@@ -5,8 +5,9 @@ fn queued() -> Conversation {
     let client = Client::new(
         "https://example.test/chat/completions",
         "model",
-        "dummy-key",
+        Some("dummy-key"),
         None,
+        crate::DEFAULT_TIMEOUT_SECS,
     )
     .unwrap();
     let mut conversation = client
@@ -43,7 +44,10 @@ fn queued() -> Conversation {
 async fn queued_calls_require_one_matching_result_before_the_next_call() {
     let stop = AtomicBool::new(false);
     let mut conversation = queued();
-    assert_eq!(conversation.request["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(
+        conversation.request["tools"].as_array().unwrap().len(),
+        metldr_browser_tools::definitions().len()
+    );
     assert_eq!(
         conversation.request["tools"][4]["function"]["name"],
         "select_option"

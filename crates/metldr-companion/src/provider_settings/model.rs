@@ -65,21 +65,48 @@ pub(crate) enum Selection {
 pub(crate) struct Connection {
     pub endpoint: String,
     pub model: String,
+    /// Vault entry id. A keyless connection keeps an id for its revision but never writes it.
     pub credential: String,
     pub trust_pem: Option<String>,
+    /// Chat Completions only: the endpoint runs without a key.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keyless: bool,
+    /// Chat Completions only: response timeout in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u16>,
 }
 
 impl Connection {
     pub fn profile(&self, protocol: Protocol, scope: &str, revision: u64) -> Result<Profile> {
+        let pem = self.trust_pem.as_ref().map(|pem| pem.as_bytes().to_vec());
+        if self.keyless {
+            CredentialId::parse(&self.credential)?;
+            return Profile::keyless(
+                &self.endpoint,
+                &self.model,
+                revision,
+                pem,
+                protocol.name(),
+                self.timeout_secs,
+            );
+        }
         Profile::from_keyring(
             &self.endpoint,
             &self.model,
             revision,
             CredentialId::parse(scope)?,
             CredentialId::parse(&self.credential)?,
-            self.trust_pem.as_ref().map(|pem| pem.as_bytes().to_vec()),
+            pem,
             protocol.name(),
+            self.timeout_secs,
         )
+    }
+
+    /// A retired keyless id has no vault entry to remove.
+    pub fn retire(self, retired: &mut Vec<String>) {
+        if !self.keyless {
+            retired.push(self.credential);
+        }
     }
 }
 
@@ -107,7 +134,11 @@ impl<'de> Deserialize<'de> for SecretInput {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum KeyChange {
     Keep,
-    Replace { value: SecretInput },
+    Replace {
+        value: SecretInput,
+    },
+    /// Chat Completions only: save the connection without a key.
+    None,
 }
 
 impl Settings {
@@ -193,6 +224,8 @@ mod checks {
             model: "test-model".into(),
             credential: "b".repeat(32),
             trust_pem: None,
+            keyless: false,
+            timeout_secs: None,
         };
         let mut settings = Settings {
             scope: Some(scope),
@@ -233,5 +266,14 @@ mod checks {
         };
         assert!(runtime.check_deadline().is_err());
         runtime.job.take().unwrap().join().unwrap();
+        // Older panels deny unknown row fields, so default rows must not carry the new ones.
+        let view = crate::provider_settings::Runtime::default().public(&Settings::default());
+        assert!(
+            view["connections"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| { row.get("keyless").is_none() && row.get("timeout_secs").is_none() })
+        );
     }
 }

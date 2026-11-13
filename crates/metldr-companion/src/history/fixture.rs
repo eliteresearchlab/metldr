@@ -343,6 +343,8 @@ pub(super) fn legacy() -> Store {
             model: "fixture-next".into(),
             credential: "b".repeat(32),
             trust_pem: None,
+            keyless: false,
+            timeout_secs: None,
         },
     });
     providers.retired.push("c".repeat(32));

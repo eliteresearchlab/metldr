@@ -137,7 +137,8 @@ impl Edit<'_> {
                     .pending
                     .take()
                     .ok_or("pending provider save disappeared")?;
-                next.retired.push(pending.connection.credential);
+                // A keyless save never wrote the vault, so it has nothing to retire.
+                pending.connection.retire(&mut next.retired);
                 self.replace_settings(scope, &providers, &agents, next, agents.clone())?;
             }
             Ok(())
