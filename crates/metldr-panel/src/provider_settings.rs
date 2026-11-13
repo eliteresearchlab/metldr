@@ -321,7 +321,12 @@ fn save_connection(state: Rc<SettingsPanel>, protocol: ProviderProtocol) {
                 revision,
                 endpoint,
                 model,
-                (!key.is_empty()).then_some(key),
+                if key.is_empty() {
+                    crate::model::ProviderKey::Keep
+                } else {
+                    crate::model::ProviderKey::Replace(key)
+                },
+                None,
             )
             .await;
         finish(

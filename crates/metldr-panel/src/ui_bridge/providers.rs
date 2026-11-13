@@ -98,7 +98,8 @@ impl UiProviderConnection {
         &self,
         endpoint: String,
         model: String,
-        key: Option<String>,
+        key: crate::model::ProviderKey,
+        timeout_secs: Option<u16>,
     ) -> Result<impl Future<Output = Result<js_sys::Undefined, FlowError>> + 'static, FlowError>
     {
         let work = self.begin()?;
@@ -108,7 +109,7 @@ impl UiProviderConnection {
             let result = async {
                 work.current_flow()
                     .await?
-                    .provider_save(protocol, revision, endpoint, model, key)
+                    .provider_save(protocol, revision, endpoint, model, key, timeout_secs)
                     .await
             }
             .await;
@@ -190,7 +191,13 @@ impl UiProviderConnection {
         model: String,
         key: Option<String>,
     ) -> Result<Promise<js_sys::Undefined>, JsValue> {
-        let work = self.save_work(endpoint, model, key).map_err(js_error)?;
+        let key = key.map_or(
+            crate::model::ProviderKey::Keep,
+            crate::model::ProviderKey::Replace,
+        );
+        let work = self
+            .save_work(endpoint, model, key, None)
+            .map_err(js_error)?;
         Ok(future_to_promise_typed(async move {
             work.await.map_err(js_error)
         }))

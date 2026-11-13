@@ -212,27 +212,38 @@ impl FlowClient {
         expected_revision: u64,
         endpoint: String,
         model: String,
-        key: Option<String>,
+        key: crate::model::ProviderKey,
+        timeout_secs: Option<u16>,
     ) -> Result<PageView> {
+        use crate::model::ProviderKey;
+        let chat = protocol == ProviderProtocol::ChatCompletions;
         if !crate::model::valid_https_endpoint(&endpoint)
             || !crate::model::valid_ascii_label(&model, 128)
-            || key.as_ref().is_some_and(|value| {
-                value.is_empty()
-                    || value.len() > 4_096
-                    || !value.bytes().all(|byte| byte.is_ascii_graphic())
-            })
+            || matches!(&key, ProviderKey::Replace(value) if value.is_empty()
+                || value.len() > 4_096
+                || !value.bytes().all(|byte| byte.is_ascii_graphic()))
+            || (!chat && (matches!(key, ProviderKey::None) || timeout_secs.is_some()))
+            || timeout_secs.is_some_and(|secs| !crate::model::PROVIDER_TIMEOUT_SECS.contains(&secs))
         {
             return Err(FlowError::InvalidInput(
                 "Provider settings are invalid or exceed their limits.".into(),
             ));
         }
-        let key = key.map_or_else(
-            || json!({"kind":"keep"}),
-            |value| json!({"kind":"replace","value":value}),
-        );
-        match self.request(json!({"op":"provider_save","protocol":protocol.name(),"expected_revision":expected_revision,"endpoint":endpoint,"model":model,"key":key}), ReplyKind::Page).await? {
+        let key = match key {
+            ProviderKey::Keep => json!({"kind":"keep"}),
+            ProviderKey::Replace(value) => json!({"kind":"replace","value":value}),
+            ProviderKey::None => json!({"kind":"none"}),
+        };
+        let mut request = json!({"op":"provider_save","protocol":protocol.name(),"expected_revision":expected_revision,"endpoint":endpoint,"model":model,"key":key});
+        // Sent only when set, so a save without a timeout still works with an older companion.
+        if let Some(secs) = timeout_secs {
+            request["timeout_secs"] = json!(secs);
+        }
+        match self.request(request, ReplyKind::Page).await? {
             Reply::Page(view) => Ok(view),
-            _ => Err(FlowError::Protocol("Expected the updated provider settings view.".into())),
+            _ => Err(FlowError::Protocol(
+                "Expected the updated provider settings view.".into(),
+            )),
         }
     }
 

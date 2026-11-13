@@ -15,6 +15,9 @@ struct ProviderDraft {
     endpoint: TextEdit,
     model: TextEdit,
     key: TextEdit,
+    /// Chat Completions only.
+    keyless: bool,
+    timeout: TextEdit,
     dirty: bool,
     version: u64,
 }
@@ -67,6 +70,8 @@ impl Default for Settings {
                     endpoint: TextEdit::default(),
                     model: TextEdit::default(),
                     key: TextEdit::default().secure(),
+                    keyless: false,
+                    timeout: TextEdit::default(),
                     dirty: false,
                     version: 0,
                 })
@@ -151,6 +156,13 @@ impl Settings {
                 draft.revision = row.revision;
                 replace_if_changed(&mut draft.endpoint, row.endpoint.as_deref().unwrap_or(""));
                 replace_if_changed(&mut draft.model, row.model.as_deref().unwrap_or(""));
+                draft.keyless = row.keyless;
+                replace_if_changed(
+                    &mut draft.timeout,
+                    &row.timeout_secs
+                        .map(|secs| secs.to_string())
+                        .unwrap_or_default(),
+                );
             }
         }
         for draft in &mut self.agents {
@@ -217,13 +229,27 @@ impl Settings {
             return;
         }
         if save
-            && [&draft.endpoint, &draft.model, &draft.key]
+            && [&draft.endpoint, &draft.model, &draft.key, &draft.timeout]
                 .iter()
                 .any(|edit| edit.preedit.is_some())
         {
             state.settings.message = Some("Finish composing text before saving.");
             return;
         }
+        let chat = draft.protocol == ProviderProtocol::ChatCompletions;
+        let timeout = match draft.timeout.text.trim() {
+            "" => None,
+            text => match text.parse::<u16>() {
+                Ok(secs) if chat && crate::model::PROVIDER_TIMEOUT_SECS.contains(&secs) => {
+                    Some(secs)
+                }
+                _ if save => {
+                    state.settings.message = Some("Response timeout must be 5 to 600 seconds.");
+                    return;
+                }
+                _ => None,
+            },
+        };
         let row = core
             .page
             .view
@@ -233,10 +259,21 @@ impl Settings {
             .iter()
             .find(|row| row.protocol == draft.protocol && row.revision == draft.revision)
             .cloned();
-        let key = if save && row.is_some() && !draft.key.text.is_empty() {
-            Some(std::mem::take(&mut draft.key.text))
+        if save
+            && chat
+            && !draft.keyless
+            && draft.key.text.is_empty()
+            && row.as_ref().is_some_and(|row| row.keyless)
+        {
+            state.settings.message = Some("Enter an API key.");
+            return;
+        }
+        let key = if save && row.is_some() && chat && draft.keyless {
+            crate::model::ProviderKey::None
+        } else if save && row.is_some() && !draft.key.text.is_empty() {
+            crate::model::ProviderKey::Replace(std::mem::take(&mut draft.key.text))
         } else {
-            None
+            crate::model::ProviderKey::Keep
         };
         draft.key.clear();
         let version = draft.version;
@@ -245,7 +282,12 @@ impl Settings {
                 let connection = UiProviderConnection::new(Rc::clone(&core.page), row);
                 if save {
                     connection
-                        .save_work(draft.endpoint.text.clone(), draft.model.text.clone(), key)
+                        .save_work(
+                            draft.endpoint.text.clone(),
+                            draft.model.text.clone(),
+                            key,
+                            timeout,
+                        )
                         .map(|work| Box::pin(work) as WorkFuture)
                 } else {
                     connection
@@ -431,6 +473,7 @@ enum ProviderField {
     Endpoint,
     Model,
     Key,
+    Timeout,
 }
 #[derive(Clone, Copy)]
 enum AgentField {
@@ -471,6 +514,7 @@ fn provider_input(
         ProviderField::Endpoint => &mut state.settings.providers[index].endpoint,
         ProviderField::Model => &mut state.settings.providers[index].model,
         ProviderField::Key => &mut state.settings.providers[index].key,
+        ProviderField::Timeout => &mut state.settings.providers[index].timeout,
     })
     .on_input_change(move |state: &mut State, _| {
         let draft = &mut state.settings.providers[index];
@@ -481,6 +525,9 @@ fn provider_input(
         input = input
             .secure()
             .placeholder("Leave blank to keep the saved key", ink.alpha(0.55));
+    }
+    if matches!(field, ProviderField::Timeout) {
+        input = input.placeholder("45", ink.alpha(0.55));
     }
     col().gap(3.0).child(typography.text(label)).child(input)
 }
@@ -666,8 +713,50 @@ impl Settings {
                     enabled,
                     typography,
                     palette,
-                ))
-                .child(provider_input(
+                ));
+            if draft.protocol == ProviderProtocol::ChatCompletions {
+                let keyless = draft.keyless;
+                section = section
+                    .child(button(
+                        typography,
+                        if keyless {
+                            "No API key: on"
+                        } else {
+                            "No API key: off"
+                        },
+                        format!("{label} No API key: {}", if keyless { "on" } else { "off" }),
+                        format!("settings-provider-{i}-keyless"),
+                        enabled,
+                        move |state| {
+                            let Some(core) = state.core().cloned() else {
+                                return;
+                            };
+                            if !core.page.controls_ready() || core.page.settings_blocked() {
+                                return;
+                            }
+                            if let Some(draft) = state.settings.providers.get_mut(i)
+                                && draft.version == version
+                            {
+                                draft.keyless = !draft.keyless;
+                                draft.key.clear();
+                                draft.dirty = true;
+                                draft.version = draft.version.wrapping_add(1);
+                            }
+                        },
+                    ))
+                    .child(provider_input(
+                        i,
+                        ProviderField::Timeout,
+                        "Response timeout (seconds)",
+                        label,
+                        &draft.timeout,
+                        enabled,
+                        typography,
+                        palette,
+                    ));
+            }
+            if !(draft.protocol == ProviderProtocol::ChatCompletions && draft.keyless) {
+                section = section.child(provider_input(
                     i,
                     ProviderField::Key,
                     "API key",
@@ -677,6 +766,7 @@ impl Settings {
                     typography,
                     palette,
                 ));
+            }
             if conflict {
                 let saved = row.unwrap();
                 section = section

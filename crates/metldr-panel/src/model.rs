@@ -385,7 +385,23 @@ pub(crate) struct ProviderConnectionView {
     pub(crate) endpoint: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub(crate) model: Option<String>,
+    /// Chat Completions only, absent from older companions.
+    #[serde(default)]
+    pub(crate) keyless: bool,
+    #[serde(default)]
+    pub(crate) timeout_secs: Option<u16>,
 }
+
+/// How a provider save treats the API key.
+pub(crate) enum ProviderKey {
+    Keep,
+    Replace(String),
+    /// Chat Completions only: the endpoint runs without a key.
+    None,
+}
+
+/// Shortest and longest response timeout, matching the companion's chat client.
+pub(crate) const PROVIDER_TIMEOUT_SECS: std::ops::RangeInclusive<u16> = 5..=600;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1399,6 +1415,8 @@ fn default_provider_settings() -> ProviderSettingsView {
                 state: ProviderConnectionState::Unmanaged,
                 endpoint: None,
                 model: None,
+                keyless: false,
+                timeout_secs: None,
             })
             .collect(),
     }
@@ -2499,7 +2517,7 @@ mod tests {
             "busy":false,"pending":null,"cleanup_pending":false,"notice":null,
             "connections":[
                 {"protocol":"messages","revision":2,"state":"locked","endpoint":"https://api.example/v1","model":"model-a"},
-                {"protocol":"chat_completions","revision":0,"state":"unmanaged","endpoint":null,"model":null},
+                {"protocol":"chat_completions","revision":3,"state":"ready","endpoint":"https://llm.example/v1/chat/completions","model":"local","keyless":true,"timeout_secs":90},
                 {"protocol":"responses","revision":0,"state":"unmanaged","endpoint":null,"model":null},
                 {"protocol":"google_interactions","revision":1,"state":"removed","endpoint":null,"model":null}
             ]
@@ -2513,6 +2531,10 @@ mod tests {
             decoded.provider_settings.connections[0].state,
             ProviderConnectionState::Locked
         );
+        // Rows from an older companion omit the Chat Completions fields.
+        let chat = &decoded.provider_settings.connections[1];
+        assert!(chat.keyless && chat.timeout_secs == Some(90));
+        assert!(!decoded.provider_settings.connections[0].keyless);
 
         view["provider_settings"]["connections"][1]["protocol"] = serde_json::json!("messages");
         assert!(PageView::decode(&serde_json::to_vec(&view).unwrap()).is_err());
