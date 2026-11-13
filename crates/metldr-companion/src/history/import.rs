@@ -124,6 +124,7 @@ impl Prepared {
             workflows,
             codex_workflows,
             opencode_workflows,
+            harness_workflows: _,
             browser_actions,
             providers,
             agent_settings,

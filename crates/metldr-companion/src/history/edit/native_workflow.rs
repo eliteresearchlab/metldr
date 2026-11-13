@@ -9,6 +9,7 @@ pub(crate) enum NativeWorkflow {
     Pi(crate::agent_model::Workflow),
     Codex(crate::codex_model::Workflow),
     OpenCode(crate::opencode_model::Workflow),
+    Harness(crate::harness_model::Workflow),
 }
 
 impl NativeWorkflow {
@@ -23,6 +24,9 @@ impl NativeWorkflow {
                 ..
             }) | Self::OpenCode(crate::opencode_model::Workflow {
                 binding: crate::opencode_model::Binding::Pending,
+                ..
+            }) | Self::Harness(crate::harness_model::Workflow {
+                binding: crate::harness_model::Binding::Pending,
                 ..
             })
         )
@@ -39,6 +43,9 @@ impl NativeWorkflow {
                 ..
             }) | Self::OpenCode(crate::opencode_model::Workflow {
                 binding: crate::opencode_model::Binding::Bound { .. },
+                ..
+            }) | Self::Harness(crate::harness_model::Workflow {
+                binding: crate::harness_model::Binding::Bound { .. },
                 ..
             })
         )
@@ -62,6 +69,7 @@ impl NativeWorkflow {
             Self::Pi(value) => restore!(value),
             Self::Codex(value) => restore!(value),
             Self::OpenCode(value) => restore!(value),
+            Self::Harness(value) => restore!(value),
         }
         if serde_json::to_vec(self)? != serde_json::to_vec(&restored)? {
             return Err("native continuation changed its profile source or binding".into());
@@ -74,6 +82,7 @@ impl NativeWorkflow {
             Self::Pi(workflow) => &workflow.source,
             Self::Codex(workflow) => &workflow.source,
             Self::OpenCode(workflow) => &workflow.source,
+            Self::Harness(workflow) => &workflow.source,
         }
     }
 
@@ -82,6 +91,7 @@ impl NativeWorkflow {
             Self::Pi(workflow) => workflow.revision,
             Self::Codex(workflow) => workflow.revision,
             Self::OpenCode(workflow) => workflow.revision,
+            Self::Harness(workflow) => workflow.revision,
         }
     }
 
@@ -90,6 +100,7 @@ impl NativeWorkflow {
             Self::Pi(workflow) => &workflow.last_run,
             Self::Codex(workflow) => &workflow.last_run,
             Self::OpenCode(workflow) => &workflow.last_run,
+            Self::Harness(workflow) => &workflow.last_run,
         }
     }
 
@@ -99,6 +110,7 @@ impl NativeWorkflow {
             (Self::Pi(_), Launch::Pi { .. })
                 | (Self::Codex(_), Launch::Codex { .. })
                 | (Self::OpenCode(_), Launch::OpenCode { .. })
+                | (Self::Harness(_), Launch::Harness { .. })
         )
     }
 
@@ -115,6 +127,11 @@ impl NativeWorkflow {
             Self::OpenCode(workflow) => {
                 state
                     .opencode_workflows
+                    .insert(id.to_owned(), workflow.clone());
+            }
+            Self::Harness(workflow) => {
+                state
+                    .harness_workflows
                     .insert(id.to_owned(), workflow.clone());
             }
         }
@@ -147,6 +164,14 @@ impl NativeWorkflow {
                 after.revision,
             ),
             (Self::OpenCode(before), Self::OpenCode(after)) => (
+                before.profile == after.profile,
+                before.fingerprint == after.fingerprint,
+                before.source.id == after.source.id && before.source.page == after.source.page,
+                before.last_run == after.last_run,
+                before.revision,
+                after.revision,
+            ),
+            (Self::Harness(before), Self::Harness(after)) if before.harness == after.harness => (
                 before.profile == after.profile,
                 before.fingerprint == after.fingerprint,
                 before.source.id == after.source.id && before.source.page == after.source.page,

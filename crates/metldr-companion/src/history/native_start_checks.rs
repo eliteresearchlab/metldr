@@ -295,6 +295,7 @@ fn seed_bound_and_terminal(owner: &mut Owner, run: &str, dir: &PathBuf) -> crate
             };
             w.revision += 1;
         }
+        _ => unreachable!("fixtures build no harness workflows"),
     }
     match &mut task.launch {
         Launch::Codex { selection, .. } => {
@@ -365,6 +366,7 @@ fn actual_owner_native_starts_are_record_durable_and_snapshot_compatible() -> cr
             NativeWorkflow::Pi(w) => w.revision,
             NativeWorkflow::Codex(w) => w.revision,
             NativeWorkflow::OpenCode(w) => w.revision,
+            _ => unreachable!("fixtures build no harness workflows"),
         };
         assert_eq!(revision, 2);
         assert_eq!(first.run.source, source);
@@ -403,6 +405,7 @@ fn actual_owner_native_starts_are_record_durable_and_snapshot_compatible() -> cr
             NativeWorkflow::Pi(w) => w.revision,
             NativeWorkflow::Codex(w) => w.revision,
             NativeWorkflow::OpenCode(w) => w.revision,
+            _ => unreachable!("fixtures build no harness workflows"),
         };
         assert_eq!(next_revision, 4);
         assert_eq!(next_task.run.source, source);

@@ -152,5 +152,6 @@ fn block(workflow: &mut NativeWorkflow) {
         NativeWorkflow::Pi(value) => value.binding.block_recovery(),
         NativeWorkflow::Codex(value) => value.binding.block_recovery(),
         NativeWorkflow::OpenCode(value) => value.binding.block_recovery(),
+        NativeWorkflow::Harness(value) => value.binding.block_recovery(),
     }
 }

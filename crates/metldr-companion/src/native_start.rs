@@ -213,6 +213,17 @@ fn new_workflow(profile: NativeProfile, source: Source, fingerprint: String) -> 
                 binding: crate::opencode_model::Binding::Pending,
             })
         }
+        NativeProfile::Harness(harness, profile) => {
+            NativeWorkflow::Harness(crate::harness_model::Workflow {
+                harness: harness.into(),
+                profile,
+                fingerprint,
+                source,
+                revision: 1,
+                last_run: String::new(),
+                binding: crate::harness_model::Binding::Pending,
+            })
+        }
     }
 }
 
@@ -237,6 +248,11 @@ fn validate_followup(
             if w.revision == revision && w.fingerprint == fingerprint =>
         {
             w.binding.resume()?.is_some()
+        }
+        (NativeWorkflow::Harness(w), NativeProfile::Harness(harness, _))
+            if w.harness == *harness && w.revision == revision && w.fingerprint == fingerprint =>
+        {
+            w.binding.resume(&w.harness)?.is_some()
         }
         _ => return Err("native workflow revision profile or kind changed".into()),
     };
@@ -286,6 +302,15 @@ fn records(
                 input_digest,
                 workflow: workflow.into(),
                 selection: None,
+                activity: vec![],
+            }
+        }
+        NativeWorkflow::Harness(w) => {
+            advance!(w);
+            Launch::Harness {
+                input_digest,
+                harness: w.harness.clone(),
+                workflow: workflow.into(),
                 activity: vec![],
             }
         }

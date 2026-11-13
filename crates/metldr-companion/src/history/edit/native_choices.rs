@@ -35,6 +35,7 @@ impl NativeChoices {
                 Kind::Pi => "agent_sessions",
                 Kind::Codex => "codex_sessions",
                 Kind::Opencode => "opencode_sessions",
+                Kind::Claude => "claude_sessions",
             };
             view[field] = match self.0.get(&kind) {
                 Some(choices) => serde_json::to_value(choices)?,
@@ -50,6 +51,7 @@ fn table(kind: Kind) -> TableDefinition<'static, &'static str, &'static [u8]> {
         Kind::Pi => PI,
         Kind::Codex => CODEX,
         Kind::Opencode => OPENCODE,
+        Kind::Claude => HARNESS,
     }
 }
 
@@ -58,6 +60,7 @@ fn fingerprint(workflow: &NativeWorkflow) -> (Kind, &str) {
         NativeWorkflow::Pi(w) => (Kind::Pi, &w.fingerprint),
         NativeWorkflow::Codex(w) => (Kind::Codex, &w.fingerprint),
         NativeWorkflow::OpenCode(w) => (Kind::Opencode, &w.fingerprint),
+        NativeWorkflow::Harness(w) => (Kind::Claude, &w.fingerprint),
     }
 }
 
@@ -137,6 +140,7 @@ impl Reader<'_> {
             Kind::Pi => load!(PI, crate::agent_model::Workflow, Pi),
             Kind::Codex => load!(CODEX, crate::codex_model::Workflow, Codex),
             Kind::Opencode => load!(OPENCODE, crate::opencode_model::Workflow, OpenCode),
+            Kind::Claude => load!(HARNESS, crate::harness_model::Workflow, Harness),
         })
     }
 
@@ -178,6 +182,7 @@ impl Reader<'_> {
             workflows: BTreeMap::new(),
             codex_workflows: BTreeMap::new(),
             opencode_workflows: BTreeMap::new(),
+            harness_workflows: Default::default(),
             browser_actions: BTreeMap::new(),
             providers: profile.providers.clone(),
             agent_settings: profile.agents.clone(),
@@ -188,6 +193,10 @@ impl Reader<'_> {
             NativeWorkflow::Pi(w) => w.binding.resume_path().is_ok_and(|path| path.is_some()),
             NativeWorkflow::Codex(w) => w.binding.resume().is_ok_and(|value| value.is_some()),
             NativeWorkflow::OpenCode(w) => w.binding.resume().is_ok_and(|value| value.is_some()),
+            NativeWorkflow::Harness(w) => w
+                .binding
+                .resume(&w.harness)
+                .is_ok_and(|value| value.is_some()),
         };
         let (_, fingerprint) = fingerprint(&workflow);
         Ok(Entry {

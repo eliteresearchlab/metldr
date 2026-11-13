@@ -149,6 +149,8 @@ pub(super) struct Store {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) opencode_workflows: BTreeMap<String, crate::opencode_model::Workflow>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) harness_workflows: BTreeMap<String, crate::harness_model::Workflow>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) browser_actions: BTreeMap<String, crate::browser_action::Action>,
     pub(super) providers: crate::provider_settings::Settings,
     pub(super) agent_settings: crate::agent_settings::Settings,

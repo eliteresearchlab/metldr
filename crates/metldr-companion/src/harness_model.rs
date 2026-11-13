@@ -62,6 +62,20 @@ impl Binding {
         *self = Self::ReleaseUnknown { previous };
     }
 
+    /// Whether a saved workflow may move from this binding to `after`.
+    pub fn can_become(&self, after: &Self) -> bool {
+        match (self, after) {
+            (Self::Pending, Self::Pending | Self::Bound { .. })
+            | (Self::Pending, Self::ReleaseUnknown { previous: None }) => true,
+            (Self::Bound { session: a }, Self::Bound { session: b }) => a == b,
+            (Self::Bound { session }, Self::ReleaseUnknown { previous: Some(previous) }) => {
+                session == previous
+            }
+            (Self::ReleaseUnknown { previous: a }, Self::ReleaseUnknown { previous: b }) => a == b,
+            _ => false,
+        }
+    }
+
     /// The session to resume, `None` for a new one.
     pub fn resume(&self, harness: &str) -> Result<Option<String>> {
         match self {

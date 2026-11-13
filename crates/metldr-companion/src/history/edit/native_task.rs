@@ -84,6 +84,9 @@ impl Edit<'_> {
                 Launch::OpenCode { .. } => {
                     load!(OPENCODE, crate::opencode_model::Workflow, OpenCode)
                 }
+                Launch::Harness { .. } => {
+                    load!(HARNESS, crate::harness_model::Workflow, Harness)
+                }
                 _ => return Err("task has no native workflow".into()),
             };
             let source = saved.value.source();
@@ -118,6 +121,7 @@ impl Edit<'_> {
             workflows: BTreeMap::new(),
             codex_workflows: BTreeMap::new(),
             opencode_workflows: BTreeMap::new(),
+            harness_workflows: Default::default(),
             browser_actions: BTreeMap::new(),
             providers: self.profile.providers.clone(),
             agent_settings: self.profile.agents.clone(),
@@ -202,6 +206,7 @@ impl Edit<'_> {
             NativeWorkflow::Pi(value) => save!(PI, value),
             NativeWorkflow::Codex(value) => save!(CODEX, value),
             NativeWorkflow::OpenCode(value) => save!(OPENCODE, value),
+            NativeWorkflow::Harness(value) => save!(HARNESS, value),
         }
         Ok(())
     }
