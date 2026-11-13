@@ -47,7 +47,6 @@
     "sidePanel",
     "storage",
     "scripting",
-    "activeTab",
     "tabs",
     "offscreen",
     "nativeMessaging",
@@ -55,9 +54,6 @@
     "webNavigation"
   ],
   "host_permissions": [
-    "http://localhost:11434/*",
-    "http://127.0.0.1:11434/*",
-    "https://mail.google.com/*",
     "<all_urls>"
   ],
   "web_accessible_resources": [
