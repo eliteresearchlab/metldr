@@ -10,6 +10,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Deserialize)]
 struct Census {
+    #[serde(default)]
+    scoped: bool,
+    #[serde(default)]
+    readonly_fields: Vec<ReadonlyField>,
     url: String,
     title: String,
     text: String,
@@ -25,6 +29,12 @@ struct Census {
     controls: Vec<NativeControl>,
     frame_scroll_targets_observed: bool,
     scroll_targets: Vec<CensusScrollTarget>,
+}
+
+#[derive(Deserialize, serde::Serialize)]
+struct ReadonlyField {
+    label: String,
+    value: String,
 }
 
 #[derive(Deserialize)]
@@ -114,6 +124,31 @@ pub(super) struct Snapshot {
 }
 
 impl Snapshot {
+    pub(super) fn contains(&self, handle: &str) -> bool {
+        self.fields.contains_key(handle)
+            || self.buttons.contains_key(handle)
+            || self.selects.contains_key(handle)
+            || self.controls.contains_key(handle)
+            || self.scroll_targets.contains_key(handle)
+    }
+
+    pub(super) fn scope(&self, handle: &str) -> Result<String> {
+        let (collection, slot) = if let Some(field) = self.fields.get(handle) {
+            ("root", field.slot)
+        } else if let Some(button) = self.buttons.get(handle) {
+            ("root.__metldr_buttons", button.slot)
+        } else if let Some(control) = self.selects.get(handle) {
+            ("root.__metldr_selects", control.slot)
+        } else if let Some(control) = self.controls.get(handle) {
+            ("root.__metldr_controls", control.slot)
+        } else if let Some(target) = self.scroll_targets.get(handle) {
+            ("root.__metldr_scrollers", target.slot)
+        } else {
+            return Err("stale snapshot ref: observe the page again".into());
+        };
+        Ok(format!("refElement({collection}[{slot}])"))
+    }
+
     pub(super) fn from_census(
         context: FrameContext,
         root: RemoteObjectId,
@@ -218,7 +253,7 @@ impl Snapshot {
             observed_controls.push(control.public(&handle));
             controls.insert(handle, control.clone());
         }
-        let result = json!({
+        let mut result = json!({
             "kind": "page_observation",
             "untrusted": true,
             "url": census.url,
@@ -237,6 +272,12 @@ impl Snapshot {
             "controls_truncated": census.controls_truncated,
             "controls": observed_controls,
         });
+        if census.scoped {
+            result["scoped"] = json!(true);
+        }
+        if !census.readonly_fields.is_empty() {
+            result["readonly_fields"] = json!(census.readonly_fields);
+        }
         Ok((
             Self {
                 context,
@@ -254,30 +295,30 @@ impl Snapshot {
     pub(super) fn field(&self, handle: &str) -> Result<&Field> {
         self.fields
             .get(handle)
-            .ok_or_else(|| "invalid or expired browser field handle".into())
+            .ok_or_else(|| "stale browser field ref; observe the page again".into())
     }
     pub(super) fn button(&self, handle: &str) -> Result<&Field> {
         self.buttons
             .get(handle)
-            .ok_or_else(|| "invalid or expired browser button handle".into())
+            .ok_or_else(|| "stale browser button ref; observe the page again".into())
     }
 
     pub(super) fn select(&self, handle: &str) -> Result<&SelectControl> {
         self.selects
             .get(handle)
-            .ok_or_else(|| "invalid or expired browser selection handle".into())
+            .ok_or_else(|| "stale browser selection ref; observe the page again".into())
     }
 
     pub(super) fn scroll_target(&self, handle: &str) -> Result<&ScrollTarget> {
         self.scroll_targets
             .get(handle)
-            .ok_or_else(|| "invalid or expired browser scroll handle".into())
+            .ok_or_else(|| "stale browser scroll ref; observe the page again".into())
     }
 
     pub(super) fn control(&self, handle: &str) -> Result<&NativeControl> {
         self.controls
             .get(handle)
-            .ok_or_else(|| "invalid or expired browser control handle".into())
+            .ok_or_else(|| "stale browser control ref; observe the page again".into())
     }
 }
 
@@ -291,6 +332,11 @@ impl Census {
             || self.url.len() > 2048
             || self.title.len() > 128
             || self.text.len() > 4096
+            || self.readonly_fields.len() > 32
+            || self
+                .readonly_fields
+                .iter()
+                .any(|field| !valid_label(&field.label) || field.value.len() > 1024)
             || [&self.fields, &self.buttons].into_iter().any(|controls| {
                 let mut slots = BTreeSet::new();
                 controls.len() > 32
@@ -336,7 +382,7 @@ impl Census {
         {
             return Err("invalid or oversized browser selection observation".into());
         }
-        if self.scroll_targets.is_empty()
+        if (!self.scoped && self.scroll_targets.is_empty())
             || self.scroll_targets.len() > 16
             || self.frame_scroll_targets_observed
             || self
@@ -348,7 +394,7 @@ impl Census {
                         || !valid_label(&target.label)
                         || !numeric_position(&target.x)
                         || !numeric_position(&target.y)
-                        || (slot == 0 && target.kind != ScrollKind::Page)
+                        || (!self.scoped && slot == 0 && target.kind != ScrollKind::Page)
                         || (slot > 0 && target.kind != ScrollKind::Region)
                 })
         {
@@ -393,6 +439,11 @@ mod checks {
         });
         assert!(census.validate().is_err());
         census.fields.pop();
+        census.scoped = true;
+        census.scroll_targets.clear();
+        census.validate().unwrap();
+        census.scoped = false;
+        assert!(census.validate().is_err());
         census.text = "x".repeat(4097);
         assert!(census.validate().is_err());
     }

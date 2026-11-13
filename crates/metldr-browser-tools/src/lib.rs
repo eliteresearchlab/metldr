@@ -42,6 +42,9 @@ pub enum ScrollDirection {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Call {
     Observe,
+    ObserveWithin {
+        within: String,
+    },
     Navigate {
         destination: String,
     },

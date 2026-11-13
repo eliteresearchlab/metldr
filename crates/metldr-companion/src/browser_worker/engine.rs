@@ -37,6 +37,9 @@ struct Request {
     job: Job,
 }
 enum Kind {
+    ActionScope {
+        handle: String,
+    },
     PrepareControl {
         tool: String,
         handle: String,
@@ -45,6 +48,7 @@ enum Kind {
     SetNativeControl(Action),
     Observe {
         generation: u64,
+        within: Option<String>,
     },
     PrepareChange {
         tool: String,
@@ -218,8 +222,14 @@ impl Engine {
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
         Ok(serde_json::from_value(value)?)
     }
-    pub(super) async fn observe(&self, generation: u64) -> Result<Value> {
-        self.request(Kind::Observe { generation }).await
+    pub(super) async fn observe(&self, generation: u64, within: Option<String>) -> Result<Value> {
+        self.request(Kind::Observe { generation, within }).await
+    }
+    pub(super) async fn child_action(&self, handle: &str) -> Result<bool> {
+        self.request(Kind::ActionScope {
+            handle: handle.into(),
+        })
+        .await
     }
     pub(super) async fn page_logs(&self) -> Result<Value> {
         self.request(Kind::PageLogs).await

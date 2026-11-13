@@ -84,6 +84,29 @@ impl Tools {
         if stop.load(Ordering::Acquire) {
             return Err("browser task stopped".into());
         }
+        let handle = match &call {
+            Call::Change { handle, .. }
+            | Call::ActivateButton { handle }
+            | Call::SelectOption { handle, .. }
+            | Call::Scroll { handle, .. }
+            | Call::SetNativeControl { handle, .. } => Some(handle),
+            _ => None,
+        };
+        if let Some(handle) = handle
+            && self
+                .engine
+                .as_ref()
+                .ok_or("browser is not attached")?
+                .child_action(handle)
+                .await?
+        {
+            let result = serde_json::to_value(Outcome::Prevented {
+                reason: "actions inside frames are not supported yet".into(),
+            })?;
+            self.completed
+                .insert(call_id.to_owned(), (call, result.clone()));
+            return Ok(result);
+        }
         let result = match &call {
             Call::SetNativeControl { handle, checked } => {
                 let prepared = self
@@ -102,6 +125,7 @@ impl Tools {
                 }
             }
             Call::Observe => self.observe().await?,
+            Call::ObserveWithin { within } => self.observe_within(Some(within.clone())).await?,
             Call::Navigate { destination } => {
                 self.navigate(call_id, destination, stop, budget).await?
             }
@@ -223,6 +247,10 @@ impl Tools {
     }
 
     async fn observe(&mut self) -> Result<Value> {
+        self.observe_within(None).await
+    }
+
+    async fn observe_within(&mut self, within: Option<String>) -> Result<Value> {
         self.observation_generation = self
             .observation_generation
             .checked_add(1)
@@ -230,7 +258,7 @@ impl Tools {
         self.engine
             .as_ref()
             .ok_or("browser is not attached")?
-            .observe(self.observation_generation)
+            .observe(self.observation_generation, within)
             .await
     }
 
@@ -321,6 +349,8 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
         Call::SetNativeControl { handle, .. } if valid_handle(handle) => Ok(()),
         Call::SetNativeControl { .. } => Err("invalid native control handle".into()),
         Call::Observe => Ok(()),
+        Call::ObserveWithin { within } if valid_handle(within) => Ok(()),
+        Call::ObserveWithin { .. } => Err("invalid observation scope ref".into()),
         Call::Navigate { destination }
             if !destination.is_empty()
                 && destination.len() <= 2048

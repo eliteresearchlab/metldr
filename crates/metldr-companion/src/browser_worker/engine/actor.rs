@@ -29,6 +29,7 @@ mod buttons;
 mod controls;
 mod initialization;
 mod navigation;
+mod observation;
 mod requests;
 mod results;
 mod scroll;
@@ -64,10 +65,6 @@ enum Work {
     },
     Init(Initialization),
     CreateWorld,
-    ReleaseObserve {
-        generation: u64,
-        job: Job,
-    },
     Capture {
         generation: u64,
         job: Job,
@@ -173,6 +170,12 @@ pub(super) struct Actor {
     offers: VecDeque<runtime::Dispatch>,
     inflight: FuturesUnordered<BoxFuture<'static, (Completion, runtime::Result<Value>)>>,
     snapshot: Option<Snapshot>,
+    snapshots: Vec<Snapshot>,
+    observation_contexts: VecDeque<FrameContext>,
+    observation_results: Vec<Value>,
+    observation_bytes: usize,
+    retired_snapshots: Vec<Snapshot>,
+    frames_truncated: bool,
     generation: u64,
     busy: bool,
     seen: HashSet<(String, u64)>,
@@ -214,6 +217,12 @@ impl Actor {
             offers: VecDeque::new(),
             inflight: FuturesUnordered::new(),
             snapshot: None,
+            snapshots: Vec::new(),
+            observation_contexts: VecDeque::new(),
+            observation_results: Vec::new(),
+            observation_bytes: 0,
+            retired_snapshots: Vec::new(),
+            frames_truncated: false,
             generation: 0,
             busy: false,
             seen: HashSet::new(),
@@ -523,8 +532,7 @@ impl Actor {
 impl Work {
     fn job(&self) -> Option<&Job> {
         match self {
-            Self::ReleaseObserve { job, .. }
-            | Self::Capture { job, .. }
+            Self::Capture { job, .. }
             | Self::Census { job, .. }
             | Self::ReadField { job, .. }
             | Self::ReadButton { job, .. }

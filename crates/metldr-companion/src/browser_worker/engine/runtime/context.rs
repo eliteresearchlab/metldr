@@ -310,6 +310,53 @@ impl ContextMap {
         })
     }
 
+    pub fn observation_contexts(&self) -> (Vec<FrameContext>, bool) {
+        let mut truncated = false;
+        let mut contexts = Vec::new();
+        for id in self.frames.keys().filter(|id| self.observable_frame(id)) {
+            match (self.frame_depth(id), self.context(id)) {
+                (Some(0..=3), Some(context)) => contexts.push(context),
+                _ => truncated = true,
+            }
+        }
+        contexts.sort_by(|a, b| a.frame.cmp(&b.frame));
+        if let Some(main) = self.main_context() {
+            contexts.retain(|context| context != &main);
+            contexts.insert(0, main);
+        }
+        (contexts, truncated)
+    }
+
+    fn frame_depth(&self, id: &str) -> Option<usize> {
+        let mut frame = self.frames.get(id)?;
+        let mut depth = 0;
+        while let Some(parent) = &frame.parent {
+            depth += 1;
+            if depth > 3 {
+                return Some(depth);
+            }
+            frame = self.frames.get(parent)?;
+        }
+        Some(depth)
+    }
+
+    fn observable_frame(&self, id: &str) -> bool {
+        let mut current = Some(id);
+        for _ in 0..64 {
+            let Some(frame) = current.and_then(|id| self.frames.get(id)) else {
+                return false;
+            };
+            if crate::model::validate_page_url(&frame.url).is_ok() {
+                return true;
+            }
+            if !matches!(frame.url.as_str(), "about:blank" | "about:srcdoc") {
+                return false;
+            }
+            current = frame.parent.as_deref();
+        }
+        false
+    }
+
     /// Whether a session belongs to this tab. Events from any other session are not ours.
     pub fn owns(&self, session: Option<&str>) -> bool {
         self.sessions.contains_key(&session.map(str::to_owned))
