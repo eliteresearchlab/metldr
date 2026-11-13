@@ -234,21 +234,24 @@ impl Owner {
     }
 
     pub(super) fn stop_run(&mut self, id: &str, run: &str) -> Result<()> {
-        let terminal = self.record_execution(run, |edit, execution| {
-            Ok(edit.run(execution, run)?.status.terminal())
-        })?;
-        if terminal {
-            return self.reply_stop(id, "already_terminal", run);
-        }
         let pending = self.detach_inputs(run);
+        let mut active = false;
         let saved = self.record_execution(run, |edit, execution| {
-            edit.prevent_browser(execution, run, "user stopped before dispatch")?;
             let mut record = edit.run(execution, run)?;
+            if record.status.terminal() {
+                return Ok(false);
+            }
+            active = true;
+            edit.prevent_browser(execution, run, "user stopped before dispatch")?;
             record.status = Status::StopRequested;
             edit.put_run(execution, record)?;
-            Ok(())
+            Ok(true)
         });
-        if let Some(operation) = self.operations.get(run) {
+        if matches!(saved, Ok(false)) {
+            self.restore_inputs(pending);
+            return self.reply_stop(id, "already_terminal", run);
+        }
+        if active && let Some(operation) = self.operations.get(run) {
             operation.stop.store(true, Ordering::Release);
         }
         if let Err(error) = saved {
