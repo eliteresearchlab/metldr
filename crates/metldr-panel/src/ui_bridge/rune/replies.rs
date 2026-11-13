@@ -258,13 +258,27 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                         }
                     }
                 }
+                let ready = enabled
+                    && questions.iter().all(|question| {
+                        let key = field_key(&run, &request, "question", &question.id);
+                        let selected = state.replies.selected.get(&key).map_or(0, Vec::len);
+                        let other = state
+                            .replies
+                            .edits
+                            .get(&key)
+                            .map_or("", |edit| edit.text.as_str());
+                        let length = other.chars().count();
+                        length <= 4096
+                            && selected + usize::from(length > 0) <= 16
+                            && (selected > 0 || length > 0)
+                    });
                 let action_key = rune_reply_key("codex", &run, &request, "questions");
                 let submit_run = run.clone();
                 let submit_request = request.clone();
                 panel = panel.child(activate(
-                    button(typography, "Submit answers".into(), action_key, enabled)
+                    button(typography, "Submit answers".into(), action_key, ready)
                         .label(format!("Submit answers for request {}", request.as_str())),
-                    enabled,
+                    ready,
                     move |state: &mut State, tx| {
                         if questions.iter().any(|question| {
                             let key =
