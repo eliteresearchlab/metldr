@@ -122,6 +122,11 @@ impl Log {
         }
     }
 
+    /// Whether output from `session` is recorded now. Checked before any redaction work.
+    fn records(&self, session: Option<&str>) -> bool {
+        !self.paused && self.armed.iter().any(|armed| armed.as_deref() == session)
+    }
+
     fn clear(&mut self) {
         self.entries.clear();
         self.bytes = 0;
@@ -205,7 +210,7 @@ impl PageLogs {
     }
 
     fn console_for(&self, session: Option<&str>, params: &Value) {
-        if self.0.lock().map_or(true, |log| log.paused) {
+        if !self.0.lock().is_ok_and(|log| log.records(session)) {
             return;
         }
         let args = params["args"]
@@ -286,7 +291,7 @@ impl PageLogs {
         let Ok(mut log) = self.0.lock() else {
             return;
         };
-        if log.paused || !log.armed.contains(&session.map(str::to_owned)) {
+        if !log.records(session) {
             return;
         }
         let entry = Entry {
