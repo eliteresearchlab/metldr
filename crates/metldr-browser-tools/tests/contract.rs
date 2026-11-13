@@ -6,6 +6,21 @@ use serde_json::json;
 
 #[test]
 fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
+    assert_eq!(decode_call("propose_task_plan", json!({"goal":"Update field", "intended_effects":["Change value"], "scope":"Current page"})).unwrap(), Call::ProposeTaskPlan { goal: "Update field".into(), intended_effects: vec!["Change value".into()], scope: "Current page".into() });
+    assert!(
+        decode_call(
+            "propose_task_plan",
+            json!({"goal":"", "intended_effects":[], "scope":"Current page"})
+        )
+        .is_err()
+    );
+    assert!(
+        decode_call(
+            "propose_task_plan",
+            json!({"goal":"Update", "intended_effects":[], "scope":"Current page", "approve":true})
+        )
+        .is_err()
+    );
     assert_eq!(
         decode_call("observe_page", json!({})).unwrap(),
         Call::Observe
@@ -243,7 +258,8 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             CONTROL_TOOL,
             "page_logs",
             "status",
-            "settings"
+            "settings",
+            "propose_task_plan"
         ]
     );
     assert!(

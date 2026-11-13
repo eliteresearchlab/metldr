@@ -41,6 +41,11 @@ pub enum ScrollDirection {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Call {
+    ProposeTaskPlan {
+        goal: String,
+        intended_effects: Vec<String>,
+        scope: String,
+    },
     Observe,
     ObserveWithin {
         within: String,
@@ -87,7 +92,7 @@ pub fn valid_handle(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
 }
 
-pub fn definitions() -> [Definition; 10] {
+pub fn definitions() -> [Definition; 11] {
     tools::definitions()
 }
 
