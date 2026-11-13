@@ -259,7 +259,13 @@ impl State {
         });
     }
 
-    fn use_followup(&mut self, tx: &mut Tx) {
+    fn use_followup(&mut self, add: bool, tx: &mut Tx) {
+        if add && self.draft.preedit.is_some() {
+            self.fail(FlowError::InvalidInput(
+                "Finish composing your draft first.".into(),
+            ));
+            return;
+        }
         let Some(followup) = self.proposed_followup.take() else {
             return;
         };
@@ -277,11 +283,21 @@ impl State {
             });
         match result {
             Ok(()) => {
-                self.replace_draft(followup.text);
-                self.menu = None;
-                tx.focus("rune-composer-field");
+                if add {
+                    let text = if self.draft.text.is_empty() {
+                        followup.text
+                    } else {
+                        format!("{}\n\n{}", self.draft.text, followup.text)
+                    };
+                    self.replace_draft(text);
+                    self.menu = None;
+                    tx.focus("rune-composer-field");
+                }
             }
-            Err(error) => self.fail(error),
+            Err(error) => {
+                self.proposed_followup = Some(followup);
+                self.fail(error);
+            }
         }
     }
 
@@ -747,9 +763,6 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
     let followup = updates.presentation.borrow_mut().followup.take();
     if let Some(followup) = followup {
         state.proposed_followup = Some(followup);
-        if !state.settings_open && state.draft.text.is_empty() && state.draft.preedit.is_none() {
-            state.use_followup(tx);
-        }
     }
     if state
         .proposed_followup
@@ -989,23 +1002,24 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             col()
                 .gap(8.0)
                 .child(typography.text(&followup.text).wrap())
-                .child(
-                    typography
-                        .text("Replace draft with followup")
-                        .role("button")
-                        .focusable(true)
-                        .press(ink.alpha(0.12))
-                        .on_press_tx(|state: &mut State, tx| {
-                            state.sound(crate::interaction_audio::Cue::Press);
-                            state.use_followup(tx);
-                        })
-                        .on_key(|state: &mut State, key, tx| {
-                            composer::enter(state, key, tx, |state, tx| {
-                                state.sound(crate::interaction_audio::Cue::Press);
-                                state.use_followup(tx);
-                            })
-                        }),
-                ),
+                .child({
+                    let mut actions = row().gap(8.0);
+                    for (label, add) in [("Add to draft", true), ("Dismiss", false)] {
+                        actions = actions.child(
+                            typography
+                                .text(label)
+                                .role("button")
+                                .focusable(true)
+                                .native_activation()
+                                .press(ink.alpha(0.12))
+                                .on_press_tx(move |state: &mut State, tx| {
+                                    state.sound(crate::interaction_audio::Cue::Press);
+                                    state.use_followup(add, tx);
+                                }),
+                        );
+                    }
+                    actions
+                }),
         );
     }
     thread = thread.child(state.sources.view(typography));
