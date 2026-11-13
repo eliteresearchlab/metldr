@@ -211,6 +211,7 @@ pub(super) struct Owner {
     pub(super) native_permissions: BTreeMap<String, PendingPermission>,
     pub(super) pi_ui: BTreeMap<String, crate::pi_ui::State>,
     pub(super) codex_input: BTreeMap<String, crate::codex_input::State>,
+    pub(super) plan_hold: Option<crate::browser_owner::PlanHold>,
     pub(super) browser_approval: Option<crate::browser_owner::PendingApproval>,
     pub(super) browser_route: Option<crate::https_profile::Profile>,
     pub(super) responses_route: Option<crate::https_profile::Profile>,

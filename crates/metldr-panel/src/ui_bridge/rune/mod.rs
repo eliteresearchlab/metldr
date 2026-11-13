@@ -888,6 +888,7 @@ mod followup_tests {
 
     fn sample_plan(state: crate::model::PlanState) -> crate::model::TaskPlanView {
         crate::model::TaskPlanView {
+            proposer: "Agent".into(),
             run: serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:1"))
                 .unwrap(),
             goal: "Find information".into(),
@@ -1161,6 +1162,11 @@ fn plan_view<S: 'static>(
         .w_full()
         .gap(8.0)
         .child(typography.text("Task plan").wrap())
+        .child(
+            typography
+                .text(format!("Proposed by {}", plan.proposer))
+                .wrap(),
+        )
         .child(typography.text(format!("Goal: {}", plan.goal)).wrap());
     for effect in &plan.intended_effects {
         card = card.child(typography.text(format!("Effect: {effect}")).wrap());

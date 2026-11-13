@@ -82,6 +82,44 @@ impl Tools {
                 .insert(call_id.to_owned(), (call, result.clone()));
             return Ok(result);
         }
+        if let Call::ProposeTaskPlan {
+            goal,
+            intended_effects,
+            scope,
+        } = &call
+        {
+            let (ack, rx) = mpsc::sync_channel(1);
+            self.client
+                .tx
+                .try_send(Event::Browser(browser_owner::Event::Plan {
+                    run: self.client.run.clone(),
+                    goal: goal.clone(),
+                    intended_effects: intended_effects.clone(),
+                    scope: scope.clone(),
+                    ack,
+                }))
+                .map_err(|_| "browser owner channel unavailable")?;
+            let revision = loop {
+                if stop.load(Ordering::Acquire) {
+                    return Err("browser task stopped".into());
+                }
+                match rx.try_recv() {
+                    Ok(result) => {
+                        break result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                            e.into()
+                        })?;
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => return Err("plan owner ended".into()),
+                    Err(mpsc::TryRecvError::Empty) => {
+                        tokio::time::sleep(Duration::from_millis(20)).await
+                    }
+                }
+            };
+            let result = json!({"revision":revision,"status":"awaiting user approval"});
+            self.completed
+                .insert(call_id.to_owned(), (call, result.clone()));
+            return Ok(result);
+        }
         // Reads run before attachment, so reporting state never attaches the browser.
         if matches!(call, Call::Status | Call::Settings) {
             let result = self.read(&call, stop).await?;
@@ -126,6 +164,36 @@ impl Tools {
                     .await?;
                 match prepared {
                     super::engine::ControlPreparation::NoOp { state } => {
+                        let (ack, rx) = mpsc::sync_channel(1);
+                        self.client
+                            .tx
+                            .try_send(Event::Browser(browser_owner::Event::NoOp {
+                                run: self.client.run.clone(),
+                                ack,
+                                budget: budget.cloned(),
+                            }))
+                            .map_err(|_| "browser owner channel unavailable")?;
+                        loop {
+                            if stop.load(Ordering::Acquire) {
+                                return Err("browser task stopped".into());
+                            }
+                            match rx.try_recv() {
+                                Ok(result) => {
+                                    result.map_err(
+                                        |e| -> Box<dyn std::error::Error + Send + Sync> {
+                                            e.into()
+                                        },
+                                    )?;
+                                    break;
+                                }
+                                Err(mpsc::TryRecvError::Disconnected) => {
+                                    return Err("plan owner ended".into());
+                                }
+                                Err(mpsc::TryRecvError::Empty) => {
+                                    tokio::time::sleep(Duration::from_millis(20)).await
+                                }
+                            }
+                        }
                         json!({"kind":"control_no_op", "state":state, "scope":"local_observation", "untrusted":true})
                     }
                     super::engine::ControlPreparation::Propose { proposal } => {
@@ -180,7 +248,7 @@ impl Tools {
                     .page_logs()
                     .await?
             }
-            Call::Status | Call::Settings => {
+            Call::Status | Call::Settings | Call::ProposeTaskPlan { .. } => {
                 return Err("read-only browser call reached the attached path".into());
             }
         };
@@ -385,7 +453,7 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
         }
         Call::Scroll { .. } => Err("invalid browser scroll request".into()),
         Call::PageLogs => Ok(()),
-        Call::Status | Call::Settings => Ok(()),
+        Call::Status | Call::Settings | Call::ProposeTaskPlan { .. } => Ok(()),
     }
 }
 

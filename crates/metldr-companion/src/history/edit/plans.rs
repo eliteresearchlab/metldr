@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TaskPlan {
+    #[serde(default)]
+    pub proposer: String,
     pub goal: String,
     pub intended_effects: Vec<String>,
     pub scope: String,
@@ -74,7 +76,7 @@ impl Edit<'_> {
         let execution = self.current_execution(scope, &run.id)?;
         Ok(self.task_plan(&execution)?.map(|plan| {
             serde_json::json!({
-                "run": run.id, "goal": plan.goal, "intended_effects": plan.intended_effects,
+                "run": run.id, "proposer": if plan.proposer.is_empty() { "Agent" } else { &plan.proposer }, "goal": plan.goal, "intended_effects": plan.intended_effects,
                 "scope": plan.scope, "revision": plan.revision, "state": plan.state
             })
         }))
@@ -94,7 +96,6 @@ impl Edit<'_> {
         Ok(saved.map(|saved| saved.value))
     }
 
-    #[allow(dead_code)]
     pub(crate) fn propose_plan(
         &mut self,
         execution: &Execution,
@@ -103,12 +104,24 @@ impl Edit<'_> {
         if self.run(execution, execution.run())?.status != crate::model::Status::Running {
             return Err(PlanError::Invalid.into());
         }
-        if self
-            .browser_open(execution, execution.run())?
-            .is_some_and(|action| matches!(action.state, crate::browser_action::Phase::Dispatching))
-        {
+        if self.browser_open(execution, execution.run())?.is_some() {
             return Err(PlanError::Held.into());
         }
+        let launch: Record<crate::agent_model::Launch> =
+            storage(|| record(self.write, super::super::schema::LAUNCHES, execution.run()))?
+                .ok_or(PlanError::Invalid)?;
+        plan.proposer = match launch.value {
+            crate::agent_model::Launch::Pi { .. } => "Pi",
+            crate::agent_model::Launch::Codex { .. } => "Codex",
+            crate::agent_model::Launch::OpenCode { .. } => "OpenCode",
+            crate::agent_model::Launch::Messages { .. }
+            | crate::agent_model::Launch::ConfiguredMessages { .. } => "Messages",
+            crate::agent_model::Launch::ConfiguredResponses { .. } => "Responses",
+            crate::agent_model::Launch::ConfiguredGoogle { .. } => "Google",
+            crate::agent_model::Launch::ConfiguredChat { .. } => "Chat Completions",
+            _ => "Agent",
+        }
+        .to_owned();
         plan.revision = self
             .task_plan(execution)?
             .map_or(Some(1), |p| p.revision.checked_add(1))
@@ -152,7 +165,8 @@ impl Edit<'_> {
         match self.task_plan(execution)?.map(|plan| plan.state) {
             Some(PlanState::Proposed) => Err(PlanError::Held.into()),
             Some(PlanState::Declined) => Err(PlanError::Declined.into()),
-            Some(PlanState::Approved) | None => Ok(()),
+            Some(PlanState::Approved) => Ok(()),
+            None => Err("call propose_task_plan first".into()),
         }
     }
 
@@ -229,6 +243,7 @@ mod tests {
     #[test]
     fn largest_plan_fits_review_budget() {
         let plan = TaskPlan {
+            proposer: "Agent".into(),
             goal: "\\".repeat(1024),
             scope: "\\".repeat(1024),
             intended_effects: vec!["\\".repeat(512); 16],

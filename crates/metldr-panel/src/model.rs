@@ -194,6 +194,8 @@ pub(crate) struct PageView {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TaskPlanView {
+    #[serde(default)]
+    pub(crate) proposer: String,
     pub(crate) run: RunId,
     pub(crate) goal: String,
     pub(crate) intended_effects: Vec<String>,

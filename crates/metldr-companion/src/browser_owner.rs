@@ -11,6 +11,18 @@ mod review;
 pub(crate) use review::Budget;
 
 pub(super) enum Event {
+    Plan {
+        run: String,
+        goal: String,
+        intended_effects: Vec<String>,
+        scope: String,
+        ack: SyncSender<std::result::Result<u32, String>>,
+    },
+    NoOp {
+        run: String,
+        ack: SyncSender<std::result::Result<(), String>>,
+        budget: Option<Budget>,
+    },
     Proposed {
         proposal: Proposal,
         ack: Reply,
@@ -27,6 +39,38 @@ pub(super) enum Event {
         outcome: Outcome,
         ack: Reply,
     },
+}
+
+pub(super) enum PlanHold {
+    Action {
+        proposal: Proposal,
+        ack: Reply,
+        budget: Option<Budget>,
+        review: Option<review::Review>,
+    },
+    NoOp {
+        run: String,
+        ack: SyncSender<std::result::Result<(), String>>,
+        review: Option<review::Review>,
+    },
+}
+impl PlanHold {
+    fn run(&self) -> &str {
+        match self {
+            Self::Action { proposal, .. } => &proposal.run,
+            Self::NoOp { run, .. } => run,
+        }
+    }
+    fn reject(self, error: &str) {
+        match self {
+            Self::Action { ack, .. } => {
+                let _ = ack.send(Err(error.into()));
+            }
+            Self::NoOp { ack, .. } => {
+                let _ = ack.send(Err(error.into()));
+            }
+        }
+    }
 }
 
 pub(super) struct PendingApproval {
@@ -72,11 +116,103 @@ impl Owner {
 
     pub(super) fn browser_event(&mut self, event: Event) -> Result<()> {
         match event {
+            Event::Plan {
+                run,
+                goal,
+                intended_effects,
+                scope,
+                ack,
+            } => {
+                let result = self.browser_operation(&run).and_then(|_| {
+                    self.record_execution(&run, |edit, execution| {
+                        edit.propose_plan(
+                            execution,
+                            crate::history::TaskPlan {
+                                proposer: String::new(),
+                                goal,
+                                intended_effects,
+                                scope,
+                                revision: 0,
+                                state: crate::history::PlanState::Proposed,
+                                approver_request: None,
+                            },
+                        )
+                        .map(|plan| plan.revision)
+                    })
+                });
+                return acknowledge(ack, result);
+            }
+            Event::NoOp { run, ack, budget } => {
+                let result = self.browser_operation(&run).and_then(|_| {
+                    self.record_history.edit(|edit| {
+                        let execution = edit.execution(&run)?;
+                        edit.task_plan(&execution)
+                    })
+                });
+                match result {
+                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Approved => {
+                        acknowledge(ack, Ok(()))
+                    }
+                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Proposed => {
+                        if self.plan_hold.is_some() || self.browser_approval.is_some() {
+                            return acknowledge(
+                                ack,
+                                Err("browser approval already pending".into()),
+                            );
+                        }
+                        let review = match budget.as_ref().map(Budget::pause).transpose() {
+                            Ok(review) => review,
+                            Err(error) => return acknowledge(ack, Err(error)),
+                        };
+                        self.plan_hold = Some(PlanHold::NoOp { run, ack, review });
+                        Ok(())
+                    }
+                    Ok(Some(_)) => acknowledge(ack, Err("task plan declined".into())),
+                    Ok(None) => acknowledge(ack, Err("call propose_task_plan first".into())),
+                    Err(error) => acknowledge(ack, Err(error)),
+                }
+            }
             Event::Proposed {
                 proposal,
                 ack,
                 budget,
             } => {
+                let plan = self.record_history.edit(|edit| {
+                    let execution = edit.execution(&proposal.run)?;
+                    edit.task_plan(&execution)
+                });
+                match plan {
+                    Ok(None) => {
+                        return acknowledge(ack, Err("call propose_task_plan first".into()));
+                    }
+                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Declined => {
+                        return acknowledge(ack, Err("task plan declined".into()));
+                    }
+                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Proposed => {
+                        if self.plan_hold.is_some() || self.browser_approval.is_some() {
+                            return acknowledge(
+                                ack,
+                                Err("browser approval already pending".into()),
+                            );
+                        }
+                        if let Err(error) = self.browser_operation(&proposal.run) {
+                            return acknowledge(ack, Err(error));
+                        }
+                        let review = match budget.as_ref().map(Budget::pause).transpose() {
+                            Ok(review) => review,
+                            Err(error) => return acknowledge(ack, Err(error)),
+                        };
+                        self.plan_hold = Some(PlanHold::Action {
+                            proposal,
+                            ack,
+                            budget,
+                            review,
+                        });
+                        return Ok(());
+                    }
+                    Err(error) => return acknowledge(ack, Err(error)),
+                    _ => {}
+                }
                 let result = (|| -> Result<(Action, bool, Option<review::Review>)> {
                     if let Some(existing) =
                         self.saved_browser_tool(&proposal.run, &proposal.tool_use_id)?
@@ -202,6 +338,11 @@ impl Owner {
     }
 
     pub(super) fn cancel_browser_approval(&mut self, run: &str) {
+        if self.plan_hold.as_ref().is_some_and(|p| p.run() == run) {
+            if let Some(pending) = self.plan_hold.take() {
+                pending.reject("browser action stopped before dispatch");
+            }
+        }
         if self.browser_approval.as_ref().is_some_and(|p| p.run == run)
             && let Some(pending) = self.browser_approval.take()
         {
@@ -210,6 +351,28 @@ impl Owner {
     }
 
     pub(super) fn release_plan_dispatch(&mut self, run: &str) -> Result<()> {
+        if self.plan_hold.as_ref().is_some_and(|p| p.run() == run) {
+            let pending = self.plan_hold.take().unwrap();
+            match pending {
+                PlanHold::Action {
+                    proposal,
+                    ack,
+                    budget,
+                    review,
+                } => {
+                    drop(review);
+                    self.browser_event(Event::Proposed {
+                        proposal,
+                        ack,
+                        budget,
+                    })?;
+                }
+                PlanHold::NoOp { ack, review, .. } => {
+                    drop(review);
+                    let _ = ack.send(Ok(()));
+                }
+            }
+        }
         if self
             .browser_approval
             .as_ref()
@@ -226,6 +389,11 @@ impl Owner {
     }
 
     pub(super) fn fail_plan_dispatch(&mut self, run: &str) -> Result<()> {
+        if self.plan_hold.as_ref().is_some_and(|p| p.run() == run) {
+            if let Some(pending) = self.plan_hold.take() {
+                pending.reject("task plan declined");
+            }
+        }
         if self
             .browser_approval
             .as_ref()

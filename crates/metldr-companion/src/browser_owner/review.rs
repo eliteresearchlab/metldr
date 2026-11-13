@@ -64,7 +64,7 @@ impl Budget {
     }
 }
 
-pub(super) struct Review(Budget);
+pub(crate) struct Review(Budget);
 
 impl Drop for Review {
     fn drop(&mut self) {

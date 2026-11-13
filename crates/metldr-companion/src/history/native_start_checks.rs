@@ -180,6 +180,7 @@ fn setup(
         native_permissions: BTreeMap::new(),
         pi_ui: Default::default(),
         codex_input: Default::default(),
+        plan_hold: None,
         browser_approval: None,
         browser_route: None,
         responses_route: None,
