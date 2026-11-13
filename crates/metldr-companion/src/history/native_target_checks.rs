@@ -73,6 +73,7 @@ fn navigate(
                     binding: next,
                     url: url.into(),
                     loader: "owned-loader".into(),
+                    evidence: Default::default(),
                 },
             },
         },

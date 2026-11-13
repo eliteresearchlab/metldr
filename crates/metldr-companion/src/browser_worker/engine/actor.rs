@@ -27,6 +27,7 @@ use tokio::{
 
 mod buttons;
 mod controls;
+mod documents;
 mod initialization;
 mod navigation;
 mod observation;
@@ -183,6 +184,7 @@ pub(super) struct Actor {
     busy: bool,
     seen: HashSet<(String, u64)>,
     navigation: Option<Navigation>,
+    documents: documents::Documents,
     subscriptions: Subscriptions,
     page_logs: PageLogs,
 }
@@ -230,6 +232,7 @@ impl Actor {
             busy: false,
             seen: HashSet::new(),
             navigation: None,
+            documents: documents::Documents::default(),
             subscriptions,
             page_logs,
         }
@@ -313,6 +316,7 @@ impl Actor {
         {
             return Ok(());
         }
+        self.documents.event(&event);
         let change = self.contexts.event(&event)?;
         if event.method.as_ref() == "Target.detachedFromTarget" {
             self.page_logs

@@ -18,8 +18,17 @@ impl Actor {
         job: Job,
         value: Value,
     ) -> Result<()> {
-        if value.get("errorText").is_some() || value["isDownload"] == true {
-            self.finish(job, Err("navigation failed or started a download".into()));
+        if let Some(error) = value.get("errorText") {
+            // Only a bounded Chrome net error code reaches the agent, never free page text.
+            let code = error
+                .as_str()
+                .filter(|code| net_error_code(code))
+                .unwrap_or("unknown error");
+            self.finish(job, Err(format!("navigation failed: {code}").into()));
+            return Ok(());
+        }
+        if value["isDownload"] == true {
+            self.finish(job, Err("navigation started a download".into()));
             return Ok(());
         }
         let frame = value["frameId"]
@@ -166,6 +175,7 @@ impl Actor {
                     ..from.clone()
                 },
                 url: confirmed.url,
+                evidence: Box::new(self.documents.take(&confirmed.loader)),
                 loader: confirmed.loader,
             })
         })();
@@ -177,6 +187,16 @@ impl Actor {
             }
         }
     }
+}
+
+/// A Chrome net error such as `net::ERR_NAME_NOT_RESOLVED`.
+fn net_error_code(code: &str) -> bool {
+    code.strip_prefix("net::ERR_").is_some_and(|name| {
+        (1..=64).contains(&name.len())
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+    })
 }
 
 fn frame_url(frame: &Value) -> Option<String> {
