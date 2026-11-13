@@ -169,6 +169,13 @@ pub(super) enum Launch {
         protocol: crate::provider_settings::Protocol,
         binding: crate::https_profile::Binding,
     },
+    /// A run on the generic harness path, named by its registry key (B1.12).
+    Harness {
+        input_digest: String,
+        harness: String,
+        workflow: String,
+        activity: Vec<Activity>,
+    },
 }
 impl Launch {
     pub fn input_digest(&self) -> Option<&str> {
@@ -182,7 +189,8 @@ impl Launch {
             | Self::Fixture { input_digest }
             | Self::Pi { input_digest, .. }
             | Self::Codex { input_digest, .. }
-            | Self::OpenCode { input_digest, .. } => Some(input_digest),
+            | Self::OpenCode { input_digest, .. }
+            | Self::Harness { input_digest, .. } => Some(input_digest),
             Self::Text { input_digest, .. } => Some(input_digest),
         }
     }
