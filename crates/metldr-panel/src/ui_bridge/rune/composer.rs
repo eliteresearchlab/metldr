@@ -318,6 +318,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .center_y()
         .px(6.0)
         .max_w(160.0)
+        .shrink()
         .radius(8.0)
         .child(
             typography
