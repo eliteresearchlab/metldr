@@ -181,10 +181,10 @@ impl UiBrowserActionSnapshot {
 
 #[wasm_bindgen]
 pub struct UiBrowserAction {
-    action: BrowserActionView,
-    display: Display,
-    approve: bool,
-    decline: bool,
+    pub(super) action: BrowserActionView,
+    pub(super) display: Display,
+    pub(super) approve: bool,
+    pub(super) decline: bool,
 }
 
 #[wasm_bindgen]
@@ -308,6 +308,11 @@ impl UiBrowserActions {
 }
 
 impl Core {
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_browser_actions(&self) -> UiBrowserActionSnapshot {
+        UiBrowserActionSnapshot { state: State::read(self) }
+    }
+
     #[cfg(feature = "rune-ui")]
     pub(super) fn rune_browser_action(&self) -> Option<(BrowserActionView, bool, bool)> {
         let state = State::read(self);
@@ -494,6 +499,17 @@ mod tests {
             epoch: 1,
             operation: Operation::Idle,
         };
+        let mut receipt = action.clone();
+        receipt.id = serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:3")).unwrap();
+        receipt.phase = BrowserActionPhase::Settled;
+        receipt.outcome = Some(crate::model::BrowserActionOutcome::Verified);
+        state.actions.push(receipt);
+        let shown = UiBrowserActionSnapshot { state: state.clone() }.actions();
+        assert_eq!(shown.len(), 2);
+        assert!(!shown[0].receipt());
+        assert!(shown[0].decline_enabled());
+        assert!(shown[1].receipt());
+        assert!(!shown[1].decline_enabled());
         assert!(state.enabled(&action, false));
         assert!(!state.enabled(&action, true));
         state.approvable.push(action.id.clone());
