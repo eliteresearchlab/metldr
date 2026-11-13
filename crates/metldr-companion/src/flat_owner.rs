@@ -135,7 +135,8 @@ impl Owner {
                             state.view.source.as_ref(),
                             &view.native_fingerprints()?,
                         )?;
-                        view.preflight(&state, &browser_view, &current, &choices)?;
+                        let plan = edit.plan_view(&current, &state)?;
+                        view.preflight(&state, &browser_view, &current, &choices, plan)?;
                         Ok((state, browser_view))
                     })
                     .transpose()?;

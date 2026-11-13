@@ -235,6 +235,7 @@ impl Owner {
             view.state.view.source.as_ref(),
             &view.native_fingerprints()?,
         )?;
+        let plan = history.edit(|edit| edit.plan_view(&selection, view.state))?;
         let reply = view.reply(
             view.state,
             request,
@@ -243,6 +244,7 @@ impl Owner {
             view.browser_actions,
             &selection,
             &choices,
+            plan,
         )?;
         self.emit(reply)
     }
@@ -275,6 +277,7 @@ impl Owner {
             let actions = edit.browser_view(&subscription.scope, &runs)?;
             let choices =
                 edit.native_choices(&subscription.scope, state.view.source.as_ref(), &profiles)?;
+            let plan = edit.plan_view(&subscription.scope, &state)?;
             Ok((
                 view.reply(
                     &state,
@@ -284,6 +287,7 @@ impl Owner {
                     &actions,
                     &subscription.scope,
                     &choices,
+                    plan,
                 )?,
                 ended,
             ))
@@ -483,9 +487,9 @@ impl Owner {
             } => {
                 self.require_conversation(scope)?;
                 self.browser_operation(&run)?;
-                self.record_history.edit(|edit| {
-                    let execution = edit.current_execution(scope, &run)?;
-                    edit.review_reply(&execution, revision, approve, id)
+                self.record_execution(&run, |edit, execution| {
+                    edit.current_execution(scope, &run)?;
+                    edit.review_reply(execution, revision, approve, id)
                 })?;
                 if approve {
                     self.release_plan_dispatch(&run)?;

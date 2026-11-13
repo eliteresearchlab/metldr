@@ -59,6 +59,27 @@ impl std::fmt::Display for PlanError {
 impl std::error::Error for PlanError {}
 
 impl Edit<'_> {
+    pub(crate) fn plan_view(
+        &self,
+        scope: &super::Selection,
+        state: &crate::model::Store,
+    ) -> Result<Option<serde_json::Value>> {
+        let run = state
+            .view
+            .runs
+            .iter()
+            .find(|run| !run.status.terminal())
+            .or_else(|| state.view.runs.last());
+        let Some(run) = run else { return Ok(None) };
+        let execution = self.current_execution(scope, &run.id)?;
+        Ok(self.task_plan(&execution)?.map(|plan| {
+            serde_json::json!({
+                "run": run.id, "goal": plan.goal, "intended_effects": plan.intended_effects,
+                "scope": plan.scope, "revision": plan.revision, "state": plan.state
+            })
+        }))
+    }
+
     pub(crate) fn task_plan(&self, execution: &Execution) -> Result<Option<TaskPlan>> {
         self.require_execution(execution, execution.run())?;
         let saved: Option<Record<TaskPlan>> =
@@ -188,14 +209,39 @@ impl Edit<'_> {
 }
 
 fn valid_plan(plan: &TaskPlan) -> bool {
-    let valid = |s: &str| !s.is_empty() && s.len() <= 4096 && !s.chars().any(char::is_control);
-    valid(&plan.goal)
-        && valid(&plan.scope)
-        && plan.intended_effects.len() <= 32
-        && plan.intended_effects.iter().all(|s| valid(s))
+    let valid =
+        |s: &str, limit| !s.is_empty() && s.len() <= limit && !s.chars().any(char::is_control);
+    valid(&plan.goal, 1024)
+        && valid(&plan.scope, 1024)
+        && plan.intended_effects.len() <= 16
+        && plan.intended_effects.iter().all(|s| valid(s, 512))
         && match (&plan.state, &plan.approver_request) {
             (PlanState::Proposed, None) => true,
             (PlanState::Approved | PlanState::Declined, Some(id)) => valid_request_id(id),
             _ => false,
         }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn largest_plan_fits_review_budget() {
+        let plan = TaskPlan {
+            goal: "\\".repeat(1024),
+            scope: "\\".repeat(1024),
+            intended_effects: vec!["\\".repeat(512); 16],
+            revision: u32::MAX,
+            state: PlanState::Proposed,
+            approver_request: None,
+        };
+        assert!(valid_plan(&plan));
+        // Other view content is variable; reserve 22 KiB for the worst escaped plan.
+        assert!(serde_json::to_vec(&plan).unwrap().len() < 22 * 1024);
+        assert!(!valid_plan(&TaskPlan {
+            goal: "x".repeat(1025),
+            ..plan
+        }));
+    }
 }

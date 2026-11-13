@@ -629,12 +629,22 @@ fn plan_approval_binds_revision_and_request() -> crate::Result<()> {
     let directory = Directory::new()?;
     let (mut owner, run) = make_owner(&directory)?;
     let proposed = propose_plan(&mut owner, &run)?;
+    let selection = owner.record_history.selection()?;
+    let projected = owner
+        .record_history
+        .edit(|edit| edit.plan_view(&selection, &owner.state))?
+        .unwrap();
+    assert_eq!(projected["run"], run);
+    assert_eq!(projected["revision"], proposed.revision);
+    assert_eq!(projected["state"], "proposed");
     let invalid = panel_plan_reply(&mut owner, &run, proposed.revision, "").unwrap_err();
     assert_eq!(
         invalid.downcast_ref::<PlanError>(),
         Some(&PlanError::Untrusted)
     );
+    let before = owner.state.view.sequence;
     panel_plan_reply(&mut owner, &run, proposed.revision, "panel-1")?;
+    assert!(owner.state.view.sequence > before);
     let saved = owner
         .record_history
         .edit(|edit| {

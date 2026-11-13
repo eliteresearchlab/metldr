@@ -27,6 +27,11 @@ pub(crate) use protocol::StopReceipt;
 use protocol::{Protocol, Reply, ReplyCell, ReplyKind, WatchCell};
 type Result<T> = std::result::Result<T, FlowError>;
 
+#[cfg(feature = "rune-ui")]
+pub(crate) fn plan_reply(run: &RunId, revision: u32, approve: bool) -> Value {
+    json!({"op":"plan_reply", "run":run, "revision":revision, "approve":approve})
+}
+
 pub(crate) enum PageTextPrompt {
     Summary,
     Answer(UserText),
@@ -814,6 +819,49 @@ impl FlowClient {
         {
             Reply::Correction(_) => Ok(()),
             _ => Err(FlowError::Protocol("Expected a correction receipt.".into())),
+        }
+    }
+
+    #[cfg(feature = "rune-ui")]
+    pub(crate) async fn decide_plan(
+        &self,
+        scope: metldr_history_pages::Scope,
+        run: RunId,
+        revision: u32,
+        approve: bool,
+    ) -> Result<PageView> {
+        let available = self
+            .inner
+            .protocol
+            .borrow()
+            .latest
+            .as_ref()
+            .is_some_and(|view| {
+                self.is_connected()
+                    && view.selection == scope
+                    && view.active_run() == Some(&run)
+                    && view.task_plan.as_ref().is_some_and(|plan| {
+                        plan.run == run
+                            && plan.revision == revision
+                            && plan.state == crate::model::PlanState::Proposed
+                    })
+            });
+        if !available {
+            return Err(FlowError::InvalidInput(
+                "This task plan is no longer pending.".into(),
+            ));
+        }
+        match self
+            .request(
+                conversation(&scope, plan_reply(&run, revision, approve)),
+                ReplyKind::SelectedPage(scope),
+            )
+            .await?
+        {
+            Reply::Page(view) => Ok(self.check_source(view).await),
+            _ => Err(FlowError::Protocol(
+                "Expected the updated task plan view.".into(),
+            )),
         }
     }
 

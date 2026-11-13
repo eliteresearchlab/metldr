@@ -399,6 +399,46 @@ impl State {
         }
     }
 
+    fn decide_plan(&mut self, plan: crate::model::TaskPlanView, approve: bool, tx: &mut Tx) {
+        let key = plan_key(&plan, approve);
+        if !tx.consume_activation(&key) {
+            return;
+        }
+        let Some(core) = self.core().cloned() else {
+            return;
+        };
+        let Some(updates) = self.updates.clone() else {
+            return;
+        };
+        let valid = core.ensure_current().is_ok()
+            && core.flow().is_connected()
+            && !core.page.recovery.borrow().active()
+            && !core.page.settings.borrow().blocked()
+            && !core.page.navigating.get()
+            && core.page.view.borrow().task_plan.as_ref() == Some(&plan)
+            && core.page.view.borrow().active_run() == Some(&plan.run)
+            && plan.state == crate::model::PlanState::Proposed;
+        if !valid {
+            return;
+        }
+        let mut pending = core.plan_operation.borrow_mut();
+        if pending.as_ref() == Some(&(plan.run.clone(), plan.revision)) {
+            return;
+        }
+        *pending = Some((plan.run.clone(), plan.revision));
+        drop(pending);
+        self.sound(crate::interaction_audio::Cue::Press);
+        spawn_local(async move {
+            let result = core
+                .flow()
+                .decide_plan(core.scope.clone(), plan.run.clone(), plan.revision, approve)
+                .await
+                .and_then(|view| core.accept(view).map(|_| ()));
+            finish_plan(&core.plan_operation, &plan.run, plan.revision);
+            updates.finish(result);
+        });
+    }
+
     fn select(&mut self, value: String, _: &mut Tx) {
         let result = (|| {
             let core = self.core().ok_or(FlowError::Disconnected)?;
@@ -846,6 +886,140 @@ mod followup_tests {
     use super::*;
     use ::rune::{Env, Key, KeyEvent, Mods, Runtime};
 
+    fn sample_plan(state: crate::model::PlanState) -> crate::model::TaskPlanView {
+        crate::model::TaskPlanView {
+            run: serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:1"))
+                .unwrap(),
+            goal: "Find information".into(),
+            intended_effects: vec!["Open a page".into()],
+            scope: "One site".into(),
+            revision: 7,
+            state,
+        }
+    }
+
+    #[test]
+    fn declined_plan_has_no_buttons_and_untrusted_input_is_ignored() {
+        fn view(_: &State, _: &mut Cx<State>) -> El {
+            plan_view(
+                &sample_plan(crate::model::PlanState::Declined),
+                true,
+                preferences::Typography {
+                    scale: 1.0,
+                    ink: oklch(0.5, 0.0, 0.0),
+                },
+                State::decide_plan,
+            )
+        }
+        let mut rt = Runtime::new(State::default(), view, (640.0, 300.0), Env::default());
+        rt.frame(0.0);
+        let elements = rt.elements();
+        assert!(
+            elements
+                .iter()
+                .any(|el| el.role == "group" && el.label.as_deref() == Some("Task plan"))
+        );
+        assert!(
+            elements
+                .iter()
+                .any(|el| el.text.as_deref() == Some("Declined"))
+        );
+        assert!(!elements.iter().any(|el| el.role == "button"));
+        let plan = sample_plan(crate::model::PlanState::Proposed);
+        assert!(!Tx::default().consume_activation(&plan_key(&plan, true)));
+        assert_ne!(plan_key(&plan, true), plan_key(&plan, false));
+    }
+
+    #[derive(Default)]
+    struct PlanTest {
+        pending: RefCell<Option<(RunId, u32)>>,
+        replies: Vec<serde_json::Value>,
+    }
+
+    fn test_plan_view(state: &PlanTest, _: &mut Cx<PlanTest>) -> El {
+        let plan = sample_plan(crate::model::PlanState::Proposed);
+        let enabled = state.pending.borrow().as_ref() != Some(&(plan.run.clone(), plan.revision));
+        plan_view(
+            &plan,
+            enabled,
+            preferences::Typography {
+                scale: 1.0,
+                ink: oklch(0.5, 0.0, 0.0),
+            },
+            |state: &mut PlanTest, plan, approve, _| {
+                *state.pending.borrow_mut() = Some((plan.run.clone(), plan.revision));
+                state
+                    .replies
+                    .push(crate::flow::plan_reply(&plan.run, plan.revision, approve));
+            },
+        )
+    }
+
+    #[test]
+    fn enter_approves_the_displayed_revision_once() {
+        let mut rt = Runtime::new(
+            PlanTest::default(),
+            test_plan_view,
+            (640.0, 300.0),
+            Env::default(),
+        );
+        rt.set_tab_visits_controls(true);
+        rt.frame(0.0);
+        rt.key(KeyEvent {
+            key: Key::Tab,
+            mods: Mods::default(),
+        });
+        rt.frame(0.0);
+        let plan = sample_plan(crate::model::PlanState::Proposed);
+        assert_eq!(
+            rt.elements()
+                .iter()
+                .find(|el| el.focused)
+                .and_then(|el| el.key.as_deref()),
+            Some(plan_key(&plan, true).as_str())
+        );
+        let enter = KeyEvent {
+            key: Key::Enter,
+            mods: Mods::default(),
+        };
+        rt.key(enter.clone());
+        rt.repeat_key(enter);
+        rt.frame(0.0);
+        assert_eq!(
+            rt.state.replies,
+            vec![
+                serde_json::json!({"op":"plan_reply", "run":plan.run, "revision":7, "approve":true})
+            ]
+        );
+    }
+
+    #[test]
+    fn failed_reply_reenables_buttons_without_clearing_newer_work() {
+        let plan = sample_plan(crate::model::PlanState::Proposed);
+        let state = PlanTest::default();
+        *state.pending.borrow_mut() = Some((plan.run.clone(), plan.revision));
+        let mut rt = Runtime::new(state, test_plan_view, (640.0, 300.0), Env::default());
+        rt.frame(0.0);
+        assert!(
+            rt.elements()
+                .iter()
+                .filter(|el| el.role == "button")
+                .all(|el| !el.focusable)
+        );
+        finish_plan(&rt.state.pending, &plan.run, plan.revision + 1);
+        assert!(rt.state.pending.borrow().is_some());
+        finish_plan(&rt.state.pending, &plan.run, plan.revision);
+        let mut rt = Runtime::new(rt.state, test_plan_view, (640.0, 300.0), Env::default());
+        rt.frame(0.0);
+        let buttons: Vec<_> = rt
+            .elements()
+            .into_iter()
+            .filter(|el| el.role == "button")
+            .collect();
+        assert_eq!(buttons.len(), 2);
+        assert!(buttons.iter().all(|el| el.focusable));
+    }
+
     #[test]
     fn message_roles_and_startup_error_match_the_reference() {
         let updates = Updates::new(std::sync::Arc::new(|| {}), Rc::new(Cell::new(0)));
@@ -952,6 +1126,80 @@ fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
 
 fn toggle_browser_receipts(state: &mut State, _: &mut Tx) {
     state.browser_receipts_open = !state.browser_receipts_open;
+}
+
+fn plan_key(plan: &crate::model::TaskPlanView, approve: bool) -> String {
+    format!(
+        "plan:{}:{}:{}",
+        plan.run.as_str(),
+        plan.revision,
+        u8::from(approve)
+    )
+}
+
+fn finish_plan(pending: &RefCell<Option<(RunId, u32)>>, run: &RunId, revision: u32) {
+    let mut pending = pending.borrow_mut();
+    if pending
+        .as_ref()
+        .is_some_and(|key| key.0 == *run && key.1 == revision)
+    {
+        *pending = None;
+    }
+}
+
+fn plan_view<S: 'static>(
+    plan: &crate::model::TaskPlanView,
+    enabled: bool,
+    typography: preferences::Typography,
+    decide: fn(&mut S, crate::model::TaskPlanView, bool, &mut Tx),
+) -> El {
+    use crate::model::PlanState;
+    let mut card = col()
+        .key(format!("task-plan:{}", plan.run.as_str()))
+        .role("group")
+        .label("Task plan")
+        .w_full()
+        .gap(8.0)
+        .child(typography.text("Task plan").wrap())
+        .child(typography.text(format!("Goal: {}", plan.goal)).wrap());
+    for effect in &plan.intended_effects {
+        card = card.child(typography.text(format!("Effect: {effect}")).wrap());
+    }
+    card = card.child(typography.text(format!("Scope: {}", plan.scope)).wrap());
+    match plan.state {
+        PlanState::Approved => card.child(typography.text("Approved")),
+        PlanState::Declined => card.child(typography.text("Declined")),
+        PlanState::Proposed => {
+            for (approve, label) in [(true, "Approve"), (false, "Decline")] {
+                let press_plan = plan.clone();
+                let key_plan = plan.clone();
+                card = card.child(
+                    typography
+                        .text(label)
+                        .key(plan_key(plan, approve))
+                        .role("button")
+                        .label(label)
+                        .focusable(enabled)
+                        .disabled(!enabled)
+                        .native_activation()
+                        .press(typography.ink.alpha(0.12))
+                        .on_press_tx(move |state: &mut S, tx| {
+                            decide(state, press_plan.clone(), approve, tx)
+                        })
+                        .on_key(move |state: &mut S, key, tx| {
+                            if key.key != ::rune::Key::Enter {
+                                return false;
+                            }
+                            if !tx.key_repeat() {
+                                decide(state, key_plan.clone(), approve, tx);
+                            }
+                            true
+                        }),
+                );
+            }
+            card
+        }
+    }
 }
 
 fn browser_action_view(
@@ -1085,6 +1333,13 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         return col().w_full().h_full().fill(page).color(ink).child(thread);
     };
     let connection = connection::UiConnectionSnapshot::read(core);
+    if let Some(plan) = core.page.view.borrow().task_plan.as_ref() {
+        let enabled = core.ensure_current().is_ok()
+            && core.flow().is_connected()
+            && core.page.view.borrow().active_run() == Some(&plan.run)
+            && core.plan_operation.borrow().as_ref() != Some(&(plan.run.clone(), plan.revision));
+        thread = thread.child(plan_view(plan, enabled, typography, State::decide_plan));
+    }
     if !core.history_loading.get()
         && state
             .updates
