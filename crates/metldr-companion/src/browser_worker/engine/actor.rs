@@ -29,6 +29,7 @@ mod buttons;
 mod controls;
 mod documents;
 mod initialization;
+mod keys;
 mod navigation;
 mod observation;
 mod requests;
@@ -135,6 +136,17 @@ enum Work {
     },
     WriteSecret {
         action: Action,
+        job: Job,
+    },
+    ArmKey {
+        action: Action,
+        job: Job,
+    },
+    KeyGesture {
+        action: Action,
+        job: Job,
+    },
+    KeyReceipt {
         job: Job,
     },
     Verify {
@@ -424,6 +436,8 @@ impl Actor {
             match &pending.work {
                 Work::Write { action, .. }
                 | Work::WriteSecret { action, .. }
+                | Work::ArmKey { action, .. }
+                | Work::KeyGesture { action, .. }
                 | Work::WriteSelection { action, .. }
                 | Work::WriteScroll { action, .. }
                 | Work::Navigate { action, .. }
@@ -467,6 +481,13 @@ impl Actor {
                 url: action.proposal.url.clone(),
                 params: command.params,
             },
+            Work::KeyGesture { action, .. } => Operation::PressKey {
+                action: action.id.clone(),
+                revision: action.revision,
+                binding: action.proposal.binding.clone(),
+                url: action.proposal.url.clone(),
+                params: command.params,
+            },
             Work::WriteSecret { action, .. } => Operation::EnterSecret {
                 action: action.id.clone(),
                 revision: action.revision,
@@ -498,6 +519,7 @@ impl Actor {
         let reply = match &pending.work {
             Work::Write { job, .. }
             | Work::WriteSecret { job, .. }
+            | Work::KeyGesture { job, .. }
             | Work::WriteSelection { job, .. }
             | Work::WriteScroll { job, .. }
             | Work::Navigate { job, .. }
@@ -576,6 +598,9 @@ impl Work {
             | Self::ButtonReceipt { job }
             | Self::Write { job, .. }
             | Self::WriteSecret { job, .. }
+            | Self::ArmKey { job, .. }
+            | Self::KeyGesture { job, .. }
+            | Self::KeyReceipt { job }
             | Self::Verify { job, .. }
             | Self::Navigate { job, .. } => Some(job),
             Self::FrameTree(nav) => Some(&nav.job),

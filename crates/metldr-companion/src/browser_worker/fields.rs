@@ -44,7 +44,7 @@ pub(crate) struct Tools {
     current: Target,
     stop: Arc<AtomicBool>,
     observation_generation: u64,
-    completed: BTreeMap<String, (Call, Value)>,
+    completed: BTreeMap<String, (Call, Arc<Value>)>,
     release_unknown: bool,
 }
 
@@ -73,7 +73,7 @@ impl Tools {
         call: Call,
         stop: &AtomicBool,
         budget: Option<&browser_owner::Budget>,
-    ) -> Result<Value> {
+    ) -> Result<Arc<Value>> {
         if stop.load(Ordering::Acquire) {
             return Err("browser task stopped".into());
         }
@@ -81,9 +81,9 @@ impl Tools {
         if let Some((previous, result)) = self.completed.get(call_id) {
             if previous == &call {
                 if matches!(call, Call::Status) {
-                    return Ok(self.status());
+                    return Ok(Arc::new(self.status()));
                 }
-                return Ok(result.clone());
+                return Ok(Arc::clone(result));
             }
             return Err("model reused a tool identity with changed arguments".into());
         }
@@ -95,9 +95,7 @@ impl Tools {
             let result = serde_json::to_value(Outcome::Prevented {
                 reason: "protected browser page is not accessible".into(),
             })?;
-            self.completed
-                .insert(call_id.to_owned(), (call, result.clone()));
-            return Ok(result);
+            return Ok(self.remember(call_id, call, result));
         }
         if let Call::ProposeTaskPlan {
             goal,
@@ -133,16 +131,12 @@ impl Tools {
                 }
             };
             let result = json!({"revision":revision,"status":"awaiting user approval"});
-            self.completed
-                .insert(call_id.to_owned(), (call, result.clone()));
-            return Ok(result);
+            return Ok(self.remember(call_id, call, result));
         }
         // Reads run before attachment, so reporting state never attaches the browser.
         if matches!(call, Call::Status | Call::Settings) {
             let result = self.read(&call, stop).await?;
-            self.completed
-                .insert(call_id.to_owned(), (call, result.clone()));
-            return Ok(result);
+            return Ok(self.remember(call_id, call, result));
         }
         self.attach().await?;
         if stop.load(Ordering::Acquire) {
@@ -151,6 +145,7 @@ impl Tools {
         let handle = match &call {
             Call::Change { handle, .. }
             | Call::EnterSecret { handle, .. }
+            | Call::PressKey { handle, .. }
             | Call::ActivateButton { handle }
             | Call::SelectOption { handle, .. }
             | Call::Scroll { handle, .. }
@@ -168,9 +163,7 @@ impl Tools {
             let result = serde_json::to_value(Outcome::Prevented {
                 reason: "actions inside frames are not supported yet".into(),
             })?;
-            self.completed
-                .insert(call_id.to_owned(), (call, result.clone()));
-            return Ok(result);
+            return Ok(self.remember(call_id, call, result));
         }
         let result = match &call {
             Call::SetNativeControl { handle, checked } => {
@@ -222,6 +215,15 @@ impl Tools {
             }
             Call::Change { handle, value } => {
                 self.change(call_id, handle, value, stop, budget).await?
+            }
+            Call::PressKey { handle, key } => {
+                let proposal = self
+                    .engine
+                    .as_ref()
+                    .ok_or("browser is not attached")?
+                    .prepare_key(call_id, handle, *key)
+                    .await?;
+                self.perform(proposal, stop, budget).await?
             }
             Call::EnterSecret { handle, kind } => {
                 let proposal = self
@@ -282,9 +284,15 @@ impl Tools {
                 return Err("read-only browser call reached the attached path".into());
             }
         };
+        Ok(self.remember(call_id, call, result))
+    }
+
+    /// Caches a finished result for identical retries and shares it with the caller.
+    fn remember(&mut self, call_id: &str, call: Call, result: Value) -> Arc<Value> {
+        let result = Arc::new(result);
         self.completed
-            .insert(call_id.to_owned(), (call, result.clone()));
-        Ok(result)
+            .insert(call_id.to_owned(), (call, Arc::clone(&result)));
+        result
     }
 
     async fn read(&self, call: &Call, stop: &AtomicBool) -> Result<Value> {
@@ -414,6 +422,7 @@ impl Tools {
                 let outcome = match &dispatched.proposal.intent {
                     Intent::Field { .. } => engine.change(&dispatched).await,
                     Intent::Secret { .. } => engine.enter_secret(&dispatched).await,
+                    Intent::PressKey { .. } => engine.press_key(&dispatched).await,
                     Intent::ActivateButton { .. } => engine.activate_button(&dispatched).await,
                     Intent::SelectOption { .. } => engine.select_option(&dispatched).await,
                     Intent::Scroll { .. } => engine.scroll(&dispatched).await,
@@ -469,6 +478,8 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
         Call::Navigate { .. } => Err("invalid browser navigation URL".into()),
         Call::Change { handle, value } if valid_handle(handle) && value.len() <= 1024 => Ok(()),
         Call::Change { .. } => Err("invalid browser field change".into()),
+        Call::PressKey { handle, .. } if valid_handle(handle) => Ok(()),
+        Call::PressKey { .. } => Err("invalid key target handle".into()),
         Call::EnterSecret { handle, .. } if valid_handle(handle) => Ok(()),
         Call::EnterSecret { .. } => Err("invalid secret field handle".into()),
         Call::ActivateButton { handle } if valid_handle(handle) => Ok(()),
@@ -573,7 +584,7 @@ mod failed_attach_check {
             .await
             .unwrap();
         assert_eq!(
-            result,
+            *result,
             serde_json::json!({"kind":"prevented","reason":"protected browser page is not accessible"})
         );
         assert!(rx.try_recv().is_err());
@@ -595,7 +606,7 @@ mod failed_attach_check {
         );
         tools.completed.insert(
             "cached".into(),
-            (Call::Observe, serde_json::json!({"cached":true})),
+            (Call::Observe, Arc::new(serde_json::json!({"cached":true}))),
         );
         let stop = AtomicBool::new(true);
         assert!(
@@ -707,7 +718,7 @@ mod failed_attach_check {
                 "status-1".into(),
                 (
                     Call::Status,
-                    serde_json::json!({"attached": true, "release_confirmed": !release_succeeds}),
+                    Arc::new(serde_json::json!({"attached": true, "release_confirmed": !release_succeeds})),
                 ),
             );
             let status = tools
@@ -715,7 +726,7 @@ mod failed_attach_check {
                 .await
                 .expect("status is a local read");
             assert_eq!(
-                status,
+                *status,
                 serde_json::json!({"attached": false, "release_confirmed": release_succeeds}),
                 "status must report the detached state after a failed attach"
             );
@@ -791,3 +802,4 @@ mod failed_attach_check {
         );
     }
 }
+

@@ -56,6 +56,8 @@ pub(crate) fn tier_one(intent: &Intent) -> bool {
         | Intent::SelectOption { .. }
         | Intent::Scroll { .. }
         | Intent::SetNativeControl { .. } => true,
+        // Enter can submit a form, so only the other keys are Tier 1.
+        Intent::PressKey { key, .. } => key != "Enter",
         Intent::ActivateButton { .. } | Intent::Secret { .. } => false,
     }
 }
@@ -121,6 +123,18 @@ mod tests {
             },
         );
         assert!(!grant.covers(&secret, 2, now), "a secret needs its own consent");
+        let key = |key: &str| {
+            proposal(
+                "session-1",
+                Intent::PressKey {
+                    field_id: "field_1".into(),
+                    field_label: "Search".into(),
+                    key: key.into(),
+                },
+            )
+        };
+        assert!(grant.covers(&key("Tab"), 2, now));
+        assert!(!grant.covers(&key("Enter"), 2, now), "Enter can submit, so it always asks");
         assert!(!grant.covers(&step, 2, now + GRANT_TTL));
     }
 }

@@ -258,7 +258,7 @@ struct ToolRequest {
     call: Call,
     budget: Budget,
     cancel: Arc<AtomicBool>,
-    reply: oneshot::Sender<std::result::Result<Value, String>>,
+    reply: oneshot::Sender<std::result::Result<Arc<Value>, String>>,
 }
 
 enum Inbound {
@@ -293,7 +293,7 @@ impl Calls {
     }
 }
 
-fn answer_tool(request: ToolRequest, result: Result<Value>) {
+fn answer_tool(request: ToolRequest, result: Result<Arc<Value>>) {
     let _ = request
         .reply
         .send(result.map_err(|error| error.to_string()));
@@ -561,7 +561,7 @@ async fn process_message(
                 .remove(&identity);
             match response {
                 Some(Ok(Ok(value))) => {
-                    json!({"content":[{"type":"text","text":serde_json::to_string(&value)?}]})
+                    json!({"content":[{"type":"text","text":serde_json::to_string(&*value)?}]})
                 }
                 Some(Ok(Err(error))) => return Ok(Some(tool_error(id, error))),
                 _ => {
@@ -930,6 +930,7 @@ mod tests {
                             ("propose_task_plan", false, false, false),
                             ("network_requests", true, false, true),
                             ("enter_secret", false, true, false),
+                            ("press_key", false, true, false),
                         ];
                         assert_eq!(
                             tools.len(),

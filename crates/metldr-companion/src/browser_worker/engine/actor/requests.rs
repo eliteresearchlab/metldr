@@ -16,6 +16,7 @@ impl Actor {
             &kind,
             Kind::Change(_)
                 | Kind::EnterSecret(_)
+                | Kind::PressKey(_)
                 | Kind::ActivateButton(_)
                 | Kind::SetNativeControl(_)
                 | Kind::SelectOption(_)
@@ -81,6 +82,8 @@ impl Actor {
                 self.prepare_secret(tool, handle, kind, job)
             }
             Kind::EnterSecret(action) => self.enter_secret(action, job),
+            Kind::PrepareKey { tool, handle, key } => self.prepare_key(tool, handle, key, job),
+            Kind::PressKey(action) => self.arm_key(action, job),
             Kind::PrepareSelection {
                 tool,
                 handle,

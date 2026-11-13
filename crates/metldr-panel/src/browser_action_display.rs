@@ -30,6 +30,8 @@ pub(crate) fn display(action: &BrowserActionView) -> Display {
         BrowserActionIntent::Scroll { .. } => "Page scroll",
         BrowserActionIntent::SetNativeControl { .. } if pending => "Approve control change",
         BrowserActionIntent::SetNativeControl { .. } => "Control change",
+        BrowserActionIntent::PressKey { .. } if pending => "Approve key press",
+        BrowserActionIntent::PressKey { .. } => "Key press",
         BrowserActionIntent::EnterSecret { .. } if pending => "Enter a secret",
         BrowserActionIntent::EnterSecret { .. } => "Secret entry",
     };
@@ -46,6 +48,13 @@ pub(crate) fn display(action: &BrowserActionView) -> Display {
             add("field", "Field", field_label.clone());
             add("previous-value", "Previous value", previous_value.clone());
             add("value", "Proposed value", value.clone());
+        }
+        BrowserActionIntent::PressKey {
+            field_label, key, ..
+        } => {
+            add("destination", "Destination", action.url.clone());
+            add("field", "Field", field_label.clone());
+            add("key", "Key", key.clone());
         }
         BrowserActionIntent::EnterSecret {
             field_label,
@@ -195,6 +204,7 @@ pub(crate) fn display(action: &BrowserActionView) -> Display {
         Some(BrowserActionOutcome::ScrollObserved) => "Scroll position observed".to_owned(),
         Some(BrowserActionOutcome::ControlObserved) => "Control state observed on this page".to_owned(),
         Some(BrowserActionOutcome::SecretEntered) => "Secret entered on this page".to_owned(),
+        Some(BrowserActionOutcome::KeyObserved) => "Key press observed".to_owned(),
         _ => format!("{}{}{}", action.phase,
             action.outcome.map(|outcome| format!(" ({outcome})")).unwrap_or_default(),
             action.reason.as_ref().map(|reason| format!(": {reason}")).unwrap_or_default()),

@@ -144,6 +144,21 @@ impl Actor {
                 self.control_gestured(action, job)
             }
             Work::Gesture { job, .. } => self.button_gestured(job),
+            Work::ArmKey { action, job } => self.key_armed(action, job, &value),
+            Work::KeyGesture { job, .. } => self.key_pressed(job),
+            Work::KeyReceipt { job } => {
+                let delivered = evaluation_value(&value).is_ok_and(|v| v == Value::Bool(true));
+                self.value(
+                    job,
+                    if delivered {
+                        Outcome::KeyPressObserved
+                    } else {
+                        Outcome::Uncertain {
+                            reason: "approved key press could not be verified".into(),
+                        }
+                    },
+                )
+            }
             Work::ControlReceipt { action, job } => self.control_receipt(action, job, value),
             Work::ButtonReceipt { job } => {
                 let delivered = evaluation_value(&value).is_ok_and(|v| v == Value::Bool(true));
@@ -266,98 +281,66 @@ impl Actor {
         }
     }
     fn failed(&mut self, work: Work, reason: String, prevented: bool) -> Result<()> {
+        // A dispatched effect whose reply is lost is uncertain; one stopped before dispatch is
+        // prevented. Unverified receipts are always uncertain.
+        let lost = |lost: &str| {
+            if prevented {
+                Outcome::Prevented {
+                    reason: reason.clone(),
+                }
+            } else {
+                Outcome::Uncertain {
+                    reason: lost.into(),
+                }
+            }
+        };
+        let unverified = |why: &str| Outcome::Uncertain { reason: why.into() };
         match work {
             Work::CreateWorld if prevented => Ok(()),
             Work::Init(_) | Work::CreateWorld => {
                 Err(format!("browser session initialization failed: {reason}").into())
             }
-            Work::Gesture { action, job } => self.value(
-                job,
-                if prevented {
-                    Outcome::Prevented { reason }
-                } else {
-                    Outcome::Uncertain {
-                        reason: if matches!(
-                            &action.proposal.intent,
-                            Intent::SetNativeControl { .. }
-                        ) {
-                            "native control input result was lost".into()
-                        } else {
-                            "button input result was lost".into()
-                        },
-                    }
-                },
-            ),
+            Work::Gesture { action, job } => {
+                let outcome = lost(
+                    if matches!(&action.proposal.intent, Intent::SetNativeControl { .. }) {
+                        "native control input result was lost"
+                    } else {
+                        "button input result was lost"
+                    },
+                );
+                self.value(job, outcome)
+            }
+            Work::KeyGesture { job, .. } => self.value(job, lost("key input result was lost")),
+            Work::WriteSelection { job, .. } => {
+                self.value(job, lost("selection dispatch result was lost"))
+            }
+            Work::WriteScroll { job, .. } => {
+                self.value(job, lost("scroll dispatch result was lost"))
+            }
+            Work::WriteSecret { job, .. } => self.value(job, lost("secret entry result was lost")),
+            Work::Write { job, .. } => self.value(job, lost("field dispatch result was lost")),
             Work::ButtonReceipt { job } => self.value(
                 job,
-                Outcome::Uncertain {
-                    reason: "approved button click could not be verified".into(),
-                },
+                unverified("approved button click could not be verified"),
             ),
+            Work::KeyReceipt { job } => {
+                self.value(job, unverified("approved key press could not be verified"))
+            }
             Work::ControlReceipt { job, .. } => self.value(
                 job,
-                Outcome::Uncertain {
-                    reason: "native control state could not be verified".into(),
-                },
+                unverified("native control state could not be verified"),
             ),
-            Work::WriteSelection { job, .. } => self.value(
-                job,
-                if prevented {
-                    Outcome::Prevented { reason }
-                } else {
-                    Outcome::Uncertain {
-                        reason: "selection dispatch result was lost".into(),
-                    }
-                },
-            ),
-            Work::WriteScroll { job, .. } => self.value(
-                job,
-                if prevented {
-                    Outcome::Prevented { reason }
-                } else {
-                    Outcome::Uncertain {
-                        reason: "scroll dispatch result was lost".into(),
-                    }
-                },
-            ),
-            Work::VerifyScroll { job, .. } => self.value(
-                job,
-                Outcome::Uncertain {
-                    reason: "scroll position could not be verified".into(),
-                },
-            ),
+            Work::VerifyScroll { job, .. } => {
+                self.value(job, unverified("scroll position could not be verified"))
+            }
             Work::VerifySelection { job, .. } => self.value(
                 job,
-                Outcome::Uncertain {
-                    reason: "selection could not be observed after dispatch".into(),
-                },
+                unverified("selection could not be observed after dispatch"),
             ),
-            Work::WriteSecret { job, .. } => self.value(
-                job,
-                if prevented {
-                    Outcome::Prevented { reason }
-                } else {
-                    Outcome::Uncertain {
-                        reason: "secret entry result was lost".into(),
-                    }
-                },
-            ),
-            Work::Write { job, .. } => self.value(
-                job,
-                if prevented {
-                    Outcome::Prevented { reason }
-                } else {
-                    Outcome::Uncertain {
-                        reason: "field dispatch result was lost".into(),
-                    }
-                },
-            ),
-            Work::Verify { job, .. } => self.value(
-                job,
-                Outcome::Uncertain {
-                    reason: "field effect could not be verified".into(),
-                },
-            ),
+            Work::Verify { job, .. } => {
+                self.value(job, unverified("field effect could not be verified"))
+            }
+            Work::ArmKey { job, .. } => self.value(job, Outcome::Prevented { reason }),
             Work::Navigate { job, .. } if prevented => {
                 self.value(job, Outcome::Prevented { reason })
             }

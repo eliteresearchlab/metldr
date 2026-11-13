@@ -63,6 +63,12 @@ enum Kind {
         kind: crate::browser_action::SecretKind,
     },
     EnterSecret(Action),
+    PrepareKey {
+        tool: String,
+        handle: String,
+        key: metldr_browser_tools::Key,
+    },
+    PressKey(Action),
     PrepareSelection {
         tool: String,
         handle: String,
@@ -329,6 +335,23 @@ impl Engine {
             kind,
         })
         .await
+    }
+    pub(super) async fn prepare_key(
+        &self,
+        tool: &str,
+        handle: &str,
+        key: metldr_browser_tools::Key,
+    ) -> Result<Proposal> {
+        self.request(Kind::PrepareKey {
+            tool: tool.into(),
+            handle: handle.into(),
+            key,
+        })
+        .await
+    }
+    pub(super) async fn press_key(&self, action: &Action) -> Outcome {
+        self.effect(Kind::PressKey(action.clone()), "key press result was lost")
+            .await
     }
     pub(super) async fn enter_secret(&self, action: &Action) -> Outcome {
         self.effect(

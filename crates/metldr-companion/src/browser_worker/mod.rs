@@ -276,7 +276,9 @@ async fn execute(
             .await
         {
             Ok(result) => result,
-            Err(error) if error.is::<PlanRefusal>() => json!({"error": error.to_string()}),
+            Err(error) if error.is::<PlanRefusal>() => {
+                std::sync::Arc::new(json!({"error": error.to_string()}))
+            }
             Err(error) => return Err(error),
         };
         protocol.continuation(&result)?;
