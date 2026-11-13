@@ -125,6 +125,7 @@ struct State {
     settings_open: bool,
     conversations: conversations::Conversations,
     activities: Activities,
+    browser_receipts_open: bool,
     answers: answers::Answers,
     thread_rect: ::rune::Live<[f32; 4]>,
     proposed_followup: Option<answers::Followup>,
@@ -152,6 +153,7 @@ impl Default for State {
             settings_open: false,
             conversations: conversations::Conversations::default(),
             activities: Activities::default(),
+            browser_receipts_open: false,
             answers: answers::Answers::default(),
             thread_rect: ::rune::Live::new([0.0; 4]),
             proposed_followup: None,
@@ -231,6 +233,7 @@ impl State {
         }
         self.answers = answers::Answers::default();
         self.activities = Activities::default();
+        self.browser_receipts_open = false;
         self.replies = replies::Replies::default();
         self.pi_replies = pi_replies::PiReplies::default();
         self.corrections = corrections::Corrections::default();
@@ -256,7 +259,23 @@ impl State {
         });
     }
 
-    fn use_followup(&mut self, tx: &mut Tx) {
+    fn add_followup(&mut self, tx: &mut Tx) {
+        self.sound(crate::interaction_audio::Cue::Press);
+        self.use_followup(true, tx);
+    }
+
+    fn dismiss_followup(&mut self, tx: &mut Tx) {
+        self.sound(crate::interaction_audio::Cue::Release);
+        self.use_followup(false, tx);
+    }
+
+    fn use_followup(&mut self, add: bool, tx: &mut Tx) {
+        if add && self.draft.preedit.is_some() {
+            self.fail(FlowError::InvalidInput(
+                "Finish composing your draft first.".into(),
+            ));
+            return;
+        }
         let Some(followup) = self.proposed_followup.take() else {
             return;
         };
@@ -274,11 +293,21 @@ impl State {
             });
         match result {
             Ok(()) => {
-                self.replace_draft(followup.text);
-                self.menu = None;
-                tx.focus("rune-composer-field");
+                if add {
+                    let text = if self.draft.text.is_empty() {
+                        followup.text
+                    } else {
+                        format!("{}\n\n{}", self.draft.text, followup.text)
+                    };
+                    self.replace_draft(text);
+                    self.menu = None;
+                    tx.focus("rune-composer-field");
+                }
             }
-            Err(error) => self.fail(error),
+            Err(error) => {
+                self.proposed_followup = Some(followup);
+                self.fail(error);
+            }
         }
     }
 
@@ -744,9 +773,6 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
     let followup = updates.presentation.borrow_mut().followup.take();
     if let Some(followup) = followup {
         state.proposed_followup = Some(followup);
-        if !state.settings_open && state.draft.text.is_empty() && state.draft.preedit.is_none() {
-            state.use_followup(tx);
-        }
     }
     if state
         .proposed_followup
@@ -756,6 +782,74 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
         state.proposed_followup = None;
     }
     true
+}
+
+fn followup_controls<S: 'static>(
+    typography: preferences::Typography,
+    add: fn(&mut S, &mut Tx),
+    dismiss: fn(&mut S, &mut Tx),
+) -> El {
+    let mut actions = row().gap(8.0);
+    for (label, action) in [("Add to draft", add), ("Dismiss", dismiss)] {
+        actions = actions.child(
+            typography
+                .text(label)
+                .key(label)
+                .role("button")
+                .focusable(true)
+                .native_activation()
+                .press(typography.ink.alpha(0.12))
+                .on_press_tx(action)
+                .on_key(move |state: &mut S, key, tx| composer::enter(state, key, tx, action)),
+        );
+    }
+    actions
+}
+
+#[cfg(test)]
+mod followup_tests {
+    use super::*;
+    use ::rune::{Env, Key, KeyEvent, Mods, Runtime};
+
+    #[test]
+    fn enter_activates_each_followup_once_and_ignores_repeat() {
+        fn view(_: &[u32; 2], _: &mut Cx<[u32; 2]>) -> El {
+            followup_controls(
+                preferences::Typography {
+                    scale: 1.0,
+                    ink: oklch(0.5, 0.0, 0.0),
+                },
+                |counts: &mut [u32; 2], _| counts[0] += 1,
+                |counts: &mut [u32; 2], _| counts[1] += 1,
+            )
+        }
+        let mut rt = Runtime::new([0, 0], view, (640.0, 100.0), Env::default());
+        rt.set_tab_visits_controls(true);
+        rt.frame(0.0);
+        for (label, expected) in [("Add to draft", [1, 0]), ("Dismiss", [1, 1])] {
+            rt.key(KeyEvent {
+                key: Key::Tab,
+                mods: Mods::default(),
+            });
+            rt.frame(0.0);
+            assert_eq!(
+                rt.elements()
+                    .into_iter()
+                    .find(|el| el.focused)
+                    .and_then(|el| el.key)
+                    .as_deref(),
+                Some(label)
+            );
+            let enter = KeyEvent {
+                key: Key::Enter,
+                mods: Mods::default(),
+            };
+            rt.key(enter.clone());
+            rt.repeat_key(enter);
+            rt.frame(0.0);
+            assert_eq!(rt.state, expected);
+        }
+    }
 }
 
 fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
@@ -774,6 +868,66 @@ fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
+fn toggle_browser_receipts(state: &mut State, _: &mut Tx) {
+    state.browser_receipts_open = !state.browser_receipts_open;
+}
+
+fn browser_action_view(
+    row: &browser_actions::UiBrowserAction,
+    typography: preferences::Typography,
+) -> El {
+    let action = &row.action;
+    let display = &row.display;
+    let mut card = col()
+        .key(format!("browser-action:{}", action.id.as_str()))
+        .w_full()
+        .gap(8.0)
+        .child(typography.text(display.title).wrap())
+        .child(typography.text(&display.status).wrap());
+    if !display.details.iter().any(|detail| {
+        matches!(detail.part, "source" | "destination")
+            || matches!(detail.label, "Source" | "Destination")
+    }) {
+        card = card.child(typography.text(&action.url).wrap());
+    }
+    for detail in &display.details {
+        card = card.child(
+            typography
+                .text(format!("{}: {}", detail.label, detail.value))
+                .wrap(),
+        );
+    }
+    if action.phase == crate::model::BrowserActionPhase::Pending {
+        if row.decline && !row.approve {
+            card = card.child(typography.text("Approval needs access to the original page. You can still decline this action.").wrap());
+        }
+        for (approve, enabled, label) in [
+            (false, row.decline, "Decline"),
+            (true, row.approve, "Approve"),
+        ] {
+            let decision = browser_actions::DecisionKey {
+                id: action.id.clone(),
+                revision: action.revision,
+                approve,
+            };
+            card = card.child(
+                typography
+                    .text(label)
+                    .key(decision.element_key())
+                    .role("button")
+                    .focusable(true)
+                    .disabled(!enabled)
+                    .label(format!("{label} browser action at {}", action.url))
+                    .native_activation()
+                    .on_press_tx(move |state: &mut State, tx| {
+                        state.decide_browser_action(decision.clone(), tx)
+                    }),
+            );
+        }
+    }
+    card
+}
+
 fn view(state: &State, cx: &mut Cx<State>) -> El {
     let palette = state.preferences.palette();
     let (ink, page) = (palette.ink, palette.page);
@@ -783,15 +937,35 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         let presentation = updates.presentation.borrow();
         for message in &presentation.messages.messages {
             if let Some(content) = message.text() {
+                let id = message.id();
+                let user = matches!(message, crate::ag_ui::AgUiMessage::User { .. });
+                let body = typography
+                    .text(content)
+                    .wrap()
+                    .font(typography.font(14.0, 400.0).lh(21.0 * typography.scale))
+                    .color(ink)
+                    .selectable(true);
+                let message = if user {
+                    row().w_full().justify_end().child(
+                        col()
+                            .max_w(620.0)
+                            .padding(12.0)
+                            .radius(12.0)
+                            .fill(palette.field)
+                            .child(body),
+                    )
+                } else {
+                    col().max_w(620.0).child(body)
+                };
                 thread = thread.child(
-                    typography
-                        .text(content)
-                        .key(message.id())
-                        .w_full()
-                        .wrap()
-                        .font(typography.font(14.0, 400.0).lh(21.0 * typography.scale))
-                        .color(ink)
-                        .selectable(true),
+                    message
+                        .key(id)
+                        .role(if user { "group" } else { "article" })
+                        .label(if user {
+                            "User message"
+                        } else {
+                            "Assistant message"
+                        }),
                 );
             } else if let crate::ag_ui::AgUiMessage::Activity { id, .. } = message {
                 thread = thread.child(
@@ -802,6 +976,9 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                         .w_full(),
                 );
             }
+        }
+        if state.running() && presentation.messages.waiting() {
+            thread = thread.child(typography.text("Working").key("working").role("status"));
         }
         if let Some(error) = &presentation.error {
             thread = thread.child(
@@ -815,7 +992,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         }
     }
     if matches!(state.session, Session::Connecting) {
-        thread = thread.child(typography.text("Opening metldr").label("Opening metldr"));
+        thread = thread.child(typography.text("Connecting").role("status"));
     }
     let Some(core) = state.core() else {
         if matches!(state.session, Session::Failed) {
@@ -833,6 +1010,19 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         return col().w_full().h_full().fill(page).color(ink).child(thread);
     };
     let connection = connection::UiConnectionSnapshot::read(core);
+    if state
+        .updates
+        .as_ref()
+        .is_some_and(|updates| updates.presentation.borrow().messages.messages.is_empty())
+    {
+        thread = thread.child(
+            typography
+                .text("Welcome to metldr")
+                .role("heading")
+                .level(1),
+        );
+        thread = thread.child(typography.text("What do you want to do?").wrap());
+    }
     if state.conversations.is_open() {
         return col()
             .w_full()
@@ -890,23 +1080,11 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             col()
                 .gap(8.0)
                 .child(typography.text(&followup.text).wrap())
-                .child(
-                    typography
-                        .text("Replace draft with followup")
-                        .role("button")
-                        .focusable(true)
-                        .press(ink.alpha(0.12))
-                        .on_press_tx(|state: &mut State, tx| {
-                            state.sound(crate::interaction_audio::Cue::Press);
-                            state.use_followup(tx);
-                        })
-                        .on_key(|state: &mut State, key, tx| {
-                            composer::enter(state, key, tx, |state, tx| {
-                                state.sound(crate::interaction_audio::Cue::Press);
-                                state.use_followup(tx);
-                            })
-                        }),
-                ),
+                .child(followup_controls(
+                    typography,
+                    State::add_followup,
+                    State::dismiss_followup,
+                )),
         );
     }
     thread = thread.child(state.sources.view(typography));
@@ -919,44 +1097,48 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     for correction in corrections::view(state, core) {
         thread = thread.child(correction);
     }
-    if let Some((action, can_approve, can_decline)) = core.rune_browser_action() {
-        let display = crate::browser_action_display::display(&action);
-        let mut approval = col()
-            .key("browser-approval")
-            .w_full()
-            .gap(8.0)
-            .child(typography.text(display.title).wrap());
-        for detail in display.details {
-            approval = approval.child(
-                typography
-                    .text(format!("{}: {}", detail.label, detail.value))
-                    .wrap(),
-            );
+    let browser = core.rune_browser_actions();
+    if let Some(notice) = browser.notice() {
+        let role = if !browser.connected() || browser.stale() || browser.uncertain() {
+            "alert"
+        } else {
+            "status"
+        };
+        thread = thread.child(typography.text(notice).role(role).wrap());
+    }
+    let actions = browser.actions();
+    for action in actions.iter().filter(|action| !action.display.receipt) {
+        thread = thread.child(browser_action_view(action, typography));
+    }
+    let receipts: Vec<_> = actions
+        .iter()
+        .filter(|action| action.display.receipt)
+        .collect();
+    if !receipts.is_empty() {
+        thread = thread.child(
+            typography
+                .text(format!("Browser action results ({})", receipts.len()))
+                .key("browser-receipts-toggle")
+                .role("button")
+                .focusable(true)
+                .expanded(state.browser_receipts_open)
+                .on_press_tx(toggle_browser_receipts)
+                .on_key(|state: &mut State, key, tx| {
+                    if key.key == ::rune::Key::Enter || key.key == ::rune::Key::Text(" ".into()) {
+                        if !tx.key_repeat() {
+                            toggle_browser_receipts(state, tx);
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }),
+        );
+        if state.browser_receipts_open {
+            for action in receipts {
+                thread = thread.child(browser_action_view(action, typography));
+            }
         }
-        for (approve, enabled, label) in [
-            (true, can_approve, "Approve"),
-            (false, can_decline, "Decline"),
-        ] {
-            let decision = browser_actions::DecisionKey {
-                id: action.id.clone(),
-                revision: action.revision,
-                approve,
-            };
-            approval = approval.child(
-                typography
-                    .text(label)
-                    .key(decision.element_key())
-                    .role("button")
-                    .focusable(true)
-                    .disabled(!enabled)
-                    .label(label)
-                    .native_activation()
-                    .on_press_tx(move |state: &mut State, tx| {
-                        state.decide_browser_action(decision.clone(), tx)
-                    }),
-            );
-        }
-        thread = thread.child(approval);
     }
     if !connection.connected() {
         thread = thread.child(
@@ -988,6 +1170,10 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     if let Some(menu) = composer::menu(state, cx) {
         composer = composer.child(menu);
     }
+    let error = state
+        .updates
+        .as_ref()
+        .and_then(|updates| updates.presentation.borrow().error.clone());
     col()
         .w_full()
         .h_full()
@@ -1024,6 +1210,37 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                             composer::enter(state, key, tx, State::open_settings)
                         }),
                 ),
+        )
+        .child(
+            typography
+                .text(if connection.stale() {
+                    "The conversation changed. Reload the panel."
+                } else if connection.reconnecting() {
+                    "Reconnecting"
+                } else if !connection.connected() {
+                    "Connection lost"
+                } else if connection.uncertain() {
+                    "Check saved work before starting again"
+                } else if let Some(error) = &error {
+                    error
+                } else if let Some(error) = &state.conversations.error {
+                    error
+                } else if matches!(*core.owner.borrow(), Owner::Capturing) {
+                    "Reading current page"
+                } else if !core.rune_native_requests().0.is_empty()
+                    || core.rune_browser_action().is_some()
+                {
+                    "Waiting for approval"
+                } else if state.running() {
+                    "Running"
+                } else if state.conversations.busy || core.history_loading.get() {
+                    "Loading history"
+                } else {
+                    "Ready"
+                })
+                .key("conversation-status")
+                .role("status")
+                .padding(8.0),
         )
         .child(state.conversations.toolbar(state))
         .child(
