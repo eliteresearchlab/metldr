@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+pub mod detect;
 pub mod handoff;
 
 /// Every agent harness MetLDR can drive. Adding one means one variant here, one entry in

@@ -198,7 +198,7 @@ pub(super) struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            slots: [Kind::Pi, Kind::Codex, Kind::Opencode]
+            slots: Kind::ALL
                 .into_iter()
                 .map(|k| {
                     (
@@ -222,7 +222,7 @@ impl Settings {
         if self.slots.len() != 3 {
             return Err("invalid agent settings slots".into());
         }
-        for k in [Kind::Pi, Kind::Codex, Kind::Opencode] {
+        for k in Kind::ALL {
             let s = self.slot(k);
             let configured = !matches!(s.selection, Selection::Unmanaged);
             if (s.revision == 0) != !configured || (s.revision == 0) != s.last_change.is_none() {
@@ -254,10 +254,48 @@ impl Settings {
 #[derive(Default)]
 pub(crate) struct Runtime {
     pub states: BTreeMap<Kind, &'static str>,
+    /// Installed agents and desktop apps, refreshed at most every 10 seconds.
+    detected: std::cell::RefCell<Option<(std::time::Instant, Value)>>,
+}
+impl Kind {
+    pub(super) const ALL: [Kind; 3] = [Kind::Pi, Kind::Codex, Kind::Opencode];
+    fn harness(self) -> metldr_harness::HarnessId {
+        match self {
+            Self::Pi => metldr_harness::HarnessId::Pi,
+            Self::Codex => metldr_harness::HarnessId::Codex,
+            Self::Opencode => metldr_harness::HarnessId::OpenCode,
+        }
+    }
+}
+fn detect() -> Value {
+    use metldr_harness::detect;
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let path = std::env::var_os("PATH");
+    let agents: serde_json::Map<String, Value> = detect::executables(path.as_deref(), &home)
+        .into_iter()
+        .map(|(id, found)| (id.key().to_owned(), json!(found)))
+        .collect();
+    let app_data = std::env::var_os("APPDATA").map(PathBuf::from);
+    let apps: Vec<_> = detect::desktop_apps(&home, detect::Os::current(), app_data.as_deref())
+        .into_iter()
+        .map(|app| json!({"app":app.key,"label":app.label,"config":app.config,"local_config":app.local_config}))
+        .collect();
+    json!({"agents":agents,"apps":apps})
 }
 impl Runtime {
     pub fn public(&self, s: &Settings, busy: bool) -> Value {
-        let agents: Vec<_> = [Kind::Pi, Kind::Codex, Kind::Opencode]
+        let now = std::time::Instant::now();
+        let detected = {
+            let mut cache = self.detected.borrow_mut();
+            if cache
+                .as_ref()
+                .is_none_or(|(at, _)| now.duration_since(*at) > std::time::Duration::from_secs(10))
+            {
+                *cache = Some((now, detect()));
+            }
+            cache.as_ref().map(|(_, value)| value.clone()).unwrap_or_default()
+        };
+        let agents: Vec<_> = Kind::ALL
             .into_iter()
             .map(|agent| {
                 let slot = s.slot(agent);
@@ -271,10 +309,11 @@ impl Runtime {
                 };
                 json!({"agent":agent,"revision":slot.revision,"state":state,"profile":profile,
                     "last_request":slot.last_change.as_ref().map(|r|&r.request),
-                    "last_digest":slot.last_change.as_ref().map(|r|&r.digest)})
+                    "last_digest":slot.last_change.as_ref().map(|r|&r.digest),
+                    "found":detected["agents"][agent.harness().key()]})
             })
             .collect();
-        json!({"busy":busy,"agents":agents})
+        json!({"busy":busy,"agents":agents,"apps":detected["apps"]})
     }
 }
 impl Owner {
@@ -355,7 +394,7 @@ impl Owner {
         }
         self.persist_settings(self.state.clone())?;
         self.agent_runtime.states.clear();
-        for k in [Kind::Pi, Kind::Codex, Kind::Opencode] {
+        for k in Kind::ALL {
             self.refresh_agent_runtime(k)
         }
         self.publish()?;
@@ -571,3 +610,4 @@ mod checks {
         fs::remove_dir_all(root).unwrap();
     }
 }
+

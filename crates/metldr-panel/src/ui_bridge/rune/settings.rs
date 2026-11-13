@@ -333,6 +333,25 @@ impl Settings {
         draft.version = draft.version.wrapping_add(1);
     }
 
+    /// Fills the executable with the one the companion found; the user still saves.
+    fn use_found(state: &mut State, index: usize, expected_version: u64, path: &str) {
+        let Some(core) = state.core().cloned() else {
+            return;
+        };
+        if !core.page.controls_ready() || core.page.settings_blocked() {
+            return;
+        }
+        let Some(draft) = state.settings.agents.get_mut(index) else {
+            return;
+        };
+        if draft.version != expected_version {
+            return;
+        }
+        replace_if_changed(&mut draft.executable, path);
+        draft.dirty = true;
+        draft.version = draft.version.wrapping_add(1);
+    }
+
     fn agent_action(state: &mut State, index: usize, expected_version: u64, save: bool) {
         let (Some(core), Some(updates)) = (state.core().cloned(), state.updates.clone()) else {
             return;
@@ -950,6 +969,23 @@ impl Settings {
             if let Some(row) = row {
                 let wrapper = UiAgentConfiguration::new(Rc::clone(page), row.clone());
                 section = section.child(typography.text(wrapper.state()));
+                match &row.found {
+                    Some(path) => {
+                        section = section.child(typography.text(format!("Found at {path}")).wrap());
+                        if draft.executable.text != *path {
+                            let path = path.clone();
+                            section = section.child(button(
+                                typography,
+                                "Use found",
+                                format!("Use the {label} found at {path}"),
+                                format!("settings-agent-{i}-found"),
+                                enabled,
+                                move |state| Settings::use_found(state, i, version, &path),
+                            ));
+                        }
+                    }
+                    None => section = section.child(typography.text("Not found on this computer").wrap()),
+                }
             }
             section = section
                 .child(agent_input(
@@ -1132,6 +1168,22 @@ impl Settings {
                     },
                 ));
             out = out.child(section);
+        }
+        if !view.agent_settings.apps.is_empty() {
+            let mut apps = col()
+                .key("settings-desktop-apps")
+                .w_full()
+                .gap(6.0)
+                .child(typography.text("Desktop apps").role("heading"));
+            for app in &view.agent_settings.apps {
+                let status = match (&app.config, app.local_config) {
+                    (Some(path), _) => format!("{}: config at {path}", app.label),
+                    (None, true) => format!("{}: not found", app.label),
+                    (None, false) => format!("{}: add MetLDR in its own settings", app.label),
+                };
+                apps = apps.child(typography.text(status).wrap());
+            }
+            out = out.child(apps);
         }
         if !connected {
             out = out.child(
