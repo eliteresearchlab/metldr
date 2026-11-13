@@ -1516,24 +1516,29 @@ impl PageView {
         if bytes.len() > MAX_FRAME {
             return Err(FlowError::Protocol("view exceeds 65536 bytes".into()));
         }
-        let value: serde_json::Value = serde_json::from_slice(bytes)
-            .map_err(|error| FlowError::Protocol(error.to_string()))?;
-        if value.get("pi_ui").is_some_and(|pi_ui| {
-            serde_json::to_vec(pi_ui).map_or(true, |encoded| encoded.len() > MAX_PI_UI)
-        }) {
-            return Err(FlowError::Protocol(
-                "Pi UI projection exceeds 32768 bytes".into(),
-            ));
-        }
-        if value.get("codex_input").is_some_and(|input| {
-            serde_json::to_vec(input).map_or(true, |encoded| encoded.len() > 32_768)
-        }) {
-            return Err(FlowError::Protocol(
-                "Codex input projection exceeds 32768 bytes".into(),
-            ));
-        }
-        let wire: WireView = serde_json::from_value(value)
-            .map_err(|error| FlowError::Protocol(error.to_string()))?;
+        let wire: WireView = if bytes.len() <= MAX_PI_UI.min(32_768) {
+            // Compact re-encoding never grows a value, so no projection inside a frame this
+            // small can pass its 32 KiB limit: parse once, straight into the typed view.
+            serde_json::from_slice(bytes).map_err(|error| FlowError::Protocol(error.to_string()))?
+        } else {
+            let value: serde_json::Value = serde_json::from_slice(bytes)
+                .map_err(|error| FlowError::Protocol(error.to_string()))?;
+            if value.get("pi_ui").is_some_and(|pi_ui| {
+                serde_json::to_vec(pi_ui).map_or(true, |encoded| encoded.len() > MAX_PI_UI)
+            }) {
+                return Err(FlowError::Protocol(
+                    "Pi UI projection exceeds 32768 bytes".into(),
+                ));
+            }
+            if value.get("codex_input").is_some_and(|input| {
+                serde_json::to_vec(input).map_or(true, |encoded| encoded.len() > 32_768)
+            }) {
+                return Err(FlowError::Protocol(
+                    "Codex input projection exceeds 32768 bytes".into(),
+                ));
+            }
+            serde_json::from_value(value).map_err(|error| FlowError::Protocol(error.to_string()))?
+        };
         if wire.store.len() != 32
             || !wire.store.bytes().all(|byte| byte.is_ascii_hexdigit())
             || wire.runs.len() > MAX_RUNS
