@@ -94,6 +94,8 @@ pub(crate) enum Profile {
         trust_pem: Option<Vec<u8>>,
         /// Response timeout a Chat Completions connection set; others use their client default.
         timeout_secs: Option<u16>,
+        /// The built Chat Completions client, reused by every conversation on this binding.
+        chat: std::sync::Arc<std::sync::OnceLock<metldr_chat_completions::Client>>,
     },
 }
 
@@ -276,6 +278,7 @@ fn bind_parts(
         credential,
         trust_pem: pem,
         timeout_secs,
+        chat: Default::default(),
     })
 }
 
@@ -330,8 +333,11 @@ impl Profile {
         }
         let header = self.credential()?;
         match &mut self {
-            Self::Https { credential, .. } => {
-                *credential = Credential::Pinned(std::sync::Arc::new(header))
+            Self::Https {
+                credential, chat, ..
+            } => {
+                *credential = Credential::Pinned(std::sync::Arc::new(header));
+                *chat = Default::default();
             }
             Self::Fixture { .. } => return Err("fixture profile cannot be managed".into()),
         }
@@ -444,10 +450,14 @@ impl Profile {
             trust_pem,
             credential,
             timeout_secs,
+            chat,
         } = self
         else {
             return Err("Chat Completions requires HTTPS".into());
         };
+        if let Some(client) = chat.get() {
+            return Ok(client.clone());
+        }
         let key = match credential {
             Credential::None => None,
             _ => Some(self.credential()?),
@@ -463,6 +473,10 @@ impl Profile {
         )?;
         if stop.load(std::sync::atomic::Ordering::Acquire) {
             return Err("Chat request cancelled".into());
+        }
+        // Only a pinned key is cached: an environment or vault read stays per call.
+        if matches!(credential, Credential::Pinned(_) | Credential::None) {
+            let _ = chat.set(client.clone());
         }
         Ok(client)
     }

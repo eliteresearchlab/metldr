@@ -5,6 +5,8 @@ use crate::{Prompt, Result, TextEvent, sse, stream};
 use metldr_browser_tools::{BROWSER_POLICY, definitions};
 use stream::Turn;
 
+/// Cheap to clone: clones share one connection pool.
+#[derive(Clone)]
 pub struct Client {
     client: reqwest::Client,
     endpoint: String,

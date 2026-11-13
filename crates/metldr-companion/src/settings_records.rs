@@ -192,6 +192,7 @@ mod tests {
             credential: Credential::Environment("METLDR_TEST_KEY".into()),
             trust_pem: None,
             timeout_secs: None,
+            chat: Default::default(),
         };
         assert_eq!(route_source(false, Some(&route)), "environment");
         assert_eq!(route_source(true, Some(&route)), "saved");
