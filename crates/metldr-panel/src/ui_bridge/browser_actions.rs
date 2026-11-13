@@ -32,7 +32,13 @@ pub(super) struct DecisionKey {
 impl DecisionKey {
     pub(super) fn element_key(&self) -> String {
         let id = self.id.as_str();
-        format!("browser:{}:{}:{}:{}", id.len(), id, self.revision, u8::from(self.approve))
+        format!(
+            "browser:{}:{}:{}:{}",
+            id.len(),
+            id,
+            self.revision,
+            u8::from(self.approve)
+        )
     }
 }
 
@@ -300,7 +306,10 @@ impl UiBrowserActions {
             .ok()
             .filter(|value| *value > 0)
             .ok_or_else(|| crate::err("Invalid browser action revision."))?;
-        let work = self.core.reserve_browser_decision(Key { id, revision }, approve).map_err(js_error)?;
+        let work = self
+            .core
+            .reserve_browser_decision(Key { id, revision }, approve)
+            .map_err(js_error)?;
         Ok(future_to_promise(async move {
             work.await.map(|()| JsValue::UNDEFINED).map_err(js_error)
         }))
@@ -310,17 +319,24 @@ impl UiBrowserActions {
 impl Core {
     #[cfg(feature = "rune-ui")]
     pub(super) fn rune_browser_actions(&self) -> UiBrowserActionSnapshot {
-        UiBrowserActionSnapshot { state: State::read(self) }
+        UiBrowserActionSnapshot {
+            state: State::read(self),
+        }
     }
 
     #[cfg(feature = "rune-ui")]
     pub(super) fn rune_browser_action(&self) -> Option<(BrowserActionView, bool, bool)> {
         let state = State::read(self);
         let action = state.actions.iter().find(|action| {
-            action.phase == BrowserActionPhase::Pending && action.revision > 0
+            action.phase == BrowserActionPhase::Pending
+                && action.revision > 0
                 && state.active.as_ref() == Some(&action.run)
         })?;
-        Some((action.clone(), state.enabled(action, true), state.enabled(action, false)))
+        Some((
+            action.clone(),
+            state.enabled(action, true),
+            state.enabled(action, false),
+        ))
     }
 
     #[cfg(feature = "rune-ui")]
@@ -330,9 +346,17 @@ impl Core {
         tx: &mut ::rune::Tx,
     ) -> Result<impl Future<Output = Result<(), FlowError>> + 'static, FlowError> {
         if decision.revision == 0 || !tx.consume_activation(&decision.element_key()) {
-            return Err(FlowError::InvalidInput("Use a current action to answer the request.".into()));
+            return Err(FlowError::InvalidInput(
+                "Use a current action to answer the request.".into(),
+            ));
         }
-        self.reserve_browser_decision(Key { id: decision.id, revision: decision.revision }, decision.approve)
+        self.reserve_browser_decision(
+            Key {
+                id: decision.id,
+                revision: decision.revision,
+            },
+            decision.approve,
+        )
     }
 
     fn reserve_browser_decision(
@@ -346,7 +370,9 @@ impl Core {
             .iter()
             .any(|row| key.offered(row) && state.enabled(row, approve))
         {
-            return Err(FlowError::InvalidInput("This browser action is no longer available.".into()));
+            return Err(FlowError::InvalidInput(
+                "This browser action is no longer available.".into(),
+            ));
         }
         *self.browser_operation.borrow_mut() = Operation::Sending(key.clone());
         self.notify_browser_actions();
@@ -401,7 +427,9 @@ impl Core {
             observer.wake();
         }
         let changed = self.page.changed.borrow().clone();
-        if let Some(changed) = changed { changed(); }
+        if let Some(changed) = changed {
+            changed();
+        }
     }
 }
 
@@ -416,9 +444,21 @@ mod tests {
         let id: BrowserActionId =
             serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:2"))
                 .unwrap();
-        let approve = DecisionKey { id: id.clone(), revision: 1, approve: true };
-        let decline = DecisionKey { id: id.clone(), revision: 1, approve: false };
-        let newer = DecisionKey { id, revision: 2, approve: true };
+        let approve = DecisionKey {
+            id: id.clone(),
+            revision: 1,
+            approve: true,
+        };
+        let decline = DecisionKey {
+            id: id.clone(),
+            revision: 1,
+            approve: false,
+        };
+        let newer = DecisionKey {
+            id,
+            revision: 2,
+            approve: true,
+        };
         assert_ne!(approve.element_key(), decline.element_key());
         assert_ne!(approve.element_key(), newer.element_key());
     }
@@ -500,11 +540,16 @@ mod tests {
             operation: Operation::Idle,
         };
         let mut receipt = action.clone();
-        receipt.id = serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:3")).unwrap();
+        receipt.id =
+            serde_json::from_value(serde_json::json!("0123456789abcdef0123456789abcdef:3"))
+                .unwrap();
         receipt.phase = BrowserActionPhase::Settled;
         receipt.outcome = Some(crate::model::BrowserActionOutcome::Verified);
         state.actions.push(receipt);
-        let shown = UiBrowserActionSnapshot { state: state.clone() }.actions();
+        let shown = UiBrowserActionSnapshot {
+            state: state.clone(),
+        }
+        .actions();
         assert_eq!(shown.len(), 2);
         assert!(!shown[0].receipt());
         assert!(shown[0].decline_enabled());

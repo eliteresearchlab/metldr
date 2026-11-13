@@ -32,6 +32,15 @@ pub(crate) fn plan_reply(run: &RunId, revision: u32, approve: bool) -> Value {
     json!({"op":"plan_reply", "run":run, "revision":revision, "approve":approve})
 }
 
+/// Turns session approval on or extends it (`grant`), or stops it.
+pub(crate) fn session_grant(run: &RunId, revision: u32, grant: bool) -> Value {
+    if grant {
+        json!({"op":"grant_session", "run":run, "revision":revision})
+    } else {
+        json!({"op":"revoke_session", "run":run})
+    }
+}
+
 pub(crate) enum PageTextPrompt {
     Summary,
     Answer(UserText),
@@ -854,6 +863,48 @@ impl FlowClient {
         match self
             .request(
                 conversation(&scope, plan_reply(&run, revision, approve)),
+                ReplyKind::SelectedPage(scope),
+            )
+            .await?
+        {
+            Reply::Page(view) => Ok(self.check_source(view).await),
+            _ => Err(FlowError::Protocol(
+                "Expected the updated task plan view.".into(),
+            )),
+        }
+    }
+
+    pub(crate) async fn set_session_grant(
+        &self,
+        scope: metldr_history_pages::Scope,
+        run: RunId,
+        revision: u32,
+        grant: bool,
+    ) -> Result<PageView> {
+        let available = self
+            .inner
+            .protocol
+            .borrow()
+            .latest
+            .as_ref()
+            .is_some_and(|view| {
+                self.is_connected()
+                    && view.selection == scope
+                    && view.active_run() == Some(&run)
+                    && view.task_plan.as_ref().is_some_and(|plan| {
+                        plan.run == run
+                            && plan.revision == revision
+                            && plan.state == crate::model::PlanState::Approved
+                    })
+            });
+        if !available {
+            return Err(FlowError::InvalidInput(
+                "This task plan is no longer approved.".into(),
+            ));
+        }
+        match self
+            .request(
+                conversation(&scope, session_grant(&run, revision, grant)),
                 ReplyKind::SelectedPage(scope),
             )
             .await?

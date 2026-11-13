@@ -202,6 +202,16 @@ pub(crate) struct TaskPlanView {
     pub(crate) scope: String,
     pub(crate) revision: u32,
     pub(crate) state: PlanState,
+    #[serde(default)]
+    pub(crate) session_grant: Option<SessionGrantView>,
+}
+
+/// An active session approval for the plan's run (decision 09, B3.2).
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SessionGrantView {
+    pub(crate) remaining_s: u64,
+    pub(crate) bound: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -1529,6 +1539,9 @@ impl PageView {
                     !s.is_empty() && s.len() <= max && !s.chars().any(char::is_control)
                 };
                 plan.revision == 0
+                    || plan.session_grant.as_ref().is_some_and(|grant| {
+                        plan.state != PlanState::Approved || grant.remaining_s > 1800
+                    })
                     || !valid(&plan.goal, 1024)
                     || !valid(&plan.scope, 1024)
                     || plan.intended_effects.len() > 16
