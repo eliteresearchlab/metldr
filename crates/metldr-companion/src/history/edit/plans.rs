@@ -48,6 +48,7 @@ pub(crate) enum PlanError {
     AlreadyReviewed,
     Untrusted,
     Held,
+    Declined,
     Invalid,
 }
 impl std::fmt::Display for PlanError {
@@ -127,13 +128,11 @@ impl Edit<'_> {
     }
 
     pub(super) fn require_approved_plan(&self, execution: &Execution) -> Result<()> {
-        if self
-            .task_plan(execution)?
-            .is_some_and(|plan| plan.state != PlanState::Approved)
-        {
-            return Err(PlanError::Held.into());
+        match self.task_plan(execution)?.map(|plan| plan.state) {
+            Some(PlanState::Proposed) => Err(PlanError::Held.into()),
+            Some(PlanState::Declined) => Err(PlanError::Declined.into()),
+            Some(PlanState::Approved) | None => Ok(()),
         }
-        Ok(())
     }
 
     #[allow(dead_code)]

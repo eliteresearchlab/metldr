@@ -224,4 +224,20 @@ impl Owner {
         }
         Ok(())
     }
+
+    pub(super) fn fail_plan_dispatch(&mut self, run: &str) -> Result<()> {
+        if self
+            .browser_approval
+            .as_ref()
+            .is_some_and(|p| p.run == run && p.dispatch_revision.is_some())
+        {
+            self.record_execution(run, |edit, execution| {
+                edit.prevent_browser(execution, run, "task plan declined")
+            })?;
+            if let Some(pending) = self.browser_approval.take() {
+                pending.reply(Err("task plan declined".into()));
+            }
+        }
+        Ok(())
+    }
 }

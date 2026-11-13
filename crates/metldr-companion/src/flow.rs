@@ -489,6 +489,8 @@ impl Owner {
                 })?;
                 if approve {
                     self.release_plan_dispatch(&run)?;
+                } else {
+                    self.fail_plan_dispatch(&run)?;
                 }
                 self.reply_view(Some(id), "view", true)
             }

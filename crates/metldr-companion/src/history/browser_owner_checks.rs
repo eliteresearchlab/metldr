@@ -724,3 +724,96 @@ fn effect_is_held_until_plan_approval() -> crate::Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn declining_plan_releases_held_action_and_allows_replanning() -> crate::Result<()> {
+    use super::edit::plans::PlanError;
+    let directory = Directory::new()?;
+    let (mut owner, run) = make_owner(&directory)?;
+    let plan = propose_plan(&mut owner, &run)?;
+    let binding = Binding {
+        tab: 17,
+        document: "document-1".into(),
+        target: "target-1".into(),
+        frame: "frame-1".into(),
+        session: "session-1".into(),
+        unique_context: "context-1".into(),
+        grant_revision: 1,
+    };
+    let (ack, reply) = mpsc::sync_channel(1);
+    owner.browser_event(Event::Proposed {
+        proposal: proposal(
+            &run,
+            "declined-tool",
+            &binding,
+            "http://127.0.0.1:4567/article",
+            field(),
+        ),
+        ack,
+        budget: None,
+    })?;
+    let action = owner.browser_approval.as_ref().unwrap().action.clone();
+    owner.browser_decide(&action, 1, true)?;
+    let approved = reply.recv()?.map_err(std::io::Error::other)?;
+    let (ack, reply) = mpsc::sync_channel(1);
+    owner.browser_event(Event::Dispatch {
+        action: action.clone(),
+        revision: approved.revision,
+        ack,
+    })?;
+    assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    let scope = crate::history_io::Scope::from(&owner.record_history.selection()?);
+    owner.command(
+        "panel-decline",
+        Command::Conversation {
+            scope,
+            action: crate::model::ConversationAction::PlanReply {
+                run: run.clone(),
+                revision: plan.revision,
+                approve: false,
+            },
+        },
+    )?;
+    assert_eq!(reply.try_recv()?, Err("task plan declined".into()));
+    assert!(owner.browser_approval.is_none());
+    let error = owner
+        .record_history
+        .edit(|edit| {
+            let execution = edit.execution(&run)?;
+            edit.dispatch_browser(&execution, &action, approved.revision)
+        })
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<PlanError>(),
+        Some(&PlanError::Declined)
+    );
+    let next = propose_plan(&mut owner, &run)?;
+    assert_eq!(next.revision, plan.revision + 1);
+    panel_plan_reply(&mut owner, &run, next.revision, "panel-approve")?;
+    let (ack, reply) = mpsc::sync_channel(1);
+    owner.browser_event(Event::Proposed {
+        proposal: proposal(
+            &run,
+            "next-tool",
+            &binding,
+            "http://127.0.0.1:4567/article",
+            field(),
+        ),
+        ack,
+        budget: None,
+    })?;
+    let action = owner.browser_approval.as_ref().unwrap().action.clone();
+    owner.browser_decide(&action, 1, true)?;
+    let approved = reply.recv()?.map_err(std::io::Error::other)?;
+    let (ack, reply) = mpsc::sync_channel(1);
+    owner.browser_event(Event::Dispatch {
+        action,
+        revision: approved.revision,
+        ack,
+    })?;
+    assert_eq!(
+        reply.recv()?.map_err(std::io::Error::other)?.state,
+        Phase::Dispatching
+    );
+    Ok(())
+}
