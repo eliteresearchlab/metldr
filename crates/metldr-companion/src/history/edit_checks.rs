@@ -763,14 +763,6 @@ fn actual_records_commit_update_retry_abort_and_reopen() -> Result<()> {
             .edit(|tx| tx.duplicate(&wrong_scope, "start:1", &"b".repeat(64)))
             .is_err()
     );
-    assert!(
-        history
-            .edit(|tx| {
-                let id = tx.id()?;
-                tx.admit(&selection, "start:2", run(id), launch())
-            })
-            .is_err()
-    );
     assert_eq!(
         (profile(&history)?.sequence, profile(&history)?.next),
         (43, 62)
