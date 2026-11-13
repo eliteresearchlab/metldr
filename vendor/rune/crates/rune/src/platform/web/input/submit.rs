@@ -129,8 +129,8 @@ impl<S: 'static> Running<S> {
     }
 
     pub(super) fn reconcile_submit(&mut self) {
-        let current = self.rt.native_submit_binding();
         let Some(field) = &mut self.input.submit else { return };
+        let current = self.rt.native_submit_binding();
         field.binding = current.filter(|binding| {
             !field.lifecycle.composing.get() && !field.lifecycle.needs_sync.get()
                 && self.input.getters.as_ref().is_some_and(|g| g.in_document(field.node.as_ref()))

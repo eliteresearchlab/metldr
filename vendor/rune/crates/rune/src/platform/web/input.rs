@@ -445,6 +445,7 @@ impl<S: 'static> Running<S> {
         if let Some(field) = &self.input.submit {
             field.synced();
         }
+        self.reconcile_submit();
     }
 
     pub(super) fn input_event(&mut self, event: &mut serde_json::Value, window: &Arc<Window>) {

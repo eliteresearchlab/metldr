@@ -7,6 +7,8 @@ use wasm_bindgen_futures::spawn_local;
 #[cfg(target_arch = "wasm32")]
 use {crate::ui_bridge::activation::SubmissionActivation, std::cell::OnceCell};
 
+const RETRY_MESSAGE: &str = "Correction not sent. Press Enter again.";
+
 struct Submitted {
     core: Weak<Core>,
     request: String,
@@ -79,6 +81,9 @@ pub(super) fn submit(
         return Ok(false);
     };
     let (request, work) = core.rune_correction(run, draft_version, draft.to_owned(), tx)?;
+    if updates.presentation.borrow().error.as_deref() == Some(RETRY_MESSAGE) {
+        updates.presentation.borrow_mut().error = None;
+    }
     state.corrections.submitted = Some(Submitted {
         core: Rc::downgrade(&core),
         request,
@@ -134,20 +139,16 @@ pub(super) fn attach_field(field: El, state: &State) -> El {
     )
 }
 
-/// Enter in the draft may focus the native button but cannot grant its activation.
-pub(super) fn focus(state: &State, tx: &mut Tx) -> bool {
+/// A correction requires the original trusted event; keep the draft if it was not admitted.
+pub(super) fn focus(state: &State, _: &mut Tx) -> bool {
     let Some(core) = state.core() else {
         return false;
     };
-    let (run, available) = core.rune_correction_offer();
-    let Some(run) = run else { return false };
-    if available
-        && state.corrections.submitted.is_none()
-        && state.draft.preedit.is_none()
-        && UserText::try_from(state.draft.text.as_str()).is_ok()
-    {
-        tx.focus(correction_key(&run, state.draft_version));
+    let (run, _) = core.rune_correction_offer();
+    if run.is_none() {
+        return false;
     }
+    state.fail(FlowError::InvalidInput(RETRY_MESSAGE.into()));
     true
 }
 
