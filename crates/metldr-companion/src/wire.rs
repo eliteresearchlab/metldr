@@ -53,6 +53,32 @@ pub(crate) fn write_raw(writer: &mut impl Write, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Serializes `value` behind room for its length, so header and body leave in one `write`.
+pub(crate) fn frame(value: &Value) -> Result<Vec<u8>> {
+    let mut frame = Vec::with_capacity(4096);
+    frame.extend_from_slice(&[0; 4]);
+    serde_json::to_writer(&mut frame, value)?;
+    seal(&mut frame)?;
+    Ok(frame)
+}
+
+/// Fills in the length of a frame built by [`frame`].
+fn seal(frame: &mut [u8]) -> Result<()> {
+    let size = frame.len() - 4;
+    if size == 0 || size > FRAME_MAX {
+        return Err("outgoing native frame exceeds bound".into());
+    }
+    frame[..4].copy_from_slice(&(size as u32).to_ne_bytes());
+    Ok(())
+}
+
+/// Writes a sealed frame with one `write_all` and flushes it.
+pub(crate) fn write_sealed(writer: &mut impl Write, frame: &[u8]) -> Result<()> {
+    writer.write_all(frame)?;
+    writer.flush()?;
+    Ok(())
+}
+
 /// Stands in for a secret while its message is serialized. The NUL bytes keep it apart from any
 /// page text, which reaches the message only inside escaped script source.
 pub(crate) const SECRET_SENTINEL: &str = "\u{0}metldr-secret\u{0}";
@@ -62,22 +88,21 @@ pub(crate) const SECRET_SENTINEL: &str = "\u{0}metldr-secret\u{0}";
 pub(crate) fn secret_frame(value: &Value, secret: &str) -> Result<Zeroizing<Vec<u8>>> {
     let bytes = serde_json::to_vec(value)?;
     let marker = serde_json::to_vec(SECRET_SENTINEL)?;
-    let mut found = bytes
-        .windows(marker.len())
-        .enumerate()
-        .filter(|(_, window)| *window == marker.as_slice())
-        .map(|(at, _)| at);
+    let mut found = memchr::memmem::find_iter(&bytes, &marker);
     let (Some(at), None) = (found.next(), found.next()) else {
         return Err("secret message must hold exactly one secret".into());
     };
-    let mut frame = Zeroizing::new(Vec::with_capacity(bytes.len() + secret.len() * 2));
+    // Control characters are refused, so escaping at most doubles the secret: no reallocation
+    // leaves an unwiped copy behind.
+    let mut frame = Zeroizing::new(Vec::with_capacity(4 + bytes.len() + secret.len() * 2));
+    frame.extend_from_slice(&[0; 4]);
     frame.extend_from_slice(&bytes[..at]);
     serde_json::to_writer(&mut *frame, secret)?;
     frame.extend_from_slice(&bytes[at + marker.len()..]);
+    seal(&mut frame)?;
     Ok(frame)
 }
 
 pub(crate) fn write_frame(writer: &mut impl Write, value: &Value) -> Result<()> {
-    let bytes = serde_json::to_vec(value)?;
-    write_raw(writer, &bytes)
+    write_sealed(writer, &frame(value)?)
 }

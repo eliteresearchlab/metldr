@@ -160,12 +160,12 @@ impl Transport {
         let frame = crate::wire::secret_frame(value, secret)?;
         #[cfg(test)]
         if let Some(frames) = &self.captured_frames {
-            return crate::wire::write_raw(&mut *frames.lock().unwrap(), &frame);
+            return crate::wire::write_sealed(&mut *frames.lock().unwrap(), &frame);
         }
         match &mut self.mode {
-            Mode::Stdio => crate::wire::write_raw(&mut std::io::stdout().lock(), &frame),
+            Mode::Stdio => crate::wire::write_sealed(&mut std::io::stdout().lock(), &frame),
             #[cfg(unix)]
-            Mode::Socket(socket) => socket.emit_bytes(&frame),
+            Mode::Socket(socket) => socket.emit_sealed(&frame),
         }
     }
 
