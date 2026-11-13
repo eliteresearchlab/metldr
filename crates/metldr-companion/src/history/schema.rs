@@ -32,6 +32,8 @@ pub(super) const CODEX: TableDefinition<&str, &[u8]> = TableDefinition::new("cod
 pub(super) const OPENCODE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("opencode_workflows");
 pub(super) const ACTIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("actions");
+pub(super) const TASK_PLANS: TableDefinition<&str, &[u8]> = TableDefinition::new("task_plans");
+pub(super) const PLAN_GRANTS: TableDefinition<&str, &[u8]> = TableDefinition::new("plan_grants");
 pub(super) const RUN_ORDER: TableDefinition<(&str, u64), &str> = TableDefinition::new("run_order");
 pub(super) const ACTION_ORDER: TableDefinition<(&str, u64, &str), &str> =
     TableDefinition::new("action_order");

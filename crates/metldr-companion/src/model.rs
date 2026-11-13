@@ -251,6 +251,11 @@ pub(super) enum ConversationAction {
         revision: u64,
         approve: bool,
     },
+    PlanReply {
+        run: String,
+        revision: u32,
+        approve: bool,
+    },
     Summarize {
         page: Page,
     },

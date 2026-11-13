@@ -34,6 +34,7 @@ pub(super) struct PendingApproval {
     pub action: String,
     pub ack: Reply,
     review: Option<review::Review>,
+    dispatch_revision: Option<u64>,
 }
 
 impl PendingApproval {
@@ -58,7 +59,7 @@ impl Owner {
         })
     }
 
-    fn browser_operation(&self, run: &str) -> Result<()> {
+    pub(super) fn browser_operation(&self, run: &str) -> Result<()> {
         if self
             .operations
             .get(run)
@@ -116,6 +117,7 @@ impl Owner {
                             action: action.id,
                             ack,
                             review,
+                            dispatch_revision: None,
                         });
                         Ok(())
                     }
@@ -135,6 +137,25 @@ impl Owner {
                         edit.dispatch_browser(execution, &action, revision)
                     })
                 })();
+                if result
+                    .as_ref()
+                    .err()
+                    .and_then(|e| e.downcast_ref::<crate::history::PlanError>())
+                    == Some(&crate::history::PlanError::Held)
+                {
+                    if self.browser_approval.is_some() {
+                        return acknowledge(ack, Err("browser approval already pending".into()));
+                    }
+                    let run = self.saved_browser_action(&action)?.proposal.run;
+                    self.browser_approval = Some(PendingApproval {
+                        run,
+                        action,
+                        ack,
+                        review: None,
+                        dispatch_revision: Some(revision),
+                    });
+                    return Ok(());
+                }
                 acknowledge(ack, result)
             }
             Event::Observed {
@@ -167,7 +188,7 @@ impl Owner {
         let pending = self
             .browser_approval
             .as_ref()
-            .filter(|p| p.action == action)
+            .filter(|p| p.action == action && p.dispatch_revision.is_none())
             .ok_or("browser action is not awaiting this approval")?;
         self.browser_operation(&pending.run)?;
         let run = pending.run.clone();
@@ -186,5 +207,21 @@ impl Owner {
         {
             pending.reply(Err("browser action stopped before dispatch".into()));
         }
+    }
+
+    pub(super) fn release_plan_dispatch(&mut self, run: &str) -> Result<()> {
+        if self
+            .browser_approval
+            .as_ref()
+            .is_some_and(|p| p.run == run && p.dispatch_revision.is_some())
+        {
+            let pending = self.browser_approval.take().unwrap();
+            self.browser_event(Event::Dispatch {
+                action: pending.action,
+                revision: pending.dispatch_revision.unwrap(),
+                ack: pending.ack,
+            })?;
+        }
+        Ok(())
     }
 }
