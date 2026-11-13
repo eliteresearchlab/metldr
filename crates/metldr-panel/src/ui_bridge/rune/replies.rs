@@ -480,6 +480,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
             .w_full()
             .gap(8.0)
             .child(typography.text(&permission.title).wrap())
+            .child(typography.text(permission.agent.label()).wrap())
             .child(typography.text(&permission.tool).wrap())
             .child(typography.text(&permission.input).wrap());
         for option in permission.options {

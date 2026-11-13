@@ -125,6 +125,7 @@ struct State {
     settings_open: bool,
     conversations: conversations::Conversations,
     activities: Activities,
+    browser_receipts_open: bool,
     answers: answers::Answers,
     thread_rect: ::rune::Live<[f32; 4]>,
     proposed_followup: Option<answers::Followup>,
@@ -152,6 +153,7 @@ impl Default for State {
             settings_open: false,
             conversations: conversations::Conversations::default(),
             activities: Activities::default(),
+            browser_receipts_open: false,
             answers: answers::Answers::default(),
             thread_rect: ::rune::Live::new([0.0; 4]),
             proposed_followup: None,
@@ -231,6 +233,7 @@ impl State {
         }
         self.answers = answers::Answers::default();
         self.activities = Activities::default();
+        self.browser_receipts_open = false;
         self.replies = replies::Replies::default();
         self.pi_replies = pi_replies::PiReplies::default();
         self.corrections = corrections::Corrections::default();
@@ -774,6 +777,66 @@ fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
+fn toggle_browser_receipts(state: &mut State, _: &mut Tx) {
+    state.browser_receipts_open = !state.browser_receipts_open;
+}
+
+fn browser_action_view(
+    row: &browser_actions::UiBrowserAction,
+    typography: preferences::Typography,
+) -> El {
+    let action = &row.action;
+    let display = &row.display;
+    let mut card = col()
+        .key(format!("browser-action:{}", action.id.as_str()))
+        .w_full()
+        .gap(8.0)
+        .child(typography.text(display.title).wrap())
+        .child(typography.text(&display.status).wrap());
+    if !display.details.iter().any(|detail| {
+        matches!(detail.part, "source" | "destination")
+            || matches!(detail.label, "Source" | "Destination")
+    }) {
+        card = card.child(typography.text(&action.url).wrap());
+    }
+    for detail in &display.details {
+        card = card.child(
+            typography
+                .text(format!("{}: {}", detail.label, detail.value))
+                .wrap(),
+        );
+    }
+    if action.phase == crate::model::BrowserActionPhase::Pending {
+        if row.decline && !row.approve {
+            card = card.child(typography.text("Approval needs access to the original page. You can still decline this action.").wrap());
+        }
+        for (approve, enabled, label) in [
+            (false, row.decline, "Decline"),
+            (true, row.approve, "Approve"),
+        ] {
+            let decision = browser_actions::DecisionKey {
+                id: action.id.clone(),
+                revision: action.revision,
+                approve,
+            };
+            card = card.child(
+                typography
+                    .text(label)
+                    .key(decision.element_key())
+                    .role("button")
+                    .focusable(true)
+                    .disabled(!enabled)
+                    .label(format!("{label} browser action at {}", action.url))
+                    .native_activation()
+                    .on_press_tx(move |state: &mut State, tx| {
+                        state.decide_browser_action(decision.clone(), tx)
+                    }),
+            );
+        }
+    }
+    card
+}
+
 fn view(state: &State, cx: &mut Cx<State>) -> El {
     let palette = state.preferences.palette();
     let (ink, page) = (palette.ink, palette.page);
@@ -955,44 +1018,48 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     for correction in corrections::view(state, core) {
         thread = thread.child(correction);
     }
-    if let Some((action, can_approve, can_decline)) = core.rune_browser_action() {
-        let display = crate::browser_action_display::display(&action);
-        let mut approval = col()
-            .key("browser-approval")
-            .w_full()
-            .gap(8.0)
-            .child(typography.text(display.title).wrap());
-        for detail in display.details {
-            approval = approval.child(
-                typography
-                    .text(format!("{}: {}", detail.label, detail.value))
-                    .wrap(),
-            );
+    let browser = core.rune_browser_actions();
+    if let Some(notice) = browser.notice() {
+        let role = if !browser.connected() || browser.stale() || browser.uncertain() {
+            "alert"
+        } else {
+            "status"
+        };
+        thread = thread.child(typography.text(notice).role(role).wrap());
+    }
+    let actions = browser.actions();
+    for action in actions.iter().filter(|action| !action.display.receipt) {
+        thread = thread.child(browser_action_view(action, typography));
+    }
+    let receipts: Vec<_> = actions
+        .iter()
+        .filter(|action| action.display.receipt)
+        .collect();
+    if !receipts.is_empty() {
+        thread = thread.child(
+            typography
+                .text(format!("Browser action results ({})", receipts.len()))
+                .key("browser-receipts-toggle")
+                .role("button")
+                .focusable(true)
+                .expanded(state.browser_receipts_open)
+                .on_press_tx(toggle_browser_receipts)
+                .on_key(|state: &mut State, key, tx| {
+                    if key.key == ::rune::Key::Enter || key.key == ::rune::Key::Text(" ".into()) {
+                        if !tx.key_repeat() {
+                            toggle_browser_receipts(state, tx);
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }),
+        );
+        if state.browser_receipts_open {
+            for action in receipts {
+                thread = thread.child(browser_action_view(action, typography));
+            }
         }
-        for (approve, enabled, label) in [
-            (true, can_approve, "Approve"),
-            (false, can_decline, "Decline"),
-        ] {
-            let decision = browser_actions::DecisionKey {
-                id: action.id.clone(),
-                revision: action.revision,
-                approve,
-            };
-            approval = approval.child(
-                typography
-                    .text(label)
-                    .key(decision.element_key())
-                    .role("button")
-                    .focusable(true)
-                    .disabled(!enabled)
-                    .label(label)
-                    .native_activation()
-                    .on_press_tx(move |state: &mut State, tx| {
-                        state.decide_browser_action(decision.clone(), tx)
-                    }),
-            );
-        }
-        thread = thread.child(approval);
     }
     if !connection.connected() {
         thread = thread.child(
