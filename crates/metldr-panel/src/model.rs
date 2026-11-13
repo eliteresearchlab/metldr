@@ -458,6 +458,12 @@ pub(crate) enum BrowserActionIntent {
     SetNativeControl {
         control: Control,
     },
+    /// One trusted key press in an observed field (B4.5).
+    PressKey {
+        field_id: String,
+        field_label: String,
+        key: String,
+    },
     /// A consented secret entry (B3.5). The view never carries the secret itself.
     EnterSecret {
         field_id: String,
@@ -608,6 +614,8 @@ struct WireBrowserAction {
     #[serde(default, deserialize_with = "present")]
     control: Option<Control>,
     #[serde(default, deserialize_with = "present")]
+    key: Option<String>,
+    #[serde(default, deserialize_with = "present")]
     secret: Option<SecretKind>,
     #[serde(default, deserialize_with = "present")]
     reference: Option<String>,
@@ -645,7 +653,29 @@ impl<'de> Deserialize<'de> for BrowserActionView {
         if secret_members != (wire.kind == "enter_secret") {
             return Err(serde::de::Error::custom("invalid browser action intent"));
         }
+        if wire.key.is_some() != (wire.kind == "press_key") {
+            return Err(serde::de::Error::custom("invalid browser action intent"));
+        }
         let intent = match wire.kind.as_str() {
+            "press_key"
+                if wire.previous_value.is_none()
+                    && wire.value.is_none()
+                    && !button_members
+                    && wire.destination.is_none()
+                    && !selection_member
+                    && !scroll_member
+                    && !control_member =>
+            {
+                BrowserActionIntent::PressKey {
+                    field_id: wire
+                        .field_id
+                        .ok_or_else(|| serde::de::Error::missing_field("field_id"))?,
+                    field_label: wire
+                        .field_label
+                        .ok_or_else(|| serde::de::Error::missing_field("field_label"))?,
+                    key: wire.key.ok_or_else(|| serde::de::Error::missing_field("key"))?,
+                }
+            }
             "enter_secret"
                 if wire.previous_value.is_none()
                     && wire.value.is_none()
@@ -825,6 +855,7 @@ pub(crate) enum BrowserActionOutcome {
     ScrollObserved,
     ControlObserved,
     SecretEntered,
+    KeyObserved,
     Prevented,
     Uncertain,
 }
@@ -838,6 +869,7 @@ impl std::fmt::Display for BrowserActionOutcome {
             Self::ScrollObserved => "scroll_observed",
             Self::ControlObserved => "control_observed",
             Self::SecretEntered => "secret_entered",
+            Self::KeyObserved => "key_observed",
             Self::Prevented => "prevented",
             Self::Uncertain => "uncertain",
         })
@@ -2205,6 +2237,18 @@ fn valid_browser_intent(intent: &BrowserActionIntent) -> bool {
             previous_value,
             value,
         } => field(field_id, field_label) && value.len() <= 1_024 && previous_value.len() <= 1_024,
+        BrowserActionIntent::PressKey {
+            field_id,
+            field_label,
+            key,
+        } => {
+            field(field_id, field_label)
+                && matches!(
+                    key.as_str(),
+                    "Enter" | "Tab" | "Escape" | "Backspace" | "ArrowUp" | "ArrowDown"
+                        | "ArrowLeft" | "ArrowRight" | "Home" | "End" | "PageUp" | "PageDown"
+                )
+        }
         BrowserActionIntent::Navigate { destination } => {
             !destination.is_empty()
                 && destination.len() <= 2_048

@@ -98,6 +98,13 @@ enum Operation {
         url: String,
         params: Value,
     },
+    PressKey {
+        action: String,
+        revision: u64,
+        binding: navigation::Binding,
+        url: String,
+        params: Value,
+    },
     ConfirmNavigation {
         action: String,
         revision: u64,
@@ -254,6 +261,26 @@ async fn handle(envelope: Envelope, connection: u64) -> Result<Value, String> {
                 url,
                 params,
                 "control",
+            )
+            .await
+        }
+        Operation::PressKey {
+            action,
+            revision,
+            binding,
+            url,
+            params,
+        } => {
+            button::activate(
+                connection,
+                envelope.call,
+                &envelope.run,
+                action,
+                revision,
+                binding,
+                url,
+                params,
+                "key",
             )
             .await
         }

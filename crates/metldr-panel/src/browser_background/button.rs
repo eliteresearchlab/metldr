@@ -13,6 +13,40 @@ struct TapParams {
     gesture_source_type: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KeyParams {
+    key: String,
+}
+
+/// The trusted keyDown and keyUp for one allowed key. Enter carries its carriage return so a
+/// field reacts as to a real key.
+fn key_events(key: &str) -> Option<Vec<(&'static str, Value)>> {
+    let (code, virtual_key) = match key {
+        "Enter" => ("Enter", 13),
+        "Tab" => ("Tab", 9),
+        "Escape" => ("Escape", 27),
+        "Backspace" => ("Backspace", 8),
+        "ArrowUp" => ("ArrowUp", 38),
+        "ArrowDown" => ("ArrowDown", 40),
+        "ArrowLeft" => ("ArrowLeft", 37),
+        "ArrowRight" => ("ArrowRight", 39),
+        "Home" => ("Home", 36),
+        "End" => ("End", 35),
+        "PageUp" => ("PageUp", 33),
+        "PageDown" => ("PageDown", 34),
+        _ => return None,
+    };
+    let mut down = json!({"type":"rawKeyDown","key":key,"code":code,"windowsVirtualKeyCode":virtual_key,"nativeVirtualKeyCode":virtual_key});
+    if key == "Enter" {
+        down["type"] = json!("keyDown");
+        down["text"] = json!("\r");
+        down["unmodifiedText"] = json!("\r");
+    }
+    let up = json!({"type":"keyUp","key":key,"code":code,"windowsVirtualKeyCode":virtual_key,"nativeVirtualKeyCode":virtual_key});
+    Some(vec![("Input.dispatchKeyEvent", down), ("Input.dispatchKeyEvent", up)])
+}
+
 pub(super) async fn activate(
     connection: u64,
     call_id: u64,
@@ -24,20 +58,31 @@ pub(super) async fn activate(
     params: Value,
     name: &str,
 ) -> Result<Value, String> {
-    let tap: TapParams = serde_json::from_value(params.clone())
-        .map_err(|_| format!("Invalid {name} gesture parameters."))?;
+    // The debugger commands this action may send, built here from validated input only.
+    let commands = if name == "key" {
+        let KeyParams { key } = serde_json::from_value(params.clone())
+            .map_err(|_| "Invalid key parameters.".to_owned())?;
+        key_events(&key).ok_or_else(|| "Unsupported key.".to_owned())?
+    } else {
+        let tap: TapParams = serde_json::from_value(params.clone())
+            .map_err(|_| format!("Invalid {name} gesture parameters."))?;
+        if !tap.x.is_finite()
+            || !tap.y.is_finite()
+            || !(0.0..=100_000.0).contains(&tap.x)
+            || !(0.0..=100_000.0).contains(&tap.y)
+            || tap.duration != 50
+            || tap.tap_count != 1
+            || tap.gesture_source_type != "mouse"
+        {
+            return Err(format!("Invalid browser {name} request."));
+        }
+        vec![("Input.synthesizeTapGesture", params.clone())]
+    };
     if !bounded_id(&action, 128)
         || revision == 0
         || !navigation::valid_binding(&binding)
         || binding.tab < 0
         || validate_url(&url).is_err()
-        || !tap.x.is_finite()
-        || !tap.y.is_finite()
-        || !(0.0..=100_000.0).contains(&tap.x)
-        || !(0.0..=100_000.0).contains(&tap.y)
-        || tap.duration != 50
-        || tap.tap_count != 1
-        || tap.gesture_source_type != "mouse"
         || !bounded_json(&params, MAX_FRAME)
     {
         return Err(format!("Invalid browser {name} request."));
@@ -111,18 +156,20 @@ pub(super) async fn activate(
             Some(session) => json!({"tabId":binding.tab,"sessionId":session}),
             None => json!({"tabId":binding.tab}),
         };
-        let response = await_call(
-            &debugger,
-            "sendCommand",
-            &[
-                parse(&target).map_err(message)?,
-                JsValue::from_str("Input.synthesizeTapGesture"),
-                parse(&params).map_err(message)?,
-            ],
-        )
-        .await;
-        ensure_epoch(connection, epoch)?;
-        response.map_err(message)?;
+        for (method, params) in &commands {
+            let response = await_call(
+                &debugger,
+                "sendCommand",
+                &[
+                    parse(&target).map_err(message)?,
+                    JsValue::from_str(method),
+                    parse(params).map_err(message)?,
+                ],
+            )
+            .await;
+            ensure_epoch(connection, epoch)?;
+            response.map_err(message)?;
+        }
         verify(connection, epoch).await?;
         Ok(json!({"activated":true}))
     }
@@ -165,4 +212,20 @@ async fn send(
     .await;
     ensure_epoch(connection, epoch)?;
     to_value(&result.map_err(message)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_allowed_keys_reach_the_debugger() {
+        assert!(key_events("a").is_none() && key_events("Meta").is_none());
+        let enter = key_events("Enter").unwrap();
+        assert_eq!(enter[0].1["text"], "\r");
+        assert_eq!(enter[1].1["type"], "keyUp");
+        let tab = key_events("Tab").unwrap();
+        assert_eq!(tab[0].1["type"], "rawKeyDown");
+        assert!(tab[0].1.get("text").is_none());
+    }
 }
