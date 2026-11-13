@@ -92,11 +92,15 @@ pub(crate) enum Profile {
         binding: Binding,
         credential: Credential,
         trust_pem: Option<Vec<u8>>,
+        /// Response timeout a Chat Completions connection set; others use their client default.
+        timeout_secs: Option<u16>,
     },
 }
 
 #[derive(Clone)]
 pub(crate) enum Credential {
+    /// A Chat Completions endpoint that runs without a key.
+    None,
     Environment(String),
     Pinned(std::sync::Arc<HeaderValue>),
     Keyring {
@@ -213,7 +217,7 @@ impl Config {
                 Ok(bytes)
             })
             .transpose()?;
-        bind_parts(endpoint, model, revision, credential, pem, protocol)
+        bind_parts(endpoint, model, revision, credential, pem, protocol, None)
     }
 }
 
@@ -224,8 +228,17 @@ fn bind_parts(
     credential: Credential,
     pem: Option<Vec<u8>>,
     protocol: &str,
+    timeout_secs: Option<u16>,
 ) -> Result<Profile> {
     let endpoint = validate_endpoint(&endpoint)?.to_string();
+    if (matches!(credential, Credential::None) || timeout_secs.is_some())
+        && protocol != "chat_completions"
+    {
+        return Err("only Chat Completions connections can omit the key or set a timeout".into());
+    }
+    if timeout_secs.is_some_and(|secs| !metldr_chat_completions::TIMEOUT_SECS.contains(&secs)) {
+        return Err("Provider response timeout is out of range".into());
+    }
     if pem.as_ref().is_some_and(|bytes| bytes.len() > 16_384) {
         return Err("Provider trust certificate exceeds bound".into());
     }
@@ -238,8 +251,13 @@ fn bind_parts(
     }
     let mut identity = json!({"protocol":protocol, "endpoint":endpoint,
                     "model":model,"revision":revision,"trust_pem":pem});
+    // Keys added only when set, so existing connections keep their fingerprints.
+    if let Some(secs) = timeout_secs {
+        identity["timeout_secs"] = json!(secs);
+    }
     match &credential {
         Credential::Pinned(_) => return Err("pinned credential cannot define a binding".into()),
+        Credential::None => identity["credential_none"] = json!(true),
         Credential::Environment(variable) => identity["credential_env"] = json!(variable),
         Credential::Keyring { scope, id } => {
             identity["credential_keyring"] = json!({"scope":scope.as_str(), "id":id.as_str()})
@@ -257,6 +275,7 @@ fn bind_parts(
         binding,
         credential,
         trust_pem: pem,
+        timeout_secs,
     })
 }
 
@@ -269,6 +288,7 @@ impl Profile {
         id: CredentialId,
         pem: Option<Vec<u8>>,
         protocol: &str,
+        timeout_secs: Option<u16>,
     ) -> Result<Self> {
         bind_parts(
             endpoint.into(),
@@ -277,10 +297,37 @@ impl Profile {
             Credential::Keyring { scope, id },
             pem,
             protocol,
+            timeout_secs,
+        )
+    }
+
+    pub fn keyless(
+        endpoint: &str,
+        model: &str,
+        revision: u64,
+        pem: Option<Vec<u8>>,
+        protocol: &str,
+        timeout_secs: Option<u16>,
+    ) -> Result<Self> {
+        bind_parts(
+            endpoint.into(),
+            model.into(),
+            revision,
+            Credential::None,
+            pem,
+            protocol,
+            timeout_secs,
         )
     }
 
     pub fn pin(mut self) -> Result<Self> {
+        if let Self::Https {
+            credential: Credential::None,
+            ..
+        } = self
+        {
+            return Ok(self);
+        }
         let header = self.credential()?;
         match &mut self {
             Self::Https { credential, .. } => {
@@ -393,17 +440,26 @@ impl Profile {
             return Err("Chat request cancelled".into());
         }
         let Self::Https {
-            binding, trust_pem, ..
+            binding,
+            trust_pem,
+            credential,
+            timeout_secs,
         } = self
         else {
             return Err("Chat Completions requires HTTPS".into());
         };
-        let key = self.credential()?;
+        let key = match credential {
+            Credential::None => None,
+            _ => Some(self.credential()?),
+        };
         let client = metldr_chat_completions::Client::new(
             &binding.endpoint,
             &binding.model,
-            key.to_str().map_err(|_| "invalid Chat credential")?,
+            key.as_ref()
+                .map(|key| key.to_str().map_err(|_| "invalid Chat credential"))
+                .transpose()?,
             trust_pem.as_deref(),
+            timeout_secs.unwrap_or(metldr_chat_completions::DEFAULT_TIMEOUT_SECS),
         )?;
         if stop.load(std::sync::atomic::Ordering::Acquire) {
             return Err("Chat request cancelled".into());
@@ -421,6 +477,10 @@ impl Profile {
     pub fn credential(&self) -> Result<HeaderValue> {
         let mut header = match self {
             Self::Fixture { .. } => HeaderValue::from_static("dummy-owned-browser-fixture"),
+            Self::Https {
+                credential: Credential::None,
+                ..
+            } => return Err("Provider credential not configured".into()),
             Self::Https {
                 credential: Credential::Pinned(header),
                 ..

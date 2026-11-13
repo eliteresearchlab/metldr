@@ -263,6 +263,8 @@ fn owned_settings_consumer() {
             model: crate::https_profile::FIXTURE_MODEL.into(),
             credential: CredentialId::generate().unwrap().as_str().into(),
             trust_pem: None,
+            keyless: false,
+            timeout_secs: None,
         };
         if after_put {
             vault

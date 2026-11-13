@@ -46,15 +46,17 @@ impl Runtime {
     pub fn public(&self, settings: &super::Settings) -> Value {
         let connections: Vec<_> = Protocol::ALL.into_iter().map(|protocol| {
             let slot = settings.slot(protocol);
-            let (state, endpoint, model) = match &slot.selection {
-                Selection::Unmanaged => ("unmanaged", None, None),
-                Selection::Removed => ("removed", None, None),
+            let (state, endpoint, model, keyless, timeout) = match &slot.selection {
+                Selection::Unmanaged => ("unmanaged", None, None, false, None),
+                Selection::Removed => ("removed", None, None, false, None),
                 Selection::Configured { connection } => (
                     self.states.get(&protocol).copied().unwrap_or("loading"),
                     Some(connection.endpoint.as_str()), Some(connection.model.as_str()),
+                    connection.keyless, connection.timeout_secs,
                 ),
             };
-            json!({"protocol":protocol,"revision":slot.revision,"state":state,"endpoint":endpoint,"model":model})
+            json!({"protocol":protocol,"revision":slot.revision,"state":state,"endpoint":endpoint,"model":model,
+                "keyless":keyless,"timeout_secs":timeout})
         }).collect();
         json!({"busy":self.job.is_some(),"pending":settings.pending.as_ref().map(|p|p.protocol),
             "cleanup_pending":!settings.retired.is_empty(),"notice":self.notice,"connections":connections})
@@ -116,18 +118,30 @@ impl Owner {
         endpoint: String,
         model: String,
         key: KeyChange,
+        timeout_secs: Option<u16>,
     ) -> Result<()> {
         if !self.provider_admit(request, protocol, expected)? {
             return Ok(());
         }
         let slot = self.state.providers.slot(protocol);
         let previous = match &slot.selection {
-            Selection::Configured { connection } => Some(connection.credential.clone()),
+            Selection::Configured { connection } => {
+                Some((connection.credential.clone(), connection.keyless))
+            }
             _ => None,
         };
-        if matches!(key, KeyChange::Keep) && previous.is_none() {
-            return Err("a new connection requires an API key".into());
-        }
+        let keyless = match &key {
+            KeyChange::None => true,
+            KeyChange::Replace { .. } => false,
+            KeyChange::Keep => {
+                previous
+                    .as_ref()
+                    .ok_or("a new connection requires an API key")?
+                    .1
+            }
+        };
+        // Keep reads the saved key only when the previous connection had one.
+        let previous = previous.and_then(|(credential, keyless)| (!keyless).then_some(credential));
         let revision = expected
             .checked_add(1)
             .ok_or("provider revision capacity reached")?;
@@ -151,6 +165,8 @@ impl Owner {
             model,
             credential: CredentialId::generate()?.as_str().to_owned(),
             trust_pem,
+            keyless,
+            timeout_secs,
         };
         connection.profile(protocol, &scope, revision)?;
         let pending = Pending {
@@ -186,7 +202,7 @@ impl Owner {
         let slot = self.state.providers.slot(protocol);
         let mut next = self.state.clone();
         if let Selection::Configured { connection } = slot.selection {
-            next.providers.retired.push(connection.credential);
+            connection.retire(&mut next.providers.retired);
         }
         next.providers.slots.insert(
             protocol,
@@ -282,7 +298,7 @@ impl Owner {
                         if let Selection::Configured { connection } =
                             next.providers.slot(pending.protocol).selection
                         {
-                            next.providers.retired.push(connection.credential);
+                            connection.retire(&mut next.providers.retired);
                         }
                         next.providers.slots.insert(
                             pending.protocol,
@@ -297,7 +313,7 @@ impl Owner {
                         (Some(profile), None)
                     }
                     Err(error) => {
-                        next.providers.retired.push(pending.connection.credential);
+                        pending.connection.retire(&mut next.providers.retired);
                         (None, Some(error))
                     }
                 };

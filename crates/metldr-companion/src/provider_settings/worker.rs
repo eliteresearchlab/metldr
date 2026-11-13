@@ -27,15 +27,18 @@ pub(super) fn save(
     thread::spawn(move || {
         let _lease = lease;
         let result = (|| -> crate::Result<Profile> {
-            let vault = Vault::new(CredentialId::parse(&scope)?);
-            let id = CredentialId::parse(&pending.connection.credential)?;
-            let key = match change {
-                KeyChange::Keep => vault.read(&CredentialId::parse(
-                    previous.as_deref().ok_or("previous provider key missing")?,
-                )?)?,
-                KeyChange::Replace { value } => value.0,
-            };
-            vault.put(&id, &key)?;
+            if !pending.connection.keyless {
+                let vault = Vault::new(CredentialId::parse(&scope)?);
+                let id = CredentialId::parse(&pending.connection.credential)?;
+                let key = match change {
+                    KeyChange::Keep => vault.read(&CredentialId::parse(
+                        previous.as_deref().ok_or("previous provider key missing")?,
+                    )?)?,
+                    KeyChange::Replace { value } => value.0,
+                    KeyChange::None => return Err("provider key change mismatch".into()),
+                };
+                vault.put(&id, &key)?;
+            }
             pending
                 .connection
                 .profile(pending.protocol, &scope, pending.revision)?

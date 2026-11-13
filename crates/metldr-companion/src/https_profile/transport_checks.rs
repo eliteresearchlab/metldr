@@ -264,11 +264,16 @@ fn scripted_protocol(
                 }
                 Protocol::Google => ("x-goog-api-key", api_key.clone()),
             };
-            assert!(headers.lines().any(|line| {
-                line.split_once(':').is_some_and(|(name, value)| {
-                    name.eq_ignore_ascii_case(expected_header) && value.trim() == expected_key
-                })
-            }));
+            // An empty key stands for a keyless endpoint: no key header may be sent.
+            assert_eq!(
+                headers.lines().any(|line| {
+                    line.split_once(':').is_some_and(|(name, value)| {
+                        name.eq_ignore_ascii_case(expected_header)
+                            && (api_key.is_empty() || value.trim() == expected_key)
+                    })
+                }),
+                !api_key.is_empty()
+            );
             assert!(headers.starts_with(&format!("POST {path} HTTP/1.1\r\n")));
             let length: usize = headers
                 .lines()
@@ -288,6 +293,87 @@ fn scripted_protocol(
         requests
     });
     (endpoint, worker)
+}
+
+#[test]
+fn keyless_chat_profile_sends_no_key_and_keeps_existing_fingerprints() {
+    let ca = include_bytes!("../../test-tls/ca.pem").to_vec();
+    let keyed = |timeout| {
+        Profile::from_keyring(
+            "https://127.0.0.1:1/v1/chat/completions",
+            "model",
+            1,
+            CredentialId::parse(&"a".repeat(32)).unwrap(),
+            CredentialId::parse(&"b".repeat(32)).unwrap(),
+            None,
+            "chat_completions",
+            timeout,
+        )
+        .unwrap()
+        .public()["fingerprint"]
+            .clone()
+    };
+    assert_ne!(
+        keyed(None),
+        keyed(Some(90)),
+        "a set timeout changes the binding"
+    );
+    assert!(
+        Profile::keyless(
+            "https://127.0.0.1:1/v1/messages",
+            "model",
+            1,
+            None,
+            "messages",
+            None
+        )
+        .is_err()
+    );
+    assert!(
+        Profile::keyless(
+            "https://127.0.0.1:1/v1/chat/completions",
+            "model",
+            1,
+            None,
+            "chat_completions",
+            Some(4)
+        )
+        .is_err()
+    );
+    let chunk = json!({"id":"chat","choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]});
+    let (endpoint, worker) = scripted(
+        vec![(
+            "200 OK".into(),
+            format!("data: {chunk}\n\ndata: [DONE]\n\n"),
+        )],
+        "",
+        true,
+    );
+    let profile = Profile::keyless(&endpoint, "model", 1, Some(ca), "chat_completions", Some(7))
+        .unwrap()
+        .pin()
+        .unwrap();
+    assert!(profile.credential().is_err(), "no key exists to read");
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let mut text = String::new();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(
+            profile
+                .chat_client(&stop)
+                .unwrap()
+                .text("system", "input", &stop, |event| {
+                    if let metldr_chat_completions::TextEvent::Delta(delta) = event {
+                        text.push_str(&delta);
+                    }
+                    Ok(())
+                }),
+        )
+        .unwrap();
+    assert_eq!(text, "done");
+    assert_eq!(worker.join().unwrap().len(), 1);
 }
 
 #[test]
@@ -319,8 +405,8 @@ fn chat_rejects_malformed_siblings_and_changed_reused_ids_before_yielding() {
                 ]))]
             };
             let (endpoint, worker) = scripted(replies, "dummy-owned-browser-fixture", true);
-            let client = metldr_chat_completions::Client::new(&endpoint, "model", "dummy-owned-browser-fixture",
-                Some(include_bytes!("../../test-tls/ca.pem"))).unwrap();
+            let client = metldr_chat_completions::Client::new(&endpoint, "model", Some("dummy-owned-browser-fixture"),
+                Some(include_bytes!("../../test-tls/ca.pem")), metldr_chat_completions::DEFAULT_TIMEOUT_SECS).unwrap();
             let mut conversation = client.start(metldr_chat_completions::Prompt {
                 instruction:"inspect",title:"Title",url:"https://example.org/",text:"Text"
             }).unwrap();

@@ -375,7 +375,16 @@ impl Owner {
                 endpoint,
                 model,
                 key,
-            } => self.provider_save(id, protocol, expected_revision, endpoint, model, key),
+                timeout_secs,
+            } => self.provider_save(
+                id,
+                protocol,
+                expected_revision,
+                endpoint,
+                model,
+                key,
+                timeout_secs,
+            ),
             Command::ProviderRemove {
                 protocol,
                 expected_revision,

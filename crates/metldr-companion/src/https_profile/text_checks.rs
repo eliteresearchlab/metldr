@@ -170,8 +170,9 @@ async fn call(
             metldr_chat_completions::Client::new(
                 endpoint,
                 MODEL,
-                KEY,
+                Some(KEY),
                 Some(include_bytes!("../../test-tls/ca.pem")),
+                metldr_chat_completions::DEFAULT_TIMEOUT_SECS,
             )?
             .text(SYSTEM, INPUT, stop, emit)
             .await

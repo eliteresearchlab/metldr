@@ -9,7 +9,7 @@ mod stream;
 #[cfg(test)]
 mod stream_checks;
 
-pub use client::Client;
+pub use client::{Client, DEFAULT_TIMEOUT_SECS, TIMEOUT_SECS};
 use metldr_browser_tools::Call;
 pub use metldr_browser_tools::{Invocation, Prompt};
 pub use metldr_conversation::TextEvent;

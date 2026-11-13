@@ -9,15 +9,21 @@ pub struct Client {
     client: reqwest::Client,
     endpoint: String,
     model: String,
-    authorization: reqwest::header::HeaderValue,
+    authorization: Option<reqwest::header::HeaderValue>,
 }
+
+/// Response timeout when the connection does not set one.
+pub const DEFAULT_TIMEOUT_SECS: u16 = 45;
+/// Shortest and longest response timeout a connection may set.
+pub const TIMEOUT_SECS: std::ops::RangeInclusive<u16> = 5..=600;
 
 impl Client {
     pub fn new(
         endpoint: &str,
         model: &str,
-        bearer_token: &str,
+        bearer_token: Option<&str>,
         trust_ca_pem: Option<&[u8]>,
+        timeout_secs: u16,
     ) -> Result<Self> {
         let url = reqwest::Url::parse(endpoint).map_err(|_| "invalid Chat endpoint")?;
         if endpoint.len() > 1024
@@ -34,22 +40,30 @@ impl Client {
         if model.is_empty() || model.len() > 128 || !model.bytes().all(|b| b.is_ascii_graphic()) {
             return Err("invalid Chat model".into());
         }
-        if bearer_token.is_empty()
-            || bearer_token.len() > 4096
-            || !bearer_token.bytes().all(|b| b.is_ascii_graphic())
-        {
-            return Err("invalid Chat credential".into());
+        if !TIMEOUT_SECS.contains(&timeout_secs) {
+            return Err("invalid Chat response timeout".into());
         }
-        let mut authorization =
-            reqwest::header::HeaderValue::from_str(&format!("Bearer {bearer_token}"))
-                .map_err(|_| "invalid Chat credential")?;
-        authorization.set_sensitive(true);
+        // A compatible endpoint may run without a key; then no authorization header is sent.
+        let authorization = bearer_token
+            .map(|token| {
+                if token.is_empty()
+                    || token.len() > 4096
+                    || !token.bytes().all(|b| b.is_ascii_graphic())
+                {
+                    return Err("invalid Chat credential");
+                }
+                let mut header = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+                    .map_err(|_| "invalid Chat credential")?;
+                header.set_sensitive(true);
+                Ok(header)
+            })
+            .transpose()?;
         let mut client = reqwest::Client::builder()
             .tls_backend_rustls()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
-            .timeout(std::time::Duration::from_secs(45));
+            .timeout(std::time::Duration::from_secs(timeout_secs.into()));
         if let Some(pem) = trust_ca_pem {
             if pem.len() > 16_384 {
                 return Err("Chat trust certificate exceeds bound".into());
@@ -121,10 +135,11 @@ impl Client {
         if body.len() > 131_072 {
             return Err("Chat request exceeds bound".into());
         }
-        let sending = self
-            .client
-            .post(&self.endpoint)
-            .header("authorization", self.authorization.clone())
+        let mut sending = self.client.post(&self.endpoint);
+        if let Some(authorization) = &self.authorization {
+            sending = sending.header("authorization", authorization.clone());
+        }
+        let sending = sending
             .header("content-type", "application/json")
             .header("accept", "text/event-stream")
             .body(body)

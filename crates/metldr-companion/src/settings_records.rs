@@ -163,7 +163,7 @@ fn route_source(managed: bool, route: Option<&Profile>) -> &'static str {
         (false, Some(Profile::Fixture { .. })) => "fixture",
         (false, Some(Profile::Https { credential, .. })) => match credential {
             Credential::Environment(_) => "environment",
-            Credential::Pinned(_) | Credential::Keyring { .. } => "launch",
+            Credential::None | Credential::Pinned(_) | Credential::Keyring { .. } => "launch",
         },
     }
 }
@@ -191,6 +191,7 @@ mod tests {
             },
             credential: Credential::Environment("METLDR_TEST_KEY".into()),
             trust_pem: None,
+            timeout_secs: None,
         };
         assert_eq!(route_source(false, Some(&route)), "environment");
         assert_eq!(route_source(true, Some(&route)), "saved");
