@@ -111,9 +111,11 @@ impl Edit<'_> {
             storage(|| record(self.write, super::super::schema::LAUNCHES, execution.run()))?
                 .ok_or(PlanError::Invalid)?;
         plan.proposer = match launch.value {
-            crate::agent_model::Launch::Pi { .. } => "Pi",
-            crate::agent_model::Launch::Codex { .. } => "Codex",
-            crate::agent_model::Launch::OpenCode { .. } => "OpenCode",
+            crate::agent_model::Launch::Pi { .. } => metldr_harness::HarnessId::Pi.label(),
+            crate::agent_model::Launch::Codex { .. } => metldr_harness::HarnessId::Codex.label(),
+            crate::agent_model::Launch::OpenCode { .. } => {
+                metldr_harness::HarnessId::OpenCode.label()
+            }
             crate::agent_model::Launch::Messages { .. }
             | crate::agent_model::Launch::ConfiguredMessages { .. } => "Messages",
             crate::agent_model::Launch::ConfiguredResponses { .. } => "Responses",

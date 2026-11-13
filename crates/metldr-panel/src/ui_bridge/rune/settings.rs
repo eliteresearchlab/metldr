@@ -941,11 +941,7 @@ impl Settings {
             let enabled = !busy && row.is_some();
             let version = draft.version;
             let seen_revision = row.map(|row| row.revision);
-            let label = match draft.agent {
-                AgentKind::Codex => "Codex",
-                AgentKind::Opencode => "OpenCode",
-                AgentKind::Pi => "Pi",
-            };
+            let label = draft.agent.label();
             let mut section = col()
                 .key(format!("settings-agent-{i}"))
                 .w_full()

@@ -186,10 +186,7 @@ fn name(route: &RunRoute) -> &'static str {
             }
             crate::model::ProviderProtocol::ChatCompletions => "Chat Completions page questions",
         },
-        RunRoute::Codex { .. } => "Codex",
-        RunRoute::OpenCode { .. } => "OpenCode",
-        RunRoute::Pi { .. } => "Pi",
-        _ => "metldr",
+        route => route.harness().map_or("metldr", metldr_harness::HarnessId::label),
     }
 }
 
