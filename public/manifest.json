@@ -47,7 +47,6 @@
     "sidePanel",
     "storage",
     "scripting",
-    "activeTab",
     "tabs",
     "offscreen",
     "nativeMessaging",
