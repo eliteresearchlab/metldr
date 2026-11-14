@@ -421,7 +421,7 @@ fn watches_keep_their_run_when_the_visible_run_changes() -> Result<()> {
 #[test]
 fn native_choices_survive_a_flat_result_without_loading_native_runs() -> Result<()> {
     use crate::agent_settings::Kind;
-    for kind in [Kind::Pi, Kind::Codex, Kind::Opencode] {
+    for kind in Kind::ALL {
         let directory = Directory::new()?;
         let disk = Disk::lock(directory.0.clone())?;
         let mut legacy = super::fixture::legacy();

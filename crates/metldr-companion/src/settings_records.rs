@@ -124,7 +124,7 @@ impl Owner {
                 })
             })
             .collect();
-        let agents: Vec<Value> = [Kind::Pi, Kind::Codex, Kind::Opencode]
+        let agents: Vec<Value> = Kind::ALL
             .into_iter()
             .map(|kind| {
                 let slot = self.state.agent_settings.slot(kind);

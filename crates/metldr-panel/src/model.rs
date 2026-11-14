@@ -239,6 +239,8 @@ pub(crate) struct ProviderSettingsView {
 pub(crate) struct AgentSettingsView {
     pub(crate) busy: bool,
     pub(crate) agents: Vec<AgentSettingView>,
+    #[serde(default)]
+    pub(crate) apps: Vec<DesktopAppView>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -253,6 +255,19 @@ pub(crate) struct AgentSettingView {
     pub(crate) last_request: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub(crate) last_digest: Option<String>,
+    /// The executable the companion found for this agent, before any setup.
+    #[serde(default)]
+    pub(crate) found: Option<String>,
+}
+
+/// A desktop app that can host the MetLDR MCP server, and its config file when present.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DesktopAppView {
+    pub(crate) app: String,
+    pub(crate) label: String,
+    pub(crate) config: Option<String>,
+    pub(crate) local_config: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -1510,8 +1525,10 @@ fn default_agent_settings() -> AgentSettingsView {
                 profile: None,
                 last_request: None,
                 last_digest: None,
+                found: None,
             })
             .collect(),
+        apps: Vec::new(),
     }
 }
 
