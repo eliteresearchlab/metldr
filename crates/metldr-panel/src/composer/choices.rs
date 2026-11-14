@@ -11,123 +11,135 @@ pub(crate) struct Choice {
     pub(super) element: &'static str,
 }
 
+/// The fixed rows of the model menu: value, legacy option element and label.
+const ROWS: [(&str, &str, &str); 13] = [
+    ("model", "execution-model", "Test model"),
+    ("browser", "execution-browser", "Browser task, Messages"),
+    ("chat", "execution-chat", "Browser task, Chat Completions"),
+    (
+        "responses",
+        "execution-responses",
+        "Browser task, OpenAI Responses",
+    ),
+    (
+        "google",
+        "execution-google",
+        "Browser task, Google Interactions",
+    ),
+    (
+        "page:messages",
+        "execution-page-messages",
+        "Page questions, Messages",
+    ),
+    (
+        "page:responses",
+        "execution-page-responses",
+        "Page questions, OpenAI Responses",
+    ),
+    (
+        "page:google_interactions",
+        "execution-page-google",
+        "Page questions, Google Interactions",
+    ),
+    (
+        "page:chat_completions",
+        "execution-page-chat",
+        "Page questions, Chat Completions",
+    ),
+    ("pi", "execution-pi", "Pi"),
+    ("codex", "execution-codex", "Codex"),
+    ("opencode", "execution-opencode", "OpenCode"),
+    ("claude", "execution-claude", "Claude Code"),
+];
+
 pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
-    let mut choices: Vec<_> = [
-        ("model", "execution-model", "Test model"),
-        ("browser", "execution-browser", "Browser task, Messages"),
-        ("chat", "execution-chat", "Browser task, Chat Completions"),
-        (
-            "responses",
-            "execution-responses",
-            "Browser task, OpenAI Responses",
-        ),
-        (
-            "google",
-            "execution-google",
-            "Browser task, Google Interactions",
-        ),
-        (
-            "page:messages",
-            "execution-page-messages",
-            "Page questions, Messages",
-        ),
-        (
-            "page:responses",
-            "execution-page-responses",
-            "Page questions, OpenAI Responses",
-        ),
-        (
-            "page:google_interactions",
-            "execution-page-google",
-            "Page questions, Google Interactions",
-        ),
-        (
-            "page:chat_completions",
-            "execution-page-chat",
-            "Page questions, Chat Completions",
-        ),
-        ("pi", "execution-pi", "Pi"),
-        ("codex", "execution-codex", "Codex"),
-        ("opencode", "execution-opencode", "OpenCode"),
-        ("claude", "execution-claude", "Claude Code"),
-    ]
-    .into_iter()
-    .map(|(value, element, label)| Choice {
+    ROWS.iter().map(|row| build(view, *row)).collect()
+}
+
+/// The choice for `value` alone, without building the rest of the menu.
+pub(crate) fn selected(view: Option<&PageView>, value: &str) -> Option<Choice> {
+    ROWS.iter()
+        .find(|row| row.0 == value)
+        .map(|row| build(view, *row))
+}
+
+fn build(
+    view: Option<&PageView>,
+    (value, element, label): (&'static str, &'static str, &'static str),
+) -> Choice {
+    let mut choice = Choice {
         value: value.into(),
         label: label.into(),
         enabled: view.is_some_and(|view| resolve(view, value).is_ok()),
         element,
-    })
-    .collect();
-    let Some(view) = view else { return choices };
-    for choice in &mut choices {
-        let route = match &*choice.value {
-            "browser" => match &view.browser_route {
-                Some(BrowserRouteView::Messages { model }) => {
-                    choice.label = format!("Browser task, Messages, {model}").into();
-                    None
-                }
-                Some(BrowserRouteView::HttpsMessages {
-                    endpoint, model, ..
-                }) => Some((
+    };
+    let Some(view) = view else { return choice };
+    let route = match &*choice.value {
+        "browser" => match &view.browser_route {
+            Some(BrowserRouteView::Messages { model }) => {
+                choice.label = format!("Browser task, Messages, {model}").into();
+                None
+            }
+            Some(BrowserRouteView::HttpsMessages {
+                endpoint, model, ..
+            }) => Some((
+                "Browser task",
+                "Messages",
+                endpoint.as_str(),
+                model.as_str(),
+            )),
+            None => None,
+        },
+        "chat" => view.chat_route.as_ref().map(
+            |ChatRouteView::HttpsChatCompletions {
+                 endpoint, model, ..
+             }| {
+                (
                     "Browser task",
-                    "Messages",
+                    "Chat Completions",
                     endpoint.as_str(),
                     model.as_str(),
-                )),
-                None => None,
+                )
             },
-            "chat" => view.chat_route.as_ref().map(
-                |ChatRouteView::HttpsChatCompletions {
-                     endpoint, model, ..
-                 }| {
-                    (
-                        "Browser task",
-                        "Chat Completions",
-                        endpoint.as_str(),
-                        model.as_str(),
-                    )
-                },
-            ),
-            "responses" => view.responses_route.as_ref().map(
-                |ResponsesRouteView::HttpsResponses {
-                     endpoint, model, ..
-                 }| {
-                    (
-                        "Browser task",
-                        "OpenAI Responses",
-                        endpoint.as_str(),
-                        model.as_str(),
-                    )
-                },
-            ),
-            "google" => view.google_route.as_ref().map(
-                |GoogleRouteView::HttpsGoogleInteractions {
-                     endpoint, model, ..
-                 }| {
-                    (
-                        "Browser task",
-                        "Google Interactions",
-                        endpoint.as_str(),
-                        model.as_str(),
-                    )
-                },
-            ),
-            value if value.starts_with("page:") => ProviderProtocol::ALL
-                .into_iter()
-                .find(|protocol| value.strip_prefix("page:") == Some(protocol.name()))
-                .and_then(|protocol| {
-                    page_route(view, protocol).map(|(endpoint, model, _)| {
-                        ("Page questions", provider_name(protocol), endpoint, model)
-                    })
-                }),
-            _ => None,
-        };
-        if let Some((task, protocol, endpoint, model)) = route {
-            choice.label = format!("{task}, {protocol}, {model}, {endpoint}").into();
-        }
+        ),
+        "responses" => view.responses_route.as_ref().map(
+            |ResponsesRouteView::HttpsResponses {
+                 endpoint, model, ..
+             }| {
+                (
+                    "Browser task",
+                    "OpenAI Responses",
+                    endpoint.as_str(),
+                    model.as_str(),
+                )
+            },
+        ),
+        "google" => view.google_route.as_ref().map(
+            |GoogleRouteView::HttpsGoogleInteractions {
+                 endpoint, model, ..
+             }| {
+                (
+                    "Browser task",
+                    "Google Interactions",
+                    endpoint.as_str(),
+                    model.as_str(),
+                )
+            },
+        ),
+        value if value.starts_with("page:") => ProviderProtocol::ALL
+            .into_iter()
+            .find(|protocol| value.strip_prefix("page:") == Some(protocol.name()))
+            .and_then(|protocol| {
+                page_route(view, protocol).map(|(endpoint, model, _)| {
+                    ("Page questions", provider_name(protocol), endpoint, model)
+                })
+            }),
+        _ => None,
+    };
+    if let Some((task, protocol, endpoint, model)) = route {
+        choice.label = format!("{task}, {protocol}, {model}, {endpoint}").into();
     }
-    choices
+    choice
 }
 
 #[cfg(test)]
@@ -258,7 +270,10 @@ mod checks {
         }
         assert!(matches!(resolve(&view, "claude"), Ok(Destination::Claude)));
         assert!(matches!(resolve(&view, "codex"), Ok(Destination::Codex)));
-        assert!(matches!(resolve(&view, "opencode"), Ok(Destination::OpenCode)));
+        assert!(matches!(
+            resolve(&view, "opencode"),
+            Ok(Destination::OpenCode)
+        ));
         assert!(matches!(resolve(&view, "pi"), Ok(Destination::Pi)));
         view.responses_route = None;
         let choices = list(Some(&view));
@@ -267,4 +282,3 @@ mod checks {
         assert_eq!(choices[6].value, "page:responses");
     }
 }
-

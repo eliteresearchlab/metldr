@@ -205,11 +205,7 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
 pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     let p = palette(state);
     let typography = state.preferences.typography();
-    let choices = state.choices();
-    let selected = choices
-        .iter()
-        .find(|choice| choice.value == state.selection);
-    let model_label = selected.map_or_else(
+    let model_label = state.selected_choice().map_or_else(
         || "Choose model".to_owned(),
         |choice| {
             if supports_plan(&choice.value) && state.mode == Mode::Plan {
@@ -289,6 +285,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     )
     .hover(p.hover)
     .press(p.press)
+    .press_scale(super::theme::PRESS_SCALE)
     .on_press_tx(sources)
     .on_key(|state: &mut State, key, tx| {
         if matches!(&key.key, Key::Down | Key::Up) {
@@ -322,6 +319,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .child(::rune::el::icon(&CHEVRON, 11.0).color(p.muted))
         .hover(p.hover)
         .press(p.strong)
+        .press_scale(super::theme::PRESS_SCALE)
         .role("button")
         .focusable(true)
         .label("Choose model")
@@ -358,6 +356,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         let stop = button("rune-stop", "Stop", &STOP, p.surface)
             .fill(p.ink)
             .press(p.press_solid)
+            .press_scale(super::theme::PRESS_SCALE)
             .on_press_tx(|state: &mut State, tx| state.stop(tx))
             .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::stop));
         if let Some(correction) = super::corrections::control(state) {
@@ -378,6 +377,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         if can_send {
             send = send
                 .press(p.press_solid)
+                .press_scale(super::theme::PRESS_SCALE)
                 .on_press_tx(|state: &mut State, tx| state.send(tx))
                 .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::send));
         }
