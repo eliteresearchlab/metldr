@@ -208,3 +208,10 @@ pub(super) fn rise() -> Transition {
         .combined(Transition::opacity())
         .springs(SpringPair::with_exit_ratio(Spring::from_motion(0.3, 0.0), 0.75))
 }
+
+/// A sheet such as Saved chats opens from its centre, 0.96 to 1 with opacity, on a critically damped
+/// 250 ms spring; the exit is shorter. Under Reduce Motion Rune turns it into a short fade without the scale.
+pub(super) fn sheet() -> Transition {
+    Transition::scale_anchor(0.96, Vec2 { x: 0.5, y: 0.5 })
+        .springs(SpringPair::with_exit_ratio(Spring::from_motion(0.25, 0.0), 0.75))
+}
