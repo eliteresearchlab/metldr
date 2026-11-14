@@ -147,6 +147,17 @@ fn codex_ready(view: &PageView, session: &AgentSessionView) -> bool {
 }
 
 /// Whether a Claude Code profile is saved and ready.
+/// The chat's most recently created session that can continue now.
+fn newest<'a>(
+    sessions: &'a [AgentSessionView],
+    ready: impl Fn(&AgentSessionView) -> bool,
+) -> Option<&'a AgentSessionView> {
+    sessions.iter().filter(|session| ready(session)).max_by_key(|session| {
+        let id = session.workflow.as_str();
+        id.rsplit(':').next().and_then(|n| n.parse::<u64>().ok()).unwrap_or(0)
+    })
+}
+
 fn claude_configured(view: &PageView) -> bool {
     view.agent_settings.agents.iter().any(|row| {
         row.agent == crate::model::AgentKind::Claude && row.state == crate::model::AgentSettingState::Ready
@@ -314,16 +325,21 @@ pub(crate) fn resolve(view: &PageView, value: &str) -> Result<Destination, Strin
                 fingerprint,
             })
         }
-        "pi" if view.pi_profile.is_some() => Ok(Destination::Pi),
+        // One chat keeps one session per agent: its newest ready session continues (B1.12.4).
+        "pi" if view.pi_profile.is_some() => Ok(newest(&view.agent_sessions, |s| ready(view, s))
+            .map_or(Destination::Pi, |s| Destination::Continue { workflow: s.workflow.clone(), revision: s.revision })),
         "pi" => Err("Pi is unavailable. Choose another destination or configure Pi.".into()),
-        "codex" if view.codex_profile.is_some() => Ok(Destination::Codex),
+        "codex" if view.codex_profile.is_some() => Ok(newest(&view.codex_sessions, |s| codex_ready(view, s))
+            .map_or(Destination::Codex, |s| Destination::ContinueCodex { workflow: s.workflow.clone(), revision: s.revision })),
         "codex" => Err(
             "Codex configuration is unavailable. Choose another destination or configure Codex."
                 .into(),
         ),
-        "opencode" if view.opencode_profile.is_some() => Ok(Destination::OpenCode),
+        "opencode" if view.opencode_profile.is_some() => Ok(newest(&view.opencode_sessions, |s| opencode_ready(view, s))
+            .map_or(Destination::OpenCode, |s| Destination::ContinueOpenCode { workflow: s.workflow.clone(), revision: s.revision })),
         "opencode" => Err("OpenCode is unavailable. Configure an OpenCode profile first.".into()),
-        "claude" if claude_configured(view) => Ok(Destination::Claude),
+        "claude" if claude_configured(view) => Ok(newest(&view.claude_sessions, |s| claude_ready(view, s))
+            .map_or(Destination::Claude, |s| Destination::ContinueClaude { workflow: s.workflow.clone(), revision: s.revision })),
         "claude" => Err("Claude Code is unavailable. Configure a Claude Code profile first.".into()),
         _ => {
             if let Some(id) = value.strip_prefix("claude:") {
@@ -616,55 +632,11 @@ pub(super) fn render(panel: &Panel) -> Result<(), JsValue> {
     let value = select.value();
     let view = panel.snapshot.as_ref();
     let choices = choices::list(view);
-    let options: Vec<_> = (0..select.children().length())
-        .filter_map(|index| select.children().item(index))
-        .filter(|option| option.has_attribute("data-session"))
-        .collect();
-    for option in options {
-        let id = option.get_attribute("value").unwrap_or_default();
-        if !choices.iter().any(|choice| choice.value == id) {
-            if id == value {
-                option.set_text_content(Some(
-                    match option.get_attribute("data-provider").as_deref() {
-                        Some("codex") => "Codex session unavailable",
-                        Some("opencode") => "OpenCode session unavailable",
-                        Some("claude") => "Claude Code session unavailable",
-                        _ => "Pi session unavailable",
-                    },
-                ));
-                option.set_attribute("disabled", "")?;
-            } else {
-                select.remove_child(&option)?;
-            }
-        }
-    }
     for choice in choices {
-        let option = match choice.kind {
-            choices::Kind::Fixed(id) => panel
-                .document
-                .get_element_by_id(id)
-                .ok_or_else(|| err("Execution option missing."))?,
-            choices::Kind::Session { agent, revision } => {
-                let existing = (0..select.children().length())
-                    .filter_map(|index| select.children().item(index))
-                    .find(|option| {
-                        option.get_attribute("value").as_deref() == Some(&*choice.value)
-                    });
-                let option = match existing {
-                    Some(option) => option,
-                    None => {
-                        let option = panel.document.create_element("option")?;
-                        option.set_attribute("value", &choice.value)?;
-                        option.set_attribute("data-session", "")?;
-                        option.set_attribute("data-provider", agent.name())?;
-                        select.append_child(&option)?;
-                        option
-                    }
-                };
-                option.set_attribute("data-revision", &revision.to_string())?;
-                option
-            }
-        }
+        let option = panel
+            .document
+            .get_element_by_id(choice.element)
+            .ok_or_else(|| err("Execution option missing."))?
         .dyn_into::<HtmlOptionElement>()?;
         if option.text() != choice.label {
             option.set_text(&choice.label);
