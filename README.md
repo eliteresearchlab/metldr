@@ -97,4 +97,6 @@ The browser agent is in development. Its current build needs Linux and [companio
 
 Browser integration work draws on [browse](https://github.com/anomalyco/browse), and the agent harness registry and context handoff draw on [t3code](https://github.com/pingdotgg/t3code). See [third party notices](THIRD_PARTY_NOTICES.md).
 
+metldr is free for noncommercial use under the [PolyForm Noncommercial License 1.0.0](LICENSE). Keep its `Required Notice` line when you share metldr or work based on it. Commercial use needs written permission from the maintainers. Versions published before 14 November 2026 stay under the MIT license.
+
 [Build and setup](docs/development.md) | [Privacy](PRIVACY.md)
