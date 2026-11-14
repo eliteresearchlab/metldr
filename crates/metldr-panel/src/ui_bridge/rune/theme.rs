@@ -3,7 +3,7 @@
 //! Values follow beautiful-ui's `app/globals.css`; components read roles from here and never
 //! write colour literals of their own.
 
-use ::rune::{Color, oklch};
+use ::rune::{Anim, AnimExt, Color, Curve, El, Easing, oklch};
 
 /// Semantic colour roles for one theme.
 #[derive(Clone, Copy)]
@@ -170,3 +170,24 @@ impl Palette {
 /// A pressed button scales to this over 150 ms (Jakub Krehel `better-ui`); disabled controls,
 /// menu rows and list rows never scale, and Reduce Motion turns it off.
 pub(super) const PRESS_SCALE: f32 = 0.96;
+
+/// beautiful-ui `--ease-link`: links, spatial moves and the home reveal.
+pub(super) const EASE_LINK: Easing = Easing::cubic(0.16, 1.0, 0.3, 1.0);
+
+/// The beautiful-ui home reveal (`IceCreamHarness` `HOME_REVEAL` and `HOME_REVEAL_TIMING`): each
+/// line rises 23 px out of a 17 px blur over 800 ms, staged by these delays in seconds. Only the
+/// welcome copy reveals; controls are usable from the first frame.
+pub(super) const REVEAL_GREETING: f32 = 0.17;
+pub(super) const REVEAL_QUESTION: f32 = 0.33;
+
+/// Shows `el` as part of the home reveal: hidden on its first frame, then eased in after `delay`.
+/// Reduce Motion passes `shown` from the first frame, so nothing moves.
+pub(super) fn reveal(el: El, shown: bool, delay: f32) -> El {
+    let anim = || Anim::new(Curve::tween(0.8, EASE_LINK)).delay(delay);
+    el.opacity(if shown { 1.0 } else { 0.0 })
+        .offset(0.0, if shown { 0.0 } else { 23.0 })
+        .blur(if shown { 0.0 } else { 17.0 })
+        .opacity_motion(anim())
+        .offset_motion(anim())
+        .blur_motion(anim())
+}
