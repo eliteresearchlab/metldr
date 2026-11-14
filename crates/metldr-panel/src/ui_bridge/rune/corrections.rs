@@ -182,6 +182,7 @@ pub(super) fn control(state: &State) -> Option<El> {
         control
             .native_activation()
             .press(state.preferences.palette().press)
+            .press_scale(super::theme::PRESS_SCALE)
             .on_press_tx(move |state: &mut State, tx| {
                 if let Err(error) = submit(state, &core, &run, draft_version, &draft, tx) {
                     state.fail(error);
@@ -229,6 +230,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                 .label("Check correction")
                 .native_activation()
                 .press(state.preferences.palette().press)
+                .press_scale(super::theme::PRESS_SCALE)
                 .on_press_tx(|state: &mut State, _| {
                     let Some(core) = state.core().cloned() else {
                         return;

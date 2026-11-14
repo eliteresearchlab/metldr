@@ -166,3 +166,7 @@ impl Palette {
         oklch(l, 0.15, HUES[index % HUES.len()])
     }
 }
+
+/// A pressed button scales to this over 150 ms (Jakub Krehel `better-ui`); disabled controls,
+/// menu rows and list rows never scale, and Reduce Motion turns it off.
+pub(super) const PRESS_SCALE: f32 = 0.96;

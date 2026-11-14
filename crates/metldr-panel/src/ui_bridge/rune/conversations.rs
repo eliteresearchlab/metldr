@@ -458,7 +458,7 @@ fn icon_button(icon: &'static Icon, glyph: f32, size: f32, radius: f32, p: &supe
         .focusable(true)
         .hover(p.hover)
         .press(p.hover_2)
-        .press_scale(0.97)
+        .press_scale(super::theme::PRESS_SCALE)
 }
 
 fn chat_list() -> El {
@@ -647,7 +647,7 @@ pub(super) fn button(
     let press = Rc::clone(&action);
     el.hover(p.hover)
         .press(p.hover_2)
-        .press_scale(0.97)
+        .press_scale(super::theme::PRESS_SCALE)
         .on_press_tx(move |state: &mut State, tx| {
             state.sound(crate::interaction_audio::Cue::Page);
             press(state, tx)
