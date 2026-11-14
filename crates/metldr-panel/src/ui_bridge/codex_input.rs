@@ -1,18 +1,12 @@
 use super::*;
-use crate::model::{
-    CodexFormField, CodexInputPrompt, CodexInputView, CodexQuestion, CodexQuestionOption, RunRoute,
-    RunStatus,
-};
+use crate::model::{CodexFormField, CodexInputPrompt, CodexInputView, RunRoute, RunStatus};
 use serde_json::{Map, Value, json};
 
 mod answer;
 mod display;
 mod observe;
 pub use answer::{UiCodexAnswer, UiCodexFieldAnswer, UiCodexQuestionAnswer};
-pub use display::{
-    UiCodexField, UiCodexOption, UiCodexPromptKind, UiCodexQuestion, UiCodexRequest,
-    UiCodexSnapshot,
-};
+pub use display::UiCodexSnapshot;
 pub(super) use observe::Observer;
 pub use observe::UiCodexSubscription;
 
@@ -402,6 +396,7 @@ fn validate_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{CodexQuestion, CodexQuestionOption};
     use answer::{Field, Kind, Question};
     #[cfg(feature = "rune-ui")]
     #[test]
