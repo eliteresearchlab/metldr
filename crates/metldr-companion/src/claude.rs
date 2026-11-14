@@ -14,7 +14,9 @@ use crate::{
     model::Source,
     tool_report::Call,
 };
-use metldr_claude_session::{ClaudeSession, Event as NativeEvent, Launch, McpServer, Session, SessionId};
+use metldr_claude_session::{
+    ClaudeSession, Event as NativeEvent, Launch, McpServer, Session, SessionId,
+};
 use metldr_conversation::{Change, MessageKey};
 use serde_json::json;
 use std::{
@@ -147,7 +149,9 @@ async fn native(
     let ready = loop {
         match receipt.try_recv() {
             Ok(ready) => break ready?,
-            Err(mpsc::TryRecvError::Disconnected) => return Err("Claude Code binding owner ended".into()),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err("Claude Code binding owner ended".into());
+            }
             Err(mpsc::TryRecvError::Empty) => (),
         }
         if stop.load(Ordering::Acquire) {
@@ -219,7 +223,11 @@ async fn stream(
                     let request = pending.swap_remove(index);
                     let allow = answer.as_deref() == Some("allow");
                     session
-                        .answer(&request.permission, allow, "The user declined this step in MetLDR.")
+                        .answer(
+                            &request.permission,
+                            allow,
+                            "The user declined this step in MetLDR.",
+                        )
                         .await?;
                     let _ = tx.send(Event::NativePermissionResolved {
                         run: job.run.clone(),
@@ -235,12 +243,23 @@ async fn stream(
         };
         match event {
             NativeEvent::Permission(permission) => {
-                if stopping || pending.len() >= 8 || serde_json::to_vec(&permission.input)?.len() > 8192 {
-                    session.answer(&permission, false, "MetLDR stopped or bounded this request.").await?;
+                if stopping
+                    || pending.len() >= 8
+                    || serde_json::to_vec(&permission.input)?.len() > 8192
+                {
+                    session
+                        .answer(
+                            &permission,
+                            false,
+                            "MetLDR stopped or bounded this request.",
+                        )
+                        .await?;
                     continue;
                 }
                 let key = next_key;
-                next_key = next_key.checked_add(1).ok_or("Claude Code permission key exhausted")?;
+                next_key = next_key
+                    .checked_add(1)
+                    .ok_or("Claude Code permission key exhausted")?;
                 let details = json!({
                     "agent": "claude",
                     "tool": permission.tool_name,
@@ -249,39 +268,50 @@ async fn stream(
                     "options": [{"id":"allow","name":"Allow once"},{"id":"deny","name":"Deny"}],
                 });
                 let (ack, answer) = mpsc::sync_channel(1);
-                tx.send(Event::NativePermission { run: job.run.clone(), key, details, ack })
-                    .map_err(|_| "Claude Code permission owner is unavailable")?;
-                pending.push(Pending { key, permission, answer });
+                tx.send(Event::NativePermission {
+                    run: job.run.clone(),
+                    key,
+                    details,
+                    ack,
+                })
+                .map_err(|_| "Claude Code permission owner is unavailable")?;
+                pending.push(Pending {
+                    key,
+                    permission,
+                    answer,
+                });
             }
-            NativeEvent::Partial(event) => match event["type"].as_str() {
-                Some("message_start") => {
+            NativeEvent::Partial(event) => {
+                if event["type"] == "message_start" {
                     message = event["message"]["id"].as_str().map(String::from);
                 }
-                Some("content_block_delta") if event["delta"]["type"] == "text_delta" => {
-                    let text = event["delta"]["text"].as_str().unwrap_or_default();
-                    let key = message.as_deref().ok_or("Claude Code text has no message")?;
-                    bytes = bytes
-                        .checked_add(text.len())
-                        .filter(|n| *n <= crate::TEXT_MAX)
-                        .ok_or("Claude Code output exceeds application bound")?;
-                    tx.send(Event::Text {
-                        run: job.run.clone(),
-                        change: Change::Append {
-                            key: MessageKey::native(key.into())?,
-                            text: text.into(),
-                        },
-                    })
-                    .map_err(|_| "Claude Code output owner is unavailable")?;
-                }
-                _ => (),
-            },
+            }
+            NativeEvent::Text(text) => {
+                let key = message
+                    .as_deref()
+                    .ok_or("Claude Code text has no message")?;
+                bytes = bytes
+                    .checked_add(text.len())
+                    .filter(|n| *n <= crate::TEXT_MAX)
+                    .ok_or("Claude Code output exceeds application bound")?;
+                tx.send(Event::Text {
+                    run: job.run.clone(),
+                    change: Change::Append {
+                        key: MessageKey::native(key.into())?,
+                        text,
+                    },
+                })
+                .map_err(|_| "Claude Code output owner is unavailable")?;
+            }
             NativeEvent::Assistant(message) => {
                 for block in message["content"].as_array().into_iter().flatten() {
                     if block["type"] == "tool_use" {
                         let id = block["id"].as_str().ok_or("Claude Code tool has no id")?;
                         let name = block["name"].as_str().unwrap_or("tool").to_owned();
                         if tools.len() >= 16 || tools.contains_key(id) {
-                            return Err("Claude Code tool identity repeated or exceeds bound".into());
+                            return Err(
+                                "Claude Code tool identity repeated or exceeds bound".into()
+                            );
                         }
                         let mut call = Call::new(id)?;
                         call.merge_claude(Some(&name), Some(&block["input"]), None);
@@ -295,11 +325,18 @@ async fn stream(
                     if block["type"] != "tool_result" {
                         continue;
                     }
-                    let Some((name, mut call)) = block["tool_use_id"].as_str().and_then(|id| tools.remove(id)) else {
+                    let Some((name, mut call)) = block["tool_use_id"]
+                        .as_str()
+                        .and_then(|id| tools.remove(id))
+                    else {
                         continue;
                     };
                     call.merge_claude(None, None, Some(&block["content"]));
-                    let phase = if block["is_error"] == true { "failed" } else { "completed" };
+                    let phase = if block["is_error"] == true {
+                        "failed"
+                    } else {
+                        "completed"
+                    };
                     report(job, tx, &mut activities, &name, phase, call)?;
                 }
             }
@@ -344,4 +381,3 @@ fn report(
     })
     .map_err(|_| "Claude Code activity owner is unavailable".into())
 }
-

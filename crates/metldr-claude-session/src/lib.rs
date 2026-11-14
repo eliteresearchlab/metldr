@@ -1,7 +1,8 @@
 #![doc = include_str!("../README.md")]
 
+use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{path::Path, process::Stdio, time::Duration};
+use std::{borrow::Cow, path::Path, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
@@ -84,6 +85,8 @@ pub enum Event {
         tools: Vec<String>,
         mcp_servers: Value,
     },
+    /// One streamed piece of assistant text, read without building a JSON tree.
+    Text(String),
     Partial(Value),
     Assistant(Value),
     ToolResult(Value),
@@ -227,57 +230,14 @@ impl ClaudeSession {
     /// The next event; `None` when Claude Code closed its output.
     pub async fn next(&mut self) -> Result<Option<Event>> {
         loop {
-            let Some(value) = self.read().await? else {
+            if !self.read().await? {
                 return Ok(None);
-            };
-            if value["session_id"].as_str().is_some_and(|id| id != self.session.as_str()) {
-                return Err(invalid("Claude Code answered for another session"));
             }
-            let event = match (value["type"].as_str(), value["subtype"].as_str()) {
-                (Some("system"), Some("init")) => Event::Ready {
-                    model: value["model"].as_str().unwrap_or_default().into(),
-                    tools: value["tools"]
-                        .as_array()
-                        .map(|tools| tools.iter().filter_map(|t| t.as_str().map(Into::into)).collect())
-                        .unwrap_or_default(),
-                    mcp_servers: value["mcp_servers"].clone(),
-                },
-                (Some("system"), Some("api_retry")) => Event::Retry {
-                    attempt: value["attempt"].as_u64().unwrap_or_default(),
-                },
-                (Some("stream_event"), _) => Event::Partial(value["event"].clone()),
-                (Some("assistant"), _) => Event::Assistant(value["message"].clone()),
-                (Some("user"), _) => Event::ToolResult(value["message"].clone()),
-                (Some("result"), _) => Event::Finished {
-                    is_error: value["is_error"].as_bool().unwrap_or(true),
-                    stop_reason: value["stop_reason"].as_str().map(Into::into),
-                    text: value["result"].as_str().map(Into::into),
-                },
-                (Some("control_request"), _) if value["request"]["subtype"] == "can_use_tool" => {
-                    let request = &value["request"];
-                    let text = |key: &str| request[key].as_str().map(String::from);
-                    Event::Permission(Permission {
-                        request_id: value["request_id"]
-                            .as_str()
-                            .filter(|id| !id.is_empty() && id.len() <= 128)
-                            .ok_or_else(|| invalid("Claude Code permission without an id"))?
-                            .into(),
-                        tool_name: text("tool_name").ok_or_else(|| invalid("permission without a tool"))?,
-                        tool_use_id: text("tool_use_id"),
-                        description: text("description"),
-                        blocked_path: text("blocked_path"),
-                        input: request["input"].clone(),
-                    })
-                }
-                (Some("control_response"), _) => {
-                    if value["response"]["subtype"] != "success" {
-                        return Err(invalid("Claude Code refused a control request"));
-                    }
-                    continue;
-                }
-                _ => continue,
-            };
-            return Ok(Some(event));
+            let event = parse_line(&self.line, self.session.as_str());
+            self.line.clear();
+            if let Some(event) = event? {
+                return Ok(Some(event));
+            }
         }
     }
 
@@ -302,13 +262,14 @@ impl ClaudeSession {
         Ok(())
     }
 
-    async fn read(&mut self) -> Result<Option<Value>> {
-        self.line.clear();
+    /// Reads one non-empty line into `self.line`; `false` at the end of output. Cancelling it
+    /// keeps the bytes already taken, so a caller may time it out and call it again.
+    async fn read(&mut self) -> Result<bool> {
         loop {
             let buffer = self.stdout.fill_buf().await?;
             if buffer.is_empty() {
                 return if self.line.is_empty() {
-                    Ok(None)
+                    Ok(false)
                 } else {
                     Err(invalid("Claude Code output ended inside a line"))
                 };
@@ -323,14 +284,101 @@ impl ClaudeSession {
             self.line.extend_from_slice(chunk);
             let used = done.unwrap_or(buffer.len());
             self.stdout.consume(used);
-            if done.is_some() {
-                if self.line.is_empty() {
-                    continue;
-                }
-                return Ok(Some(serde_json::from_slice(&self.line)?));
+            if done.is_some() && !self.line.is_empty() {
+                return Ok(true);
             }
         }
     }
+}
+
+/// The borrowed shape of a streamed text delta, the most frequent line by far.
+#[derive(Deserialize)]
+struct DeltaLine<'a> {
+    #[serde(rename = "type", borrow)]
+    kind: Cow<'a, str>,
+    #[serde(borrow)]
+    session_id: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    event: Option<DeltaEvent<'a>>,
+}
+
+#[derive(Deserialize)]
+struct DeltaEvent<'a> {
+    #[serde(rename = "type", borrow)]
+    kind: Cow<'a, str>,
+    #[serde(borrow)]
+    delta: Option<Delta<'a>>,
+}
+
+#[derive(Deserialize)]
+struct Delta<'a> {
+    #[serde(rename = "type", borrow)]
+    kind: Cow<'a, str>,
+    #[serde(borrow)]
+    text: Option<Cow<'a, str>>,
+}
+
+/// Turns one stream-json line into an event; `None` for lines MetLDR does not use.
+pub fn parse_line(line: &[u8], session: &str) -> Result<Option<Event>> {
+    // Text deltas skip the JSON tree: unknown fields are skipped and strings borrowed.
+    if memchr::memmem::find(line, b"\"text_delta\"").is_some()
+        && let Ok(fast) = serde_json::from_slice::<DeltaLine<'_>>(line)
+        && fast.kind == "stream_event"
+        && let Some(DeltaEvent { kind, delta: Some(Delta { kind: delta, text: Some(text) }) }) = fast.event
+        && kind == "content_block_delta"
+        && delta == "text_delta"
+    {
+        if fast.session_id.is_some_and(|id| id != session) {
+            return Err(invalid("Claude Code answered for another session"));
+        }
+        return Ok(Some(Event::Text(text.into_owned())));
+    }
+    let value: Value = serde_json::from_slice(line)?;
+    if value["session_id"].as_str().is_some_and(|id| id != session) {
+        return Err(invalid("Claude Code answered for another session"));
+    }
+    let event = match (value["type"].as_str(), value["subtype"].as_str()) {
+        (Some("system"), Some("init")) => Event::Ready {
+            model: value["model"].as_str().unwrap_or_default().into(),
+            tools: value["tools"]
+                .as_array()
+                .map(|tools| tools.iter().filter_map(|t| t.as_str().map(Into::into)).collect())
+                .unwrap_or_default(),
+            mcp_servers: value["mcp_servers"].clone(),
+        },
+        (Some("system"), Some("api_retry")) => Event::Retry {
+            attempt: value["attempt"].as_u64().unwrap_or_default(),
+        },
+        (Some("stream_event"), _) => Event::Partial(value["event"].clone()),
+        (Some("assistant"), _) => Event::Assistant(value["message"].clone()),
+        (Some("user"), _) => Event::ToolResult(value["message"].clone()),
+        (Some("result"), _) => Event::Finished {
+            is_error: value["is_error"].as_bool().unwrap_or(true),
+            stop_reason: value["stop_reason"].as_str().map(Into::into),
+            text: value["result"].as_str().map(Into::into),
+        },
+        (Some("control_request"), _) if value["request"]["subtype"] == "can_use_tool" => {
+            let request = &value["request"];
+            let text = |key: &str| request[key].as_str().map(String::from);
+            Event::Permission(Permission {
+                request_id: value["request_id"]
+                    .as_str()
+                    .filter(|id| !id.is_empty() && id.len() <= 128)
+                    .ok_or_else(|| invalid("Claude Code permission without an id"))?
+                    .into(),
+                tool_name: text("tool_name").ok_or_else(|| invalid("permission without a tool"))?,
+                tool_use_id: text("tool_use_id"),
+                description: text("description"),
+                blocked_path: text("blocked_path"),
+                input: request["input"].clone(),
+            })
+        }
+        (Some("control_response"), _) if value["response"]["subtype"] != "success" => {
+            return Err(invalid("Claude Code refused a control request"));
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(event))
 }
 
 fn valid_name(value: &str) -> bool {
