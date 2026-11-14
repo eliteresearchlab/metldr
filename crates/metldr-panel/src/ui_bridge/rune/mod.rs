@@ -1829,6 +1829,14 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         Some(col().w_full().px(16.0).py(8.0).items_center().child(toolbar.max_w(720.0)))
     };
     head = head.child(state.sources.view(typography, p));
+    // An empty chat keeps the composer in the centred group, 56 px under the welcome as the
+    // reference spaces it; a chat with messages docks it under the thread.
+    let composer = if empty {
+        head = head.child(composer.pt(28.0));
+        None
+    } else {
+        Some(col().w_full().px(16.0).pb(24.0).center_y().child(composer))
+    };
     let body = col()
         .w_full()
         .max_w(720.0)
@@ -1866,7 +1874,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .child(col().w_full().h(1.0).fill(p.line))
                 .children(pinned)
                 .child(if empty { scroll.justify_center() } else { scroll })
-                .child(col().w_full().px(16.0).pb(24.0).center_y().child(composer)),
+                .children(composer),
         )
 }
 

@@ -121,42 +121,20 @@ impl Sources {
             Some(UiSourceStatus::Saved) => "Saved capture",
             Some(UiSourceStatus::Unavailable) => "Page check unavailable",
         };
+        // The whole row is the disclosure, as a summary element: label, status, then the chevron at
+        // the far end. Rows highlight but never scale.
         let mut result = col().key("saved-source").w_full().gap(8.0).child(
             row()
+                .key("saved-source-toggle")
                 .w_full()
                 .min_h(44.0)
-                .gap(8.0)
+                .gap(6.5)
                 .items_center()
                 .child(
-                    row()
-                        .key("saved-source-toggle")
-                        .gap(8.0)
-                        .min_h(44.0)
-                        .items_center()
-                        .child(
-                            typography
-                                .text("Saved page")
-                                .font(typography.font(13.0, 500.0))
-                                .color(p.ink),
-                        )
-                        .child(
-                            ::rune::el::icon(&super::composer::CHEVRON, 11.0)
-                                .color(p.ink_3)
-                                .icon_rotation(if self.expanded { std::f32::consts::PI } else { 0.0 }),
-                        )
-                        .role("button")
-                        .label(if self.expanded {
-                            "Hide saved page"
-                        } else {
-                            "Show saved page"
-                        })
-                        .focusable(true)
-                        .expanded(self.expanded)
-                        .press_scale(super::theme::PRESS_SCALE)
-                        .on_press_tx(Self::toggle)
-                        .on_key(|state: &mut State, key, tx| {
-                            composer::enter(state, key, tx, Self::toggle)
-                        }),
+                    typography
+                        .text("Saved page")
+                        .font(typography.font(13.0, 500.0))
+                        .color(p.ink),
                 )
                 .child(
                     typography
@@ -165,8 +143,27 @@ impl Sources {
                         .color(p.ink_2)
                         .truncate()
                         .min_w(0.0)
+                        .shrink()
                         .role("status"),
-                ),
+                )
+                .child(row().grow(1.0))
+                .child(
+                    ::rune::el::icon(&super::composer::CHEVRON, 11.0)
+                        .color(p.ink)
+                        .icon_rotation(if self.expanded { std::f32::consts::PI } else { 0.0 }),
+                )
+                .role("button")
+                .label(if self.expanded {
+                    "Hide saved page"
+                } else {
+                    "Show saved page"
+                })
+                .focusable(true)
+                .expanded(self.expanded)
+                .hover(p.hover)
+                .press(p.hover_2)
+                .on_press_tx(Self::toggle)
+                .on_key(|state: &mut State, key, tx| composer::enter(state, key, tx, Self::toggle)),
         );
         if !self.expanded {
             return result;
