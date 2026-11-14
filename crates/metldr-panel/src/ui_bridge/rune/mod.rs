@@ -1601,12 +1601,11 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         ));
     }
     // Layout follows whether the chat has messages, so it does not jump when history finishes
-    // loading; only the welcome waits for the load.
+    // loading; the welcome holds its space and only its reveal waits for the load.
     let empty = state
         .updates
         .as_ref()
         .is_none_or(|updates| updates.presentation.borrow().messages.messages.is_empty());
-    let welcome = empty && !core.history_loading.get();
     if state.conversations.is_open() {
         return col()
             .w_full()
@@ -1847,7 +1846,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     );
     let shown = cx.is_reduced_motion() || state.welcome_revealed;
     let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });
-    if welcome {
+    if empty {
         // Two lines with tight leading and negative tracking, as the reference's 26 px heading.
         let hero = |line: &str| {
             typography
@@ -1862,14 +1861,22 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         };
         let greeting = hero("Welcome to metldr").color(p.ink_3).role("heading").level(1);
         let question = hero("What do you want to do?").color(p.ink);
-        let mut lines = col()
-            .child(theme::reveal(greeting, shown, theme::REVEAL_GREETING))
-            .child(theme::reveal(question, shown, theme::REVEAL_QUESTION));
-        if !shown {
-            lines = lines.on_drawn_layout_tx(|state: &mut State, _, _| {
-                state.welcome_revealed = true;
-            });
-        }
+        // While history loads the lines hold their space unseen, so the toolbar and composer under
+        // them never move when the reveal starts.
+        let lines = if core.history_loading.get() {
+            col().child(greeting).child(question).opacity(0.0).a11y_hidden()
+        } else {
+            let lines = col()
+                .child(theme::reveal(greeting, shown, theme::REVEAL_GREETING))
+                .child(theme::reveal(question, shown, theme::REVEAL_QUESTION));
+            if shown {
+                lines
+            } else {
+                lines.on_drawn_layout_tx(|state: &mut State, _, _| {
+                    state.welcome_revealed = true;
+                })
+            }
+        };
         head = head.child(lines);
     }
     // An empty chat shows the toolbar under the welcome; a chat with messages pins it under the
