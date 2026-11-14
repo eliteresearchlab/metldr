@@ -58,6 +58,7 @@ fn with_owner_seed(
         output: Default::default(),
         error: None,
         corrections: Vec::new(),
+        ledger: None,
     });
     if codex {
         use crate::{
@@ -1202,7 +1203,9 @@ fn browser_owner_stop_prevents_dispatch_and_preserves_uncertainty_after_dispatch
             saved(owner).browser_actions[&pending.id].state,
             Phase::Dispatching
         );
-        owner.settled(&run, Err("stopped".into()), false).unwrap();
+        owner
+            .settled(&run, Err("stopped".into()), None, false)
+            .unwrap();
         assert!(matches!(
             saved(owner).browser_actions[&pending.id].state,
             Phase::Settled {
@@ -1389,7 +1392,7 @@ fn browser_transport_sibling_waiters_keep_run_ownership() {
                     std::mem::replace(&mut owner.operations.get_mut(&a).unwrap().worker, worker)
                         .join()
                         .unwrap();
-                    owner.settled(&a, Ok(()), false).unwrap();
+                    owner.settled(&a, Ok(()), None, false).unwrap();
                     assert!(events_a.blocking_recv().is_none());
                 } else {
                     let pending_a = call(owner, &a, command());

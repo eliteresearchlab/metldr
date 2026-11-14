@@ -29,14 +29,19 @@ pub(super) async fn run(
     tx: &SyncSender<Event>,
     stop: &AtomicBool,
     output: &mut DirectOutput<'_>,
+    recorder: &mut crate::ledger::Recorder,
 ) -> Result<()> {
     let mut conversation = client.start_presentation(system, input)?;
     let mut calls = 0;
     loop {
-        let Some(invocation) = conversation
+        recorder.begin_step();
+        let invocation = conversation
             .next(
                 stop,
-                |event| output.accept(event),
+                |event| {
+                    recorder.text();
+                    output.accept(event)
+                },
                 |progress| {
                     if calls >= MAX_PRESENTATION_STEPS {
                         return Err("presentation step limit reached".into());
@@ -44,8 +49,9 @@ pub(super) async fn run(
                     save(run, tx, stop, Update::Preview(progress)).map(|_| ())
                 },
             )
-            .await?
-        else {
+            .await?;
+        recorder.end_step(conversation.usage(), invocation.is_some());
+        let Some(invocation) = invocation else {
             return Ok(());
         };
         if calls >= MAX_PRESENTATION_STEPS {

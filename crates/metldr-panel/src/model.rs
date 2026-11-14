@@ -939,6 +939,7 @@ pub(crate) struct RunView {
     pub(crate) route: RunRoute,
     pub(crate) activity: Vec<ActivityView>,
     pub(crate) corrections: CorrectionHistory,
+    pub(crate) ledger: Option<metldr_conversation::Ledger>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -1602,6 +1603,8 @@ struct WireRun {
     route: RunRoute,
     activity: Vec<ActivityView>,
     corrections: CorrectionHistory,
+    #[serde(default)]
+    ledger: Option<metldr_conversation::Ledger>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3483,4 +3486,3 @@ mod tests {
         assert!(PageView::decode(&serde_json::to_vec(&view).unwrap()).is_err());
     }
 }
-

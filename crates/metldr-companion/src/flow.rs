@@ -83,6 +83,7 @@ pub(super) enum Event {
     Settled {
         run: String,
         result: std::result::Result<(), String>,
+        ledger: Option<metldr_conversation::Ledger>,
     },
     PiBound {
         run: String,
@@ -730,6 +731,7 @@ impl Owner {
         &mut self,
         run: &str,
         result: std::result::Result<(), String>,
+        ledger: Option<metldr_conversation::Ledger>,
         disconnected: bool,
     ) -> Result<()> {
         // A finished run ends its session grant (decision 09).
@@ -762,6 +764,7 @@ impl Owner {
             if record.status == Status::Failed {
                 record.error = Some(result.err().unwrap_or_default().chars().take(200).collect());
             }
+            record.ledger = ledger;
             edit.put_run(execution, record)?;
             Ok(())
         })?;

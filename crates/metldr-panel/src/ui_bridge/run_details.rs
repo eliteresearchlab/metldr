@@ -19,6 +19,7 @@ pub struct UiRunDetails {
     route: String,
     status: RunStatus,
     run_id: String,
+    ledger: Option<String>,
     corrections: Vec<corrections::UiCorrectionReceipt>,
 }
 
@@ -44,6 +45,7 @@ pub(super) async fn open(core: Rc<Core>, encoded: String) -> Result<UiRunDetails
         route: run_display::route(&run.route),
         status: run.status,
         run_id: run.id.as_str().into(),
+        ledger: run.ledger.as_ref().map(run_display::ledger),
         corrections: corrections::receipts(&run.id, &run.corrections),
     })
 }
@@ -58,6 +60,12 @@ impl UiRunDetails {
     #[wasm_bindgen(getter)]
     pub fn run_id(&self) -> String {
         self.run_id.clone()
+    }
+
+    /// Tokens and timings of the run, when it recorded them.
+    #[wasm_bindgen(getter)]
+    pub fn ledger(&self) -> Option<String> {
+        self.ledger.clone()
     }
 
     #[wasm_bindgen(getter)]

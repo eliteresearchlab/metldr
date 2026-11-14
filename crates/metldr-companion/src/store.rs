@@ -755,6 +755,7 @@ mod checks {
                 output: Default::default(),
                 error: None,
                 corrections: Vec::new(),
+                ledger: None,
             });
             state.next = 2;
             state.launches.insert(

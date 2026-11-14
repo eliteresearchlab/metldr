@@ -101,14 +101,14 @@ impl Client {
         input: &str,
         stop: &AtomicBool,
         emit: impl FnMut(TextEvent) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<crate::Usage> {
         let turn = self
             .send(&self.text_request(system, input), stop, emit)
             .await?;
         if !turn.calls.is_empty() {
             return Err("Chat text request returned a tool call".into());
         }
-        Ok(())
+        Ok(turn.usage.unwrap_or_default())
     }
 
     fn text_request(&self, system: &str, input: &str) -> Value {
@@ -187,15 +187,14 @@ impl Client {
             if bytes > 524_288 {
                 return Err("Chat stream exceeds bound".into());
             }
-            for byte in chunk {
-                if let Some((event, data)) = sse.byte(byte)? {
-                    cancelled(stop)?;
-                    if let Some(event) = state.frame(&event, &data)? {
-                        if let TextEvent::Delta(text) = &event {
-                            rendered.push_str(text);
-                        }
-                        emit(event)?;
+            let mut rest = &chunk[..];
+            while let Some((event, data)) = sse.next(&mut rest)? {
+                cancelled(stop)?;
+                if let Some(event) = state.frame(&event, &data)? {
+                    if let TextEvent::Delta(text) = &event {
+                        rendered.push_str(text);
                     }
+                    emit(event)?;
                 }
             }
         }

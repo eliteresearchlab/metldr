@@ -147,6 +147,7 @@ fn native_group(
                 output: metldr_conversation::Content::native(),
                 error: None,
                 corrections: Vec::new(),
+                ledger: None,
             },
             launch,
             workflow,
@@ -386,6 +387,7 @@ fn history_load_real_relationships() -> Result<()> {
                         output: Default::default(),
                         error: None,
                         corrections: Vec::new(),
+                        ledger: None,
                     },
                     Launch::Fixture {
                         input_digest: format!("{:064x}", group * 16 + item + 1),
@@ -418,6 +420,7 @@ fn history_load_real_relationships() -> Result<()> {
                         output: metldr_conversation::Content::native(),
                         error: None,
                         corrections: Vec::new(),
+                        ledger: None,
                     },
                     Launch::Text {
                         input_digest: format!("{:064x}", group * 6 + item + 1),

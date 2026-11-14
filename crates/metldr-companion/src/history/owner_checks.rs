@@ -217,9 +217,9 @@ fn complete(
     loop {
         match rx.recv_timeout(Duration::from_secs(3))? {
             Event::Text { run, change } => owner.texts(&run, vec![change])?,
-            Event::Settled { run, result } => {
+            Event::Settled { run, result, .. } => {
                 assert!(result.is_ok());
-                owner.settled(&run, result, false)?;
+                owner.settled(&run, result, None, false)?;
                 return Ok(());
             }
             _ => return Err("unexpected actual Owner event".into()),
@@ -258,9 +258,9 @@ fn stream_pieces(
                 pending = next;
                 owner.texts(&run, changes)?;
             }
-            Event::Settled { run, result } => {
+            Event::Settled { run, result, .. } => {
                 assert!(result.is_ok());
-                owner.settled(&run, result, false)?;
+                owner.settled(&run, result, None, false)?;
                 return Ok(());
             }
             _ => return Err("unexpected actual Owner event".into()),
@@ -320,10 +320,10 @@ fn stop_all_stops_the_active_run_ends_its_grant_and_reports_idle() -> Result<()>
             .all(|report| report["stopped"] == 1 && report["failed"] == 0)
     );
     drop(socket);
-    let Event::Settled { run, result } = rx.recv_timeout(Duration::from_secs(3))? else {
+    let Event::Settled { run, result, .. } = rx.recv_timeout(Duration::from_secs(3))? else {
         return Err("unexpected event after stop".into());
     };
-    owner.settled(&run, result, false)?;
+    owner.settled(&run, result, None, false)?;
     Ok(())
 }
 
@@ -626,13 +626,14 @@ fn actual_owner_admission_stream_and_durable_retry() -> Result<()> {
     let Event::Settled {
         run: settled,
         result,
+        ..
     } = rx.recv_timeout(Duration::from_secs(3))?
     else {
         return Err("Stop returned an unexpected event".into());
     };
     assert_eq!(settled, stopped);
     assert!(result.is_err());
-    owner.settled(&settled, result, false)?;
+    owner.settled(&settled, result, None, false)?;
     assert_eq!(saved(&owner, &stopped)?.value.status, Status::Cancelled);
     drop(socket);
 
@@ -969,13 +970,14 @@ fn actual_owner_conversation_switch_waits_for_work_and_preserves_retry() -> Resu
     let Event::Settled {
         run: settled,
         result,
+        ..
     } = rx.recv_timeout(Duration::from_secs(3))?
     else {
         return Err("held conversation did not settle after Stop".into());
     };
     assert_eq!(settled, run);
     assert!(result.is_err());
-    owner.settled(&settled, result, false)?;
+    owner.settled(&settled, result, None, false)?;
     drop(socket);
     assert_eq!(saved(&owner, &run)?.value.status, Status::Cancelled);
     assert!(owner.subscribers.is_empty());

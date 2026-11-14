@@ -373,6 +373,7 @@ mod text_checks {
             },
             error: None,
             corrections: Vec::new(),
+            ledger: None,
         }
     }
 

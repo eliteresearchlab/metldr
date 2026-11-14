@@ -332,12 +332,12 @@ fn parse_usage(value: &Value) -> Result<Usage> {
     let cached_input_tokens = cached_nested.or(cached_direct);
     let reasoning_tokens =
         detail_count(object.get("completion_tokens_details"), "reasoning_tokens")?;
+    count("total_tokens")?;
     Ok(Usage {
-        input_tokens: count("prompt_tokens")?,
-        output_tokens: count("completion_tokens")?,
-        total_tokens: count("total_tokens")?,
-        cached_input_tokens,
-        reasoning_tokens,
+        input: count("prompt_tokens")?,
+        cached: cached_input_tokens,
+        output: count("completion_tokens")?,
+        reasoning: reasoning_tokens,
     })
 }
 

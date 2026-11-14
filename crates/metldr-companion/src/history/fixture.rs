@@ -36,6 +36,7 @@ pub(super) fn legacy() -> Store {
             output: Default::default(),
             error: None,
             corrections: Vec::new(),
+            ledger: None,
         });
         launches.insert(id, launch);
     };

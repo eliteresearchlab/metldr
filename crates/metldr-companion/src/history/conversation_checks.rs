@@ -123,6 +123,7 @@ fn actual_conversations_keep_receipts_scopes_settings_and_native_history() -> Re
             output: Default::default(),
             error: None,
             corrections: Vec::new(),
+            ledger: None,
         };
         tx.admit(
             &b,

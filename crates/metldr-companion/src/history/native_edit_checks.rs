@@ -91,6 +91,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                 output: Content::native(),
                 error: None,
                 corrections: Vec::new(),
+                ledger: None,
             },
             Launch::Pi {
                 input_digest: "a".repeat(64),
@@ -167,6 +168,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                     output: Content::native(),
                     error: None,
                     corrections: Vec::new(),
+                    ledger: None,
                 },
                 launch,
                 workflow,
@@ -388,6 +390,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                     output: Content::native(),
                     error: None,
                     corrections: Vec::new(),
+                    ledger: None,
                 },
                 launch,
                 workflow,
@@ -503,6 +506,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                                 output: Content::native(),
                                 error: None,
                                 corrections: Vec::new(),
+                                ledger: None,
                             },
                             Launch::Pi {
                                 input_digest: "f".repeat(64),

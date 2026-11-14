@@ -9,6 +9,7 @@ mod stream;
 pub use client::Client;
 pub use metldr_browser_tools::{Invocation, Prompt};
 use metldr_conversation::TextEvent;
+pub use metldr_conversation::Usage;
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 
@@ -19,6 +20,7 @@ pub struct Conversation {
     client: Client,
     request: Value,
     phase: Phase,
+    usage: Option<Usage>,
 }
 
 enum Phase {
@@ -37,6 +39,7 @@ impl Client {
             client: self,
             request,
             phase: Phase::Ready,
+            usage: None,
         })
     }
 }
@@ -57,11 +60,17 @@ impl Conversation {
         // An interrupted or failed request must never be replayed implicitly.
         self.phase = Phase::Closed;
         let turn = self.client.send(&self.request, stop, emit).await?;
+        self.usage = Some(turn.usage);
         let invocation = turn.call.clone();
         if invocation.is_some() {
             self.phase = Phase::Pending(turn);
         }
         Ok(invocation)
+    }
+
+    /// Usage from the most recent completed response.
+    pub fn usage(&self) -> Option<Usage> {
+        self.usage
     }
 
     pub fn submit_tool_result(&mut self, result: &Value) -> Result<()> {

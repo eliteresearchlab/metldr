@@ -6,6 +6,7 @@ mod generated;
 mod key;
 mod projection;
 mod table;
+mod usage;
 
 pub use chart::{Chart, ChartDatum, ChartKind, MAX_CHART_BYTES, MAX_CHART_EXPORT_BYTES};
 pub use content::{ArtifactCompletion, ArtifactPresentation, Change, Completion, Content, Ending};
@@ -15,6 +16,7 @@ pub use generated::{
 pub use key::{ArtifactId, MessageKey, ToolId};
 pub use projection::{Display, EntryRef, ProjectedEntry, Projection};
 pub use table::{MAX_TABLE_BYTES, Table};
+pub use usage::{Ledger, MAX_LEDGER_STEPS, Step, Usage};
 
 /// Ordered assistant text. A final snapshot closes the current message.
 #[derive(Clone, Debug, Eq, PartialEq)]

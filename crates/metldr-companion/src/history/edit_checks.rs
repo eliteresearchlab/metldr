@@ -57,6 +57,7 @@ fn run(id: String) -> Run {
         output: Default::default(),
         error: None,
         corrections: Vec::new(),
+        ledger: None,
     }
 }
 

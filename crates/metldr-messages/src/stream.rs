@@ -1,4 +1,4 @@
-use crate::{Invocation, Result, TextEvent};
+use crate::{Invocation, Result, TextEvent, Usage};
 use metldr_browser_tools::decode_call;
 use serde_json::{Value, json};
 
@@ -6,6 +6,7 @@ pub(super) struct Turn {
     pub content: Vec<Value>,
     pub call: Option<Invocation>,
     pub text: String,
+    pub usage: Usage,
 }
 
 struct Block {
@@ -23,6 +24,7 @@ pub(super) struct State {
     stopped: bool,
     usage_seen: bool,
     output_tokens: u64,
+    prompt: [Option<u64>; 3],
     events: usize,
     text_bytes: usize,
     cursor: usize,
@@ -67,6 +69,7 @@ impl State {
             stopped: false,
             usage_seen: false,
             output_tokens: 0,
+            prompt: [None; 3],
             events: 0,
             text_bytes: 0,
             cursor: 0,
@@ -298,13 +301,13 @@ impl State {
         if output < self.output_tokens {
             return Err("Messages output usage decreased".into());
         }
-        for key in [
+        for (slot, key) in self.prompt.iter_mut().zip([
             "input_tokens",
             "cache_creation_input_tokens",
             "cache_read_input_tokens",
-        ] {
-            if value.get(key).is_some_and(|v| v.as_u64().is_none()) {
-                return Err("invalid Messages usage count".into());
+        ]) {
+            if let Some(v) = value.get(key) {
+                *slot = Some(v.as_u64().ok_or("invalid Messages usage count")?);
             }
         }
         self.output_tokens = output;
@@ -360,10 +363,23 @@ impl State {
         {
             return Err("Messages stop reason and output disagree".into());
         }
+        let [fresh, written, read] = self.prompt;
+        let input = (fresh.is_some() || written.is_some() || read.is_some()).then(|| {
+            [fresh, written, read]
+                .into_iter()
+                .flatten()
+                .fold(0u64, u64::saturating_add)
+        });
         Ok(Turn {
             content,
             call,
             text,
+            usage: Usage {
+                input,
+                cached: read,
+                output: Some(self.output_tokens),
+                reasoning: None,
+            },
         })
     }
 }

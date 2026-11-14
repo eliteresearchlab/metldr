@@ -179,6 +179,7 @@ impl WireRun {
                     || model.is_some() != mode.is_some()
                     || model.as_ref().is_some_and(|value| !valid_label(value, 128))
                     || mode.as_ref().is_some_and(|value| !valid_label(value, 128)))
+            || self.ledger.as_ref().is_some_and(|ledger| !ledger.valid())
         {
             return Err(FlowError::Protocol("invalid saved run".into()));
         }
@@ -198,6 +199,7 @@ impl WireRun {
             route: self.route,
             activity: self.activity,
             corrections: self.corrections,
+            ledger: self.ledger,
         })
     }
 }

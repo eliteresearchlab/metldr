@@ -16,3 +16,6 @@ debug = "line-tables-only"
 
 [profile.test]
 debug = "line-tables-only"
+
+[dependencies]
+memchr = "=2.8.3"

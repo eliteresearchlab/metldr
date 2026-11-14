@@ -207,6 +207,7 @@ impl Owner {
                     output: Default::default(),
                     error: None,
                     corrections: Vec::new(),
+                    ledger: None,
                 },
                 Launch::Fixture { input_digest },
             )?;
@@ -222,6 +223,7 @@ impl Owner {
             let _ = tx.send(Event::Settled {
                 run: worker_run,
                 result,
+                ledger: None,
             });
         });
         self.operations.insert(

@@ -12,7 +12,7 @@ mod stream_checks;
 pub use client::{Client, DEFAULT_TIMEOUT_SECS, TIMEOUT_SECS, loopback_host};
 use metldr_browser_tools::Call;
 pub use metldr_browser_tools::{Invocation, Prompt};
-pub use metldr_conversation::TextEvent;
+pub use metldr_conversation::{TextEvent, Usage};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -21,15 +21,6 @@ use std::{
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 const REQUEST_MAX: usize = 131_072;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Usage {
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub total_tokens: Option<u64>,
-    pub cached_input_tokens: Option<u64>,
-    pub reasoning_tokens: Option<u64>,
-}
 
 pub struct Conversation {
     client: Client,
@@ -146,7 +137,7 @@ impl Conversation {
         Ok(())
     }
 
-    /// Usage from the most recent completed HTTP response, without estimated cost.
+    /// Usage from the most recent completed response.
     pub fn usage(&self) -> Option<Usage> {
         self.usage
     }

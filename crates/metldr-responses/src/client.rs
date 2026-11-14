@@ -10,6 +10,7 @@ pub struct PresentationConversation {
     pub(super) client: Client,
     pub(super) request: Value,
     pub(super) phase: Phase,
+    pub(super) usage: Option<crate::Usage>,
 }
 
 pub struct PresentationInvocation {
@@ -132,7 +133,7 @@ impl Client {
         input: &str,
         stop: &AtomicBool,
         emit: impl FnMut(TextEvent) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<crate::Usage> {
         let turn = self
             .send(
                 &self.text_request(system, input),
@@ -145,7 +146,7 @@ impl Client {
         if turn.call.is_some() {
             return Err("Responses text request returned a tool call".into());
         }
-        Ok(())
+        Ok(turn.usage)
     }
 
     fn text_request(&self, system: &str, input: &str) -> Value {
@@ -181,6 +182,7 @@ impl Client {
             client: self,
             request,
             phase: Phase::Ready,
+            usage: None,
         })
     }
 
@@ -254,19 +256,18 @@ impl Client {
             if bytes > bounds.stream {
                 return Err("Responses stream exceeds bound".into());
             }
-            for byte in chunk {
-                if let Some((event, data)) = sse.byte(byte)? {
+            let mut rest = &chunk[..];
+            while let Some((event, data)) = sse.next(&mut rest)? {
+                cancelled(stop)?;
+                for text_event in state.frame(&event, &data)? {
+                    if let TextEvent::Delta(text) = &text_event {
+                        rendered.push_str(text);
+                    }
+                    emit(text_event)?;
+                }
+                if let Some(update) = state.presentation_progress()? {
                     cancelled(stop)?;
-                    for text_event in state.frame(&event, &data)? {
-                        if let TextEvent::Delta(text) = &text_event {
-                            rendered.push_str(text);
-                        }
-                        emit(text_event)?;
-                    }
-                    if let Some(update) = state.presentation_progress()? {
-                        cancelled(stop)?;
-                        progress(update)?;
-                    }
+                    progress(update)?;
                 }
             }
         }
@@ -286,6 +287,11 @@ impl Client {
 }
 
 impl PresentationConversation {
+    /// Usage from the most recent completed response.
+    pub fn usage(&self) -> Option<crate::Usage> {
+        self.usage
+    }
+
     pub async fn next(
         &mut self,
         stop: &AtomicBool,
@@ -302,6 +308,7 @@ impl PresentationConversation {
             .client
             .send(&self.request, stop, emit, PRESENTATION_BOUNDS, progress)
             .await?;
+        self.usage = Some(turn.usage);
         let Some(call) = turn.call.as_ref() else {
             return Ok(None);
         };

@@ -110,6 +110,7 @@ impl Owner {
                 output: metldr_conversation::Content::native(),
                 error: None,
                 corrections: Vec::new(),
+                ledger: None,
             };
             edit.admit(
                 scope,
@@ -129,21 +130,29 @@ impl Owner {
         let worker_run = run.clone();
         let tx = self.tx.clone();
         let worker = thread::spawn(move || {
+            let mut recorder = crate::ledger::Recorder::start();
             let result = (|| -> Result<()> {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()?;
                 runtime.block_on(async {
                     let mut output = crate::direct_output::DirectOutput::new(&worker_run, &tx);
-                    match protocol {
+                    let recorder = &mut recorder;
+                    recorder.begin_step();
+                    let mut emit = |event| {
+                        recorder.text();
+                        output.accept(event)
+                    };
+                    let usage = match protocol {
                         Protocol::Messages => {
                             profile
                                 .messages_client(&worker_stop)?
-                                .text(SYSTEM, &input, &worker_stop, |event| output.accept(event))
-                                .await
+                                .text(SYSTEM, &input, &worker_stop, &mut emit)
+                                .await?
                         }
                         Protocol::Responses => {
-                            crate::presentation::run(
+                            drop(emit);
+                            return crate::presentation::run(
                                 profile.responses_client(&worker_stop)?,
                                 SYSTEM,
                                 &input,
@@ -151,28 +160,32 @@ impl Owner {
                                 &tx,
                                 &worker_stop,
                                 &mut output,
+                                recorder,
                             )
-                            .await
+                            .await;
                         }
                         Protocol::GoogleInteractions => {
                             profile
                                 .google_client(&worker_stop)?
-                                .text(SYSTEM, &input, &worker_stop, |event| output.accept(event))
-                                .await
+                                .text(SYSTEM, &input, &worker_stop, &mut emit)
+                                .await?
                         }
                         Protocol::ChatCompletions => {
                             profile
                                 .chat_client(&worker_stop)?
-                                .text(SYSTEM, &input, &worker_stop, |event| output.accept(event))
-                                .await
+                                .text(SYSTEM, &input, &worker_stop, &mut emit)
+                                .await?
                         }
-                    }
+                    };
+                    recorder.end_step(Some(usage), false);
+                    Ok(())
                 })
             })()
             .map_err(|error| error.to_string());
             let _ = tx.send(Event::Settled {
                 run: worker_run,
                 result,
+                ledger: recorder.finish(),
             });
         });
         self.operations.insert(

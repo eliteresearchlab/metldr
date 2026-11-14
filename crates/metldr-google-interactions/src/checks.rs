@@ -41,15 +41,13 @@ fn replay(v: &[Value], size: usize) -> Result<(stream::Turn, String, Vec<TextEve
     let mut state = stream::State::default();
     let mut text = String::new();
     let mut events = Vec::new();
-    for chunk in wire.as_bytes().chunks(size) {
-        for &byte in chunk {
-            if let Some((event, data)) = sse.byte(byte)? {
-                for event in state.frame(&event, &data)? {
-                    if let TextEvent::Delta(delta) = &event {
-                        text.push_str(delta);
-                    }
-                    events.push(event);
+    for mut chunk in wire.as_bytes().chunks(size) {
+        while let Some((event, data)) = sse.next(&mut chunk)? {
+            for event in state.frame(&event, &data)? {
+                if let TextEvent::Delta(delta) = &event {
+                    text.push_str(delta);
                 }
+                events.push(event);
             }
         }
     }
@@ -241,9 +239,12 @@ async fn encodes_native_request_and_enforces_conversation_order() {
     assert_eq!(request["input"][0]["type"], "user_input");
     assert_eq!(
         request["tools"][0]["parameters"],
-        json!({"type":"object","properties":{},"additionalProperties":false})
+        metldr_browser_tools::definitions()[0].input_schema
     );
-    assert_eq!(request["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(
+        request["tools"].as_array().unwrap().len(),
+        metldr_browser_tools::definitions().len()
+    );
     assert_eq!(request["tools"][4]["name"], "select_option");
     assert_eq!(
         request["tools"][4]["parameters"],

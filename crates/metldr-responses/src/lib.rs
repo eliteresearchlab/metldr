@@ -14,7 +14,7 @@ pub use client::{
 };
 use metldr_browser_tools::decode_call;
 pub use metldr_browser_tools::{Invocation, Prompt};
-pub use metldr_conversation::TextEvent;
+pub use metldr_conversation::{TextEvent, Usage};
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 
@@ -25,6 +25,7 @@ pub struct Conversation {
     client: Client,
     request: Value,
     phase: Phase,
+    usage: Option<Usage>,
 }
 
 enum Phase {
@@ -43,6 +44,7 @@ impl Client {
             client: self,
             request,
             phase: Phase::Ready,
+            usage: None,
         })
     }
 }
@@ -68,6 +70,7 @@ impl Conversation {
                 Err("unexpected Responses presentation progress".into())
             })
             .await?;
+        self.usage = Some(turn.usage);
         let invocation = if let Some(call) = turn.call.as_ref() {
             Some(Invocation {
                 id: call.id.clone(),
@@ -80,6 +83,11 @@ impl Conversation {
             self.phase = Phase::Pending(turn);
         }
         Ok(invocation)
+    }
+
+    /// Usage from the most recent completed response.
+    pub fn usage(&self) -> Option<Usage> {
+        self.usage
     }
 
     pub fn submit_tool_result(&mut self, result: &Value) -> Result<()> {
