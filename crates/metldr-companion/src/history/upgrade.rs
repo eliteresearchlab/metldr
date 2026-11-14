@@ -24,7 +24,7 @@ pub(super) fn run(db: &Database) -> Result<()> {
     )?;
     match profile.format {
         FORMAT => return Ok(()),
-        10..=19 => (),
+        10..=20 => (),
         _ => return Err("unsupported history profile format".into()),
     }
     require_base_tables(&read)?;
@@ -83,7 +83,7 @@ pub(super) fn run(db: &Database) -> Result<()> {
         )?;
         match profile.format {
             FORMAT => return Ok(()),
-            10..=19 => (),
+            10..=20 => (),
             _ => return Err("unsupported history profile format".into()),
         }
         let format = profile.format;

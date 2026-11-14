@@ -319,6 +319,7 @@ impl State {
                 self.usage = Usage {
                     input: count("total_input_tokens"),
                     cached: count("total_cached_tokens"),
+                    written: None,
                     output: (answer.is_some() || thought.is_some())
                         .then(|| answer.unwrap_or(0).saturating_add(thought.unwrap_or(0))),
                     reasoning: thought,

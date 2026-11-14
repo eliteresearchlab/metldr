@@ -1,6 +1,6 @@
 use super::settings::{Family, Work};
 use super::*;
-use crate::model::{AgentKind, AgentSettingState, AgentSettingView};
+use crate::model::{AgentSettingState, AgentSettingView};
 use std::future::Future;
 use wasm_bindgen_futures::future_to_promise_typed;
 

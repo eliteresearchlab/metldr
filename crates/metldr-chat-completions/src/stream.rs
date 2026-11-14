@@ -336,6 +336,7 @@ fn parse_usage(value: &Value) -> Result<Usage> {
     Ok(Usage {
         input: count("prompt_tokens")?,
         cached: cached_input_tokens,
+        written: None,
         output: count("completion_tokens")?,
         reasoning: reasoning_tokens,
     })

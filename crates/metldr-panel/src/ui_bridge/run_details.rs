@@ -45,7 +45,10 @@ pub(super) async fn open(core: Rc<Core>, encoded: String) -> Result<UiRunDetails
         route: run_display::route(&run.route),
         status: run.status,
         run_id: run.id.as_str().into(),
-        ledger: run.ledger.as_ref().map(run_display::ledger),
+        ledger: run
+            .ledger
+            .as_ref()
+            .map(|ledger| run_display::ledger(ledger, &run.route)),
         corrections: corrections::receipts(&run.id, &run.corrections),
     })
 }

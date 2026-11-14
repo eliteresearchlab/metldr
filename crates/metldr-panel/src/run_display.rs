@@ -72,8 +72,36 @@ pub(crate) fn duration(ms: u32) -> String {
     }
 }
 
-/// One line of tokens and timings for run details; unknown counts are left out.
-pub(crate) fn ledger(ledger: &metldr_conversation::Ledger) -> String {
+/// USD in cents, like t3code: $0.04, and <$0.01 for a smaller nonzero cost.
+pub(crate) fn usd(value: f64) -> String {
+    if value > 0.0 && value < 0.005 {
+        "<$0.01".into()
+    } else {
+        format!("${value:.2}")
+    }
+}
+
+/// The cost of a run on an API route: priced, local, or unpriced.
+fn cost(route: &RunRoute, usage: metldr_conversation::Usage) -> Option<String> {
+    let (endpoint, model) = match route {
+        RunRoute::HttpsMessages { endpoint, model, .. }
+        | RunRoute::HttpsChatCompletions { endpoint, model, .. }
+        | RunRoute::HttpsResponses { endpoint, model, .. }
+        | RunRoute::HttpsGoogleInteractions { endpoint, model, .. }
+        | RunRoute::Text { endpoint, model, .. } => (endpoint, model),
+        _ => return None,
+    };
+    if endpoint.starts_with("http://") {
+        return Some("local".into());
+    }
+    Some(match metldr_conversation::price(model) {
+        Some(price) => usd(usage.cost(price)?),
+        None => "Unpriced".into(),
+    })
+}
+
+/// One line of tokens, timings and cost for run details; unknown counts are left out.
+pub(crate) fn ledger(ledger: &metldr_conversation::Ledger, route: &RunRoute) -> String {
     let total = ledger.total();
     let mut parts = Vec::with_capacity(5);
     if let Some(input) = total.input {
@@ -100,6 +128,7 @@ pub(crate) fn ledger(ledger: &metldr_conversation::Ledger) -> String {
         parts.push(format!("first token {}", duration(first)));
     }
     parts.push(duration(ledger.ms));
+    parts.extend(cost(route, total));
     parts.join(" · ")
 }
 
@@ -122,6 +151,7 @@ mod ledger_checks {
         let usage = |input, cached, output| Usage {
             input: Some(input),
             cached: Some(cached),
+            written: None,
             output: Some(output),
             reasoning: None,
         };
@@ -142,10 +172,20 @@ mod ledger_checks {
             ],
             ms: 4_200,
         };
-        assert_eq!(
-            super::ledger(&ledger),
-            "12.5K in, 6K cached (48.0%) · 1.2K out · 2 steps, 1 tool call · first token 850 ms · 4.2 s"
-        );
+        let route = |endpoint: &str, model: &str| crate::model::RunRoute::HttpsResponses {
+            endpoint: endpoint.into(),
+            model: model.into(),
+            revision: 1,
+            fingerprint: String::new(),
+        };
+        let line = "12.5K in, 6K cached (48.0%) · 1.2K out · 2 steps, 1 tool call · first token 850 ms · 4.2 s";
+        let gpt = route("https://api.openai.com/v1/responses", "gpt-5");
+        assert_eq!(super::ledger(&ledger, &gpt), format!("{line} · $0.02"));
+        let local = route("http://127.0.0.1:11434/v1/responses", "llama3");
+        assert_eq!(super::ledger(&ledger, &local), format!("{line} · local"));
+        let unknown = route("https://example.com/v1/responses", "house-model");
+        assert_eq!(super::ledger(&ledger, &unknown), format!("{line} · Unpriced"));
+        assert_eq!(super::usd(0.004), "<$0.01");
         assert_eq!(super::duration(192_000), "3 min 12 s");
         assert_eq!(super::duration(3_900_000), "1 h 05 min");
     }

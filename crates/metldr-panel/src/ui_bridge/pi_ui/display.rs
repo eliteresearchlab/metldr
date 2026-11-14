@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::{PiUiDialog, PiUiNotice, PiUiPending, PiUiStatus, PiUiView, PiUiWidget};
+use crate::model::{PiUiDialog, PiUiNotice, PiUiPending, PiUiWidget};
 
 #[wasm_bindgen]
 pub struct UiPiSnapshot {
