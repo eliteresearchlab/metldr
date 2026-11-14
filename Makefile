@@ -1,4 +1,4 @@
-.PHONY: rust check check-rust check-rune check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion
+.PHONY: rust check check-rust check-rune check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion dev-install
 
 # Every Cargo root in the repository, in the order the check-* targets use.
 RUST_CRATES := metldr-sse metldr-responses metldr-google-interactions metldr-messages \
@@ -101,3 +101,9 @@ check-companion:
 
 companion:
 	cargo build --locked --release --manifest-path crates/metldr-companion/Cargo.toml --bin metldr-companion
+
+# Builds the extension and the companion, then registers the companion with every installed
+# Chromium browser for the unpacked extension in dist. Load dist in chrome://extensions once.
+dev-install: companion
+	npm run build:rust && npm run build:chat && npm run build
+	"$${CARGO_TARGET_DIR:-target}/release/metldr-companion" install dist

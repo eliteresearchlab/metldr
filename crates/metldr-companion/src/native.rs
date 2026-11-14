@@ -1,4 +1,5 @@
 mod config;
+mod install;
 mod installation;
 pub(super) use config::Fixture;
 
@@ -24,6 +25,10 @@ use std::{
 };
 
 pub(super) fn run() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(result) = install::command(&args) {
+        return result;
+    }
     let config = Config::load()?;
     if let Mode::Bridge = config.mode {
         let bridge = config
