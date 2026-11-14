@@ -176,15 +176,7 @@ impl Store {
 pub(super) fn validate(state: &Store) -> Result<()> {
     for action in state.browser_actions.values() {
         let proposal = &action.proposal;
-        let initial = if matches!(
-            state.launches.get(&proposal.run),
-            Some(
-                crate::agent_model::Launch::Pi { .. }
-                    | crate::agent_model::Launch::Codex { .. }
-                    | crate::agent_model::Launch::OpenCode { .. }
-                    | crate::agent_model::Launch::Harness { .. }
-            )
-        ) {
+        let initial = if state.launches.get(&proposal.run).and_then(|l| l.native_workflow()).is_some() {
             Some(state.native_browser_target(&proposal.run)?)
         } else {
             None
