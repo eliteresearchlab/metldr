@@ -3,7 +3,7 @@ use crate::model::{CodexInputPrompt, RunId};
 use crate::ui_bridge::codex_input::{
     UiCodexAnswer, UiCodexFieldAnswer, UiCodexQuestionAnswer, rune_reply_key,
 };
-use ::rune::{El, TextEdit, TextStyle, col, oklch, text};
+use ::rune::{El, TextEdit, TextStyle, col, oklch};
 use std::collections::{HashMap, HashSet};
 use wasm_bindgen_futures::spawn_local;
 

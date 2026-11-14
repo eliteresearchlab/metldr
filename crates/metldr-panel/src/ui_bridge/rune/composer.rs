@@ -21,7 +21,7 @@
  */
 
 use super::{Menu, Mode, State};
-use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, oklch, row, text};
+use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, oklch, row};
 
 const CONTROL: f32 = 28.0;
 const BORDER: f32 = 1.0;
@@ -435,7 +435,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         )
 }
 
-pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
+pub(super) fn menu(state: &State) -> Option<El> {
     let p = palette(state);
     let typography = state.preferences.typography();
     match state.menu? {
@@ -749,7 +749,7 @@ mod tests {
                 .w_full()
                 .child(view(state, cx))
                 .on_key(|state: &mut State, key, tx| super::super::key(state, key, tx));
-            if let Some(menu) = menu(state, cx) {
+            if let Some(menu) = menu(state) {
                 tree = tree.child(menu);
             }
             tree

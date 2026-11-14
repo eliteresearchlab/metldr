@@ -1,6 +1,6 @@
 use super::*;
 use ::rune::{
-    App, AppHandle, AppSpec, Cx, El, ScrollSpec, TextEdit, TextStyle, Tx, col, oklch, row, text,
+    App, AppHandle, AppSpec, Cx, El, ScrollSpec, TextEdit, TextStyle, Tx, col, oklch, row,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -1709,7 +1709,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         );
     }
     let mut composer = col().w_full().max_w(720.0).child(composer::view(state, cx));
-    if let Some(menu) = composer::menu(state, cx) {
+    if let Some(menu) = composer::menu(state) {
         composer = composer.child(menu);
     }
     let error = state
