@@ -575,6 +575,7 @@ impl FlowClient {
         scope: metldr_history_pages::Scope,
         workflow: RunId,
         revision: u64,
+        source: &SourceId,
         text: UserText,
     ) -> Result<RunId> {
         let available = self
@@ -590,7 +591,7 @@ impl FlowClient {
                             && session.revision == revision
                             && session.ready
                             && session.profile == profile.fingerprint
-                            && Some(&session.source) == view.source()
+                            && view.source() == Some(source)
                     })
                 })
             });
@@ -599,7 +600,7 @@ impl FlowClient {
                 "The selected Pi session is unavailable.".into(),
             ));
         }
-        self.start(scope, json!({"op":"pi_follow_up","workflow":workflow,"revision":revision,"text":text.as_str()}))
+        self.start(scope, json!({"op":"pi_follow_up","workflow":workflow,"revision":revision,"source":source,"text":text.as_str()}))
             .await
     }
 
@@ -608,6 +609,7 @@ impl FlowClient {
         scope: metldr_history_pages::Scope,
         workflow: RunId,
         revision: u64,
+        source: &SourceId,
         text: UserText,
         mode: &str,
     ) -> Result<RunId> {
@@ -624,7 +626,7 @@ impl FlowClient {
                             && session.revision == revision
                             && session.ready
                             && session.profile == profile.fingerprint
-                            && Some(&session.source) == view.source()
+                            && view.source() == Some(source)
                     })
                 })
             });
@@ -633,7 +635,7 @@ impl FlowClient {
                 "The selected Codex session is unavailable.".into(),
             ));
         }
-        self.start(scope, json!({"op":"codex_follow_up","workflow":workflow,"revision":revision,"text":text.as_str(),"mode":mode})).await
+        self.start(scope, json!({"op":"codex_follow_up","workflow":workflow,"revision":revision,"source":source,"text":text.as_str(),"mode":mode})).await
     }
 
     /// A new turn for a harness on the generic path.
@@ -660,6 +662,7 @@ impl FlowClient {
         harness: &str,
         workflow: RunId,
         revision: u64,
+        source: &SourceId,
         text: UserText,
     ) -> Result<RunId> {
         let available = self.inner.protocol.borrow().latest.as_ref().is_some_and(|view| {
@@ -667,7 +670,7 @@ impl FlowClient {
                 session.workflow == workflow
                     && session.revision == revision
                     && session.ready
-                    && Some(&session.source) == view.source()
+                    && view.source() == Some(source)
             })
         });
         if !available {
@@ -675,7 +678,7 @@ impl FlowClient {
                 "The selected session is unavailable.".into(),
             ));
         }
-        self.start(scope, json!({"op":"harness_follow_up","harness":harness,"workflow":workflow,"revision":revision,"text":text.as_str()})).await
+        self.start(scope, json!({"op":"harness_follow_up","harness":harness,"workflow":workflow,"revision":revision,"source":source,"text":text.as_str()})).await
     }
 
     pub(crate) async fn opencode_follow_up(
@@ -683,6 +686,7 @@ impl FlowClient {
         scope: metldr_history_pages::Scope,
         workflow: RunId,
         revision: u64,
+        source: &SourceId,
         text: UserText,
     ) -> Result<RunId> {
         let available = self
@@ -698,7 +702,7 @@ impl FlowClient {
                             && session.revision == revision
                             && session.ready
                             && session.profile == profile.fingerprint
-                            && Some(&session.source) == view.source()
+                            && view.source() == Some(source)
                     })
                 })
             });
@@ -707,7 +711,7 @@ impl FlowClient {
                 "The selected OpenCode session is unavailable.".into(),
             ));
         }
-        self.start(scope, json!({"op":"opencode_follow_up","workflow":workflow,"revision":revision,"text":text.as_str()})).await
+        self.start(scope, json!({"op":"opencode_follow_up","workflow":workflow,"revision":revision,"source":source,"text":text.as_str()})).await
     }
 
     pub(crate) async fn native_permission(
