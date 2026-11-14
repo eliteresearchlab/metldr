@@ -168,15 +168,14 @@ impl Palette {
     }
 }
 
-/// A pressed button scales to this over 150 ms (Jakub Krehel `better-ui`); disabled controls,
+/// A pressed button scales to this over 150 ms; disabled controls,
 /// menu rows and list rows never scale, and Reduce Motion turns it off.
 pub(super) const PRESS_SCALE: f32 = 0.96;
 
-/// beautiful-ui `--ease-link`: links, spatial moves and the home reveal.
+/// Links, spatial moves and the home reveal.
 pub(super) const EASE_LINK: Easing = Easing::cubic(0.16, 1.0, 0.3, 1.0);
 
-/// The beautiful-ui home reveal (`IceCreamHarness` `HOME_REVEAL` and `HOME_REVEAL_TIMING`): each
-/// line rises 23 px out of a 17 px blur over 800 ms, staged by these delays in seconds. Only the
+/// The home reveal: each line rises 23 px out of a 17 px blur over 800 ms, staged by these delays in seconds. Only the
 /// welcome copy reveals; controls are usable from the first frame.
 pub(super) const REVEAL_GREETING: f32 = 0.17;
 pub(super) const REVEAL_QUESTION: f32 = 0.33;
@@ -193,7 +192,7 @@ pub(super) fn reveal(el: El, shown: bool, delay: f32) -> El {
         .blur_motion(anim())
 }
 
-/// beautiful-ui `pop-in` for a menu that opens above its trigger: it grows from the trigger's
+/// A menu that opens above its trigger grows from the trigger's
 /// corner, 0.95 to 1 with opacity, on a critically damped 160 ms spring; the exit is shorter.
 /// Under Reduce Motion Rune turns it into a short fade without the scale.
 pub(super) fn pop_in() -> Transition {

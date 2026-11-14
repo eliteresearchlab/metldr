@@ -3,7 +3,6 @@
 //! The newest items are kept first under a character cap, page text stays labelled as
 //! untrusted, and the result says which runs it covers and how many items it left out. A
 //! handoff is context only: the receiving harness is told not to repeat earlier actions.
-//! The two strategies and the newest-first budget follow t3code's context handoff service.
 
 /// One saved conversation item, oldest first in the input slice.
 pub struct Item<'a> {

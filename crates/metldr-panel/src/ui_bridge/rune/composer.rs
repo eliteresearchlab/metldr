@@ -202,7 +202,7 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
         .label(label)
 }
 
-/// One 30 px menu row as in beautiful-ui's model picker: name, muted tag, then the check.
+/// One 30 px menu row: name, muted tag, then the check.
 fn menu_row(
     typography: super::preferences::Typography,
     p: Palette,
