@@ -258,7 +258,7 @@ impl Owner {
 
 /// At most this many earlier runs are read for a handoff, newest first.
 const HANDOFF_RUNS: usize = 64;
-/// About 16k tokens, the default context handoff budget of t3code.
+/// About 16k tokens, the default context handoff budget.
 const HANDOFF_CAP: usize = 64_000;
 
 fn run_number(id: &str) -> Result<u64> {

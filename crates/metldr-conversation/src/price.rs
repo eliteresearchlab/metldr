@@ -1,5 +1,5 @@
-//! Built-in model prices in USD per million tokens, from the LiteLLM price list
-//! (BerriAI/litellm d81c55f, 14 November 2026), for the providers metldr connects to.
+//! Built-in model prices in USD per million tokens, as of 14 November 2026, for the providers
+//! metldr connects to.
 
 use crate::Usage;
 use std::sync::OnceLock;

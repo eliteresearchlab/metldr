@@ -36,7 +36,7 @@ pub(crate) fn route(route: &RunRoute) -> String {
     }
 }
 
-/// Compact count in the t3code usage format: 950, 1.25K, 12.5K, 125K, 1.25M.
+/// Compact count: 950, 1.25K, 12.5K, 125K, 1.25M.
 pub(crate) fn tokens(value: u64) -> String {
     let scaled = [(1e12, 'T'), (1e9, 'B'), (1e6, 'M'), (1e3, 'K')]
         .into_iter()
@@ -72,7 +72,7 @@ pub(crate) fn duration(ms: u32) -> String {
     }
 }
 
-/// USD in cents, like t3code: $0.04, and <$0.01 for a smaller nonzero cost.
+/// USD in cents: $0.04, and <$0.01 for a smaller nonzero cost.
 pub(crate) fn usd(value: f64) -> String {
     if value > 0.0 && value < 0.005 {
         "<$0.01".into()
@@ -137,7 +137,7 @@ mod ledger_checks {
     use metldr_conversation::{Ledger, Step, Usage};
 
     #[test]
-    fn formats_counts_and_ledger_like_t3code() {
+    fn formats_counts_and_ledger() {
         let cases = [
             (950, "950"),
             (1_250, "1.25K"),
