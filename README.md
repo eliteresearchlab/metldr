@@ -95,8 +95,8 @@ The app is free. Your model provider may charge.
 
 The browser agent is in development. Its current build needs Linux and [companion setup](crates/metldr-companion/README.md).
 
-Browser integration work draws on [browse](https://github.com/anomalyco/browse), and the agent harness registry and context handoff draw on [t3code](https://github.com/pingdotgg/t3code). See [third party notices](THIRD_PARTY_NOTICES.md).
+metldr thanks [browse](https://github.com/anomalyco/browse), [Rune](https://github.com/anomalyco/rune), [t3code](https://github.com/pingdotgg/t3code) and [Chart.js](https://www.chartjs.org).
 
-metldr is free for noncommercial use under the [PolyForm Noncommercial License 1.0.0](LICENSE). Keep its `Required Notice` line when you share metldr or work based on it. metldr is made by [Elite Research Lab LLC](https://elitelab.ai). Commercial use needs its written permission (info@elitelab.ai). Versions published before 14 November 2026 stay under the MIT license.
+Free for noncommercial use under the [PolyForm Noncommercial License](LICENSE). Commercial use needs written permission from [Elite Research Lab LLC](https://elitelab.ai).
 
 [Build and setup](docs/development.md) | [Privacy](PRIVACY.md)
