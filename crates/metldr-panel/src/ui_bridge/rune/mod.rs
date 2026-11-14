@@ -1480,20 +1480,28 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 let body = typography
                     .text(content)
                     .wrap()
-                    .font(typography.font(14.0, 400.0).lh(21.0 * typography.scale))
+                    .font(typography.font(13.0, 400.0).lh(13.0 * 1.625 * typography.scale))
                     .color(ink)
                     .selectable(true);
                 let message = if user {
-                    row().w_full().justify_end().child(
-                        col()
-                            .max_w(620.0)
-                            .padding(12.0)
-                            .radius(12.0)
-                            .fill(palette.field)
-                            .child(body),
-                    )
+                    // Inset from the left, wider on a wide panel; a new message rises 8 px into place.
+                    let wide = state.thread_rect.get()[2] >= 640.0;
+                    row()
+                        .w_full()
+                        .justify_end()
+                        .pl(if wide { 96.0 } else { 40.0 })
+                        .child(
+                            col()
+                                .px(14.0)
+                                .py(8.0)
+                                .radius(12.0)
+                                .fill(palette.field)
+                                .border(1.0, palette.line)
+                                .child(body),
+                        )
+                        .transition(theme::rise())
                 } else {
-                    col().max_w(620.0).child(body)
+                    col().w_full().child(body)
                 };
                 let message = message.key(id);
                 thread = thread.child(if user {

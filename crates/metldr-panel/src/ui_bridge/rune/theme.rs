@@ -1,7 +1,6 @@
 //! The one source of colour for every Rune surface (docs: design/system.md).
 //!
-//! Values follow beautiful-ui's `app/globals.css`; components read roles from here and never
-//! write colour literals of their own.
+//! Components read roles from here and never write colour literals of their own.
 
 use ::rune::{
     Anim, AnimExt, Color, Curve, El, Easing, Spring, SpringPair, Transition, Vec2, oklch,
@@ -201,4 +200,12 @@ pub(super) fn pop_in() -> Transition {
     let enter = Spring::from_motion(0.16, 0.0);
     Transition::scale_anchor(0.95, Vec2 { x: 0.0, y: 1.0 })
         .springs(SpringPair::with_exit_ratio(enter, 0.75))
+}
+
+/// A new message fades in rising 8 px, on a critically damped 300 ms spring; the exit is shorter.
+/// Under Reduce Motion Rune turns it into a short fade without the rise.
+pub(super) fn rise() -> Transition {
+    Transition::offset(0.0, 8.0)
+        .combined(Transition::opacity())
+        .springs(SpringPair::with_exit_ratio(Spring::from_motion(0.3, 0.0), 0.75))
 }
