@@ -1579,19 +1579,11 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             .w_full()
             .h_full()
             .min_h(0.0)
-            .fill(page)
+            .fill(palette.canvas)
             .color(ink)
-            .child(
-                state
-                    .conversations
-                    .view(state)
-                    .padding(16.0)
-                    .grow(1.0)
-                    .min_h(0.0)
-                    .scroll(ScrollSpec {
-                        stick_bottom: false,
-                    }),
-            );
+            .padding(10.0)
+            .justify_center()
+            .child(state.conversations.view(state));
     }
     if state.settings_open {
         return col()

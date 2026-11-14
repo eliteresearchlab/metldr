@@ -323,6 +323,7 @@ impl Conversations {
         None
     }
 
+    /// The Saved chats sheet: a title row with Close, one row per chat, then Recent and Older chats.
     pub(super) fn view(&self, state: &State) -> El {
         let typography = state.preferences.typography();
         let p = state.preferences.palette();
@@ -331,32 +332,34 @@ impl Conversations {
         };
         let retry = matches!(*core.owner.borrow(), Owner::Navigating(_));
         let available = !self.busy && !state.running() && !retry;
-        let mut out = chat_list()
-            .child(typography.text("Saved chats").role("heading"))
-            .child(button(
+        let header = row()
+            .w_full()
+            .items_center()
+            .gap(16.0)
+            .child(
+                typography
+                    .text("Saved chats")
+                    .font(typography.font(16.0, 600.0))
+                    .role("heading")
+                    .grow(1.0),
+            )
+            .child(sheet_button(
                 p,
                 typography,
                 "Close",
                 "saved-chats-close".into(),
                 true,
                 |state, tx| state.conversations.close(tx),
-            ))
-            .child(button(
-                p,
-                typography,
-                "New chat",
-                "saved-chats-new".into(),
-                available,
-                |state, _| action(state, Action::New),
             ));
+        let mut list = chat_list();
         if self.busy {
-            out = out.child(typography.text("Loading chats").role("status"));
+            list = list.child(typography.text("Loading chats").role("status"));
         }
         if let Some(error) = &self.error {
-            out = out.child(typography.text(error).wrap().role("alert"));
+            list = list.child(typography.text(error).wrap().role("alert"));
         }
         if retry {
-            out = out.child(button(
+            list = list.child(sheet_button(
                 p,
                 typography,
                 "Try again",
@@ -367,7 +370,7 @@ impl Conversations {
         }
         if let Some(page) = &self.page {
             if page.conversations.is_empty() {
-                out = out.child(typography.text("No saved chats"));
+                list = list.child(typography.text("No saved chats"));
             }
             for item in &page.conversations {
                 let id = item.id.clone();
@@ -376,7 +379,7 @@ impl Conversations {
                 } else {
                     &item.title.text
                 };
-                out = out.child(button(
+                list = list.child(chat_row(
                     p,
                     typography,
                     title,
@@ -395,22 +398,42 @@ impl Conversations {
                 ));
             }
         }
-        out.child(button(
-            p,
-            typography,
-            "Recent chats",
-            "saved-chats-recent".into(),
-            !self.busy && !retry,
-            |state, _| action(state, Action::Recent),
-        ))
-        .child(button(
-            p,
-            typography,
-            "Older chats",
-            "saved-chats-older".into(),
-            !self.busy && !retry && self.page.as_ref().is_some_and(|p| p.older_cursor.is_some()),
-            |state, _| action(state, Action::OlderChats),
-        ))
+        let footer = row()
+            .w_full()
+            .flex_wrap()
+            .gap(8.0)
+            .child(sheet_button(
+                p,
+                typography,
+                "Recent chats",
+                "saved-chats-recent".into(),
+                !self.busy && !retry,
+                |state, _| action(state, Action::Recent),
+            ))
+            .child(sheet_button(
+                p,
+                typography,
+                "Older chats",
+                "saved-chats-older".into(),
+                !self.busy && !retry && self.page.as_ref().is_some_and(|p| p.older_cursor.is_some()),
+                |state, _| action(state, Action::OlderChats),
+            ));
+        col()
+            .key("saved-chats-card")
+            .w_full()
+            .shrink()
+            .min_h(0.0)
+            .gap(16.0)
+            .padding(16.0)
+            .radius(14.0)
+            .border(1.0, p.line)
+            .fill(p.page)
+            .transition(super::theme::sheet())
+            .child(header)
+            .child(list.shrink().min_h(0.0).scroll(ScrollSpec {
+                stick_bottom: false,
+            }))
+            .child(footer)
     }
 
     /// Older and Latest messages, and a paging error, for the chat toolbar row.
@@ -462,7 +485,7 @@ fn icon_button(icon: &'static Icon, glyph: f32, size: f32, radius: f32, p: &supe
 }
 
 fn chat_list() -> El {
-    col().w_full().gap(8.0).instant_changes()
+    col().w_full().gap(1.0).padding(6.0).instant_changes()
 }
 
 fn activate(key: &::rune::KeyEvent, tx: &mut Tx, action: impl FnOnce(&mut Tx)) -> bool {
@@ -622,20 +645,67 @@ pub(super) fn button(
     enabled: bool,
     action: impl Fn(&mut State, &mut Tx) + 'static,
 ) -> El {
+    let el = row().key(key).min_h(32.0).px(8.0).items_center().child(
+        typography
+            .text(label)
+            .font(typography.font(12.0, 400.0))
+            .color(p.ink_2),
+    );
+    pressable(el, p, label, enabled, true, action)
+}
+
+/// A Close or paging control on the Saved chats sheet: 44 points tall with body text.
+fn sheet_button(
+    p: &super::preferences::Palette,
+    typography: super::preferences::Typography,
+    label: &str,
+    key: String,
+    enabled: bool,
+    action: impl Fn(&mut State, &mut Tx) + 'static,
+) -> El {
     let el = row()
         .key(key)
-        .min_h(32.0)
-        .px(8.0)
+        .min_h(44.0)
+        .px(12.0)
         .items_center()
+        .child(typography.text(label).color(p.ink));
+    pressable(el, p, label, enabled, true, action)
+}
+
+/// One saved chat in the Saved chats list: a full-width row of wrapped title text. List rows never scale.
+fn chat_row(
+    p: &super::preferences::Palette,
+    typography: super::preferences::Typography,
+    label: &str,
+    key: String,
+    enabled: bool,
+    action: impl Fn(&mut State, &mut Tx) + 'static,
+) -> El {
+    let el = row()
+        .key(key)
+        .w_full()
+        .min_h(44.0)
+        .px(12.0)
+        .py(8.0)
+        .items_center()
+        .child(typography.text(label).color(p.ink).wrap().grow(1.0));
+    pressable(el, p, label, enabled, false, action)
+}
+
+/// The outlined field surface, button semantics and Enter or press handling shared by every
+/// control on these screens. `scale` makes an enabled control shrink while pressed.
+fn pressable(
+    el: El,
+    p: &super::preferences::Palette,
+    label: &str,
+    enabled: bool,
+    scale: bool,
+    action: impl Fn(&mut State, &mut Tx) + 'static,
+) -> El {
+    let el = el
         .radius(8.0)
         .border(1.0, p.line)
         .fill(p.field)
-        .child(
-            typography
-                .text(label)
-                .font(typography.font(12.0, 400.0))
-                .color(p.ink_2),
-        )
         .role("button")
         .label(label)
         .focusable(true)
@@ -645,9 +715,13 @@ pub(super) fn button(
     }
     let action = Rc::new(action);
     let press = Rc::clone(&action);
+    let el = if scale {
+        el.press_scale(super::theme::PRESS_SCALE)
+    } else {
+        el
+    };
     el.hover(p.hover)
         .press(p.hover_2)
-        .press_scale(super::theme::PRESS_SCALE)
         .on_press_tx(move |state: &mut State, tx| {
             state.sound(crate::interaction_audio::Cue::Page);
             press(state, tx)
