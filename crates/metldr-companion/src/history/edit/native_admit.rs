@@ -101,6 +101,7 @@ impl Edit<'_> {
                 selection,
                 ..
             } if activity.is_empty() && selection.is_none() => (),
+            Launch::Harness { activity, .. } if activity.is_empty() => (),
             _ => return Err("new native launch already has activity or selection".into()),
         }
         let execution = super::Execution {

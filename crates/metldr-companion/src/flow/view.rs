@@ -78,6 +78,14 @@ impl View<'_> {
                     .map(crate::agent_model::digest)
                     .transpose()?,
             ),
+            (
+                Kind::Claude,
+                self.agent_runtime
+                    .profiles
+                    .get("claude")
+                    .map(crate::agent_model::digest)
+                    .transpose()?,
+            ),
         ]
         .into_iter()
         .filter_map(|(kind, fingerprint)| fingerprint.map(|value| (kind, value)))

@@ -94,10 +94,12 @@ impl Reader<'_> {
                 .open_table(definition)?
                 .get(id)?
                 .map(|v| v.value().to_vec()),
-            Self::Committed(tx) => tx
-                .open_table(definition)?
-                .get(id)?
-                .map(|v| v.value().to_vec()),
+            // A table first written by a newer harness may not exist in an older history yet.
+            Self::Committed(tx) => match tx.open_table(definition) {
+                Ok(table) => table.get(id)?.map(|v| v.value().to_vec()),
+                Err(redb::TableError::TableDoesNotExist(_)) => None,
+                Err(error) => return Err(error.into()),
+            },
         })
     }
 

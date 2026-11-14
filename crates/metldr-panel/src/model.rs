@@ -1086,6 +1086,7 @@ impl RunRoute {
             Self::Pi { .. } => Some(metldr_harness::HarnessId::Pi),
             Self::Codex { .. } => Some(metldr_harness::HarnessId::Codex),
             Self::OpenCode { .. } => Some(metldr_harness::HarnessId::OpenCode),
+            Self::Harness { harness, .. } => metldr_harness::HarnessId::from_key(harness),
             _ => None,
         }
     }
@@ -1901,6 +1902,7 @@ impl PageView {
                             (&permission.agent, &run.route),
                             (NativePermissionAgent::Codex, RunRoute::Codex { .. })
                                 | (NativePermissionAgent::Opencode, RunRoute::OpenCode { .. })
+                                | (NativePermissionAgent::Claude, RunRoute::Harness { .. })
                         )
                 })
                 || !valid_label(&permission.tool, 128)
@@ -3481,3 +3483,4 @@ mod tests {
         assert!(PageView::decode(&serde_json::to_vec(&view).unwrap()).is_err());
     }
 }
+

@@ -253,7 +253,10 @@ pub(super) fn validate(state: &Store) -> Result<()> {
                 return Err("invalid Pi task record".into());
             }
         } else if run.kind == "agent"
-            && !matches!(launch, Launch::Codex { .. } | Launch::OpenCode { .. })
+            && !matches!(
+                launch,
+                Launch::Codex { .. } | Launch::OpenCode { .. } | Launch::Harness { .. }
+            )
         {
             return Err("agent task has no native launch".into());
         }

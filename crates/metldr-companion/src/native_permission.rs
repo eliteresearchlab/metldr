@@ -283,6 +283,7 @@ impl Owner {
             Some(crate::agent_model::Launch::OpenCode { .. }) => {
                 crate::agent_settings::Kind::Opencode
             }
+            Some(crate::agent_model::Launch::Harness { .. }) => crate::agent_settings::Kind::Claude,
             _ => {
                 let _ = ack.try_send(None);
                 return Ok(());

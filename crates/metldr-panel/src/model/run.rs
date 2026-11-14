@@ -122,7 +122,10 @@ impl WireRun {
             || (!self.activity.is_empty()
                 && !matches!(
                     &self.route,
-                    RunRoute::Pi { .. } | RunRoute::Codex { .. } | RunRoute::OpenCode { .. }
+                    RunRoute::Pi { .. }
+                        | RunRoute::Codex { .. }
+                        | RunRoute::OpenCode { .. }
+                        | RunRoute::Harness { .. }
                 ))
             || self.conversation.iter().any(|entry| matches!(entry,
                 ProjectedEntry::Artifact { id, .. } if !valid_id(id.as_str())
@@ -157,7 +160,10 @@ impl WireRun {
             || (matches!(self.kind, RunKind::Agent)
                 != matches!(
                     &self.route,
-                    RunRoute::Pi { .. } | RunRoute::Codex { .. } | RunRoute::OpenCode { .. }
+                    RunRoute::Pi { .. }
+                        | RunRoute::Codex { .. }
+                        | RunRoute::OpenCode { .. }
+                        | RunRoute::Harness { .. }
                 ))
             || matches!(&self.route, RunRoute::Pi { workflow, provider, model }
                 if !valid_id(workflow.as_str()) || !valid_label(provider, 128) || !valid_label(model, 128))
@@ -166,6 +172,8 @@ impl WireRun {
                     || provider.is_some() != model.is_some()
                     || provider.as_ref().is_some_and(|value| !valid_label(value, 128))
                     || model.as_ref().is_some_and(|value| !valid_label(value, 128)))
+            || matches!(&self.route, RunRoute::Harness { harness, workflow }
+                if harness != "claude" || !valid_id(workflow.as_str()))
             || matches!(&self.route, RunRoute::OpenCode { workflow, model, mode }
                 if !valid_id(workflow.as_str())
                     || model.is_some() != mode.is_some()

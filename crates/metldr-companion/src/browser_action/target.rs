@@ -88,6 +88,14 @@ impl Store {
                     .ok_or("missing OpenCode workflow")?
                     .source,
             ),
+            Some(crate::agent_model::Launch::Harness { workflow, .. }) => (
+                workflow,
+                &self
+                    .harness_workflows
+                    .get(workflow)
+                    .ok_or("missing harness workflow")?
+                    .source,
+            ),
             _ => return Err("browser target requires a native agent run".into()),
         };
         let mut target = Target::from(&source.page);
@@ -95,7 +103,7 @@ impl Store {
             if prior.id == run {
                 return Ok(target);
             }
-            if matches!(self.launches.get(&prior.id), Some(crate::agent_model::Launch::Pi { workflow: other, .. } | crate::agent_model::Launch::Codex { workflow: other, .. } | crate::agent_model::Launch::OpenCode { workflow: other, .. }) if other == workflow)
+            if matches!(self.launches.get(&prior.id), Some(crate::agent_model::Launch::Pi { workflow: other, .. } | crate::agent_model::Launch::Codex { workflow: other, .. } | crate::agent_model::Launch::OpenCode { workflow: other, .. } | crate::agent_model::Launch::Harness { workflow: other, .. }) if other == workflow)
                 && let Some((binding, url)) =
                     self.navigation_destination(&prior.id, Some(&target))?
             {
@@ -174,6 +182,7 @@ pub(super) fn validate(state: &Store) -> Result<()> {
                 crate::agent_model::Launch::Pi { .. }
                     | crate::agent_model::Launch::Codex { .. }
                     | crate::agent_model::Launch::OpenCode { .. }
+                    | crate::agent_model::Launch::Harness { .. }
             )
         ) {
             Some(state.native_browser_target(&proposal.run)?)

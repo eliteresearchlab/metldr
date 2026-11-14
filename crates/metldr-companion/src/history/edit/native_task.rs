@@ -19,7 +19,8 @@ pub(super) fn workflow_id(launch: &Launch) -> Result<&str> {
     match launch {
         Launch::Pi { workflow, .. }
         | Launch::Codex { workflow, .. }
-        | Launch::OpenCode { workflow, .. } => Ok(workflow),
+        | Launch::OpenCode { workflow, .. }
+        | Launch::Harness { workflow, .. } => Ok(workflow),
         _ => Err("task has no native workflow".into()),
     }
 }

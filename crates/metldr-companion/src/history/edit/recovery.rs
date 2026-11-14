@@ -62,6 +62,7 @@ impl Edit<'_> {
                 (PI, Kind::Pi),
                 (CODEX, Kind::Codex),
                 (OPENCODE, Kind::Opencode),
+                (HARNESS, Kind::Claude),
             ] {
                 let mut cursor: Option<String> = None;
                 loop {

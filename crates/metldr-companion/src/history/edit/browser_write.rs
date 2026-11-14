@@ -185,7 +185,7 @@ impl Edit<'_> {
             storage(|| record(self.write, LAUNCHES, id)?.ok_or("browser launch is absent".into()))?;
         if !matches!(
             launch.value,
-            Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
+            Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. } | Launch::Harness { .. }
         ) && self
             .saved_conversation(execution.conversation())?
             .source
@@ -262,7 +262,7 @@ impl Edit<'_> {
                         .ok_or("navigation launch is absent")?;
                     if matches!(
                         launch.value,
-                        Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
+                        Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. } | Launch::Harness { .. }
                     ) {
                         let saved: Record<NativeTarget> =
                             record(self.write, NATIVE_TARGETS, &next.proposal.run)?

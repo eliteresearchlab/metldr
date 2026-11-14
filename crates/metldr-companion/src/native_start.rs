@@ -101,6 +101,9 @@ impl Owner {
             (NativeWorkflow::Pi(value), Kind::Pi) => &value.fingerprint,
             (NativeWorkflow::Codex(value), Kind::Codex) => &value.fingerprint,
             (NativeWorkflow::OpenCode(value), Kind::Opencode) => &value.fingerprint,
+            (NativeWorkflow::Harness(value), Kind::Claude) if value.harness == "claude" => {
+                &value.fingerprint
+            }
             _ => return Err("request identity already names a different task kind".into()),
         };
         if matches!(input.origin,Origin::Source(source) if source != workflow.source().id) {
@@ -122,6 +125,7 @@ impl Owner {
             (NativeProfile::Pi(profile), Kind::Pi) => digest(profile)?,
             (NativeProfile::Codex(profile), Kind::Codex) => digest(profile)?,
             (NativeProfile::Opencode(profile), Kind::Opencode) => digest(profile)?,
+            (NativeProfile::Harness("claude", profile), Kind::Claude) => digest(profile)?,
             _ => return Err("native command and profile differ".into()),
         };
         let (source, prior) = self.record_history.edit(|edit| {

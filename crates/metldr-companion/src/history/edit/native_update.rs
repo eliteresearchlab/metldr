@@ -200,6 +200,20 @@ fn validate_launch(before: &Launch, after: &Launch) -> Result<()> {
             }
             prefix(a, b)
         }
+        (
+            Launch::Harness {
+                activity: a,
+                harness: ha,
+                workflow: wa,
+                ..
+            },
+            Launch::Harness {
+                activity: b,
+                harness: hb,
+                workflow: wb,
+                ..
+            },
+        ) if ha == hb && wa == wb => prefix(a, b),
         _ => Err("native launch kind changed".into()),
     }
 }

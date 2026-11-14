@@ -331,6 +331,7 @@ impl Store {
                 crate::agent_model::Launch::Pi { .. }
                     | crate::agent_model::Launch::Codex { .. }
                     | crate::agent_model::Launch::OpenCode { .. }
+                    | crate::agent_model::Launch::Harness { .. }
             )
         ) {
             self.native_browser_target(&proposal.run)?

@@ -13,6 +13,7 @@ fn matches_kind(launch: &Launch, kind: Kind) -> bool {
         (Launch::Pi { .. }, Kind::Pi)
             | (Launch::Codex { .. }, Kind::Codex)
             | (Launch::OpenCode { .. }, Kind::Opencode)
+            | (Launch::Harness { .. }, Kind::Claude)
     )
 }
 
