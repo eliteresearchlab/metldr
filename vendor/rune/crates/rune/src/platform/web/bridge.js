@@ -287,9 +287,11 @@ export function syncA11y(h, json, revision) {
         }
         const [x, y, w, bh] = item.r;
         const fs = item.s || 14;
-        el.style.cssText = group
+        const css = group
             ? 'position:static;margin:0;padding:0;border:0;pointer-events:none;'
             : `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${bh}px;margin:0;padding:0;border:0;background:transparent;color:transparent;font:${fs}px/1.25 sans-serif;overflow:hidden;white-space:pre-wrap;pointer-events:none;`;
+        // Writing an unchanged style still invalidates it; most nodes keep their geometry between syncs.
+        if (el._css !== css) { el._css = css; el.style.cssText = css; }
         if (group) {
             el.setAttribute('role', item.k);
             setOptionalAttribute(el, 'aria-label', item.t);
