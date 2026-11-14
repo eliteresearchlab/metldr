@@ -92,18 +92,18 @@ impl Engine {
         match self {
             Self::Pi => crate::model::ConversationAction::PiFollowUp {
                 workflow: workflow.into(),
-                revision,
+                revision, source: None,
                 text: "second prompt".into(),
             },
             Self::Codex => crate::model::ConversationAction::CodexFollowUp {
                 workflow: workflow.into(),
-                revision,
+                revision, source: None,
                 text: "second prompt".into(),
                 mode: crate::codex_input::TurnMode::Configured,
             },
             Self::OpenCode => crate::model::ConversationAction::OpenCodeFollowUp {
                 workflow: workflow.into(),
-                revision,
+                revision, source: None,
                 text: "second prompt".into(),
             },
         }
@@ -438,6 +438,36 @@ fn actual_owner_native_starts_are_record_durable_and_snapshot_compatible() -> cr
             },
         })?;
         assert_ne!(owner.state.view.source.as_ref().unwrap().id, source);
+        // A follow-up after a new capture moves the same session to the new page (B1.12.4b).
+        let moved_to = owner.state.view.source.clone().unwrap();
+        let mut moved = engine.followup(&workflow, 5);
+        match &mut moved {
+            crate::model::ConversationAction::PiFollowUp { source, .. }
+            | crate::model::ConversationAction::CodexFollowUp { source, .. }
+            | crate::model::ConversationAction::OpenCodeFollowUp { source, .. } => {
+                *source = Some(moved_to.id.clone())
+            }
+            _ => unreachable!(),
+        }
+        owner.request(Request {
+            v: crate::WIRE_VERSION,
+            request: "moved-follow-up".into(),
+            command: scoped(&owner, moved),
+        })?;
+        let moved_run = owner.state.view.runs.last().unwrap().id.clone();
+        let moved_task = task(&mut owner, &moved_run)?;
+        assert_eq!(moved_task.run.source, moved_to.id);
+        assert_eq!(moved_task.workflow.source().id, moved_to.id);
+        let history = &mut owner.record_history;
+        let selected = history.selection()?;
+        assert_eq!(
+            history.edit(|edit| edit
+                .current_execution(&selected, &moved_run)
+                .and_then(|execution| edit.native_initial_target(&execution, &moved_run)))?,
+            crate::browser_action::Target::from(&moved_to.page)
+        );
+        stop(&mut owner);
+        seed_bound_and_terminal(&mut owner, &moved_run, &directory.0)?;
 
         owner = reopen(owner)?;
         let saved = saved_start(&owner.record_history, &request)?;

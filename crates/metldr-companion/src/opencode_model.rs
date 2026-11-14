@@ -139,7 +139,7 @@ pub(super) fn validate(state: &Store) -> Result<()> {
                 .get(workflow)
                 .ok_or("missing OpenCode workflow")?;
             if run.kind != "agent"
-                || run.source != w.source.id
+                || (run.id == w.last_run && run.source != w.source.id)
                 || (run.status == crate::model::Status::Complete && selection.is_none())
             {
                 return Err("invalid OpenCode task record".into());

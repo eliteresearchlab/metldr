@@ -17,9 +17,14 @@ impl Edit<'_> {
                 let run = self
                     .saved_run(&saved.run)?
                     .ok_or("saved native start has no run")?;
-                let workflow = self.load_native_workflow(&scope.conversation, name, &launch)?;
+                let mut workflow = self.load_native_workflow(&scope.conversation, name, &launch)?;
+                // The session may have moved with its chat since; a replay names the page it
+                // was sent from.
                 if run.value.source != workflow.value.source().id {
-                    return Err("saved native start source differs".into());
+                    let source = self
+                        .source_in(&scope.conversation, &run.value.source)?
+                        .ok_or("saved native start source differs")?;
+                    workflow.value.set_source(source);
                 }
                 Ok(Some(workflow.value))
             })

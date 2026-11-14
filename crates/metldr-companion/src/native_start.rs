@@ -28,6 +28,8 @@ struct Input<'a> {
     kind: Kind,
     origin: Origin<'a>,
     text: &'a str,
+    /// The chat's current page when a follow-up moves its session there.
+    moved: Option<&'a str>,
 }
 
 impl<'a> Input<'a> {
@@ -50,6 +52,7 @@ impl<'a> Input<'a> {
                 workflow,
                 revision,
                 text,
+                ..
             } => (
                 crate::harness_model::adapter(harness)?.kind,
                 Origin::Workflow(workflow, *revision),
@@ -59,6 +62,7 @@ impl<'a> Input<'a> {
                 workflow,
                 revision,
                 text,
+                ..
             } => (Kind::Pi, Origin::Workflow(workflow, *revision), text),
             ConversationAction::CodexFollowUp {
                 workflow,
@@ -70,13 +74,21 @@ impl<'a> Input<'a> {
                 workflow,
                 revision,
                 text,
+                ..
             } => (Kind::Opencode, Origin::Workflow(workflow, *revision), text),
             _ => return Err("invalid native command".into()),
         };
         if text.trim().is_empty() || text.len() > 1024 {
             return Err("invalid native prompt".into());
         }
-        Ok(Self { kind, origin, text })
+        let moved = match command {
+            ConversationAction::PiFollowUp { source, .. }
+            | ConversationAction::CodexFollowUp { source, .. }
+            | ConversationAction::OpenCodeFollowUp { source, .. }
+            | ConversationAction::HarnessFollowUp { source, .. } => source.as_deref(),
+            _ => None,
+        };
+        Ok(Self { kind, origin, text, moved })
     }
     fn digest(
         &self,
@@ -157,7 +169,15 @@ impl Owner {
                 )),
                 Origin::Workflow(workflow, _) => {
                     let value = edit.native_workflow(scope, workflow)?;
-                    Ok((value.source().clone(), Some(value)))
+                    // A session follows its chat to the page the user captured now.
+                    let source = match input.moved {
+                        Some(id) if id != value.source().id => edit
+                            .selected_source(scope)?
+                            .filter(|saved| saved.id == id)
+                            .ok_or("source is not the current saved native source")?,
+                        _ => value.source().clone(),
+                    };
+                    Ok((source, Some(value)))
                 }
             }
         })?;
@@ -175,6 +195,8 @@ impl Owner {
                     unreachable!()
                 };
                 validate_followup(&value, &profile, revision, &fingerprint)?;
+                let mut value = value;
+                value.set_source(source.clone());
                 value
             }
             None => new_workflow(profile, source, fingerprint),

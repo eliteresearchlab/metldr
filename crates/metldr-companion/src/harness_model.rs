@@ -190,7 +190,7 @@ pub(crate) fn validate(state: &Store) -> Result<()> {
             .harness_workflows
             .get(workflow)
             .ok_or("missing harness workflow")?;
-        if run.kind != "agent" || run.source != w.source.id || &w.harness != harness {
+        if run.kind != "agent" || (run.id == w.last_run && run.source != w.source.id) || &w.harness != harness {
             return Err("invalid harness task record".into());
         }
     }

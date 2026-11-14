@@ -64,8 +64,10 @@ fn fingerprint(workflow: &NativeWorkflow) -> (Kind, &str) {
     }
 }
 
-fn bucket(conversation: &str, source: &str, kind: Kind, fingerprint: &str) -> Result<String> {
-    crate::agent_model::digest(&(conversation, source, kind, fingerprint))
+/// One chat keeps its agent sessions on every page it visits (B1.12.4b), so the page is not
+/// part of the key.
+fn bucket(conversation: &str, kind: Kind, fingerprint: &str) -> Result<String> {
+    crate::agent_model::digest(&(conversation, kind, fingerprint))
 }
 
 fn number(profile: &Profile, id: &str) -> Result<u64> {
@@ -266,14 +268,13 @@ impl Reader<'_> {
             let Some(fingerprint) = profiles.get(&kind) else {
                 continue;
             };
-            let key = bucket(&scope.conversation, &source.id, kind, fingerprint)?;
+            let key = bucket(&scope.conversation, kind, fingerprint)?;
             let mut selected = Vec::new();
             for (head, id) in self.rows(&key)? {
                 let entry = self.entry(profile, kind, &id)?;
                 if entry.conversation != scope.conversation
                     || entry.kind != kind
                     || entry.head != head
-                    || entry.choice.source != source.id
                     || &entry.choice.profile != fingerprint
                 {
                     return Err("native choice index differs from saved workflow".into());
@@ -324,7 +325,7 @@ pub(super) fn update_index(
     workflow: &NativeWorkflow,
 ) -> Result<()> {
     let (kind, fingerprint) = fingerprint(workflow);
-    let new_bucket = bucket(conversation, &workflow.source().id, kind, fingerprint)?;
+    let new_bucket = bucket(conversation, kind, fingerprint)?;
     let new_head = number(profile, workflow.last_run())?;
     let reader = Reader::Staged(write);
     let old = reader
@@ -337,7 +338,6 @@ pub(super) fn update_index(
         if old.conversation != conversation
             || old_kind != kind
             || old_fingerprint != fingerprint
-            || old.value.source().id != workflow.source().id
         {
             return Err("native choice update changed ownership".into());
         }
@@ -424,12 +424,7 @@ fn visit_index(
             }
             for id in &ids {
                 let entry = reader.entry(profile, kind, id)?;
-                let key = bucket(
-                    &entry.conversation,
-                    &entry.choice.source,
-                    kind,
-                    &entry.choice.profile,
-                )?;
+                let key = bucket(&entry.conversation, kind, &entry.choice.profile)?;
                 visit(key.as_str(), entry.head, id.as_str())?;
                 count = count
                     .checked_add(1)

@@ -24,7 +24,7 @@ pub(super) fn run(db: &Database) -> Result<()> {
     )?;
     match profile.format {
         FORMAT => return Ok(()),
-        10..=20 => (),
+        10..=21 => (),
         _ => return Err("unsupported history profile format".into()),
     }
     require_base_tables(&read)?;
@@ -83,7 +83,7 @@ pub(super) fn run(db: &Database) -> Result<()> {
         )?;
         match profile.format {
             FORMAT => return Ok(()),
-            10..=20 => (),
+            10..=21 => (),
             _ => return Err("unsupported history profile format".into()),
         }
         let format = profile.format;
@@ -122,7 +122,12 @@ pub(super) fn run(db: &Database) -> Result<()> {
         drop(order);
         drop(selections);
 
-        if format < 12 {
+        if (12..22).contains(&format) {
+            // Format 22 keys sessions by chat instead of chat and page; the index is derived
+            // from saved workflows, so it is rebuilt.
+            write.delete_table(NATIVE_CHOICES)?;
+        }
+        if format < 22 {
             edit::native_choices::backfill(&write, &profile)?;
         } else {
             edit::native_choices::validate_index(&write, &profile)?;

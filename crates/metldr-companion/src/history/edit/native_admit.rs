@@ -67,6 +67,17 @@ impl Edit<'_> {
                 return Err("native workflow still has active work".into());
             }
             before.workflow.validate_continuation(&workflow, &run.id)?;
+            // A moved session starts from the page the user captured now, never an older tab.
+            let target = if workflow.source().id == before.workflow.source().id {
+                target
+            } else if self
+                .selected_source(scope)?
+                .is_some_and(|saved| saved.id == workflow.source().id)
+            {
+                Target::from(&workflow.source().page)
+            } else {
+                return Err("native continuation moved to a page that is not selected".into());
+            };
             (
                 before.versions[2]
                     .checked_add(1)
