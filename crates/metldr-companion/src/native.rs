@@ -29,7 +29,7 @@ pub(super) fn run() -> Result<()> {
     if let Some(result) = install::command(&args) {
         return result;
     }
-    let config = Config::load()?;
+    let config = Config::load(&args)?;
     if let Mode::Bridge = config.mode {
         let bridge = config
             .bridge

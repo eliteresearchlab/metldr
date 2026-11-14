@@ -102,9 +102,8 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>> {
 }
 
 impl Config {
-    pub(super) fn load() -> Result<Self> {
-        let args: Vec<String> = std::env::args().skip(1).collect();
-        let (bootstrap, mode) = match args.as_slice() {
+    pub(super) fn load(args: &[String]) -> Result<Self> {
+        let (bootstrap, mode) = match args {
             [flag, path] if flag == "--owner-config" => (
                 parse_bootstrap_config(&read_bounded(Path::new(path))?)?,
                 Mode::SocketOwner,
