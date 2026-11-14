@@ -1,3 +1,4 @@
+use metldr_harness::handoff::{Item, Strategy};
 use crate::{
     Result,
     agent_model::{Launch, digest},
@@ -182,7 +183,32 @@ impl Owner {
             Origin::Workflow(workflow, _) => Some(workflow),
             Origin::Source(_) => None,
         };
+        // The harness sees what the chat did elsewhere since it last took part (B1.12.4).
+        let seen = match existing {
+            Some(_) => Some(run_number(value.last_run())?),
+            None => None,
+        };
         self.record_change(|edit, _| {
+            let runs = edit.handoff_runs(scope, seen.unwrap_or(0), existing, HANDOFF_RUNS)?;
+            let items: Vec<_> = runs
+                .iter()
+                .flat_map(|run| {
+                    [
+                        Item { run: run.number, speaker: "User", text: &run.question, untrusted: false },
+                        Item { run: run.number, speaker: run.route, text: &run.answer, untrusted: true },
+                    ]
+                })
+                .collect();
+            let strategy = match seen {
+                Some(run) => Strategy::DeltaSince { run: u32::try_from(run)? },
+                None => Strategy::Full,
+            };
+            let handoff = metldr_harness::handoff::build(&items, strategy, HANDOFF_CAP);
+            let text = if handoff.included == 0 {
+                input.text.to_owned()
+            } else {
+                format!("{}\n\n{}", handoff.text, input.text)
+            };
             let workflow = match existing {
                 Some(workflow) => workflow.to_owned(),
                 None => edit.id()?,
@@ -199,13 +225,22 @@ impl Owner {
                     run,
                     workflow,
                     value,
-                    text: input.text.into(),
+                    text,
                     target,
                 }),
                 Some(projection),
             ))
         })
     }
+}
+
+/// At most this many earlier runs are read for a handoff, newest first.
+const HANDOFF_RUNS: usize = 64;
+/// About 16k tokens, the default context handoff budget of t3code.
+const HANDOFF_CAP: usize = 64_000;
+
+fn run_number(id: &str) -> Result<u64> {
+    Ok(id.rsplit(':').next().ok_or("invalid run identity")?.parse()?)
 }
 
 fn new_workflow(profile: NativeProfile, source: Source, fingerprint: String) -> NativeWorkflow {

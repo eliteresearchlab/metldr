@@ -95,7 +95,7 @@ impl NativeWorkflow {
         }
     }
 
-    pub(super) fn last_run(&self) -> &str {
+    pub(crate) fn last_run(&self) -> &str {
         match self {
             Self::Pi(workflow) => &workflow.last_run,
             Self::Codex(workflow) => &workflow.last_run,
