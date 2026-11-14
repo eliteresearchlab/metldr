@@ -356,6 +356,7 @@ impl Activities {
                             .role("button")
                             .focusable(true)
                             .press(typography.press)
+                            .press_scale(super::theme::PRESS_SCALE)
                             .on_press_tx(move |state: &mut State, tx| press(state, tx))
                             .on_key(move |state: &mut State, key, tx| {
                                 if key.key != ::rune::Key::Enter {

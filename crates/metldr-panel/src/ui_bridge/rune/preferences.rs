@@ -440,6 +440,7 @@ fn button(
     let key_action = Rc::clone(action);
     element
         .press(typography.press)
+        .press_scale(super::theme::PRESS_SCALE)
         .on_press_tx(move |state: &mut State, tx| {
             if matches!(value, Action::RetrySetup) {
                 state.sound(crate::interaction_audio::Cue::Press);

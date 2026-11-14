@@ -664,6 +664,7 @@ fn button(
     let press = Rc::clone(&action);
     element
         .press(typography.press)
+        .press_scale(super::theme::PRESS_SCALE)
         .on_press(move |state: &mut State| {
             state.sound(cue);
             press(state)

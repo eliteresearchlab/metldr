@@ -342,6 +342,12 @@ impl State {
         }
     }
 
+    /// The selected choice alone, for drawing; the menu builds the full list only when open.
+    fn selected_choice(&self) -> Option<crate::composer::choices::Choice> {
+        let core = self.core()?;
+        crate::composer::choices::selected(Some(&core.page.view.borrow()), &self.selection)
+    }
+
     fn running(&self) -> bool {
         self.core().is_some_and(|core| {
             matches!(
@@ -365,10 +371,7 @@ impl State {
                     && !core.page.settings_blocked()
                     && core.page.flow.borrow().is_connected()
             })
-            && self
-                .choices()
-                .iter()
-                .any(|choice| choice.value == self.selection && choice.enabled)
+            && self.selected_choice().is_some_and(|choice| choice.enabled)
     }
 
     fn capture_disabled(&self) -> bool {
@@ -922,6 +925,7 @@ fn followup_controls<S: 'static>(
                 .focusable(true)
                 .native_activation()
                 .press(typography.press)
+                .press_scale(theme::PRESS_SCALE)
                 .on_press_tx(action)
                 .on_key(move |state: &mut S, key, tx| composer::enter(state, key, tx, action)),
         );
@@ -1272,6 +1276,7 @@ fn plan_button<S: 'static>(
         .disabled(!enabled)
         .native_activation()
         .press(typography.press)
+        .press_scale(theme::PRESS_SCALE)
         .on_press_tx(move |state: &mut S, tx| act(state, press_plan.clone(), flag, tx))
         .on_key(move |state: &mut S, key, tx| {
             if key.key != ::rune::Key::Enter {
@@ -1378,6 +1383,7 @@ fn plan_view<S: 'static>(
                         .disabled(!enabled)
                         .native_activation()
                         .press(typography.press)
+                        .press_scale(theme::PRESS_SCALE)
                         .on_press_tx(move |state: &mut S, tx| {
                             decide(state, press_plan.clone(), approve, tx)
                         })
@@ -1587,6 +1593,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                     .focusable(true)
                     .padding(12.0)
                     .press(palette.press)
+                    .press_scale(theme::PRESS_SCALE)
                     .on_press_tx(|state: &mut State, tx| state.close_settings(tx))
                     .on_key(|state: &mut State, key, tx| {
                         composer::enter(state, key, tx, State::close_settings)

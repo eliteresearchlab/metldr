@@ -152,7 +152,7 @@ impl Sources {
                         })
                         .focusable(true)
                         .expanded(self.expanded)
-                        .press_scale(0.97)
+                        .press_scale(super::theme::PRESS_SCALE)
                         .on_press_tx(Self::toggle)
                         .on_key(|state: &mut State, key, tx| {
                             composer::enter(state, key, tx, Self::toggle)
@@ -244,6 +244,7 @@ impl Sources {
         if enabled {
             check = check
                 .press(typography.press)
+                .press_scale(super::theme::PRESS_SCALE)
                 .on_press_tx(Self::refresh)
                 .on_key(|state: &mut State, key, tx| {
                     composer::enter(state, key, tx, Self::refresh)

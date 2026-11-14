@@ -71,6 +71,7 @@ fn button(
         control
             .native_activation()
             .press(typography.press)
+            .press_scale(super::theme::PRESS_SCALE)
             .on_press_tx(move |state: &mut State, tx| {
                 state.sound(crate::interaction_audio::Cue::Press);
                 handler(state, tx)
