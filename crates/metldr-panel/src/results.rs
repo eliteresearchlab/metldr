@@ -1,6 +1,6 @@
 use crate::{
     err,
-    model::{PageView, RunRoute, RunView},
+    model::{PageView, RunView},
 };
 use std::{cell::RefCell, rc::Rc};
 

@@ -10,7 +10,7 @@ use web_sys::{
 use crate::flow::FlowClient;
 use crate::model::{
     AgentSessionView, BrowserRouteView, ChatRouteView, FlowError, GoogleRouteView, PageView,
-    ProviderProtocol, ResponsesRouteView, RunId, RunView, SourceId, UserText,
+    ProviderProtocol, ResponsesRouteView, RunId, SourceId, UserText,
 };
 use crate::{Panel, active_run, begin_start, err, follow_start, js_message, set_panel_status};
 

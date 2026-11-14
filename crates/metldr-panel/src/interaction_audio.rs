@@ -4,7 +4,7 @@ use js_sys::{Math, RegExp};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 use web_sys::{
     AudioBuffer, AudioContext, AudioContextState, AudioNode, AudioScheduledSourceNode,
-    BiquadFilterNode, BiquadFilterType, Document, Element, Event, GainNode, OscillatorNode,
+    BiquadFilterNode, BiquadFilterType, Document, Element, Event, GainNode,
     OscillatorType, PageTransitionEvent, Window,
 };
 

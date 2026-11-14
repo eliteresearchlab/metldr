@@ -1,5 +1,5 @@
 use js_sys::Object;
-use serde_json::{Value, json};
+use serde_json::json;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
