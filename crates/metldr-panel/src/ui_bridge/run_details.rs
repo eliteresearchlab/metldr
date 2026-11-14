@@ -32,6 +32,15 @@ pub(super) async fn open(core: Rc<Core>, encoded: String) -> Result<UiRunDetails
     }
     let reference: RunDetailsReference = serde_json::from_str(&encoded)
         .map_err(|_| FlowError::InvalidInput("Invalid run details reference.".into()))?;
+    open_reference(core, reference).await
+}
+
+/// Opens a reference the panel already holds, without a JSON round trip.
+pub(super) async fn open_reference(
+    core: Rc<Core>,
+    reference: RunDetailsReference,
+) -> Result<UiRunDetails, FlowError> {
+    core.ensure_current()?;
     reference.validate().map_err(FlowError::InvalidInput)?;
     let run = core
         .referenced_run(&reference.run_id, &reference.origin)

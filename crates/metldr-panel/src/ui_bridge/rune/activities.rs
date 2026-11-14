@@ -994,17 +994,13 @@ async fn read(
             Ok(Value::Generated(frame))
         }
         Activity::NativeTools(reference) => {
-            let encoded = serde_json::to_string(reference).map_err(|_| ())?;
-            bridge
-                .native_tools(encoded)
+            super::native_tools::open_reference(Rc::clone(&bridge.core), reference.clone())
                 .await
                 .map(Value::Tools)
                 .map_err(|_| ())
         }
         Activity::RunDetails(reference) => {
-            let encoded = serde_json::to_string(reference).map_err(|_| ())?;
-            bridge
-                .run_details(encoded)
+            super::run_details::open_reference(Rc::clone(&bridge.core), reference.clone())
                 .await
                 .map(Value::Details)
                 .map_err(|_| ())
