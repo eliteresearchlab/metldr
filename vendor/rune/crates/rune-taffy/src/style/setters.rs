@@ -317,6 +317,13 @@ impl CompactStyle {
         self.modify_cold(|s| { s.margin.top = v; s.margin.bottom = v; });
     }
 
+    /// Auto top and bottom margins: a flex item takes the free space on both sides, centred, and
+    /// keeps its top edge in the container when it overflows (CSS `margin-block: auto`).
+    pub fn set_margin_y_auto(&mut self) {
+        let v = LengthPercentageAuto::AUTO;
+        self.modify_cold(|s| { s.margin.top = v; s.margin.bottom = v; });
+    }
+
     /// Moves this style's outer box sizing and placement onto a fresh column wrapper style and
     /// resets this style's outer box to fill that column (`flex: 1 1 auto`, `min_size: 0`). The
     /// wrapper keeps the overflow too, so a scroll viewport's wrapper is a scroll container: its

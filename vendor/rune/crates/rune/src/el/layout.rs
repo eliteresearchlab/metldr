@@ -222,6 +222,12 @@ impl El {
         self.style.set_margin_y(m);
         self
     }
+    /// Auto top and bottom margins (CSS `margin-block: auto`): centred in a column's free space,
+    /// and an overflowing item starts at the top of a scroll viewport instead of above it.
+    pub fn my_auto(mut self) -> Self {
+        self.style.set_margin_y_auto();
+        self
+    }
     pub fn mt(mut self, m: f32) -> Self {
         self.style.set_margin_top(m);
         self

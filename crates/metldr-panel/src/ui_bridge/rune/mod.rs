@@ -1191,6 +1191,36 @@ mod followup_tests {
     }
 
     #[test]
+    fn an_empty_chat_centres_and_an_overflowing_one_starts_at_the_top() {
+        fn view(tall: &bool, _: &mut Cx<bool>) -> El {
+            col().h_full().child(
+                col()
+                    .w_full()
+                    .grow(1.0)
+                    .min_h(0.0)
+                    .child(
+                        col()
+                            .key("body")
+                            .w_full()
+                            .h(if *tall { 300.0 } else { 40.0 })
+                            .my_auto(),
+                    )
+                    .scroll(ScrollSpec { stick_bottom: false }),
+            )
+        }
+        for (tall, top) in [(false, 30.0), (true, 0.0)] {
+            let mut rt = Runtime::new(tall, view, (200.0, 100.0), Env::default());
+            rt.frame(0.0);
+            let body = rt
+                .elements()
+                .into_iter()
+                .find(|el| el.key.as_deref() == Some("body"))
+                .unwrap();
+            assert_eq!(body.rect[1], top);
+        }
+    }
+
+    #[test]
     fn enter_activates_each_followup_once_and_ignores_repeat() {
         fn view(_: &[u32; 2], _: &mut Cx<[u32; 2]>) -> El {
             followup_controls(
@@ -1865,6 +1895,9 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .gap(32.0)
         .child(head)
         .child(thread);
+    // Auto margins centre an empty chat and, unlike centring the viewport, keep an overflowing
+    // welcome reachable at the top of a short panel or at 200% zoom.
+    let body = if empty { body.my_auto() } else { body };
     let scroll = col()
         .w_full()
         .px(16.0)
@@ -1896,7 +1929,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .child(state.conversations.tabs(state, core))
                 .child(col().w_full().h(1.0).fill(p.line))
                 .children(pinned)
-                .child(if empty { scroll.justify_center() } else { scroll })
+                .child(scroll)
                 .children(composer),
         )
 }
