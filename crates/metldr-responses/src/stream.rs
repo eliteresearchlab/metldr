@@ -451,6 +451,7 @@ fn usage(value: &Value) -> Result<Usage> {
     Ok(Usage {
         input: count(&value["input_tokens"])?,
         cached: count(&value["input_tokens_details"]["cached_tokens"])?,
+        written: None,
         output: count(&value["output_tokens"])?,
         reasoning: count(&value["output_tokens_details"]["reasoning_tokens"])?,
     })

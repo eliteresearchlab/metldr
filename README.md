@@ -95,7 +95,7 @@ The app is free. Your model provider may charge.
 
 The browser agent is in development. Its current build needs Linux and [companion setup](crates/metldr-companion/README.md).
 
-metldr thanks [browse](https://github.com/anomalyco/browse), [Rune](https://github.com/anomalyco/rune), [t3code](https://github.com/pingdotgg/t3code) and [Chart.js](https://www.chartjs.org).
+metldr thanks [browse](https://github.com/anomalyco/browse), [Rune](https://github.com/anomalyco/rune), [t3code](https://github.com/pingdotgg/t3code), [Chart.js](https://www.chartjs.org) and [LiteLLM](https://github.com/BerriAI/litellm).
 
 Free for noncommercial use under the [PolyForm Noncommercial License](LICENSE). Commercial use needs written permission from [Elite Research Lab LLC](https://elitelab.ai).
 

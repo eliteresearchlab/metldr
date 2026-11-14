@@ -4,6 +4,7 @@ mod chart;
 mod content;
 mod generated;
 mod key;
+mod price;
 mod projection;
 mod table;
 mod usage;
@@ -14,6 +15,7 @@ pub use generated::{
     AnswerHeight, AnswerView, CompleteSource, GeneratedAnswer, GeneratedUpdate, MAX_GENERATED_BYTES,
 };
 pub use key::{ArtifactId, MessageKey, ToolId};
+pub use price::{PRICES_AS_OF, Price, price};
 pub use projection::{Display, EntryRef, ProjectedEntry, Projection};
 pub use table::{MAX_TABLE_BYTES, Table};
 pub use usage::{Ledger, MAX_LEDGER_STEPS, Step, Usage};

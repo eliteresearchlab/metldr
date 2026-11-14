@@ -88,9 +88,9 @@ fn streams_unicode_and_preserves_exact_tool_continuation() {
         let (turn, text) = replay(&text_and_call(), chunk).unwrap();
         assert_eq!(text, "Read বাংলা 🦀");
         assert_eq!(turn.call.as_ref().unwrap().call, Call::Observe);
-        let usage = (Some(44), Some(30), Some(12));
+        let usage = (Some(44), Some(30), Some(4), Some(12));
         assert_eq!(
-            (turn.usage.input, turn.usage.cached, turn.usage.output),
+            (turn.usage.input, turn.usage.cached, turn.usage.written, turn.usage.output),
             usage
         );
         let expected = json!([

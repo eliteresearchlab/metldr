@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// Token counts that one model response reported. `input` is the whole prompt with cached reads
-/// included, and `output` includes reasoning. A count the provider did not report stays `None`.
+/// Token counts that one model response reported. `input` is the whole prompt with cache reads
+/// and writes included, and `output` includes reasoning. A count the provider did not report stays `None`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Usage {
@@ -9,6 +9,9 @@ pub struct Usage {
     pub input: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cached: Option<u64>,
+    /// Prompt tokens written to the provider cache, billed above the input rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -25,6 +28,7 @@ impl Usage {
         Self {
             input: sum(self.input, other.input),
             cached: sum(self.cached, other.cached),
+            written: sum(self.written, other.written),
             output: sum(self.output, other.output),
             reasoning: sum(self.reasoning, other.reasoning),
         }

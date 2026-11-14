@@ -177,7 +177,7 @@ fn actual_old_private_host_upgrades_and_cannot_reopen_new_history() -> Result<()
     let old_format = initial["profile"]["format"]
         .as_u64()
         .ok_or("old format absent")?;
-    assert!(matches!(old_format, 10..=19));
+    assert!(matches!(old_format, 10..=20));
     if let Some(expected) = std::env::var_os("METLDR_HISTORY_EXPECT_FORMAT") {
         let expected = expected
             .to_str()

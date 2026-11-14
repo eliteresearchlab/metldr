@@ -377,6 +377,7 @@ impl State {
             usage: Usage {
                 input,
                 cached: read,
+                written,
                 output: Some(self.output_tokens),
                 reasoning: None,
             },
