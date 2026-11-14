@@ -600,6 +600,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .color(p.muted),
                     )
                     .anchored_fit("rune-composer", Side::Top, Align::Start, 8.0)
+                    .transition(super::theme::pop_in())
                     .focus_return("rune-source-trigger")
                     .on_key(|state: &mut State, key, _| {
                         if key.key == Key::Escape {
@@ -689,6 +690,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     stick_bottom: false,
                 })
                 .anchored_fit("rune-model-trigger", Side::Top, Align::Start, 8.0)
+                .transition(super::theme::pop_in())
                 .focus_return("rune-model-trigger")
                 .on_key(|state: &mut State, key, _| {
                     if key.key == Key::Escape {

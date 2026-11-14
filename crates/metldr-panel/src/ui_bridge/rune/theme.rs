@@ -3,7 +3,9 @@
 //! Values follow beautiful-ui's `app/globals.css`; components read roles from here and never
 //! write colour literals of their own.
 
-use ::rune::{Anim, AnimExt, Color, Curve, El, Easing, oklch};
+use ::rune::{
+    Anim, AnimExt, Color, Curve, El, Easing, Spring, SpringPair, Transition, Vec2, oklch,
+};
 
 /// Semantic colour roles for one theme.
 #[derive(Clone, Copy)]
@@ -190,4 +192,13 @@ pub(super) fn reveal(el: El, shown: bool, delay: f32) -> El {
         .opacity_motion(anim())
         .offset_motion(anim())
         .blur_motion(anim())
+}
+
+/// beautiful-ui `pop-in` for a menu that opens above its trigger: it grows from the trigger's
+/// corner, 0.95 to 1 with opacity, on a critically damped 160 ms spring; the exit is shorter.
+/// Under Reduce Motion Rune turns it into a short fade without the scale.
+pub(super) fn pop_in() -> Transition {
+    let enter = Spring::from_motion(0.16, 0.0);
+    Transition::scale_anchor(0.95, Vec2 { x: 0.0, y: 1.0 })
+        .springs(SpringPair::with_exit_ratio(enter, 0.75))
 }
