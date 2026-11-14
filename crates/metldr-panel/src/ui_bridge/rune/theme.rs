@@ -204,9 +204,14 @@ pub(super) fn pop_in() -> Transition {
 /// A new message fades in rising 8 px, on a critically damped 300 ms spring; the exit is shorter.
 /// Under Reduce Motion Rune turns it into a short fade without the rise.
 pub(super) fn rise() -> Transition {
+    rise_over(0.3)
+}
+
+/// Fades in rising 8 px on a critically damped spring of `seconds`; the exit is shorter.
+fn rise_over(seconds: f32) -> Transition {
     Transition::offset(0.0, 8.0)
         .combined(Transition::opacity())
-        .springs(SpringPair::with_exit_ratio(Spring::from_motion(0.3, 0.0), 0.75))
+        .springs(SpringPair::with_exit_ratio(Spring::from_motion(seconds, 0.0), 0.75))
 }
 
 /// A sheet such as Saved chats opens from its centre, 0.96 to 1 with opacity, on a critically damped
@@ -214,4 +219,18 @@ pub(super) fn rise() -> Transition {
 pub(super) fn sheet() -> Transition {
     Transition::scale_anchor(0.96, Vec2 { x: 0.5, y: 0.5 })
         .springs(SpringPair::with_exit_ratio(Spring::from_motion(0.25, 0.0), 0.75))
+}
+
+/// A reply card: surface, 10 px radius, hairline ring and a soft shadow, 12 px padding. It fades
+/// in rising 8 px on a critically damped 380 ms spring; Reduce Motion keeps only the fade.
+pub(super) fn card(palette: &Palette) -> El {
+    ::rune::col()
+        .w_full()
+        .gap(8.0)
+        .padding(12.0)
+        .radius(10.0)
+        .fill(palette.surface)
+        .border(1.0, palette.line)
+        .shadow(1.0, 2.0, oklch(0.0, 0.0, 0.0).alpha(0.05))
+        .transition(rise_over(0.38))
 }
