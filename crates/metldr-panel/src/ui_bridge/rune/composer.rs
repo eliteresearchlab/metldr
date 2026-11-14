@@ -21,7 +21,7 @@
  */
 
 use super::{Menu, Mode, State};
-use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, oklch, row};
+use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, row};
 
 const CONTROL: f32 = 28.0;
 const BORDER: f32 = 1.0;
@@ -200,6 +200,47 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
         .role("button")
         .focusable(true)
         .label(label)
+}
+
+/// One 30 px menu row as in beautiful-ui's model picker: name, muted tag, then the check.
+fn menu_row(
+    typography: super::preferences::Typography,
+    p: Palette,
+    key: String,
+    name: String,
+    tag: &'static str,
+    active: bool,
+) -> El {
+    row()
+        .key(key)
+        .w_full()
+        .h(30.0)
+        .gap(8.0)
+        .px(8.0)
+        .center_y()
+        .radius(6.0)
+        .hover(p.hover)
+        .focus_highlight(p.hover)
+        .child(
+            typography
+                .text(name)
+                .grow(1.0)
+                .font(typography.font(12.5, 500.0))
+                .color(p.ink)
+                .truncate(),
+        )
+        .child(
+            typography
+                .text(tag)
+                .font(typography.font(11.0, 400.0))
+                .color(p.muted),
+        )
+        .child(if active {
+            ::rune::el::icon(&CHECK, 13.0).color(p.ink)
+        } else {
+            typography.text("").size(13.0, 13.0)
+        })
+        .focusable(true)
 }
 
 pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
@@ -572,61 +613,65 @@ pub(super) fn menu(state: &State) -> Option<El> {
             )
         }
         Menu::Models => {
-            let choices = state.choices();
-            let rows =
-                choices
-                    .into_iter()
-                    .fold(col().key("rune-model-rows").w_full(), |rows, choice| {
-                        let active = choice.value == state.selection;
-                        let disabled = !choice.enabled || state.running();
-                        let mut model = row()
-                            .key(format!("model:{}", choice.value))
-                            .w_full()
-                            .h(30.0)
-                            .gap(8.0)
+            // Configured routes by section with short names; routes still to set up fold into one
+            // row that opens Settings. Full labels stay the accessible names.
+            let mut choices = state.choices();
+            choices.sort_by_key(|choice| choice.short().0);
+            let hidden = choices.iter().filter(|choice| !choice.enabled).count();
+            let shown = choices.len() - hidden;
+            let mut rows = col().key("rune-model-rows").w_full();
+            let mut section = None;
+            for choice in choices.into_iter().filter(|choice| choice.enabled) {
+                let (heading, name, tag) = choice.short();
+                let (name, tag) = (name.to_owned(), tag);
+                if section != Some(heading) {
+                    section = Some(heading);
+                    rows = rows.child(
+                        typography
+                            .text(heading.heading())
+                            .font(typography.font(11.0, 500.0))
+                            .color(p.muted)
                             .px(8.0)
-                            .center_y()
-                            .radius(6.0)
-                            .hover(p.hover)
-                            .focus_highlight(p.hover)
-                            .child(
-                                typography
-                                    .text(choice.label.clone())
-                                    .grow(1.0)
-                                    .font(typography.font(12.5, 500.0))
-                                    .color(if choice.enabled { p.ink } else { p.muted })
-                                    .truncate(),
-                            )
-                            .child(if choice.enabled {
-                                typography.text("")
-                            } else {
-                                typography
-                                    .text("Unavailable")
-                                    .font(typography.font(11.0, 400.0))
-                                    .color(p.muted)
-                            })
-                            .child(if active {
-                                ::rune::el::icon(&CHECK, 13.0).color(p.ink)
-                            } else {
-                                typography.text("").size(13.0, 13.0)
-                            })
-                            .focusable(true)
-                            .disabled(disabled)
-                            .checked(active)
-                            .role("menuitemradio")
-                            .label(choice.label.clone());
-                        if !disabled {
-                            model =
-                                model
-                                    .press(p.strong)
-                                    .on_press_tx(move |state: &mut State, tx| {
-                                        if !state.running() {
-                                            state.select(choice.value.to_string(), tx);
-                                        }
-                                    });
-                        }
-                        rows.child(model)
-                    });
+                            .pt(6.0)
+                            .pb(2.0)
+                            .a11y_hidden(),
+                    );
+                }
+                let active = choice.value == state.selection;
+                let disabled = state.running();
+                let mut model = menu_row(
+                    typography,
+                    p,
+                    format!("model:{}", choice.value),
+                    name,
+                    tag,
+                    active,
+                )
+                .disabled(disabled)
+                .checked(active)
+                .role("menuitemradio")
+                .label(choice.label.clone());
+                if !disabled {
+                    model = model
+                        .press(p.strong)
+                        .on_press_tx(move |state: &mut State, tx| {
+                            if !state.running() {
+                                state.select(choice.value.to_string(), tx);
+                            }
+                        });
+                }
+                rows = rows.child(model);
+            }
+            if hidden > 0 {
+                let name = if shown == 0 { "Set up a model" } else { "Set up more" };
+                rows = rows.child(
+                    menu_row(typography, p, "model:setup".into(), name.into(), "", false)
+                        .role("menuitem")
+                        .label(name)
+                        .press(p.strong)
+                        .on_press_tx(|state: &mut State, tx| state.open_settings(tx)),
+                );
+            }
             let mut menu = col()
                 .key("rune-model-menu")
                 .role("menu")
