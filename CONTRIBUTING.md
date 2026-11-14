@@ -2,7 +2,7 @@
 
 All pull requests must use the official `gh stack` extension, including changes with one layer. Do not create standalone PRs through the website, `gh pr create` or another tool. Use [GitHub stacked pull requests](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-stacked-pull-requests) for related changes. Each layer must contain one working, verified change. Target the branch directly below it so reviewers see that layer's diff.
 
-By opening a pull request, you license your contribution under the [project license](LICENSE) and allow the maintainers to license it under other terms as well.
+By opening a pull request, you license your contribution under the [project license](LICENSE) and allow Mohammed Efaz, Kishor Morol and Elite Research Lab LLC, who own metldr, to license it under other terms as well.
 
 Start from a clean worktree. Keep unrelated edits in their own worktree.
 
