@@ -562,7 +562,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
             );
         let mut actions = ::rune::row().w_full().flex_wrap().gap(6.0).justify_end();
         for (index, option) in permission.options.into_iter().enumerate() {
-            let action = serde_json::to_string(&Some(&option.id)).expect("option key");
+            let action = super::super::native_permissions::native_action(Some(&option.id));
             let key = rune_reply_key("native", &permission.run, &permission.request, &action);
             let run = permission.run.clone();
             let request = permission.request.clone();
@@ -577,7 +577,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                 },
             ));
         }
-        let action = serde_json::to_string(&Option::<String>::None).expect("option key");
+        let action = super::super::native_permissions::native_action(None);
         let key = rune_reply_key("native", &permission.run, &permission.request, &action);
         let run = permission.run;
         let request = permission.request;

@@ -291,7 +291,7 @@ impl Core {
         option: Option<String>,
         tx: &mut ::rune::Tx,
     ) -> Result<impl Future<Output = Result<(), FlowError>> + 'static, FlowError> {
-        let action = serde_json::to_string(&option).expect("option key");
+        let action = native_action(option.as_deref());
         if !tx.consume_activation(&super::codex_input::rune_reply_key(
             "native", &run, &request, &action,
         )) {
@@ -406,4 +406,9 @@ mod tests {
         sending.observe(&[]);
         assert!(matches!(sending, Operation::Sending(_)));
     }
+}
+
+/// The action part of a native reply key: one string per option, and a distinct one for Cancel.
+pub(super) fn native_action(option: Option<&str>) -> String {
+    option.map_or_else(String::new, |id| format!("+{id}"))
 }
