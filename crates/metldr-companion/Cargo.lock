@@ -987,6 +987,7 @@ dependencies = [
  "metldr-codex-session",
  "metldr-conversation",
  "metldr-google-interactions",
+ "metldr-harness",
  "metldr-history-pages",
  "metldr-messages",
  "metldr-native-credentials",
@@ -1025,6 +1026,10 @@ dependencies = [
  "serde_json",
  "tokio",
 ]
+
+[[package]]
+name = "metldr-harness"
+version = "0.1.0"
 
 [[package]]
 name = "metldr-history-pages"

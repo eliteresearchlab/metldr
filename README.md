@@ -95,6 +95,6 @@ The app is free. Your model provider may charge.
 
 The browser agent is in development. Its current build needs Linux and [companion setup](crates/metldr-companion/README.md).
 
-Browser integration work draws on [browse](https://github.com/anomalyco/browse). See [third party notices](THIRD_PARTY_NOTICES.md).
+Browser integration work draws on [browse](https://github.com/anomalyco/browse), and the agent harness registry and context handoff draw on [t3code](https://github.com/pingdotgg/t3code). See [third party notices](THIRD_PARTY_NOTICES.md).
 
 [Build and setup](docs/development.md) | [Privacy](PRIVACY.md)

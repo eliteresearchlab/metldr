@@ -82,13 +82,10 @@ fn render_into(doc: &Document, history: &Element, runs: Vec<&RunView>) -> Result
 fn update_card(doc: &Document, card: &Element, run: &RunView) -> Result<(), JsValue> {
     card.set_attribute("data-kind", &run.kind.to_string())?;
     let route = crate::run_display::route(&run.route);
-    let agent_name = if matches!(&run.route, RunRoute::OpenCode { .. }) {
-        "OpenCode"
-    } else if matches!(&run.route, RunRoute::Codex { .. }) {
-        "Codex"
-    } else {
-        "Pi"
-    };
+    let agent_name = run
+        .route
+        .harness()
+        .map_or("Pi", metldr_harness::HarnessId::label);
     update_part(
         card,
         "state",

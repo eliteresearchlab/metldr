@@ -1,9 +1,9 @@
-.PHONY: rust check check-rust check-rune check-codex check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion
+.PHONY: rust check check-rust check-rune check-codex check-harness check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion
 
 # Every Cargo root in the repository, in the order the check-* targets use.
 RUST_CRATES := metldr-sse metldr-responses metldr-google-interactions metldr-messages \
   metldr-chat-completions metldr-native-credentials metldr-conversation \
-  metldr-pi-session metldr-codex-session metldr-opencode-session \
+  metldr-harness metldr-pi-session metldr-codex-session metldr-opencode-session \
   metldr-browser-tools metldr-answer-codec metldr-panel metldr-companion \
   metldr-core metldr-history-pages metldr-welcome metldr-rune-host
 
@@ -27,6 +27,9 @@ check-rune:
 
 check-codex:
 	cargo test --locked --manifest-path crates/metldr-codex-session/Cargo.toml
+
+check-harness:
+	cargo test --locked --manifest-path crates/metldr-harness/Cargo.toml
 
 check-pi:
 	cargo test --locked --manifest-path crates/metldr-pi-session/Cargo.toml

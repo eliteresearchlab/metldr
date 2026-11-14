@@ -265,12 +265,18 @@ pub(crate) enum AgentKind {
 
 impl AgentKind {
     pub(crate) const ALL: [Self; 3] = [Self::Codex, Self::Opencode, Self::Pi];
-    pub(crate) fn name(self) -> &'static str {
+    pub(crate) fn harness(self) -> metldr_harness::HarnessId {
         match self {
-            Self::Pi => "pi",
-            Self::Codex => "codex",
-            Self::Opencode => "opencode",
+            Self::Pi => metldr_harness::HarnessId::Pi,
+            Self::Codex => metldr_harness::HarnessId::Codex,
+            Self::Opencode => metldr_harness::HarnessId::OpenCode,
         }
+    }
+    pub(crate) fn name(self) -> &'static str {
+        self.harness().key()
+    }
+    pub(crate) fn label(self) -> &'static str {
+        self.harness().label()
     }
 }
 
@@ -1039,6 +1045,18 @@ pub(crate) enum RunRoute {
         model: Option<String>,
         mode: Option<String>,
     },
+}
+
+impl RunRoute {
+    /// The installed agent harness behind this route, if any.
+    pub(crate) fn harness(&self) -> Option<metldr_harness::HarnessId> {
+        match self {
+            Self::Pi { .. } => Some(metldr_harness::HarnessId::Pi),
+            Self::Codex { .. } => Some(metldr_harness::HarnessId::Codex),
+            Self::OpenCode { .. } => Some(metldr_harness::HarnessId::OpenCode),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]

@@ -776,7 +776,7 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
                         crate::composer::choices::list(Some(&core.page.view.borrow()))
                             .into_iter()
                             .find(|choice| choice.enabled)
-                            .map(|choice| choice.value)
+                            .map(|choice| choice.value.into_owned())
                     })
                     .unwrap_or_default();
                 let active = core
@@ -865,7 +865,7 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
     }
     if state.selection.is_empty() {
         if let Some(choice) = state.choices().into_iter().find(|choice| choice.enabled) {
-            state.selection = choice.value;
+            state.selection = choice.value.into_owned();
         }
     }
     replies::sync(state);

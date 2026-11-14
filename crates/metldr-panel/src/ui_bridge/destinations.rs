@@ -17,12 +17,12 @@ impl From<Choice> for UiDestination {
 impl UiDestination {
     #[wasm_bindgen(getter)]
     pub fn value(&self) -> String {
-        self.choice.value.clone()
+        self.choice.value.to_string()
     }
 
     #[wasm_bindgen(getter)]
     pub fn label(&self) -> String {
-        self.choice.label.clone()
+        self.choice.label.to_string()
     }
 
     #[wasm_bindgen(getter)]

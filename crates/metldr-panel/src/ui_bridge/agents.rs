@@ -141,12 +141,7 @@ impl UiAgentConfiguration {
     }
     #[wasm_bindgen(getter)]
     pub fn label(&self) -> String {
-        match self.row.agent {
-            AgentKind::Codex => "Codex",
-            AgentKind::Opencode => "OpenCode",
-            AgentKind::Pi => "Pi",
-        }
-        .into()
+        self.row.agent.label().into()
     }
     #[wasm_bindgen(getter)]
     pub fn revision(&self) -> u64 {

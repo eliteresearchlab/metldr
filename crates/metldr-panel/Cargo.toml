@@ -20,6 +20,7 @@ crate-type = ["cdylib"]
 rune-ui = ["dep:rune", "dep:wgpu"]
 
 [dependencies]
+metldr-harness = { path = "../metldr-harness" }
 rune = { path = "../../vendor/rune/crates/rune", optional = true, default-features = false, features = ["accessibility", "svg", "webgl"] }
 wgpu = { version = "~30.0.1", optional = true, default-features = false, features = ["wgsl"] }
 metldr-answer-codec = { path = "../metldr-answer-codec" }

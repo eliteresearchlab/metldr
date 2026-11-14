@@ -1,9 +1,11 @@
 use super::*;
 use crate::model::AgentKind;
 
+/// A choice in the model menu. Fixed choices borrow their text, so building the menu on
+/// each view pass allocates only for saved sessions and configured routes.
 pub(crate) struct Choice {
-    pub(crate) value: String,
-    pub(crate) label: String,
+    pub(crate) value: std::borrow::Cow<'static, str>,
+    pub(crate) label: std::borrow::Cow<'static, str>,
     pub(crate) enabled: bool,
     pub(super) kind: Kind,
 }
@@ -62,10 +64,10 @@ pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
     .collect();
     let Some(view) = view else { return choices };
     for choice in &mut choices {
-        let route = match choice.value.as_str() {
+        let route = match &*choice.value {
             "browser" => match &view.browser_route {
                 Some(BrowserRouteView::Messages { model }) => {
-                    choice.label = format!("Browser task, Messages, {model}");
+                    choice.label = format!("Browser task, Messages, {model}").into();
                     None
                 }
                 Some(BrowserRouteView::HttpsMessages {
@@ -125,14 +127,15 @@ pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
             _ => None,
         };
         if let Some((task, protocol, endpoint, model)) = route {
-            choice.label = format!("{task}, {protocol}, {model}, {endpoint}");
+            choice.label = format!("{task}, {protocol}, {model}, {endpoint}").into();
         }
     }
-    for (agent, name, sessions) in [
-        (AgentKind::Pi, "Pi", &view.agent_sessions),
-        (AgentKind::Codex, "Codex", &view.codex_sessions),
-        (AgentKind::Opencode, "OpenCode", &view.opencode_sessions),
+    for (agent, sessions) in [
+        (AgentKind::Pi, &view.agent_sessions),
+        (AgentKind::Codex, &view.codex_sessions),
+        (AgentKind::Opencode, &view.opencode_sessions),
     ] {
+        let name = agent.label();
         for session in sessions {
             let id = session.workflow.as_str();
             let value = if agent == AgentKind::Pi {
@@ -147,11 +150,12 @@ pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
             };
             if available {
                 choices.push(Choice {
-                    value,
+                    value: value.into(),
                     label: format!(
                         "Continue {name} session {}",
                         id.rsplit(':').next().unwrap_or(id)
-                    ),
+                    )
+                    .into(),
                     enabled: true,
                     kind: Kind::Session {
                         agent,
@@ -189,7 +193,7 @@ mod checks {
         assert_eq!(
             unavailable
                 .iter()
-                .map(|choice| choice.value.as_str())
+                .map(|choice| &*choice.value)
                 .collect::<Vec<_>>(),
             expected
         );
@@ -293,3 +297,4 @@ mod checks {
         assert_eq!(choices[6].value, "page:responses");
     }
 }
+
