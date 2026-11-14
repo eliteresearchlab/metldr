@@ -656,9 +656,13 @@ fn button(
         .role("button")
         .focusable(true)
         .disabled(!enabled)
-        .padding(6.0);
+        .px(10.0)
+        .py(6.0)
+        .radius(8.0)
+        .border(1.0, typography.line)
+        .fill(typography.field);
     if !enabled {
-        return element;
+        return element.opacity(0.5);
     }
     let action = Rc::new(action);
     let press = Rc::clone(&action);
@@ -689,7 +693,7 @@ impl Settings {
         _cx: &mut Cx<State>,
         typography: super::preferences::Typography,
         palette: &super::preferences::Palette,
-    ) -> El {
+    ) -> (El, El) {
         use crate::ui_bridge::settings::Family;
         let page = &core.page;
         let connected = page.flow.borrow().is_connected();
@@ -701,11 +705,7 @@ impl Settings {
         let provider_uncertain = page.settings.borrow().uncertain(Family::Providers);
         let agent_uncertain = page.settings.borrow().uncertain(Family::Agents);
         let view = page.view.borrow();
-        let mut out = col()
-            .w_full()
-            .gap(12.0)
-            .color(palette.ink)
-            .child(typography.text("Providers").role("heading"));
+        let mut out = col().w_full().gap(12.0).color(palette.ink);
         out = out.child(button(
             typography,
             "Refresh providers",
@@ -946,8 +946,11 @@ impl Settings {
                 ));
             out = out.child(section);
         }
-        out = out
-            .child(typography.text("Installed agents").role("heading"))
+        let providers = out;
+        let mut out = col()
+            .w_full()
+            .gap(12.0)
+            .color(palette.ink)
             .child(button(
                 typography,
                 "Refresh agents",
@@ -1208,6 +1211,6 @@ impl Settings {
         if let Some(message) = self.message {
             out = out.child(typography.text(message).wrap());
         }
-        out
+        (providers, out)
     }
 }

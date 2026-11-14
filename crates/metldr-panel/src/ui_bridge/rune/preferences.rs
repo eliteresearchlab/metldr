@@ -3,7 +3,7 @@ use super::*;
 use crate::preferences::{
     UiPreferenceSnapshot, UiPreferenceStatus, UiPreferenceSubscription, UiPreferences,
 };
-use ::rune::{Color, El, TextStyle, col, oklch, text};
+use ::rune::{Color, El, TextStyle, col, text};
 use wasm_bindgen_futures::JsFuture;
 
 #[derive(Clone, Copy)]
@@ -263,10 +263,7 @@ impl Preferences {
     pub(super) fn view(&self, action: impl Fn(&mut State, Action, &mut Tx) + 'static) -> El {
         let action = Rc::new(action);
         let typography = self.typography();
-        let mut result = col()
-            .w_full()
-            .gap(6.0)
-            .child(typography.text("Appearance and sound").role("heading"));
+        let mut result = col().w_full().gap(6.0);
         if self.failed {
             return result
                 .child(
@@ -432,9 +429,13 @@ fn button(
         .role("button")
         .focusable(true)
         .disabled(!enabled)
-        .padding(6.0);
+        .px(10.0)
+        .py(6.0)
+        .radius(8.0)
+        .border(1.0, typography.line)
+        .fill(typography.field);
     if !enabled {
-        return element;
+        return element.opacity(0.5);
     }
     let press = Rc::clone(action);
     let key_action = Rc::clone(action);
@@ -469,11 +470,16 @@ pub(super) struct Typography {
     pub(super) press: Color,
     /// Text caret and selection in fields.
     pub(super) selection: Color,
+    /// Hairline and fill of an outlined control.
+    pub(super) line: Color,
+    pub(super) field: Color,
 }
 
 impl Typography {
     pub(super) fn new(scale: f32, palette: &Palette) -> Self {
         Self {
+            line: palette.line,
+            field: palette.field,
             scale,
             ink: palette.ink,
             press: palette.press,
