@@ -63,20 +63,49 @@ pub(super) fn sync(state: &mut State) {
 }
 
 fn button(
+    palette: &super::theme::Palette,
     typography: super::preferences::Typography,
     label: String,
     key: String,
     enabled: bool,
 ) -> El {
-    typography
-        .text(label.clone())
+    pill(palette, typography, label, key, enabled, false)
+}
+
+/// A 28 px pill action: dark for the primary choice, quiet with a hairline for the rest.
+fn pill(
+    palette: &super::theme::Palette,
+    typography: super::preferences::Typography,
+    label: String,
+    key: String,
+    enabled: bool,
+    primary: bool,
+) -> El {
+    let (fill, ink) = if primary {
+        (palette.ink, palette.page)
+    } else {
+        (palette.field, palette.ink)
+    };
+    let pill = ::rune::row()
         .key(key)
         .min_h(28.0)
+        .px(12.0)
+        .radius(14.0)
+        .center()
+        .fill(fill)
+        .child(
+            typography
+                .text(label.clone())
+                .font(typography.font(12.5, 500.0))
+                .color(ink)
+                .wrap(),
+        )
         .role("button")
         .focusable(enabled)
         .disabled(!enabled)
-        .wrap()
-        .label(label)
+        .opacity(if enabled { 1.0 } else { 0.5 })
+        .label(label);
+    if primary { pill } else { pill.border(1.0, palette.line) }
 }
 
 fn input(
@@ -150,6 +179,7 @@ fn native(state: &mut State, run: RunId, request: RunId, option: Option<String>,
 }
 
 fn codex_action(
+    palette: &super::theme::Palette,
     typography: super::preferences::Typography,
     run: &RunId,
     request: &RunId,
@@ -161,7 +191,7 @@ fn codex_action(
     let run = run.clone();
     let request = request.clone();
     activate(
-        button(typography, label.into(), key, enabled)
+        button(palette, typography, label.into(), key, enabled)
             .label(format!("{label} for request {}", request.as_str())),
         typography.press,
         enabled,
@@ -187,7 +217,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
     }
     for (run, pending, enabled) in requests {
         let request = pending.request;
-        let mut panel = col().w_full().gap(8.0);
+        let mut panel = super::theme::card(palette);
         match pending.prompt.clone() {
             CodexInputPrompt::Questions {
                 item, questions, ..
@@ -226,7 +256,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                         let entry = key.clone();
                         let value = option.label.clone();
                         panel = panel.child(activate(
-                            button(typography, label.clone(), choice_key, enabled)
+                            button(palette, typography, label.clone(), choice_key, enabled)
                                 .label(format!("{label} for {question_label}")),
                             typography.press,
                             enabled,
@@ -284,7 +314,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                 let submit_run = run.clone();
                 let submit_request = request.clone();
                 panel = panel.child(activate(
-                    button(typography, "Submit answers".into(), action_key, ready)
+                    button(palette, typography, "Submit answers".into(), action_key, ready)
                         .label(format!("Submit answers for request {}", request.as_str())),
                     typography.press,
                     ready,
@@ -340,6 +370,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                     },
                 ));
                 panel = panel.child(codex_action(
+                    palette,
                     typography, &run, &request, "skip", "Skip", enabled,
                 ));
             }
@@ -386,7 +417,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                             let entry = key.clone();
                             let value = choice.clone();
                             panel = panel.child(activate(
-                                button(typography, label.clone(), choice_key, enabled)
+                                button(palette, typography, label.clone(), choice_key, enabled)
                                     .label(format!("{label} for {title}")),
                                 typography.press,
                                 enabled,
@@ -423,7 +454,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                 let submit_run = run.clone();
                 let submit_request = request.clone();
                 panel = panel.child(activate(
-                    button(typography, "Submit form".into(), action_key, enabled)
+                    button(palette, typography, "Submit form".into(), action_key, enabled)
                         .label(format!("Submit form for request {}", request.as_str())),
                     typography.press,
                     enabled,
@@ -468,9 +499,11 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                 ));
                 panel = panel
                     .child(codex_action(
+                        palette,
                         typography, &run, &request, "deny", "Decline", enabled,
                     ))
                     .child(codex_action(
+                        palette,
                         typography, &run, &request, "cancel", "Cancel", enabled,
                     ));
             }
@@ -484,12 +517,15 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                     .child(typography.text(review).wrap());
                 panel = panel
                     .child(codex_action(
+                        palette,
                         typography, &run, &request, "allow", "Allow", enabled,
                     ))
                     .child(codex_action(
+                        palette,
                         typography, &run, &request, "deny", "Decline", enabled,
                     ))
                     .child(codex_action(
+                        palette,
                         typography, &run, &request, "cancel", "Cancel", enabled,
                     ));
             }
@@ -501,21 +537,38 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
         result.push(typography.text(notice).wrap());
     }
     for (permission, enabled) in permissions {
-        let mut panel = col()
-            .w_full()
-            .gap(8.0)
-            .child(typography.text(&permission.title).wrap())
-            .child(typography.text(permission.agent.label()).wrap())
-            .child(typography.text(&permission.tool).wrap())
-            .child(typography.text(&permission.input).wrap());
-        for option in permission.options {
+        let mut panel = super::theme::card(palette)
+            .child(
+                typography
+                    .text(&permission.title)
+                    .font(typography.font(14.0, 500.0))
+                    .wrap(),
+            )
+            .child(
+                typography
+                    .text(format!("{} · {}", permission.agent.label(), permission.tool))
+                    .font(typography.font(12.0, 400.0))
+                    .color(palette.ink_2)
+                    .wrap(),
+            )
+            .child(
+                col().w_full().padding(8.0).radius(8.0).fill(palette.field).child(
+                    typography
+                        .text(&permission.input)
+                        .font(typography.font(12.0, 400.0).mono())
+                        .wrap()
+                        .selectable(true),
+                ),
+            );
+        let mut actions = ::rune::row().w_full().flex_wrap().gap(6.0).justify_end();
+        for (index, option) in permission.options.into_iter().enumerate() {
             let action = serde_json::to_string(&Some(&option.id)).expect("option key");
             let key = rune_reply_key("native", &permission.run, &permission.request, &action);
             let run = permission.run.clone();
             let request = permission.request.clone();
             let value = option.id;
-            panel = panel.child(activate(
-                button(typography, option.name.clone(), key, enabled)
+            actions = actions.child(activate(
+                pill(palette, typography, option.name.clone(), key, enabled, index == 0)
                     .label(format!("{} for {}", option.name, permission.title)),
                 typography.press,
                 enabled,
@@ -528,13 +581,14 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
         let key = rune_reply_key("native", &permission.run, &permission.request, &action);
         let run = permission.run;
         let request = permission.request;
-        panel = panel.child(activate(
-            button(typography, "Cancel".into(), key, enabled)
+        actions = actions.child(activate(
+            button(palette, typography, "Cancel".into(), key, enabled)
                 .label(format!("Cancel {}", permission.title)),
             typography.press,
             enabled,
             move |state: &mut State, tx| native(state, run.clone(), request.clone(), None, tx),
         ));
+        panel = panel.child(actions);
         result.push(panel);
     }
     result

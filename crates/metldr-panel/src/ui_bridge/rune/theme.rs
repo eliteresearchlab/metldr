@@ -202,3 +202,21 @@ pub(super) fn pop_in() -> Transition {
     Transition::scale_anchor(0.95, Vec2 { x: 0.0, y: 1.0 })
         .springs(SpringPair::with_exit_ratio(enter, 0.75))
 }
+
+/// A reply card: surface, 10 px radius, hairline ring and a soft shadow, 12 px padding. It fades
+/// in rising 8 px on a critically damped 380 ms spring; Reduce Motion keeps only the fade.
+pub(super) fn card(palette: &Palette) -> El {
+    ::rune::col()
+        .w_full()
+        .gap(8.0)
+        .padding(12.0)
+        .radius(10.0)
+        .fill(palette.surface)
+        .border(1.0, palette.line)
+        .shadow(1.0, 2.0, oklch(0.0, 0.0, 0.0).alpha(0.05))
+        .transition(
+            Transition::offset(0.0, 8.0)
+                .combined(Transition::opacity())
+                .springs(SpringPair::with_exit_ratio(Spring::from_motion(0.38, 0.0), 0.75)),
+        )
+}
