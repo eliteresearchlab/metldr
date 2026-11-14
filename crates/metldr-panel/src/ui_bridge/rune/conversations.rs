@@ -1,5 +1,6 @@
 use super::*;
 use crate::history::Change;
+use ::rune::Icon;
 
 #[derive(Default)]
 pub(super) struct Tabs {
@@ -126,67 +127,84 @@ impl Conversations {
 
     pub(super) fn tabs(&self, state: &State, core: &Core) -> El {
         let typography = state.preferences.typography();
+        let p = state.preferences.palette();
         let enabled =
             !self.busy && !state.running() && !matches!(*core.owner.borrow(), Owner::Navigating(_));
-        let mut out = row().role("group").label("Chats").gap(8.0);
+        let mut out = row()
+            .role("group")
+            .label("Chats")
+            .gap(4.0)
+            .h(44.0)
+            .px(8.0)
+            .items_center();
         for tab in &state.tabs.rows {
             let id = tab.id.clone();
             let close_id = id.clone();
             let key_id = id.clone();
             let close_key_id = id.clone();
             let active = id == core.scope.conversation;
-            out = out.child(
-                typography
-                    .text(&tab.title)
-                    .key(format!("chat-tab-{id}"))
-                    .role("toggle")
-                    .fill(typography.ink.alpha(if active { 0.12 } else { 0.0 }))
-                    .padding(8.0)
-                    .radius(8.0)
-                    .focusable(true)
-                    .disabled(!enabled)
-                    .checked(active)
-                    .native_activation()
-                    .on_press_tx(move |state: &mut State, _| {
+            let select = typography
+                .text(&tab.title)
+                .font(typography.font(12.5, 500.0))
+                .color(if active { p.ink } else { p.ink_2 })
+                .truncate()
+                .grow(1.0)
+                .min_w(0.0)
+                .key(format!("chat-tab-{id}"))
+                .role("toggle")
+                .focusable(true)
+                .disabled(!enabled)
+                .checked(active)
+                .native_activation()
+                .on_press_tx(move |state: &mut State, _| {
+                    if state
+                        .core()
+                        .is_some_and(|core| core.scope.conversation != id)
+                    {
+                        action(state, Action::Select(id.clone()));
+                    }
+                })
+                .on_key(move |state: &mut State, key, tx| {
+                    activate(key, tx, |_| {
                         if state
                             .core()
-                            .is_some_and(|core| core.scope.conversation != id)
+                            .is_some_and(|core| core.scope.conversation != key_id)
                         {
-                            action(state, Action::Select(id.clone()));
+                            action(state, Action::Select(key_id.clone()));
                         }
                     })
-                    .on_key(move |state: &mut State, key, tx| {
-                        activate(key, tx, |_| {
-                            if state
-                                .core()
-                                .is_some_and(|core| core.scope.conversation != key_id)
-                            {
-                                action(state, Action::Select(key_id.clone()));
-                            }
-                        })
-                    }),
-            );
-            out = out.child(
-                typography
-                    .text("Close")
-                    .key(format!("chat-close-{}", tab.id))
-                    .role("button")
-                    .label(format!("Close {}", tab.title))
-                    .focusable(true)
-                    .disabled(!enabled)
-                    .native_activation()
-                    .on_press_tx(move |state: &mut State, tx| close_tab(state, &close_id, tx))
-                    .on_key(move |state: &mut State, key, tx| {
-                        activate(key, tx, |tx| close_tab(state, &close_key_id, tx))
-                    }),
-            );
+                });
+            let close = icon_button(&CLOSE, 11.0, 24.0, 5.0, p)
+                .key(format!("chat-close-{}", tab.id))
+                .label(format!("Close {}", tab.title))
+                .disabled(!enabled)
+                .native_activation()
+                .on_press_tx(move |state: &mut State, tx| close_tab(state, &close_id, tx))
+                .on_key(move |state: &mut State, key, tx| {
+                    activate(key, tx, |tx| close_tab(state, &close_key_id, tx))
+                });
+            let tab = row()
+                .w(144.0)
+                .h(28.0)
+                .pl(10.0)
+                .pr(2.0)
+                .gap(2.0)
+                .radius(7.0)
+                .items_center()
+                .opacity(if enabled { 1.0 } else { 0.48 })
+                .child(select)
+                .child(close);
+            out = out.child(if active {
+                tab.fill(p.hover_2)
+            } else {
+                tab.hover(p.hover)
+            });
         }
         out.child(
-            typography
-                .text("New chat")
+            icon_button(&super::composer::PLUS, 15.0, 28.0, 7.0, p)
                 .key("chat-new")
-                .role("button")
-                .focusable(true)
+                .label("New chat")
+                .ml(2.0)
                 .disabled(!enabled)
                 .native_activation()
                 .on_press_tx(|state: &mut State, _| action(state, Action::New))
@@ -307,6 +325,7 @@ impl Conversations {
 
     pub(super) fn view(&self, state: &State) -> El {
         let typography = state.preferences.typography();
+        let p = state.preferences.palette();
         let Some(core) = state.core() else {
             return col();
         };
@@ -315,6 +334,7 @@ impl Conversations {
         let mut out = chat_list()
             .child(typography.text("Saved chats").role("heading"))
             .child(button(
+                p,
                 typography,
                 "Close",
                 "saved-chats-close".into(),
@@ -322,6 +342,7 @@ impl Conversations {
                 |state, tx| state.conversations.close(tx),
             ))
             .child(button(
+                p,
                 typography,
                 "New chat",
                 "saved-chats-new".into(),
@@ -336,6 +357,7 @@ impl Conversations {
         }
         if retry {
             out = out.child(button(
+                p,
                 typography,
                 "Try again",
                 "saved-chats-retry".into(),
@@ -355,6 +377,7 @@ impl Conversations {
                     &item.title.text
                 };
                 out = out.child(button(
+                    p,
                     typography,
                     title,
                     format!("saved-chat-{}", item.id),
@@ -373,6 +396,7 @@ impl Conversations {
             }
         }
         out.child(button(
+            p,
             typography,
             "Recent chats",
             "saved-chats-recent".into(),
@@ -380,6 +404,7 @@ impl Conversations {
             |state, _| action(state, Action::Recent),
         ))
         .child(button(
+            p,
             typography,
             "Older chats",
             "saved-chats-older".into(),
@@ -388,27 +413,52 @@ impl Conversations {
         ))
     }
 
-    pub(super) fn toolbar(&self, state: &State) -> El {
+    /// Older and Latest messages, and a paging error, for the chat toolbar row.
+    pub(super) fn toolbar(&self, state: &State) -> Vec<El> {
         let typography = state.preferences.typography();
+        let p = state.preferences.palette();
         let available = !self.busy && !state.running();
-        let mut out = row().gap(8.0).child(button(
+        let mut out = vec![button(
+            p,
             typography,
             "Older messages",
             "archive-older".into(),
             available && self.older_cursor.is_some(),
             |state, _| action(state, Action::OlderArchive),
-        ));
+        )];
         if let Some(error) = &self.error {
-            out = out.child(typography.text(error).wrap().role("alert"));
+            out.push(typography.text(error).wrap().role("alert"));
         }
-        out.child(button(
+        out.push(button(
+            p,
             typography,
             "Latest messages",
             "archive-latest".into(),
             available,
             |state, _| action(state, Action::LatestArchive),
-        ))
+        ));
+        out
     }
+}
+
+const CLOSE: Icon = Icon {
+    name: "metldr-close",
+    view: 24.0,
+    body: "<path d=\"M18 6 6 18M6 6l12 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\"/>",
+};
+
+/// A square icon control: `size` points wide, icon `glyph` points, muted ink.
+fn icon_button(icon: &'static Icon, glyph: f32, size: f32, radius: f32, p: super::preferences::Palette) -> El {
+    row()
+        .size(size, size)
+        .radius(radius)
+        .center()
+        .child(::rune::el::icon(icon, glyph).color(p.ink_3))
+        .role("button")
+        .focusable(true)
+        .hover(p.hover)
+        .press(p.hover_2)
+        .press_scale(0.97)
 }
 
 fn chat_list() -> El {
@@ -564,26 +614,40 @@ mod tests {
     }
 }
 
-fn button(
+pub(super) fn button(
+    p: super::preferences::Palette,
     typography: super::preferences::Typography,
     label: &str,
     key: String,
     enabled: bool,
     action: impl Fn(&mut State, &mut Tx) + 'static,
 ) -> El {
-    let el = typography
-        .text(label)
+    let el = row()
         .key(key)
+        .min_h(32.0)
+        .px(8.0)
+        .items_center()
+        .radius(8.0)
+        .border(1.0, p.line)
+        .fill(p.field)
+        .child(
+            typography
+                .text(label)
+                .font(typography.font(12.0, 400.0))
+                .color(p.ink_2),
+        )
         .role("button")
+        .label(label)
         .focusable(true)
-        .disabled(!enabled)
-        .padding(8.0);
+        .disabled(!enabled);
     if !enabled {
-        return el;
+        return el.opacity(0.5);
     }
     let action = Rc::new(action);
     let press = Rc::clone(&action);
-    el.press(oklch(0.7, 0.08, 250.0).alpha(0.2))
+    el.hover(p.hover)
+        .press(p.hover_2)
+        .press_scale(0.97)
         .on_press_tx(move |state: &mut State, tx| {
             state.sound(crate::interaction_audio::Cue::Page);
             press(state, tx)

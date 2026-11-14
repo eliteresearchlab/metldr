@@ -107,7 +107,11 @@ impl Sources {
         });
     }
 
-    pub(super) fn view(&self, typography: super::preferences::Typography) -> El {
+    pub(super) fn view(
+        &self,
+        typography: super::preferences::Typography,
+        p: super::preferences::Palette,
+    ) -> El {
         let status = match self.snapshot.as_ref().map(UiSourceSnapshot::status) {
             None => "Loading saved page",
             Some(UiSourceStatus::Empty) => "No saved page",
@@ -117,30 +121,53 @@ impl Sources {
             Some(UiSourceStatus::Saved) => "Saved capture",
             Some(UiSourceStatus::Unavailable) => "Page check unavailable",
         };
-        let mut result = col()
-            .key("saved-source")
-            .w_full()
-            .gap(8.0)
-            .child(
-                typography
-                    .text(if self.expanded {
-                        "Hide saved page"
-                    } else {
-                        "Show saved page"
-                    })
-                    .key("saved-source-toggle")
-                    .role("button")
-                    .focusable(true)
-                    .min_h(44.0)
-                    .expanded(self.expanded)
-                    .padding(6.0)
-                    .press(oklch(0.6, 0.0, 0.0).alpha(0.16))
-                    .on_press_tx(Self::toggle)
-                    .on_key(|state: &mut State, key, tx| {
-                        composer::enter(state, key, tx, Self::toggle)
-                    }),
-            )
-            .child(typography.text(status).role("status"));
+        let mut result = col().key("saved-source").w_full().gap(8.0).child(
+            row()
+                .w_full()
+                .min_h(44.0)
+                .gap(8.0)
+                .items_center()
+                .child(
+                    row()
+                        .key("saved-source-toggle")
+                        .gap(8.0)
+                        .min_h(44.0)
+                        .items_center()
+                        .child(
+                            typography
+                                .text("Saved page")
+                                .font(typography.font(13.0, 500.0))
+                                .color(p.ink),
+                        )
+                        .child(
+                            ::rune::el::icon(&super::composer::CHEVRON, 11.0)
+                                .color(p.ink_3)
+                                .icon_rotation(if self.expanded { std::f32::consts::PI } else { 0.0 }),
+                        )
+                        .role("button")
+                        .label(if self.expanded {
+                            "Hide saved page"
+                        } else {
+                            "Show saved page"
+                        })
+                        .focusable(true)
+                        .expanded(self.expanded)
+                        .press_scale(0.97)
+                        .on_press_tx(Self::toggle)
+                        .on_key(|state: &mut State, key, tx| {
+                            composer::enter(state, key, tx, Self::toggle)
+                        }),
+                )
+                .child(
+                    typography
+                        .text(status)
+                        .font(typography.font(13.0, 400.0))
+                        .color(p.ink_2)
+                        .truncate()
+                        .min_w(0.0)
+                        .role("status"),
+                ),
+        );
         if !self.expanded {
             return result;
         }

@@ -29,12 +29,12 @@ const BORDER: f32 = 1.0;
 const INSET: f32 = 14.0 + BORDER;
 const RADIUS: f32 = 22.0;
 
-const PLUS: Icon = Icon {
+pub(super) const PLUS: Icon = Icon {
     name: "metldr-plus",
     view: 24.0,
     body: "<path d=\"M12 5v14M5 12h14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>",
 };
-const CHEVRON: Icon = Icon {
+pub(super) const CHEVRON: Icon = Icon {
     name: "metldr-chevron",
     view: 24.0,
     body: "<path d=\"m6 9 6 6 6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",

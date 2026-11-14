@@ -1468,7 +1468,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     let palette = state.preferences.palette();
     let (ink, page) = (palette.ink, palette.page);
     let typography = state.preferences.typography();
-    let mut thread = col().key("messages").w_full().gap(16.0).padding(16.0);
+    let mut thread = col().key("messages").w_full().gap(16.0);
     if let Some(updates) = &state.updates {
         let presentation = updates.presentation.borrow();
         for message in &presentation.messages.messages {
@@ -1536,7 +1536,12 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                     }),
             );
         }
-        return col().w_full().h_full().fill(page).color(ink).child(thread);
+        return col()
+            .w_full()
+            .h_full()
+            .fill(page)
+            .color(ink)
+            .child(thread.padding(16.0));
     };
     let connection = connection::UiConnectionSnapshot::read(core);
     if let Some(plan) = core.page.view.borrow().task_plan.as_ref() {
@@ -1552,20 +1557,11 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             State::session_plan,
         ));
     }
-    if !core.history_loading.get()
+    let empty = !core.history_loading.get()
         && state
             .updates
             .as_ref()
-            .is_some_and(|updates| updates.presentation.borrow().messages.messages.is_empty())
-    {
-        thread = thread.child(
-            typography
-                .text("Welcome to metldr")
-                .role("heading")
-                .level(1),
-        );
-        thread = thread.child(typography.text("What do you want to do?").wrap());
-    }
+            .is_some_and(|updates| updates.presentation.borrow().messages.messages.is_empty());
     if state.conversations.is_open() {
         return col()
             .w_full()
@@ -1630,7 +1626,6 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 )),
         );
     }
-    thread = thread.child(state.sources.view(typography));
     for reply in replies::view(state, core) {
         thread = thread.child(reply);
     }
@@ -1721,46 +1716,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .updates
         .as_ref()
         .and_then(|updates| updates.presentation.borrow().error.clone());
-    col()
-        .w_full()
-        .h_full()
-        .min_h(0.0)
-        .fill(page)
-        .color(ink)
-        .child(
-            row()
-                .w_full()
-                .padding(8.0)
-                .child(
-                    typography
-                        .text("Saved chats")
-                        .key("saved-chats-open")
-                        .role("button")
-                        .focusable(true)
-                        .padding(6.0)
-                        .press(ink.alpha(0.12))
-                        .on_press_tx(|state: &mut State, tx| state.open_conversations(tx))
-                        .on_key(|state: &mut State, key, tx| {
-                            composer::enter(state, key, tx, State::open_conversations)
-                        }),
-                )
-                .child(
-                    typography
-                        .text("Settings")
-                        .key("settings-open")
-                        .role("button")
-                        .focusable(true)
-                        .padding(6.0)
-                        .press(ink.alpha(0.12))
-                        .on_press_tx(|state: &mut State, tx| state.open_settings(tx))
-                        .on_key(|state: &mut State, key, tx| {
-                            composer::enter(state, key, tx, State::open_settings)
-                        }),
-                ),
-        )
-        .child(
-            typography
-                .text(if connection.stale() {
+    let status = if connection.stale() {
                     "The conversation changed. Reload the panel."
                 } else if connection.reconnecting() {
                     "Reconnecting"
@@ -1784,21 +1740,99 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                     "Loading history"
                 } else {
                     "Ready"
-                })
-                .key("conversation-status")
-                .role("status")
-                .padding(8.0),
-        )
-        .child(state.conversations.tabs(state, core))
-        .child(state.conversations.toolbar(state))
+                };
+    let p = palette;
+    let mut toolbar = row()
+        .w_full()
+        .flex_wrap()
+        .gap(8.0)
+        .items_center()
         .child(
-            thread
-                .drawn_rect_into(&state.thread_rect)
+            typography
+                .text(status)
+                .font(typography.font(12.0, 400.0))
+                .color(p.ink_2)
+                .key("conversation-status")
+                .role("status"),
+        )
+        .child(conversations::button(
+            p,
+            typography,
+            "Saved chats",
+            "saved-chats-open".into(),
+            true,
+            |state: &mut State, tx| state.open_conversations(tx),
+        ))
+        .child(conversations::button(
+            p,
+            typography,
+            "Settings",
+            "settings-open".into(),
+            true,
+            |state: &mut State, tx| state.open_settings(tx),
+        ));
+    for control in state.conversations.toolbar(state) {
+        toolbar = toolbar.child(control);
+    }
+    let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });
+    if empty {
+        // Two lines with tight leading and negative tracking, as the reference's 26 px heading.
+        let hero = |line: &str| {
+            typography
+                .text(line)
+                .font(
+                    typography
+                        .font(26.0, 400.0)
+                        .lh(26.0 * 1.35 * typography.scale)
+                        .tracking(-0.02 * 26.0 * typography.scale),
+                )
+                .wrap()
+        };
+        head = head.child(
+            col()
+                .child(hero("Welcome to metldr").color(p.ink_3).role("heading").level(1))
+                .child(hero("What do you want to do?").color(p.ink)),
+        );
+    }
+    head = head.child(toolbar).child(state.sources.view(typography, p));
+    let body = col()
+        .w_full()
+        .max_w(720.0)
+        .gap(32.0)
+        .child(head)
+        .child(thread);
+    let scroll = col()
+        .w_full()
+        .px(16.0)
+        .pt(32.0)
+        .pb(if empty { 40.0 } else { 24.0 })
+        .items_center()
+        .child(body)
+        .drawn_rect_into(&state.thread_rect)
+        .grow(1.0)
+        .min_h(0.0)
+        .scroll(ScrollSpec { stick_bottom: true });
+    col()
+        .w_full()
+        .h_full()
+        .min_h(0.0)
+        .fill(p.canvas)
+        .color(ink)
+        .padding(10.0)
+        .child(
+            col()
+                .w_full()
                 .grow(1.0)
                 .min_h(0.0)
-                .scroll(ScrollSpec { stick_bottom: true }),
+                .fill(page)
+                .border(1.0, p.line)
+                .radius(14.0)
+                .clip_rounded(14.0)
+                .child(state.conversations.tabs(state, core))
+                .child(col().w_full().h(1.0).fill(p.line))
+                .child(if empty { scroll.justify_center() } else { scroll })
+                .child(col().w_full().px(16.0).pb(24.0).center_y().child(composer)),
         )
-        .child(col().w_full().px(16.0).pb(24.0).center_y().child(composer))
 }
 
 thread_local! {
