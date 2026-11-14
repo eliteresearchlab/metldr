@@ -246,16 +246,14 @@ fn menu_row(
 pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     let p = palette(state);
     let typography = state.preferences.typography();
-    let model_label = state.selected_choice().map_or_else(
-        || "Choose model".to_owned(),
-        |choice| {
-            if supports_plan(&choice.value) && state.mode == Mode::Plan {
-                format!("Plan mode, {}", choice.label)
-            } else {
-                choice.label.to_string()
-            }
-        },
-    );
+    // The label moves into the text node: a route label built for this frame is never copied again.
+    let model_label: std::borrow::Cow<'static, str> = match state.selected_choice() {
+        None => "Choose model".into(),
+        Some(choice) if supports_plan(&choice.value) && state.mode == Mode::Plan => {
+            format!("Plan mode, {}", choice.label).into()
+        }
+        Some(choice) => choice.label,
+    };
     let mut field = ::rune::el::text_input(
         &state.draft,
         TextStyle::new((16.0 * typography.scale).max(16.0), 400.0),

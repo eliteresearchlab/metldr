@@ -143,10 +143,9 @@ impl Sources {
                         .color(p.ink_2)
                         .truncate()
                         .min_w(0.0)
-                        .shrink()
+                        .grow(1.0)
                         .role("status"),
                 )
-                .child(row().grow(1.0))
                 .child(
                     ::rune::el::icon(&super::composer::CHEVRON, 11.0)
                         .color(p.ink)
