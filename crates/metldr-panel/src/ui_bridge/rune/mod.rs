@@ -130,6 +130,8 @@ struct State {
     sources: sources::Sources,
     preferences: preferences::Preferences,
     settings_open: bool,
+    /// Settings sections the user opened; kept while the panel stays open.
+    settings_sections: std::collections::HashSet<&'static str>,
     /// The home reveal has drawn its hidden first frame and now eases in.
     welcome_revealed: bool,
     conversations: conversations::Conversations,
@@ -163,6 +165,7 @@ impl Default for State {
             sources: sources::Sources::default(),
             preferences: preferences::Preferences::default(),
             settings_open: false,
+            settings_sections: Default::default(),
             welcome_revealed: false,
             conversations: conversations::Conversations::default(),
             tabs: conversations::Tabs::default(),
@@ -1594,37 +1597,64 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             );
     }
     if state.settings_open {
+        let (providers, agents) = state.settings.view(core, cx, typography, palette);
+        let title = row()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .child(
+                typography
+                    .text("Settings")
+                    .font(typography.font(16.0, 600.0))
+                    .role("heading"),
+            )
+            .child(conversations::button(
+                palette,
+                typography,
+                "Close",
+                "settings-back".into(),
+                true,
+                |state: &mut State, tx| state.close_settings(tx),
+            )
+            .label("Back to chat"));
         return col()
             .w_full()
             .h_full()
             .min_h(0.0)
-            .fill(page)
+            .fill(palette.canvas)
             .color(ink)
-            .child(
-                typography
-                    .text("Back to chat")
-                    .key("settings-back")
-                    .role("button")
-                    .focusable(true)
-                    .padding(12.0)
-                    .press(palette.press)
-                    .press_scale(theme::PRESS_SCALE)
-                    .on_press_tx(|state: &mut State, tx| state.close_settings(tx))
-                    .on_key(|state: &mut State, key, tx| {
-                        composer::enter(state, key, tx, State::close_settings)
-                    }),
-            )
+            .padding(10.0)
             .child(
                 col()
-                    .gap(16.0)
-                    .child(state.preferences.view(State::preference))
-                    .child(state.settings.view(core, cx, typography, palette))
-                    .padding(16.0)
+                    .key("settings-card")
+                    .w_full()
                     .grow(1.0)
                     .min_h(0.0)
-                    .scroll(ScrollSpec {
-                        stick_bottom: false,
-                    }),
+                    .gap(12.0)
+                    .padding(16.0)
+                    .fill(page)
+                    .border(1.0, palette.line)
+                    .radius(14.0)
+                    .clip_rounded(14.0)
+                    .child(title)
+                    .child(
+                        col()
+                            .w_full()
+                            .gap(10.0)
+                            .child(settings_section(
+                                state,
+                                "appearance",
+                                "Appearance and sound",
+                                state.preferences.view(State::preference),
+                            ))
+                            .child(settings_section(state, "providers", "AI providers", providers))
+                            .child(settings_section(state, "agents", "Installed agents", agents))
+                            .grow(1.0)
+                            .min_h(0.0)
+                            .scroll(ScrollSpec {
+                                stick_bottom: false,
+                            }),
+                    ),
             );
     }
     if let Some(followup) = &state.proposed_followup {
@@ -1855,6 +1885,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .padding(10.0)
         .child(
             col()
+                .key("chat-card")
                 .w_full()
                 .grow(1.0)
                 .min_h(0.0)
@@ -1868,6 +1899,62 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .child(if empty { scroll.justify_center() } else { scroll })
                 .child(col().w_full().px(16.0).pb(24.0).center_y().child(composer)),
         )
+}
+
+/// A collapsible settings card: a 44 px header with the title and a chevron, and the body below
+/// it while open.
+fn settings_section(state: &State, key: &'static str, title: &'static str, body: El) -> El {
+    let palette = state.preferences.palette();
+    let typography = state.preferences.typography();
+    let open = state.settings_sections.contains(key);
+    let header = row()
+        .key(format!("settings-section-{key}"))
+        .w_full()
+        .min_h(44.0)
+        .px(14.0)
+        .gap(6.0)
+        .items_center()
+        .child(
+            typography
+                .text(title)
+                .font(typography.font(14.0, 600.0))
+                .grow(1.0),
+        )
+        .child(
+            ::rune::el::icon(&composer::CHEVRON, 11.0)
+                .color(palette.ink_3)
+                .icon_rotation(if open { std::f32::consts::PI } else { 0.0 }),
+        )
+        .role("button")
+        .label(title)
+        .expanded(open)
+        .focusable(true)
+        .hover(palette.hover)
+        .press(palette.press)
+        .on_press_tx(move |state: &mut State, _| {
+            if !state.settings_sections.remove(key) {
+                state.settings_sections.insert(key);
+            }
+        })
+        .on_key(move |state: &mut State, key_event, tx| {
+            if key_event.key != ::rune::Key::Enter {
+                return false;
+            }
+            if !tx.key_repeat() && !state.settings_sections.remove(key) {
+                state.settings_sections.insert(key);
+            }
+            true
+        });
+    let mut card = col()
+        .w_full()
+        .radius(10.0)
+        .fill(palette.surface)
+        .border(1.0, palette.line)
+        .child(header);
+    if open {
+        card = card.child(col().w_full().px(14.0).pb(14.0).child(body));
+    }
+    card
 }
 
 thread_local! {
