@@ -157,16 +157,14 @@ impl Client {
             if bytes > 524_288 {
                 return Err("Messages stream exceeds bound".into());
             }
-            for byte in chunk {
-                if let Some((event, data)) = sse.byte(byte)? {
-                    cancelled(stop)?;
-                    if let Some(event) = state.frame(&event, &data)? {
-                        if let TextEvent::Delta(text) = &event {
-                            rendered.push_str(text);
-                        }
-                    emit(event)?;
-                        emit(event)?;
+            let mut rest = &chunk[..];
+            while let Some((event, data)) = sse.next(&mut rest)? {
+                cancelled(stop)?;
+                if let Some(event) = state.frame(&event, &data)? {
+                    if let TextEvent::Delta(text) = &event {
+                        rendered.push_str(text);
                     }
+                    emit(event)?;
                 }
             }
         }

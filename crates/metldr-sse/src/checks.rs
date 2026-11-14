@@ -57,3 +57,25 @@ fn framing_preserves_events_and_rejects_invalid_or_incomplete_input() {
         );
     }
 }
+
+#[test]
+fn every_chunk_size_yields_the_same_events() {
+    let wire = "\u{feff}event: a\r\ndata: one\r\r\ndata: two\n\ndata: three\r\n\r\n".as_bytes();
+    for size in 1..=wire.len() {
+        let mut parser = Sse::new("Messages");
+        let mut events = Vec::new();
+        for chunk in wire.chunks(size) {
+            let mut rest = chunk;
+            while let Some(event) = parser.next(&mut rest).unwrap() {
+                events.push(event);
+            }
+        }
+        parser.finish().unwrap();
+        let expected = [
+            ("a".into(), "one".into()),
+            ("".into(), "two".into()),
+            ("".into(), "three".into()),
+        ];
+        assert_eq!(events, expected, "chunk size {size}");
+    }
+}

@@ -256,24 +256,18 @@ impl Client {
             if bytes > bounds.stream {
                 return Err("Responses stream exceeds bound".into());
             }
-            for byte in chunk {
-                if let Some((event, data)) = sse.byte(byte)? {
-                    cancelled(stop)?;
-                    for text_event in state.frame(&event, &data)? {
-                        if let TextEvent::Delta(text) = &text_event {
-                            rendered.push_str(text);
-                        }
+            let mut rest = &chunk[..];
+            while let Some((event, data)) = sse.next(&mut rest)? {
+                cancelled(stop)?;
+                for text_event in state.frame(&event, &data)? {
+                    if let TextEvent::Delta(text) = &text_event {
+                        rendered.push_str(text);
+                    }
                     emit(text_event)?;
                 }
                 if let Some(update) = state.presentation_progress()? {
                     cancelled(stop)?;
                     progress(update)?;
-                        emit(text_event)?;
-                    }
-                    if let Some(update) = state.presentation_progress()? {
-                        cancelled(stop)?;
-                        progress(update)?;
-                    }
                 }
             }
         }
@@ -287,17 +281,17 @@ impl Client {
         }
         if rendered != turn.text {
             return Err("Responses streamed text differs from completed output".into());
-    /// Usage from the most recent completed response.
-    pub fn usage(&self) -> Option<crate::Usage> {
-        self.usage
-    }
-
         }
         Ok(turn)
     }
 }
 
 impl PresentationConversation {
+    /// Usage from the most recent completed response.
+    pub fn usage(&self) -> Option<crate::Usage> {
+        self.usage
+    }
+
     pub async fn next(
         &mut self,
         stop: &AtomicBool,
@@ -308,13 +302,13 @@ impl PresentationConversation {
             Phase::Ready => {}
             Phase::Pending(_) => return Err("Responses tool result missing".into()),
             Phase::Closed => return Err("Responses conversation is closed".into()),
-        self.usage = Some(turn.usage);
         }
         self.phase = Phase::Closed;
         let turn = self
             .client
             .send(&self.request, stop, emit, PRESENTATION_BOUNDS, progress)
             .await?;
+        self.usage = Some(turn.usage);
         let Some(call) = turn.call.as_ref() else {
             return Ok(None);
         };

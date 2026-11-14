@@ -575,6 +575,9 @@ dependencies = [
 [[package]]
 name = "metldr-sse"
 version = "0.1.0"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "mio"

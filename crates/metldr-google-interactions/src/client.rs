@@ -160,16 +160,14 @@ impl Client {
             if bytes > 524_288 {
                 return Err("Google Interactions stream exceeds bound".into());
             }
-            for byte in chunk {
-                if let Some((event, data)) = sse.byte(byte)? {
-                    cancelled(stop)?;
-                    for text_event in state.frame(&event, &data)? {
-                        if let TextEvent::Delta(text) = &text_event {
-                            rendered.push_str(text);
-                        }
-                    emit(text_event)?;
-                        emit(text_event)?;
+            let mut rest = &chunk[..];
+            while let Some((event, data)) = sse.next(&mut rest)? {
+                cancelled(stop)?;
+                for text_event in state.frame(&event, &data)? {
+                    if let TextEvent::Delta(text) = &text_event {
+                        rendered.push_str(text);
                     }
+                    emit(text_event)?;
                 }
             }
         }

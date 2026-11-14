@@ -32,19 +32,45 @@ impl Sse {
         }
     }
 
+    /// Feeds one byte; prefer [`Sse::next`] for whole chunks.
     pub fn byte(&mut self, byte: u8) -> Result<Option<(String, String)>> {
-        if self.after_cr && byte == b'\n' {
-            self.after_cr = false;
-            return Ok(None);
-        }
-        self.after_cr = byte == b'\r';
-        if !matches!(byte, b'\r' | b'\n') {
-            if self.line.len() >= self.bound {
-                return Err(format!("{} SSE line exceeds bound", self.provider));
+        let mut input = &[byte][..];
+        self.next(&mut input)
+    }
+
+    /// Consumes `input` up to and including the line that completes the next event, and returns
+    /// that event; returns `None` once `input` is used up. Line ends are found with a SIMD scan,
+    /// and line bytes are copied in bulk.
+    pub fn next(&mut self, input: &mut &[u8]) -> Result<Option<(String, String)>> {
+        while let Some((&first, rest)) = input.split_first() {
+            if std::mem::take(&mut self.after_cr) && first == b'\n' {
+                *input = rest;
+                continue;
             }
-            self.line.push(byte);
-            return Ok(None);
+            let Some(at) = memchr::memchr2(b'\r', b'\n', input) else {
+                self.extend(input)?;
+                *input = &[];
+                break;
+            };
+            self.extend(&input[..at])?;
+            self.after_cr = input[at] == b'\r';
+            *input = &input[at + 1..];
+            if let Some(frame) = self.line()? {
+                return Ok(Some(frame));
+            }
         }
+        Ok(None)
+    }
+
+    fn extend(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.line.len().saturating_add(bytes.len()) > self.bound {
+            return Err(format!("{} SSE line exceeds bound", self.provider));
+        }
+        self.line.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn line(&mut self) -> Result<Option<(String, String)>> {
         let line = std::str::from_utf8(&self.line)
             .map_err(|_| format!("{} SSE is not UTF8", self.provider))?;
         let line = if self.started {
