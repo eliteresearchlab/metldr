@@ -110,7 +110,7 @@ impl Sources {
     pub(super) fn view(
         &self,
         typography: super::preferences::Typography,
-        p: super::preferences::Palette,
+        p: &super::preferences::Palette,
     ) -> El {
         let status = match self.snapshot.as_ref().map(UiSourceSnapshot::status) {
             None => "Loading saved page",
@@ -243,7 +243,7 @@ impl Sources {
             .padding(6.0);
         if enabled {
             check = check
-                .press(oklch(0.6, 0.0, 0.0).alpha(0.16))
+                .press(typography.press)
                 .on_press_tx(Self::refresh)
                 .on_key(|state: &mut State, key, tx| {
                     composer::enter(state, key, tx, Self::refresh)

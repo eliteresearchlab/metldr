@@ -18,6 +18,7 @@ mod replies;
 mod secrets;
 mod settings;
 mod sources;
+mod theme;
 
 use activities::Activities;
 use messages::Messages;
@@ -920,7 +921,7 @@ fn followup_controls<S: 'static>(
                 .role("button")
                 .focusable(true)
                 .native_activation()
-                .press(typography.ink.alpha(0.12))
+                .press(typography.press)
                 .on_press_tx(action)
                 .on_key(move |state: &mut S, key, tx| composer::enter(state, key, tx, action)),
         );
@@ -953,10 +954,7 @@ mod followup_tests {
             plan_view(
                 &sample_plan(crate::model::PlanState::Declined),
                 true,
-                preferences::Typography {
-                    scale: 1.0,
-                    ink: oklch(0.5, 0.0, 0.0),
-                },
+                preferences::Typography::new(1.0, &preferences::Palette::for_theme("light")),
                 State::decide_plan,
                 State::session_plan,
             )
@@ -993,10 +991,7 @@ mod followup_tests {
         plan_view(
             plan,
             true,
-            preferences::Typography {
-                scale: 1.0,
-                ink: oklch(0.5, 0.0, 0.0),
-            },
+            preferences::Typography::new(1.0, &preferences::Palette::for_theme("light")),
             State::decide_plan,
             State::session_plan,
         )
@@ -1054,10 +1049,7 @@ mod followup_tests {
         plan_view(
             &plan,
             enabled,
-            preferences::Typography {
-                scale: 1.0,
-                ink: oklch(0.5, 0.0, 0.0),
-            },
+            preferences::Typography::new(1.0, &preferences::Palette::for_theme("light")),
             |state: &mut PlanTest, plan, approve, _| {
                 *state.pending.borrow_mut() = Some((plan.run.clone(), plan.revision));
                 state
@@ -1188,10 +1180,7 @@ mod followup_tests {
     fn enter_activates_each_followup_once_and_ignores_repeat() {
         fn view(_: &[u32; 2], _: &mut Cx<[u32; 2]>) -> El {
             followup_controls(
-                preferences::Typography {
-                    scale: 1.0,
-                    ink: oklch(0.5, 0.0, 0.0),
-                },
+                preferences::Typography::new(1.0, &preferences::Palette::for_theme("light")),
                 |counts: &mut [u32; 2], _| counts[0] += 1,
                 |counts: &mut [u32; 2], _| counts[1] += 1,
             )
@@ -1282,7 +1271,7 @@ fn plan_button<S: 'static>(
         .focusable(enabled)
         .disabled(!enabled)
         .native_activation()
-        .press(typography.ink.alpha(0.12))
+        .press(typography.press)
         .on_press_tx(move |state: &mut S, tx| act(state, press_plan.clone(), flag, tx))
         .on_key(move |state: &mut S, key, tx| {
             if key.key != ::rune::Key::Enter {
@@ -1388,7 +1377,7 @@ fn plan_view<S: 'static>(
                         .focusable(enabled)
                         .disabled(!enabled)
                         .native_activation()
-                        .press(typography.ink.alpha(0.12))
+                        .press(typography.press)
                         .on_press_tx(move |state: &mut S, tx| {
                             decide(state, press_plan.clone(), approve, tx)
                         })
@@ -1503,7 +1492,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 thread = thread.child(
                     state
                         .activities
-                        .view(id, updates, typography)
+                        .view(id, updates, typography, &palette)
                         .key(id)
                         .w_full(),
                 );
@@ -1597,7 +1586,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                     .role("button")
                     .focusable(true)
                     .padding(12.0)
-                    .press(ink.alpha(0.12))
+                    .press(palette.press)
                     .on_press_tx(|state: &mut State, tx| state.close_settings(tx))
                     .on_key(|state: &mut State, key, tx| {
                         composer::enter(state, key, tx, State::close_settings)

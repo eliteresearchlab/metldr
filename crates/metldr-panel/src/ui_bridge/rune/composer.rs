@@ -80,14 +80,12 @@ struct Palette {
     line: ::rune::Color,
     strong: ::rune::Color,
     accent: ::rune::Color,
+    press: ::rune::Color,
+    press_solid: ::rune::Color,
 }
 
 fn palette(state: &State) -> Palette {
     let p = state.preferences.palette();
-    let light = state
-        .preferences
-        .snapshot()
-        .is_some_and(|snapshot| snapshot.theme() == "light");
     Palette {
         surface: p.surface,
         hover: p.hover,
@@ -95,16 +93,10 @@ fn palette(state: &State) -> Palette {
         secondary: p.ink_2,
         muted: p.ink_3,
         line: p.line,
-        strong: if light {
-            oklch(0.912, 0.005, 258.326)
-        } else {
-            oklch(0.356, 0.007, 264.474)
-        },
-        accent: if light {
-            oklch(0.626, 0.205, 254.947)
-        } else {
-            oklch(0.68, 0.173, 253.301)
-        },
+        strong: p.line_strong,
+        accent: p.accent,
+        press: p.press,
+        press_solid: p.press_solid,
     }
 }
 
@@ -296,7 +288,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         p.secondary,
     )
     .hover(p.hover)
-    .press(p.secondary.alpha(0.16))
+    .press(p.press)
     .on_press_tx(sources)
     .on_key(|state: &mut State, key, tx| {
         if matches!(&key.key, Key::Down | Key::Up) {
@@ -365,7 +357,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     let action = if running {
         let stop = button("rune-stop", "Stop", &STOP, p.surface)
             .fill(p.ink)
-            .press(p.surface.alpha(0.16))
+            .press(p.press_solid)
             .on_press_tx(|state: &mut State, tx| state.stop(tx))
             .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::stop));
         if let Some(correction) = super::corrections::control(state) {
@@ -385,7 +377,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .disabled(!can_send);
         if can_send {
             send = send
-                .press(p.surface.alpha(0.16))
+                .press(p.press_solid)
                 .on_press_tx(|state: &mut State, tx| state.send(tx))
                 .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::send));
         }

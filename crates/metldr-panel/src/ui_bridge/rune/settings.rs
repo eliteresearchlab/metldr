@@ -554,7 +554,7 @@ fn provider_input(
     edit: &TextEdit,
     enabled: bool,
     typography: super::preferences::Typography,
-    palette: super::preferences::Palette,
+    palette: &super::preferences::Palette,
 ) -> El {
     let ink = palette.ink;
     let mut input = ::rune::el::text_input(
@@ -570,7 +570,7 @@ fn provider_input(
     .fill(palette.field)
     .border(1.0, palette.line)
     .color(ink)
-    .caret(ink, oklch(0.68, 0.12, 250.0).alpha(0.3))
+    .caret(ink, palette.selection)
     .disabled(!enabled)
     .on_edit(move |state: &mut State| match field {
         ProviderField::Endpoint => &mut state.settings.providers[index].endpoint,
@@ -602,7 +602,7 @@ fn agent_input(
     edit: &TextEdit,
     enabled: bool,
     typography: super::preferences::Typography,
-    palette: super::preferences::Palette,
+    palette: &super::preferences::Palette,
 ) -> El {
     let ink = palette.ink;
     let input = ::rune::el::text_input(
@@ -618,7 +618,7 @@ fn agent_input(
     .fill(palette.field)
     .border(1.0, palette.line)
     .color(ink)
-    .caret(ink, oklch(0.68, 0.12, 250.0).alpha(0.3))
+    .caret(ink, palette.selection)
     .disabled(!enabled)
     .on_edit(move |state: &mut State| match field {
         AgentField::Executable => &mut state.settings.agents[index].executable,
@@ -663,7 +663,7 @@ fn button(
     let action = Rc::new(action);
     let press = Rc::clone(&action);
     element
-        .press(oklch(0.7, 0.08, 250.0).alpha(0.2))
+        .press(typography.press)
         .on_press(move |state: &mut State| {
             state.sound(cue);
             press(state)
@@ -687,7 +687,7 @@ impl Settings {
         core: &Rc<Core>,
         _cx: &mut Cx<State>,
         typography: super::preferences::Typography,
-        palette: super::preferences::Palette,
+        palette: &super::preferences::Palette,
     ) -> El {
         use crate::ui_bridge::settings::Family;
         let page = &core.page;
