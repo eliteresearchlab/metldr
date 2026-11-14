@@ -161,7 +161,7 @@ impl Session {
         self.stdin.take();
         let deadline = Instant::now() + Duration::from_secs(3);
         let status = loop {
-            while let Ok(_) = self.rx.try_recv() {}
+            while self.rx.try_recv().is_ok() {}
             if let Some(status) = self.child.try_wait()? {
                 break status;
             }

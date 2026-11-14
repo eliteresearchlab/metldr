@@ -219,13 +219,11 @@ fn parse_fields(schema: &Value) -> Result<Vec<FormField>> {
             .get("default")
             .map(|v| bounded_string(v, 4096, false))
             .transpose()?;
-        if let Some(d) = &default {
-            if choices.as_ref().is_some_and(|c| !c.contains(d))
-                || d.chars().count() < min
-                || d.chars().count() > max
-            {
-                return Err(invalid("Unsupported MCP form default"));
-            }
+        if let Some(d) = &default
+            && (choices.as_ref().is_some_and(|c| !c.contains(d))
+                || !(min..=max).contains(&d.chars().count()))
+        {
+            return Err(invalid("Unsupported MCP form default"));
         }
         fields.push(FormField {
             name: name.clone(),
