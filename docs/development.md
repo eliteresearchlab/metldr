@@ -21,7 +21,7 @@ The toolbar opens the current page tools. Press Alt+Shift+M to open the browser 
 
 ## Native companion
 
-Provider and installed agent tasks need the native companion, built and registered separately for the extension ID. Linux is the verified native platform. On macOS the companion checks pass, but its use with Chrome is not verified. Native installation on Windows is not verified. Follow the [companion setup guide](../crates/metldr-companion/README.md) to build and register it.
+Provider and installed agent tasks need the native companion. Load `dist` unpacked once, then run `make dev-install` after each change. It builds the extension and the companion, copies the companion to `~/.local/share/metldr`, and registers it with Chrome, Chromium, Brave and Edge for the unpacked extension. If `chrome://extensions` shows a different ID, run `metldr-companion install <id>`. `metldr-companion uninstall` removes the registration and keeps saved history. Linux is the verified native platform.
 
 ## Local AI setup
 

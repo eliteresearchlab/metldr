@@ -46,6 +46,7 @@ rustls-pemfile = "=2.2.0"
 opt-level = "s"
 lto = true
 codegen-units = 1
+strip = true
 
 [lints.rust]
 unsafe_code = "forbid"

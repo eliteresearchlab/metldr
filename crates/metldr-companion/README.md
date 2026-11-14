@@ -54,38 +54,13 @@ METLDR_STARTUP_BINARY="$PWD/crates/metldr-companion/target/debug/metldr-companio
 
 Use the actual output path if `CARGO_TARGET_DIR` is set. The two older executable compatibility checks also require fixture binaries. `METLDR_CUTOVER_OLD_BINARY` must name the earlier wire 9 companion that writes saved schema 8. `METLDR_HISTORY_OLD_BINARY` must name a companion that writes history format 10 through 18. Set `METLDR_HISTORY_EXPECT_FORMAT` to require a specific old format. The format 16 check also reads an independently prepared saved table through both executables. Run those checks explicitly with `--ignored` only when the matching fixtures are available. A skipped compatibility check does not establish upgrade support.
 
-Pair the executable with an extension that implements metldr's native wire version 19. The remaining Vue page tools and complete extension packaging are still being migrated. Linux is the verified native platform. On macOS the companion checks pass on APFS, including crash recovery at each history migration phase, but Chrome registration and power loss have not been tested. The history loader refuses to start on Windows until its directory durability and installation checks are complete.
+Pair the executable with an extension built from the same revision. The remaining Vue page tools and complete extension packaging are still being migrated. Linux is the verified native platform. On macOS the companion checks pass on APFS, including crash recovery at each history migration phase, but Chrome registration and power loss have not been tested. The history loader refuses to start on Windows until its directory durability and installation checks are complete.
 
 Conversations and complete saved results are stored in a local record database. Startup preserves the original snapshot backup before installing the new format. New chat creates an empty conversation, while selecting a saved conversation restores its page and results. Switching is unavailable during active work. A lost confirmation requires an explicit Retry using the same request rather than another creation. Viewing saved work does not change or replay an active task. History search covers the loaded conversation pages, and More loads the next page.
 
 Saved native sessions remain selectable after a model task and browser restart. The chooser shows up to 16 recent sessions for each agent, saved page and current profile in the selected conversation. Earlier results stay in saved history. History format 19 adds typed run and source headers so lists can read small fields without decoding complete results. It upgrades formats 10 through 18 in one transaction, preserving saved tables and complete results. Older companions refuse the upgraded history. Keep a copy of the history database before downgrading.
 
-To register the companion with Chrome:
-
-1. Copy the executable to a stable location and create a private state directory owned by your user. On Linux and macOS, give the state directory mode `700` and use a directory without a symbolic link.
-2. Save `metldr-companion.json` beside the executable with the configuration below. Replace the example extension ID and absolute paths with your own values. JSON paths must be complete paths.
-
-```json
-{
-  "schema": 1,
-  "extension_origin": "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
-  "state_root": "/absolute/private/metldr-state"
-}
-```
-
-3. Save the host manifest below as `io.metldr.first_flow.json` in Chrome's user `NativeMessagingHosts` directory. Use the same extension origin in both files. The existing registration name must match the Rust panel's `connectNative` call.
-
-```json
-{
-  "name": "io.metldr.first_flow",
-  "description": "metldr Rust companion",
-  "path": "/absolute/path/to/metldr-companion",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"]
-}
-```
-
-For Google Chrome on Linux, the user manifest directory is `~/.config/google-chrome/NativeMessagingHosts`. On macOS, it is `~/Library/Application Support/Google/Chrome/NativeMessagingHosts`. Use [Chrome's native messaging guide](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging) for other browser channels and platform registration paths. Chrome starts the executable and supplies the extension origin. The companion checks the origin against its adjacent configuration and selects a separate state directory for each browser profile.
+Register the companion with `metldr-companion install <extension id or unpacked extension directory>`. It copies the executable to `~/.local/share/metldr/bin`, writes the adjacent `metldr-companion.json` with the extension origin and a private state directory, and saves the `io.metldr.first_flow` host manifest for every installed Chrome, Chromium, Brave and Edge. The companion checks the origin Chrome supplies against that configuration and keeps a separate state directory for each browser profile. `metldr-companion uninstall` unregisters it and keeps saved history.
 
 Provider keys stay in the native credential store. Installed agents keep their own authentication. Configure the desired provider or agent through the paired Rust panel before starting work. An action that loses confirmation remains uncertain and is not repeated automatically.
 
