@@ -122,17 +122,27 @@ export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
     }
     const key = (name, event = {}) => send({ kind: 'key', key: name, code: event.code ?? '', shift: !!event.shiftKey,
         ctrl: !!event.ctrlKey, alt: !!event.altKey, meta: !!event.metaKey, repeat: !!event.repeat });
-    listen(textarea, 'input', event => changed(h.composing || event.isComposing));
+    // Commits the composition: the final text replaces the preedit and the mirror resyncs.
+    const finishComposition = () => {
+        changed();
+        h.composing = false; h.composition = '';
+        send({ kind: 'sync' });
+    };
+    // A composition can end without a trusted compositionend (Chrome sends an untrusted one when
+    // text is committed through its input API), and the gate above refuses that. The next trusted
+    // input or key that is no longer composing finishes it instead, so the field never stays in a
+    // preedit that eats keys.
+    const lostEnd = event => h.composing && !event.isComposing && event.keyCode !== 229;
+    listen(textarea, 'input', event => {
+        if (lostEnd(event)) finishComposition();
+        else changed(h.composing || event.isComposing);
+    });
     listen(textarea, 'compositionstart', () => { h.composing = true; h.composition = ''; });
     listen(textarea, 'compositionupdate', event => {
         h.composition = event.data ?? '';
         queueMicrotask(() => { if (!h.disposed && h.composing) changed(true); });
     });
-    listen(textarea, 'compositionend', () => {
-        changed();
-        h.composing = false; h.composition = '';
-        send({ kind: 'sync' });
-    });
+    listen(textarea, 'compositionend', finishComposition);
     listen(password, 'input', () => {
         const text = password.value;
         password.value = '';
@@ -165,6 +175,7 @@ export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
         });
         listen(field, 'keydown', event => {
             h.shift = event.shiftKey;
+            if (field === textarea && lostEnd(event)) finishComposition();
             if (event.isComposing || h.composing || event.keyCode === 229) return;
             const chord = event.metaKey || event.ctrlKey;
             if (field.disabled || (field.readOnly && (chord || ['Enter', 'Backspace', 'Delete'].includes(event.key)))) return;
