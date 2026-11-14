@@ -6,7 +6,7 @@
 use super::{State, Tx, browser_actions, preferences};
 use crate::browser_action_display::origin;
 use crate::model::{BrowserActionId, BrowserActionIntent, BrowserActionPhase};
-use ::rune::{El, TextEdit, TextStyle, col, oklch};
+use ::rune::{El, TextEdit, TextStyle, col};
 use wasm_bindgen_futures::spawn_local;
 
 pub(super) struct SecretEntry {
