@@ -259,6 +259,17 @@ impl<S: 'static> Runtime<S> {
         }).collect()
     }
 
+    /// Whether `path` is still a native control under `key`: [`Self::native_controls`] for one
+    /// control, without building the list.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_control(&self, path: &str, key: &str) -> bool {
+        self.nodes.iter().enumerate().any(|(i, n)| {
+            n.path == path && n.key.as_deref() == Some(key) && n.handlers.on_press.is_some()
+                && self.native_eligible(i) && !n.a11y.disabled && !n.inert
+                && self.allowed(i) && !self.subtree_exiting(i)
+        })
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn native_focused_path(&self) -> Option<&str> {
         let i = self.focused_index()?;

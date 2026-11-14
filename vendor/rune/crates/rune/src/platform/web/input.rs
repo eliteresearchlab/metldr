@@ -331,7 +331,7 @@ impl<S: 'static> Running<S> {
                 };
                 let Some(shared) = weak.upgrade() else { return }; let Ok(mut shared) = shared.try_borrow_mut() else { return };
                 let Some(r) = shared.as_mut() else { return };
-                if !r.native_registered(&b) || !r.rt.native_controls().iter().any(|(p,k)| p == &b.path && k == &b.key) { return; }
+                if !r.native_registered(&b) || !r.rt.native_control(&b.path, &b.key) { return; }
                 event.prevent_default(); event.stop_propagation();
                 let shift = g.value(&g.shift, &event).and_then(|v| v.as_bool()) == Some(true);
                 r.rt.key(crate::KeyEvent { key, mods: crate::Mods { shift, ..Default::default() } });
@@ -364,7 +364,7 @@ impl<S: 'static> Running<S> {
         }
         if let Some(path) = self.rt.native_focused_path()
             && let Some(reg) = self.input.native.iter().find(|r| r.binding.path == path && self.native_registered(&r.binding)) {
-            if self.rt.native_controls().iter().any(|(p, k)| p == path && k == &reg.binding.key) {
+            if self.rt.native_control(path, &reg.binding.key) {
                 focus_native_button(&self.input.handle, &reg.binding.node, requested);
             }
         }
