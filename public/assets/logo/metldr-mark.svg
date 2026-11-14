@@ -1,14 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
   <title id="title">metldr</title>
-  <desc id="desc">Three connected paths around one control point.</desc>
-  <g id="connections" fill="#75659a">
-    <path transform="rotate(240 48 48)" d="M28 33v-7C28 15 37 6 48 6s20 9 20 20v25c0 10-5 17-14 22l-7 4-13-8 13-7c5-3 8-7 8-13V26c0-5-3-8-7-8s-8 3-8 8Z"/>
+  <desc id="desc">Three interlocked loops around one control point.</desc>
+  <defs>
+    <mask id="u0" maskUnits="userSpaceOnUse" x="0" y="0" width="96" height="96"><rect width="96" height="96" fill="#fff"/><path d="M22.813 46.376 A14 14 0 0 0 36.813 70.624 L47.206 64.624 A14 14 0 0 0 33.206 40.376 Z" fill="none" stroke="#000" stroke-width="12"/><circle cx="48" cy="48" r="7" fill="#000"/></mask>
+    <mask id="u1" maskUnits="userSpaceOnUse" x="0" y="0" width="96" height="96"><rect width="96" height="96" fill="#fff"/><path d="M62.000 27.000 A14 14 0 0 0 34.000 27.000 L34.000 39.000 A14 14 0 0 0 62.000 39.000 Z" fill="none" stroke="#000" stroke-width="12"/><circle cx="48" cy="48" r="7" fill="#000"/></mask>
+    <mask id="u2" maskUnits="userSpaceOnUse" x="0" y="0" width="96" height="96"><rect width="96" height="96" fill="#fff"/><path d="M59.187 70.624 A14 14 0 0 0 73.187 46.376 L62.794 40.376 A14 14 0 0 0 48.794 64.624 Z" fill="none" stroke="#000" stroke-width="12"/><circle cx="48" cy="48" r="7" fill="#000"/></mask>
+  </defs>
+  <g fill="none" stroke-width="8">
+    <path stroke="#b4befe" mask="url(#u0)" d="M62.000 27.000 A14 14 0 0 0 34.000 27.000 L34.000 39.000 A14 14 0 0 0 62.000 39.000 Z"/>
+    <path stroke="#ff8338" mask="url(#u1)" d="M59.187 70.624 A14 14 0 0 0 73.187 46.376 L62.794 40.376 A14 14 0 0 0 48.794 64.624 Z"/>
+    <path stroke="#75659a" mask="url(#u2)" d="M22.813 46.376 A14 14 0 0 0 36.813 70.624 L47.206 64.624 A14 14 0 0 0 33.206 40.376 Z"/>
   </g>
-  <g id="execution" fill="#ff8338">
-    <path transform="rotate(120 48 48)" d="M28 33v-7C28 15 37 6 48 6s20 9 20 20v25c0 10-5 17-14 22l-7 4-13-8 13-7c5-3 8-7 8-13V26c0-5-3-8-7-8s-8 3-8 8Z"/>
-    <circle cx="48" cy="48" r="6"/>
-  </g>
-  <g id="browser" fill="#b4befe">
-    <path d="M28 33v-7C28 15 37 6 48 6s20 9 20 20v25c0 10-5 17-14 22l-7 4-13-8 13-7c5-3 8-7 8-13V26c0-5-3-8-7-8s-8 3-8 8Z"/>
-  </g>
+  <circle cx="48" cy="48" r="5" fill="#ff8338"/>
 </svg>
