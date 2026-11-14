@@ -6,7 +6,7 @@ use crate::ag_ui::{
 use crate::model::RunStatus;
 
 mod display;
-pub use display::{UiNativeTool, UiNativeToolPage, UiToolPreview};
+pub use display::UiNativeToolPage;
 
 #[wasm_bindgen]
 pub struct UiNativeTools {
@@ -25,6 +25,15 @@ pub(super) async fn open(core: Rc<Core>, encoded: String) -> Result<UiNativeTool
     }
     let reference: ToolGroupReference = serde_json::from_str(&encoded)
         .map_err(|_| FlowError::InvalidInput("Invalid native tool reference.".into()))?;
+    open_reference(core, reference).await
+}
+
+/// Opens a reference the panel already holds, without a JSON round trip.
+pub(super) async fn open_reference(
+    core: Rc<Core>,
+    reference: ToolGroupReference,
+) -> Result<UiNativeTools, FlowError> {
+    core.ensure_current()?;
     reference.validate().map_err(FlowError::InvalidInput)?;
     let run = core
         .referenced_run(&reference.run_id, &reference.origin)

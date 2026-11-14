@@ -62,7 +62,7 @@ impl Drop for Entry {
 
 impl Activities {
     /// Call from poll after accepting conversation changes; one read runs at a time.
-    pub(super) fn sync(&self, core: &Rc<Core>, messages: &[AgUiMessage], updates: &Rc<Updates>) {
+    pub(super) fn sync(&self, core: &Rc<Core>, messages: &[AgUiMessage]) {
         let mut cache = self.inner.borrow_mut();
         if cache.core.as_ptr() != Rc::as_ptr(core) {
             cache.entries.clear();
@@ -139,11 +139,7 @@ impl Activities {
         cache.reading = true;
         let generation = cache.generation;
         drop(cache);
-        let (cache, core, updates) = (
-            Rc::downgrade(&self.inner),
-            Rc::clone(core),
-            Rc::downgrade(updates),
-        );
+        let (cache, core) = (Rc::downgrade(&self.inner), Rc::clone(core));
         spawn_local(async move {
             let result = read(core, &activity, frame.clone()).await;
             if let Some(cache) = cache.upgrade() {
@@ -936,6 +932,11 @@ async fn read(
     activity: &Activity,
     existing: Option<Rc<UiAnswerFrame>>,
 ) -> Result<Value, ()> {
+    // Another history read holds the panel's single read slot. A first read waits as Pending and
+    // retries on the next sync instead of failing for good.
+    if existing.is_none() && core.history_loading.get() {
+        return Ok(Value::Pending);
+    }
     let bridge = UiBridge { core };
     match activity {
         Activity::Table(reference) => {
@@ -989,17 +990,13 @@ async fn read(
             Ok(Value::Generated(frame))
         }
         Activity::NativeTools(reference) => {
-            let encoded = serde_json::to_string(reference).map_err(|_| ())?;
-            bridge
-                .native_tools(encoded)
+            super::native_tools::open_reference(Rc::clone(&bridge.core), reference.clone())
                 .await
                 .map(Value::Tools)
                 .map_err(|_| ())
         }
         Activity::RunDetails(reference) => {
-            let encoded = serde_json::to_string(reference).map_err(|_| ())?;
-            bridge
-                .run_details(encoded)
+            super::run_details::open_reference(Rc::clone(&bridge.core), reference.clone())
                 .await
                 .map(Value::Details)
                 .map_err(|_| ())
