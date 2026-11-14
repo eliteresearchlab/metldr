@@ -6,7 +6,7 @@ use crate::ag_ui::{
 use crate::model::RunStatus;
 
 mod display;
-pub use display::{UiNativeTool, UiNativeToolPage, UiToolPreview};
+pub use display::UiNativeToolPage;
 
 #[wasm_bindgen]
 pub struct UiNativeTools {

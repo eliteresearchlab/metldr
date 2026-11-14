@@ -882,7 +882,7 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
         let presentation = updates.presentation.borrow();
         state
             .activities
-            .sync(&core, &presentation.messages.messages, &updates);
+            .sync(&core, &presentation.messages.messages);
         if state
             .answers
             .sync(&state.activities, &presentation.messages.messages, &updates)

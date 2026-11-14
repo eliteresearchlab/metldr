@@ -62,7 +62,7 @@ impl Drop for Entry {
 
 impl Activities {
     /// Call from poll after accepting conversation changes; one read runs at a time.
-    pub(super) fn sync(&self, core: &Rc<Core>, messages: &[AgUiMessage], updates: &Rc<Updates>) {
+    pub(super) fn sync(&self, core: &Rc<Core>, messages: &[AgUiMessage]) {
         let mut cache = self.inner.borrow_mut();
         if cache.core.as_ptr() != Rc::as_ptr(core) {
             cache.entries.clear();
@@ -139,11 +139,7 @@ impl Activities {
         cache.reading = true;
         let generation = cache.generation;
         drop(cache);
-        let (cache, core, updates) = (
-            Rc::downgrade(&self.inner),
-            Rc::clone(core),
-            Rc::downgrade(updates),
-        );
+        let (cache, core) = (Rc::downgrade(&self.inner), Rc::clone(core));
         spawn_local(async move {
             let result = read(core, &activity, frame.clone()).await;
             if let Some(cache) = cache.upgrade() {

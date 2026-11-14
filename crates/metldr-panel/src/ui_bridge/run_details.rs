@@ -9,7 +9,7 @@ use crate::{
 };
 
 mod display;
-pub use display::{UiRunReport, UiRunReportPage};
+pub use display::UiRunReportPage;
 
 #[wasm_bindgen]
 pub struct UiRunDetails {
