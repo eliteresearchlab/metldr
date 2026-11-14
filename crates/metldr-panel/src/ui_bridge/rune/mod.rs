@@ -130,6 +130,8 @@ struct State {
     sources: sources::Sources,
     preferences: preferences::Preferences,
     settings_open: bool,
+    /// The home reveal has drawn its hidden first frame and now eases in.
+    welcome_revealed: bool,
     conversations: conversations::Conversations,
     tabs: conversations::Tabs,
     focus_tab_after_titles: Option<String>,
@@ -161,6 +163,7 @@ impl Default for State {
             sources: sources::Sources::default(),
             preferences: preferences::Preferences::default(),
             settings_open: false,
+            welcome_revealed: false,
             conversations: conversations::Conversations::default(),
             tabs: conversations::Tabs::default(),
             focus_tab_after_titles: None,
@@ -883,6 +886,10 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
         state
             .activities
             .sync(&core, &presentation.messages.messages);
+        if !presentation.messages.messages.is_empty() {
+            // A later empty chat replays the home reveal.
+            state.welcome_revealed = false;
+        }
         if state
             .answers
             .sync(&state.activities, &presentation.messages.messages, &updates)
@@ -1778,6 +1785,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             .key("conversation-status")
             .role("status"),
     );
+    let shown = cx.is_reduced_motion() || state.welcome_revealed;
     let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });
     if welcome {
         // Two lines with tight leading and negative tracking, as the reference's 26 px heading.
@@ -1792,11 +1800,17 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 )
                 .wrap()
         };
-        head = head.child(
-            col()
-                .child(hero("Welcome to metldr").color(p.ink_3).role("heading").level(1))
-                .child(hero("What do you want to do?").color(p.ink)),
-        );
+        let greeting = hero("Welcome to metldr").color(p.ink_3).role("heading").level(1);
+        let question = hero("What do you want to do?").color(p.ink);
+        let mut lines = col()
+            .child(theme::reveal(greeting, shown, theme::REVEAL_GREETING))
+            .child(theme::reveal(question, shown, theme::REVEAL_QUESTION));
+        if !shown {
+            lines = lines.on_drawn_layout_tx(|state: &mut State, _, _| {
+                state.welcome_revealed = true;
+            });
+        }
+        head = head.child(lines);
     }
     // An empty chat shows the toolbar under the welcome; a chat with messages pins it under the
     // tabs, so Settings and paging stay reachable while the thread scrolls.
