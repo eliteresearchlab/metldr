@@ -21,7 +21,7 @@
  */
 
 use super::{Menu, Mode, State};
-use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, oklch, row};
+use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, row};
 
 const CONTROL: f32 = 28.0;
 const BORDER: f32 = 1.0;

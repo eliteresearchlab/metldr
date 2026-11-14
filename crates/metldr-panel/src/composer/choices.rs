@@ -1,5 +1,4 @@
 use super::*;
-use crate::model::AgentKind;
 
 /// A choice in the model menu. Fixed choices borrow their text, so building the menu on
 /// each view pass allocates only for saved sessions and configured routes.
@@ -190,7 +189,7 @@ fn build(
 #[cfg(test)]
 mod checks {
     use super::*;
-    use crate::model::{CodexProfileView, PiProfileView};
+    use crate::model::{AgentKind, CodexProfileView, PiProfileView};
 
     #[test]
     fn short_forms_name_the_model_and_tag_the_protocol() {
