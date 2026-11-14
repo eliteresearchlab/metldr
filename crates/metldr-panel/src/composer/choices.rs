@@ -52,6 +52,51 @@ const ROWS: [(&str, &str, &str); 13] = [
     ("claude", "execution-claude", "Claude Code"),
 ];
 
+/// Where a menu row belongs, in menu order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Section {
+    Agents,
+    Browser,
+    Page,
+    Test,
+}
+
+impl Section {
+    pub(crate) fn heading(self) -> &'static str {
+        match self {
+            Self::Agents => "Agents",
+            Self::Browser => "Browser tasks",
+            Self::Page => "Page questions",
+            Self::Test => "Test",
+        }
+    }
+}
+
+impl Choice {
+    /// The menu's short form of this choice: its section, a name (the model when one is set) and
+    /// a tag (the protocol). The full label stays the accessible name.
+    pub(crate) fn short(&self) -> (Section, &str, &'static str) {
+        let section = match &*self.value {
+            "model" => Section::Test,
+            "pi" | "codex" | "opencode" | "claude" => Section::Agents,
+            value if value.starts_with("page:") => Section::Page,
+            _ => Section::Browser,
+        };
+        if matches!(section, Section::Test | Section::Agents) {
+            return (section, &self.label, "");
+        }
+        let mut parts = self.label.splitn(4, ", ").skip(1);
+        let tag = match parts.next() {
+            Some("Messages") => "Messages",
+            Some("Chat Completions") => "Chat",
+            Some("OpenAI Responses") => "Responses",
+            Some("Google Interactions") => "Google",
+            _ => "",
+        };
+        (section, parts.next().unwrap_or(tag), tag)
+    }
+}
+
 pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
     ROWS.iter().map(|row| build(view, *row)).collect()
 }
@@ -146,6 +191,22 @@ fn build(
 mod checks {
     use super::*;
     use crate::model::{CodexProfileView, PiProfileView};
+
+    #[test]
+    fn short_forms_name_the_model_and_tag_the_protocol() {
+        let choice = |value: &'static str, label: &str| Choice {
+            value: value.into(),
+            label: label.to_owned().into(),
+            enabled: true,
+            element: "",
+        };
+        let set = choice("chat", "Browser task, Chat Completions, gpt-5, https://api.openai.com/v1");
+        assert_eq!(set.short(), (Section::Browser, "gpt-5", "Chat"));
+        let unset = choice("page:messages", "Page questions, Messages");
+        assert_eq!(unset.short(), (Section::Page, "Messages", "Messages"));
+        assert_eq!(choice("claude", "Claude Code").short(), (Section::Agents, "Claude Code", ""));
+        assert_eq!(choice("model", "Test model").short(), (Section::Test, "Test model", ""));
+    }
 
     #[test]
     fn choices_preserve_all_routes_and_only_ready_matching_sessions() {
