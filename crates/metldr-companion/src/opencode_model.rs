@@ -5,29 +5,9 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub(super) struct Profile {
-    pub executable: PathBuf,
-    pub workspace: PathBuf,
-}
-impl Profile {
-    pub fn validate(&self) -> Result<()> {
-        for path in [&self.executable, &self.workspace] {
-            if !path.is_absolute()
-                || path.to_string_lossy().len() > 2048
-                || path
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
-                return Err("invalid OpenCode profile path".into());
-            }
-        }
-        Ok(())
-    }
-}
+/// OpenCode stores the same profile shape as every harness.
+pub(super) use crate::harness_model::Profile;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
