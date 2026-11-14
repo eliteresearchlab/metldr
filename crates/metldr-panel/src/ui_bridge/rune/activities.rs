@@ -936,6 +936,11 @@ async fn read(
     activity: &Activity,
     existing: Option<Rc<UiAnswerFrame>>,
 ) -> Result<Value, ()> {
+    // Another history read holds the panel's single read slot. A first read waits as Pending and
+    // retries on the next sync instead of failing for good.
+    if existing.is_none() && core.history_loading.get() {
+        return Ok(Value::Pending);
+    }
     let bridge = UiBridge { core };
     match activity {
         Activity::Table(reference) => {
