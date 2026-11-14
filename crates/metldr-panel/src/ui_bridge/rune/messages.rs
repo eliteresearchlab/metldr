@@ -97,8 +97,10 @@ impl Messages {
             }
             Event::TextMessageContent { message_id, delta } => {
                 let boundary = self.boundary();
+                // Ids are unique and the streaming message is almost always last: search back.
                 let Some(AgUiMessage::Assistant { content, .. }) = self.messages[boundary..]
                     .iter_mut()
+                    .rev()
                     .find(|message| message.id() == message_id)
                 else {
                     return Err(protocol("text delta has no matching assistant message"));
@@ -598,4 +600,5 @@ mod tests {
         );
         assert_eq!((full.messages, full.scope), before);
     }
+
 }
