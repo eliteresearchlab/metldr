@@ -25,13 +25,19 @@ pub(crate) struct RunReport {
 
 impl RunDetailsReference {
     pub(crate) fn new(run: &RunView, origin: RunOrigin) -> Self {
-        let reports = reports(&run.activity);
         let mut hasher = DefaultHasher::new();
         run.id.as_str().hash(&mut hasher);
         run.route.hash(&mut hasher);
         run.status.hash(&mut hasher);
         run.corrections.hash(&mut hasher);
-        reports.hash(&mut hasher);
+        // Hashes the same bytes as the report list, without building it on every stream update.
+        hasher.write_usize(run.activity.len());
+        for report in &run.activity {
+            report.tool.hash(&mut hasher);
+            report.phase.hash(&mut hasher);
+            report.outcome.hash(&mut hasher);
+            report.call.as_ref().map(|call| call.id.as_str()).hash(&mut hasher);
+        }
         Self {
             run_id: run.id.clone(),
             origin,
@@ -115,8 +121,17 @@ mod tests {
             RunDetailsReference::new(&run, RunOrigin::Live).revision,
             correction.revision
         );
+        let mut hasher = DefaultHasher::new();
+        run.id.as_str().hash(&mut hasher);
+        run.route.hash(&mut hasher);
+        run.status.hash(&mut hasher);
+        run.corrections.hash(&mut hasher);
+        super::reports(&run.activity).hash(&mut hasher);
+        let listed = format!("{:016x}", hasher.finish());
+        assert_eq!(RunDetailsReference::new(&run, RunOrigin::Live).revision, listed);
         let value = serde_json::to_value(&changed).unwrap();
         assert!(value.get("reports").is_none());
         assert_eq!(value["revision"].as_str().unwrap().len(), 16);
     }
+
 }
