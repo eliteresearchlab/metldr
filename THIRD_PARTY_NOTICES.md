@@ -7,7 +7,8 @@ The harness registry and the context handoff in `crates/metldr-harness` are info
 | Area | metldr files | Use | Behaviour change | Checks |
 | --- | --- | --- | --- | --- |
 | One registry of harnesses with declared capabilities | `crates/metldr-harness/src/lib.rs` | Reference only; written independently in Rust | None | `cargo test --manifest-path crates/metldr-harness/Cargo.toml` |
-| Delta or full context handoff, newest first under a cap | `crates/metldr-harness/src/handoff.rs` | Reference only; written independently in Rust | None until the companion uses it | the same suite |
+| Delta or full context handoff, newest first under a cap | `crates/metldr-harness/src/handoff.rs` | Reference only; written independently in Rust | None | the same suite |
+| One native session per harness in each chat, a delta since the harness last took part or a full summary for its first run, and a 16k token default budget, from `apps/server/src/orchestration-v2/Orchestrator.ts`, `ProviderTurnStartService.ts` and `packages/provider-core/src/server/handoffBudget.ts` at revision [a61291e](https://github.com/pingdotgg/t3code/tree/a61291e3e2) | `crates/metldr-companion/src/native_start.rs`, `crates/metldr-companion/src/history/edit/handoff.rs`, `crates/metldr-panel/src/composer.rs` | Reference only; written independently in Rust | Picking an agent continues the chat's session for it, and each run opens with what the chat did elsewhere | `cargo test` for both crates and the private Claude Code flow |
 
 ```text
 MIT License

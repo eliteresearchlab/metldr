@@ -17,6 +17,7 @@ mod browser_view;
 mod browser_write;
 mod context;
 mod conversations;
+mod handoff;
 mod native_admit;
 pub(super) mod native_choices;
 mod native_start;

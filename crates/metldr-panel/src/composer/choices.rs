@@ -7,12 +7,8 @@ pub(crate) struct Choice {
     pub(crate) value: std::borrow::Cow<'static, str>,
     pub(crate) label: std::borrow::Cow<'static, str>,
     pub(crate) enabled: bool,
-    pub(super) kind: Kind,
-}
-
-pub(super) enum Kind {
-    Fixed(&'static str),
-    Session { agent: AgentKind, revision: u64 },
+    /// The legacy panel's option element for this choice.
+    pub(super) element: &'static str,
 }
 
 pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
@@ -50,17 +46,17 @@ pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
             "execution-page-chat",
             "Page questions, Chat Completions",
         ),
-        ("pi", "execution-pi", "Pi, new session"),
-        ("codex", "execution-codex", "Codex, new session"),
-        ("opencode", "execution-opencode", "OpenCode, new session"),
-        ("claude", "execution-claude", "Claude Code, new session"),
+        ("pi", "execution-pi", "Pi"),
+        ("codex", "execution-codex", "Codex"),
+        ("opencode", "execution-opencode", "OpenCode"),
+        ("claude", "execution-claude", "Claude Code"),
     ]
     .into_iter()
     .map(|(value, element, label)| Choice {
         value: value.into(),
         label: label.into(),
         enabled: view.is_some_and(|view| resolve(view, value).is_ok()),
-        kind: Kind::Fixed(element),
+        element,
     })
     .collect();
     let Some(view) = view else { return choices };
@@ -129,43 +125,6 @@ pub(crate) fn list(view: Option<&PageView>) -> Vec<Choice> {
         };
         if let Some((task, protocol, endpoint, model)) = route {
             choice.label = format!("{task}, {protocol}, {model}, {endpoint}").into();
-        }
-    }
-    for (agent, sessions) in [
-        (AgentKind::Pi, &view.agent_sessions),
-        (AgentKind::Codex, &view.codex_sessions),
-        (AgentKind::Opencode, &view.opencode_sessions),
-        (AgentKind::Claude, &view.claude_sessions),
-    ] {
-        let name = agent.label();
-        for session in sessions {
-            let id = session.workflow.as_str();
-            let value = if agent == AgentKind::Pi {
-                id.into()
-            } else {
-                format!("{}:{id}", agent.name())
-            };
-            let available = match agent {
-                AgentKind::Pi => ready(view, session),
-                AgentKind::Codex => codex_ready(view, session),
-                AgentKind::Opencode => opencode_ready(view, session),
-                AgentKind::Claude => claude_ready(view, session),
-            };
-            if available {
-                choices.push(Choice {
-                    value: value.into(),
-                    label: format!(
-                        "Continue {name} session {}",
-                        id.rsplit(':').next().unwrap_or(id)
-                    )
-                    .into(),
-                    enabled: true,
-                    kind: Kind::Session {
-                        agent,
-                        revision: session.revision,
-                    },
-                });
-            }
         }
     }
     choices
@@ -257,56 +216,50 @@ mod checks {
             }
         }
         let choices = list(Some(&view));
-        assert!(matches!(
-            crate::composer::resolve(&view, "claude:0123456789abcdef0123456789abcdef:20"),
-            Ok(crate::composer::Destination::ContinueClaude { .. })
-        ), "a ready Claude Code session continues");
-        assert_eq!(choices.len(), 17);
+        // One chat keeps one session per agent: picking the agent continues it.
+        use crate::composer::{Destination, resolve};
+        for (agent, old) in [
+            ("claude", "claude:0123456789abcdef0123456789abcdef:20"),
+            ("codex", "codex:0123456789abcdef0123456789abcdef:20"),
+            ("opencode", "opencode:0123456789abcdef0123456789abcdef:20"),
+            ("pi", "0123456789abcdef0123456789abcdef:20"),
+        ] {
+            for value in [agent, old] {
+                assert!(
+                    matches!(
+                        resolve(&view, value),
+                        Ok(Destination::ContinueClaude { revision: 7, .. }
+                            | Destination::ContinueCodex { revision: 7, .. }
+                            | Destination::ContinueOpenCode { revision: 7, .. }
+                            | Destination::Continue { revision: 7, .. })
+                    ),
+                    "{value} continues the chat's session"
+                );
+            }
+        }
+        assert_eq!(choices.len(), 13);
         assert!(choices.iter().all(|choice| choice.enabled));
         assert_eq!(
             choices[6].label,
             "Page questions, OpenAI Responses, online-model, https://api.example.test/v1"
-        );
-        assert_eq!(choices[13].value, "0123456789abcdef0123456789abcdef:20");
-        assert_eq!(
-            choices[14].value,
-            "codex:0123456789abcdef0123456789abcdef:20"
-        );
-        assert_eq!(
-            choices[15].value,
-            "opencode:0123456789abcdef0123456789abcdef:20"
         );
         assert!(
             choices
                 .iter()
                 .all(|choice| !choice.label.contains(&fingerprint))
         );
-        for phase in 0..3 {
-            for sessions in [
-                &mut view.agent_sessions,
-                &mut view.codex_sessions,
-                &mut view.opencode_sessions,
-                &mut view.claude_sessions,
-            ] {
-                sessions[0].ready = phase != 0;
-                sessions[0].profile = if phase == 1 {
-                    "b".repeat(64)
-                } else {
-                    fingerprint.clone()
-                };
-                if phase == 2 {
-                    sessions[0].source =
-                        serde_json::from_str("\"0123456789abcdef0123456789abcdef:2\"").unwrap();
-                }
-            }
-            assert_eq!(
-                list(Some(&view)).len(),
-                // Claude Code readiness comes from the companion's ready flag, which already
-                // compares the saved profile, so only a fingerprint change still lists it here.
-                13 + usize::from(phase == 1),
-                "unavailable native session phase {phase}"
-            );
+        for sessions in [
+            &mut view.agent_sessions,
+            &mut view.codex_sessions,
+            &mut view.opencode_sessions,
+            &mut view.claude_sessions,
+        ] {
+            sessions[0].ready = false;
         }
+        assert!(matches!(resolve(&view, "claude"), Ok(Destination::Claude)));
+        assert!(matches!(resolve(&view, "codex"), Ok(Destination::Codex)));
+        assert!(matches!(resolve(&view, "opencode"), Ok(Destination::OpenCode)));
+        assert!(matches!(resolve(&view, "pi"), Ok(Destination::Pi)));
         view.responses_route = None;
         let choices = list(Some(&view));
         assert!(!choices[3].enabled && !choices[6].enabled);

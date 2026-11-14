@@ -12,7 +12,8 @@ impl ExecutionPreference {
         let value = web_sys::window()
             .and_then(|window| window.local_storage().ok().flatten())
             .and_then(|storage| storage.get_item(STORAGE_KEY).ok().flatten())
-            .filter(|value| value.len() <= MAX_EXECUTION_CHOICE_BYTES);
+            .filter(|value| value.len() <= MAX_EXECUTION_CHOICE_BYTES)
+            .map(|value| agent_of_session(&value).map_or(value, str::to_owned));
         Self {
             current: value.clone(),
             persisted: value,
@@ -43,6 +44,25 @@ impl ExecutionPreference {
     }
 }
 
+/// A chat keeps one session per agent, so a saved pick of one session from the former menu
+/// becomes a pick of its agent: `claude:<id>` is Claude Code and a bare workflow id is Pi.
+fn agent_of_session(value: &str) -> Option<&'static str> {
+    let (head, tail) = value.split_once(':')?;
+    match head {
+        "codex" => Some("codex"),
+        "opencode" => Some("opencode"),
+        "claude" => Some("claude"),
+        _ if head.len() == 32
+            && head.bytes().all(|b| b.is_ascii_hexdigit())
+            && !tail.is_empty()
+            && tail.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            Some("pi")
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ExecutionPreference;
@@ -66,5 +86,14 @@ mod tests {
         });
         assert_eq!(preference.value().as_deref(), Some("codex:workflow"));
         assert_eq!(writes, 2);
+    }
+
+    #[test]
+    fn a_saved_session_pick_becomes_its_agent() {
+        use super::agent_of_session;
+        assert_eq!(agent_of_session("claude:0123456789abcdef0123456789abcdef:3"), Some("claude"));
+        assert_eq!(agent_of_session("0123456789abcdef0123456789abcdef:3"), Some("pi"));
+        assert_eq!(agent_of_session("page:responses"), None);
+        assert_eq!(agent_of_session("codex"), None);
     }
 }

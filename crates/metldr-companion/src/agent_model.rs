@@ -189,6 +189,22 @@ impl Launch {
         }
     }
 
+    /// The name a user knows this route by.
+    pub fn label(&self) -> &'static str {
+        use metldr_harness::HarnessId;
+        match self {
+            Self::Pi { .. } => HarnessId::Pi.label(),
+            Self::Codex { .. } => HarnessId::Codex.label(),
+            Self::OpenCode { .. } => HarnessId::OpenCode.label(),
+            Self::Harness { harness, .. } => HarnessId::from_key(harness).map_or("Agent", |id| id.label()),
+            Self::Messages { .. } | Self::ConfiguredMessages { .. } => "Messages",
+            Self::ConfiguredResponses { .. } => "Responses",
+            Self::ConfiguredGoogle { .. } => "Google",
+            Self::ConfiguredChat { .. } => "Chat Completions",
+            _ => "Agent",
+        }
+    }
+
     /// Tool reports of a launched agent; `None` for flat runs.
     pub fn activity(&self) -> Option<&[Activity]> {
         match self {
