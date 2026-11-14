@@ -112,27 +112,39 @@ export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
     for (const name of GATED_INPUT) listen(window, name, refuseUntrusted, { capture: true });
     for (const name of ['pointerdown', 'pointercancel', 'click', 'blur'])
         listen(window, name, raw, { capture: true });
+    // The field's selection as anchor and focus, so a backward selection keeps its direction.
+    const selection = () => textarea.selectionDirection === 'backward'
+        ? { anchor: textarea.selectionEnd, focus: textarea.selectionStart }
+        : { anchor: textarea.selectionStart, focus: textarea.selectionEnd };
     function changed(preedit = false) {
         if (h.field.disabled || h.field.readOnly) return;
-        const backward = textarea.selectionDirection === 'backward';
         send({ kind: preedit ? 'preedit' : 'edit', key: h.key, base: h.base, expected: h.value,
             ...replacement(h.value, textarea.value, preedit ? h.composition : '', textarea.selectionEnd),
-            anchor: backward ? textarea.selectionEnd : textarea.selectionStart,
-            focus: backward ? textarea.selectionStart : textarea.selectionEnd });
+            ...selection() });
     }
     const key = (name, event = {}) => send({ kind: 'key', key: name, code: event.code ?? '', shift: !!event.shiftKey,
         ctrl: !!event.ctrlKey, alt: !!event.altKey, meta: !!event.metaKey, repeat: !!event.repeat });
-    listen(textarea, 'input', event => changed(h.composing || event.isComposing));
+    // Commits the composition: the final text replaces the preedit and the mirror resyncs.
+    const finishComposition = () => {
+        changed();
+        h.composing = false; h.composition = '';
+        send({ kind: 'sync' });
+    };
+    // A composition can end without a trusted compositionend (Chrome sends an untrusted one when
+    // text is committed through its input API), and the gate above refuses that. The next trusted
+    // input or key that is no longer composing finishes it instead, so the field never stays in a
+    // preedit that eats keys.
+    const lostEnd = event => h.composing && !event.isComposing && event.keyCode !== 229;
+    listen(textarea, 'input', event => {
+        if (lostEnd(event)) finishComposition();
+        else changed(h.composing || event.isComposing);
+    });
     listen(textarea, 'compositionstart', () => { h.composing = true; h.composition = ''; });
     listen(textarea, 'compositionupdate', event => {
         h.composition = event.data ?? '';
         queueMicrotask(() => { if (!h.disposed && h.composing) changed(true); });
     });
-    listen(textarea, 'compositionend', () => {
-        changed();
-        h.composing = false; h.composition = '';
-        send({ kind: 'sync' });
-    });
+    listen(textarea, 'compositionend', finishComposition);
     listen(password, 'input', () => {
         const text = password.value;
         password.value = '';
@@ -165,6 +177,7 @@ export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
         });
         listen(field, 'keydown', event => {
             h.shift = event.shiftKey;
+            if (field === textarea && lostEnd(event)) finishComposition();
             if (event.isComposing || h.composing || event.keyCode === 229) return;
             const chord = event.metaKey || event.ctrlKey;
             if (field.disabled || (field.readOnly && (chord || ['Enter', 'Backspace', 'Delete'].includes(event.key)))) return;
@@ -180,10 +193,7 @@ export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
     }
     listen(textarea, 'select', () => {
         if (h.syncing || h.composing || document.activeElement !== textarea) return;
-        const backward = textarea.selectionDirection === 'backward';
-        send({ kind: 'selection', key: h.key, base: h.base, expected: h.value,
-            anchor: backward ? textarea.selectionEnd : textarea.selectionStart,
-            focus: backward ? textarea.selectionStart : textarea.selectionEnd });
+        send({ kind: 'selection', key: h.key, base: h.base, expected: h.value, ...selection() });
     });
     // Synchronous copy support for read-only `El::selectable` selections (`Edit › Copy` / ⌘C).
     listen(document, 'copy', event => {
@@ -276,9 +286,11 @@ export function syncA11y(h, json, revision) {
         }
         const [x, y, w, bh] = item.r;
         const fs = item.s || 14;
-        el.style.cssText = group
+        const css = group
             ? 'position:static;margin:0;padding:0;border:0;pointer-events:none;'
             : `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${bh}px;margin:0;padding:0;border:0;background:transparent;color:transparent;font:${fs}px/1.25 sans-serif;overflow:hidden;white-space:pre-wrap;pointer-events:none;`;
+        // Writing an unchanged style still invalidates it; most nodes keep their geometry between syncs.
+        if (el._css !== css) { el._css = css; el.style.cssText = css; }
         if (group) {
             el.setAttribute('role', item.k);
             setOptionalAttribute(el, 'aria-label', item.t);
