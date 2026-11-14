@@ -112,13 +112,15 @@ export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
     for (const name of GATED_INPUT) listen(window, name, refuseUntrusted, { capture: true });
     for (const name of ['pointerdown', 'pointercancel', 'click', 'blur'])
         listen(window, name, raw, { capture: true });
+    // The field's selection as anchor and focus, so a backward selection keeps its direction.
+    const selection = () => textarea.selectionDirection === 'backward'
+        ? { anchor: textarea.selectionEnd, focus: textarea.selectionStart }
+        : { anchor: textarea.selectionStart, focus: textarea.selectionEnd };
     function changed(preedit = false) {
         if (h.field.disabled || h.field.readOnly) return;
-        const backward = textarea.selectionDirection === 'backward';
         send({ kind: preedit ? 'preedit' : 'edit', key: h.key, base: h.base, expected: h.value,
             ...replacement(h.value, textarea.value, preedit ? h.composition : '', textarea.selectionEnd),
-            anchor: backward ? textarea.selectionEnd : textarea.selectionStart,
-            focus: backward ? textarea.selectionStart : textarea.selectionEnd });
+            ...selection() });
     }
     const key = (name, event = {}) => send({ kind: 'key', key: name, code: event.code ?? '', shift: !!event.shiftKey,
         ctrl: !!event.ctrlKey, alt: !!event.altKey, meta: !!event.metaKey, repeat: !!event.repeat });
@@ -191,10 +193,7 @@ export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
     }
     listen(textarea, 'select', () => {
         if (h.syncing || h.composing || document.activeElement !== textarea) return;
-        const backward = textarea.selectionDirection === 'backward';
-        send({ kind: 'selection', key: h.key, base: h.base, expected: h.value,
-            anchor: backward ? textarea.selectionEnd : textarea.selectionStart,
-            focus: backward ? textarea.selectionStart : textarea.selectionEnd });
+        send({ kind: 'selection', key: h.key, base: h.base, expected: h.value, ...selection() });
     });
     // Synchronous copy support for read-only `El::selectable` selections (`Edit › Copy` / ⌘C).
     listen(document, 'copy', event => {
