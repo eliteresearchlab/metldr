@@ -24,11 +24,8 @@ impl Owner {
             | ConversationAction::HarnessFollowUp { harness, .. } => harness.clone(),
             _ => return Err("invalid harness command".into()),
         };
-        let kind = match harness.as_str() {
-            "claude" => crate::agent_settings::Kind::Claude,
-            _ => return Err("unknown harness".into()),
-        };
-        self.prepare_agent(kind)?;
+        let adapter = crate::harness_model::adapter(&harness)?;
+        self.prepare_agent(adapter.kind)?;
         let (key, profile) = self
             .agent_runtime
             .profiles
@@ -54,7 +51,7 @@ impl Owner {
         let crate::history::NativeWorkflow::Harness(w) = value else {
             return Err("harness admission workflow mismatch".into());
         };
-        let job = crate::claude::Job {
+        let job = crate::harness_model::Job {
             run: run.clone(),
             workflow,
             profile: w.profile.clone(),
@@ -67,7 +64,8 @@ impl Owner {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
         let tx = self.tx.clone();
-        let worker = thread::spawn(move || crate::claude::execute(job, worker_stop, tx, events));
+        let execute = adapter.execute;
+        let worker = thread::spawn(move || execute(job, worker_stop, tx, events));
         self.operations.insert(
             run.clone(),
             Operation {

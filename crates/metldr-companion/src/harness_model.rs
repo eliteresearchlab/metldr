@@ -7,14 +7,53 @@ use crate::{
     model::{Source, Store},
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{Arc, atomic::AtomicBool, mpsc},
+};
 
-/// Harness keys this path accepts today. Pi, Codex and OpenCode keep their own records
-/// until they migrate.
-pub(crate) const KEYS: [&str; 1] = ["claude"];
+/// One harness on the generic path. Adding a harness is one adapter module and one entry
+/// in [`ADAPTERS`]; Pi, Codex and OpenCode keep their own records until they migrate.
+pub(crate) struct Adapter {
+    pub key: &'static str,
+    pub kind: crate::agent_settings::Kind,
+    pub valid_session: fn(&str) -> Result<()>,
+    pub execute: fn(
+        Job,
+        Arc<AtomicBool>,
+        mpsc::SyncSender<crate::flow::Event>,
+        tokio::sync::mpsc::Receiver<crate::browser_io::Notice>,
+    ),
+}
 
-pub(crate) fn valid_key(key: &str) -> bool {
-    KEYS.contains(&key)
+pub(crate) const ADAPTERS: &[Adapter] = &[Adapter {
+    key: "claude",
+    kind: crate::agent_settings::Kind::Claude,
+    valid_session: crate::claude::valid_session,
+    execute: crate::claude::execute,
+}];
+
+pub(crate) fn adapter(key: &str) -> Result<&'static Adapter> {
+    ADAPTERS
+        .iter()
+        .find(|adapter| adapter.key == key)
+        .ok_or_else(|| "unknown harness".into())
+}
+
+/// Whether `key` names a harness of settings kind `kind`.
+pub(crate) fn is_kind(key: &str, kind: crate::agent_settings::Kind) -> bool {
+    adapter(key).is_ok_and(|adapter| adapter.kind == kind)
+}
+
+/// One run handed to a harness adapter.
+pub(crate) struct Job {
+    pub run: String,
+    pub workflow: String,
+    pub profile: Profile,
+    pub binding: Binding,
+    pub source: Source,
+    pub target: crate::browser_action::Target,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -33,7 +72,7 @@ impl Profile {
                     .components()
                     .any(|c| matches!(c, std::path::Component::ParentDir))
             {
-                return Err("invalid harness profile path".into());
+                return Err("invalid agent profile path".into());
             }
         }
         Ok(())
@@ -42,10 +81,7 @@ impl Profile {
 
 /// Checks a native session id for `harness`.
 pub(crate) fn valid_session(harness: &str, session: &str) -> Result<()> {
-    match harness {
-        "claude" => metldr_claude_session::SessionId::saved(session).map(|_| ()),
-        _ => Err("unknown harness".into()),
-    }
+    (adapter(harness)?.valid_session)(session)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -110,7 +146,7 @@ pub(crate) struct Workflow {
 
 impl Workflow {
     pub fn validate(&self) -> Result<()> {
-        if !valid_key(&self.harness)
+        if adapter(&self.harness).is_err()
             || self.revision == 0
             || self.fingerprint != digest(&self.profile)?
         {
@@ -202,7 +238,7 @@ mod tests {
         lost.block_recovery();
         assert!(lost.resume("claude").is_err());
         assert!(
-            !valid_key("codex"),
+            adapter("codex").is_err(),
             "codex keeps its own records until it migrates"
         );
     }

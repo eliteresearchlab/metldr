@@ -10,8 +10,7 @@ use crate::{
     browser_mcp::Server,
     browser_worker::{BROWSER_POLICY, Tools},
     flow::Event,
-    harness_model::{Binding, Profile},
-    model::Source,
+    harness_model::Job,
     tool_report::Call,
 };
 use metldr_claude_session::{
@@ -29,17 +28,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) struct Job {
-    pub run: String,
-    pub workflow: String,
-    pub profile: Profile,
-    pub binding: Binding,
-    pub source: Source,
-    pub target: crate::browser_action::Target,
-    pub text: String,
+/// Checks a saved Claude Code session id.
+pub(crate) fn valid_session(session: &str) -> Result<()> {
+    SessionId::saved(session).map(|_| ())
 }
 
-pub(super) fn execute(
+pub(crate) fn execute(
     job: Job,
     stop: Arc<AtomicBool>,
     tx: mpsc::SyncSender<Event>,

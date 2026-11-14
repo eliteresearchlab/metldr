@@ -185,8 +185,8 @@ impl OpenCodeSession {
 
     pub async fn next_event(&mut self) -> Result<Event> {
         loop {
-            let value = self.rpc.next().await?;
-            match self.decode(&value) {
+            let mut value = self.rpc.next().await?;
+            match self.decode(&mut value) {
                 Ok(Some(event)) => return Ok(event),
                 Ok(None) => {
                     if value.get("id").is_some() {
@@ -204,7 +204,8 @@ impl OpenCodeSession {
         }
     }
 
-    fn decode(&mut self, value: &Value) -> Result<Option<Event>> {
+    /// Decodes one message. An update is moved out of `value`, never copied.
+    fn decode(&mut self, value: &mut Value) -> Result<Option<Event>> {
         if let Some(method) = value["method"].as_str() {
             if method == "session/update" && value.get("id").is_none() {
                 let params = &value["params"];
@@ -215,7 +216,7 @@ impl OpenCodeSession {
                 {
                     return Err(invalid("OpenCode update has wrong session or missing kind"));
                 }
-                return Ok(Some(Event::Update(params["update"].clone())));
+                return Ok(Some(Event::Update(value["params"]["update"].take())));
             }
             if method == "session/request_permission" {
                 let key = permission::request_key(&value["id"])?;
