@@ -1,4 +1,4 @@
-use crate::{Result, agent_model::Launch};
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -213,10 +213,7 @@ impl crate::flow::Owner {
             return Ok(());
         }
         self.native_change(run, |_, launch, _| {
-            let (Launch::Pi { activity, .. }
-            | Launch::Codex { activity, .. }
-            | Launch::OpenCode { activity, .. }) = launch
-            else {
+            let Some(activity) = launch.activity_mut() else {
                 return Ok(false);
             };
             Ok(coalesce(activity, call))
@@ -270,7 +267,7 @@ pub(super) fn fit_wire(reply: &mut Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_model::Activity;
+    use crate::agent_model::{Activity, Launch};
     use serde_json::json;
 
     #[test]

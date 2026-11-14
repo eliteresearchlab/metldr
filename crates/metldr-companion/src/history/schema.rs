@@ -35,6 +35,8 @@ pub(super) const OPENCODE: TableDefinition<&str, &[u8]> =
 /// older history treats it as empty.
 pub(super) const HARNESS: TableDefinition<&str, &[u8]> =
     TableDefinition::new("harness_workflows");
+/// Every saved native workflow table; a workflow name lives in at most one.
+pub(super) const NATIVE_WORKFLOWS: [TableDefinition<&str, &[u8]>; 4] = [PI, CODEX, OPENCODE, HARNESS];
 pub(super) const ACTIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("actions");
 pub(super) const TASK_PLANS: TableDefinition<&str, &[u8]> = TableDefinition::new("task_plans");
 pub(super) const PLAN_GRANTS: TableDefinition<&str, &[u8]> = TableDefinition::new("plan_grants");

@@ -178,6 +178,38 @@ pub(super) enum Launch {
     },
 }
 impl Launch {
+    /// The native workflow a launched agent runs in; `None` for flat runs.
+    pub fn native_workflow(&self) -> Option<&str> {
+        match self {
+            Self::Pi { workflow, .. }
+            | Self::Codex { workflow, .. }
+            | Self::OpenCode { workflow, .. }
+            | Self::Harness { workflow, .. } => Some(workflow),
+            _ => None,
+        }
+    }
+
+    /// Tool reports of a launched agent; `None` for flat runs.
+    pub fn activity(&self) -> Option<&[Activity]> {
+        match self {
+            Self::Pi { activity, .. }
+            | Self::Codex { activity, .. }
+            | Self::OpenCode { activity, .. }
+            | Self::Harness { activity, .. } => Some(activity),
+            _ => None,
+        }
+    }
+
+    pub fn activity_mut(&mut self) -> Option<&mut Vec<Activity>> {
+        match self {
+            Self::Pi { activity, .. }
+            | Self::Codex { activity, .. }
+            | Self::OpenCode { activity, .. }
+            | Self::Harness { activity, .. } => Some(activity),
+            _ => None,
+        }
+    }
+
     pub fn input_digest(&self) -> Option<&str> {
         match self {
             Self::LegacyUnspecified => None,

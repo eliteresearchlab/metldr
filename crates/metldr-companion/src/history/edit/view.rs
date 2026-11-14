@@ -154,10 +154,7 @@ impl Edit<'_> {
                     record(self.write, LAUNCHES, id)?
                         .ok_or_else(|| "projected launch is absent".into())
                 })?;
-                if matches!(
-                    launch.value,
-                    Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
-                ) {
+                if launch.value.native_workflow().is_some() {
                     return self.project_native(expected, id);
                 }
                 storage(|| {

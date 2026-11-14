@@ -30,10 +30,7 @@ impl Edit<'_> {
                 let launch: Record<Launch> = storage(|| {
                     record(self.write, LAUNCHES, &id)?.ok_or("recovery launch is absent".into())
                 })?;
-                if matches!(
-                    launch.value,
-                    Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
-                ) {
+                if launch.value.native_workflow().is_some() {
                     let mut task = self.native_task(&execution, &id)?;
                     crate::native_correction::finish(
                         &mut task.run,
