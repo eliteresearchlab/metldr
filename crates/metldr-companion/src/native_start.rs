@@ -41,15 +41,19 @@ impl<'a> Input<'a> {
             ConversationAction::OpenCodePrompt { source, text } => {
                 (Kind::Opencode, Origin::Source(source), text)
             }
-            ConversationAction::HarnessPrompt { harness, source, text } if harness == "claude" => {
-                (Kind::Claude, Origin::Source(source), text)
+            ConversationAction::HarnessPrompt { harness, source, text } => {
+                (crate::harness_model::adapter(harness)?.kind, Origin::Source(source), text)
             }
             ConversationAction::HarnessFollowUp {
                 harness,
                 workflow,
                 revision,
                 text,
-            } if harness == "claude" => (Kind::Claude, Origin::Workflow(workflow, *revision), text),
+            } => (
+                crate::harness_model::adapter(harness)?.kind,
+                Origin::Workflow(workflow, *revision),
+                text,
+            ),
             ConversationAction::PiFollowUp {
                 workflow,
                 revision,
@@ -101,7 +105,9 @@ impl Owner {
             (NativeWorkflow::Pi(value), Kind::Pi) => &value.fingerprint,
             (NativeWorkflow::Codex(value), Kind::Codex) => &value.fingerprint,
             (NativeWorkflow::OpenCode(value), Kind::Opencode) => &value.fingerprint,
-            (NativeWorkflow::Harness(value), Kind::Claude) if value.harness == "claude" => {
+            (NativeWorkflow::Harness(value), kind)
+                if crate::harness_model::is_kind(&value.harness, kind) =>
+            {
                 &value.fingerprint
             }
             _ => return Err("request identity already names a different task kind".into()),
@@ -125,7 +131,11 @@ impl Owner {
             (NativeProfile::Pi(profile), Kind::Pi) => digest(profile)?,
             (NativeProfile::Codex(profile), Kind::Codex) => digest(profile)?,
             (NativeProfile::Opencode(profile), Kind::Opencode) => digest(profile)?,
-            (NativeProfile::Harness("claude", profile), Kind::Claude) => digest(profile)?,
+            (NativeProfile::Harness(key, profile), kind)
+                if crate::harness_model::is_kind(key, kind) =>
+            {
+                digest(profile)?
+            }
             _ => return Err("native command and profile differ".into()),
         };
         let (source, prior) = self.record_history.edit(|edit| {
