@@ -181,7 +181,7 @@ pub(super) fn control(state: &State) -> Option<El> {
     Some(if enabled {
         control
             .native_activation()
-            .press(oklch(0.6, 0.0, 0.0).alpha(0.2))
+            .press(state.preferences.palette().press)
             .on_press_tx(move |state: &mut State, tx| {
                 if let Err(error) = submit(state, &core, &run, draft_version, &draft, tx) {
                     state.fail(error);
@@ -228,7 +228,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                 .focusable(true)
                 .label("Check correction")
                 .native_activation()
-                .press(oklch(0.6, 0.0, 0.0).alpha(0.2))
+                .press(state.preferences.palette().press)
                 .on_press_tx(|state: &mut State, _| {
                     let Some(core) = state.core().cloned() else {
                         return;

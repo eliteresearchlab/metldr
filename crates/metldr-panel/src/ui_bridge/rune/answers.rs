@@ -195,7 +195,7 @@ impl Answers {
         clip: [f32; 4],
         updates: &Rc<Updates>,
         activities: &Activities,
-        palette: super::preferences::Palette,
+        palette: &super::preferences::Palette,
         typography: super::preferences::Typography,
     ) {
         for (id, mounted) in self.mounts.borrow_mut().iter_mut() {

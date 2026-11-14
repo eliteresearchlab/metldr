@@ -1,3 +1,4 @@
+pub(super) use super::theme::Palette;
 use super::*;
 use crate::preferences::{
     UiPreferenceSnapshot, UiPreferenceStatus, UiPreferenceSubscription, UiPreferences,
@@ -50,9 +51,23 @@ pub(super) struct Preferences {
     failed: bool,
     parking: Option<Control>,
     last_appearance: Control,
-    /// Palette and text scale of `snapshot`, computed once per change instead of on every
-    /// `palette()` and `typography()` call while drawing.
-    look: Option<(Palette, f32)>,
+    /// Palette and text scale of `snapshot`, computed once per change and lent by reference
+    /// while drawing.
+    look: Look,
+}
+
+struct Look {
+    palette: Palette,
+    scale: f32,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self {
+            palette: Palette::for_theme("dark"),
+            scale: 1.0,
+        }
+    }
 }
 
 impl Preferences {
@@ -134,7 +149,10 @@ impl Preferences {
             }
         }
         self.snapshot = Some(snapshot);
-        self.look = Some((Palette::for_theme(&snapshot.theme()), scale(&snapshot.font_size())));
+        self.look = Look {
+            palette: Palette::for_theme(&snapshot.theme()),
+            scale: scale(&snapshot.font_size()),
+        };
         true
     }
 
@@ -200,20 +218,16 @@ impl Preferences {
         }
     }
 
-    pub(super) fn palette(&self) -> Palette {
-        self.look
-            .map_or_else(|| Palette::for_theme("catppuccin"), |(palette, _)| palette)
+    pub(super) fn palette(&self) -> &Palette {
+        &self.look.palette
     }
 
     pub(super) fn text_scale(&self) -> f32 {
-        self.look.map_or(1.0, |(_, scale)| scale)
+        self.look.scale
     }
 
     pub(super) fn typography(&self) -> Typography {
-        Typography {
-            scale: self.text_scale(),
-            ink: self.palette().ink,
-        }
+        Typography::new(self.look.scale, &self.look.palette)
     }
 
     fn notice(
@@ -425,7 +439,7 @@ fn button(
     let press = Rc::clone(action);
     let key_action = Rc::clone(action);
     element
-        .press(oklch(0.7, 0.08, 250.0).alpha(0.2))
+        .press(typography.press)
         .on_press_tx(move |state: &mut State, tx| {
             if matches!(value, Action::RetrySetup) {
                 state.sound(crate::interaction_audio::Cue::Press);
@@ -447,26 +461,25 @@ fn button(
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct Palette {
-    pub(super) page: Color,
-    pub(super) canvas: Color,
-    pub(super) surface: Color,
-    pub(super) field: Color,
-    pub(super) hover: Color,
-    pub(super) hover_2: Color,
-    pub(super) ink: Color,
-    pub(super) ink_2: Color,
-    pub(super) ink_3: Color,
-    pub(super) line: Color,
-}
-
-#[derive(Clone, Copy)]
 pub(super) struct Typography {
     pub(super) scale: f32,
     pub(super) ink: Color,
+    /// The overlay a pressed control shows.
+    pub(super) press: Color,
+    /// Text caret and selection in fields.
+    pub(super) selection: Color,
 }
 
 impl Typography {
+    pub(super) fn new(scale: f32, palette: &Palette) -> Self {
+        Self {
+            scale,
+            ink: palette.ink,
+            press: palette.press,
+            selection: palette.selection,
+        }
+    }
+
     pub(super) fn font(self, size: f32, weight: f32) -> TextStyle {
         TextStyle::new(size * self.scale, weight)
     }
@@ -480,74 +493,6 @@ fn scale(font_size: &str) -> f32 {
         "small" => 0.9375,
         "large" => 1.125,
         _ => 1.0,
-    }
-}
-
-impl Palette {
-    fn for_theme(theme: &str) -> Self {
-        let (page, canvas, surface, field, hover, hover_2, ink, ink_2, ink_3, line) = match theme {
-            "light" => (
-                (0.985, 0.001, 286.376),
-                (0.961, 0.002, 247.84),
-                (1.0, 0.0, 0.0),
-                (0.961, 0.001, 286.375),
-                (0.97, 0.002, 247.839),
-                (0.933, 0.003, 247.86),
-                (0.247, 0.006, 258.361),
-                (0.506, 0.01, 264.477),
-                (0.695, 0.009, 264.505),
-                (0.946, 0.003, 264.542),
-            ),
-            "gruvbox" => (
-                (0.24, 0.025, 75.0),
-                (0.26, 0.025, 75.0),
-                (0.3, 0.03, 75.0),
-                (0.33, 0.03, 75.0),
-                (0.33, 0.03, 75.0),
-                (0.36, 0.03, 75.0),
-                (0.91, 0.04, 85.0),
-                (0.74, 0.045, 80.0),
-                (0.65, 0.045, 80.0),
-                (0.38, 0.03, 75.0),
-            ),
-            "cyberpunk" => (
-                (0.17, 0.045, 290.0),
-                (0.19, 0.045, 290.0),
-                (0.23, 0.06, 290.0),
-                (0.26, 0.06, 290.0),
-                (0.26, 0.06, 290.0),
-                (0.29, 0.06, 290.0),
-                (0.94, 0.04, 195.0),
-                (0.75, 0.08, 205.0),
-                (0.65, 0.08, 205.0),
-                (0.31, 0.06, 290.0),
-            ),
-            _ => (
-                (0.209, 0.004, 264.477),
-                (0.231, 0.004, 264.487),
-                (0.26, 0.006, 271.191),
-                (0.293, 0.006, 271.223),
-                (0.289, 0.006, 271.22),
-                (0.318, 0.007, 274.747),
-                (0.964, 0.002, 247.839),
-                (0.731, 0.008, 260.731),
-                (0.541, 0.01, 264.484),
-                (0.308, 0.006, 258.354),
-            ),
-        };
-        let color = |(l, c, h)| oklch(l, c, h);
-        Self {
-            page: color(page),
-            canvas: color(canvas),
-            surface: color(surface),
-            field: color(field),
-            hover: color(hover),
-            hover_2: color(hover_2),
-            ink: color(ink),
-            ink_2: color(ink_2),
-            ink_3: color(ink_3),
-            line: color(line),
-        }
     }
 }
 
@@ -639,4 +584,3 @@ mod checks {
         }
     }
 }
-

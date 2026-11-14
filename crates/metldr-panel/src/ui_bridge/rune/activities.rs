@@ -280,6 +280,7 @@ impl Activities {
         id: &str,
         updates: &Rc<Updates>,
         typography: super::preferences::Typography,
+        palette: &super::preferences::Palette,
     ) -> El {
         let cache = self.inner.borrow();
         let Some(entry) = cache.entries.get(id) else {
@@ -322,6 +323,7 @@ impl Activities {
             Value::Chart(chart) => chart_view(
                 chart,
                 typography,
+                palette,
                 entry.hovered,
                 self.pie_hover(id, chart, updates),
             )
@@ -353,7 +355,7 @@ impl Activities {
                             .key(key)
                             .role("button")
                             .focusable(true)
-                            .press(oklch(0.6, 0.0, 0.0).alpha(0.2))
+                            .press(typography.press)
                             .on_press_tx(move |state: &mut State, tx| press(state, tx))
                             .on_key(move |state: &mut State, key, tx| {
                                 if key.key != ::rune::Key::Enter {
@@ -1052,6 +1054,7 @@ fn table_view(table: &Table, typography: super::preferences::Typography) -> El {
 fn chart_view(
     chart: &Chart,
     typography: super::preferences::Typography,
+    palette: &super::preferences::Palette,
     hovered: Option<usize>,
     hover: Rc<dyn Fn(Option<(f32, f32)>)>,
 ) -> El {
@@ -1104,7 +1107,7 @@ fn chart_view(
                                 [zero.max(end), 13.0],
                                 [zero.min(end), 13.0],
                             ],
-                            oklch(0.65, 0.16, 250.0),
+                            palette.accent,
                         );
                     }
                     shape = shape.stroke(vec![[zero, 0.0], [zero, 16.0]], 1.0, typography.ink);
@@ -1131,7 +1134,7 @@ fn chart_view(
                     if end > angle {
                         let steps =
                             (((end - angle) / std::f64::consts::TAU * 64.0).ceil() as usize).max(1);
-                        let color = oklch(0.7, 0.14, (index * 47 % 360) as f32);
+                        let color = palette.series(index);
                         for i in 0..steps {
                             let a = angle + (end - angle) * i as f64 / steps as f64;
                             let b = angle + (end - angle) * (i + 1) as f64 / steps as f64;
@@ -1174,11 +1177,7 @@ fn chart_view(
                     ::rune::row()
                         .gap(6.0)
                         .center_y()
-                        .child(::rune::row().size(10.0, 10.0).fill(oklch(
-                            0.7,
-                            0.14,
-                            (index * 47 % 360) as f32,
-                        )))
+                        .child(::rune::row().size(10.0, 10.0).fill(palette.series(index)))
                         .child(
                             typography
                                 .text(format!("{}: {}", point.label, point.value))

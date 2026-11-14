@@ -448,7 +448,7 @@ const CLOSE: Icon = Icon {
 };
 
 /// A square icon control: `size` points wide, icon `glyph` points, muted ink.
-fn icon_button(icon: &'static Icon, glyph: f32, size: f32, radius: f32, p: super::preferences::Palette) -> El {
+fn icon_button(icon: &'static Icon, glyph: f32, size: f32, radius: f32, p: &super::preferences::Palette) -> El {
     row()
         .size(size, size)
         .radius(radius)
@@ -615,7 +615,7 @@ mod tests {
 }
 
 pub(super) fn button(
-    p: super::preferences::Palette,
+    p: &super::preferences::Palette,
     typography: super::preferences::Typography,
     label: &str,
     key: String,

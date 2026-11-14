@@ -70,7 +70,7 @@ fn button(
     if enabled {
         control
             .native_activation()
-            .press(oklch(0.6, 0.0, 0.0).alpha(0.2))
+            .press(typography.press)
             .on_press_tx(move |state: &mut State, tx| {
                 state.sound(crate::interaction_audio::Cue::Press);
                 handler(state, tx)

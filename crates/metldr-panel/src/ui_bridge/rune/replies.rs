@@ -82,7 +82,7 @@ fn button(
 fn input(
     edit: &TextEdit,
     typography: super::preferences::Typography,
-    palette: super::preferences::Palette,
+    palette: &super::preferences::Palette,
 ) -> El {
     let ink = palette.ink;
     ::rune::el::text_input(
@@ -100,10 +100,15 @@ fn input(
     .caret(ink, ink.alpha(0.25))
 }
 
-fn activate(el: El, enabled: bool, handler: impl Fn(&mut State, &mut Tx) + 'static) -> El {
+fn activate(
+    el: El,
+    press: ::rune::Color,
+    enabled: bool,
+    handler: impl Fn(&mut State, &mut Tx) + 'static,
+) -> El {
     if enabled {
         el.native_activation()
-            .press(oklch(0.6, 0.0, 0.0).alpha(0.2))
+            .press(press)
             .on_press_tx(move |state: &mut State, tx| {
                 state.sound(crate::interaction_audio::Cue::Press);
                 handler(state, tx)
@@ -157,6 +162,7 @@ fn codex_action(
     activate(
         button(typography, label.into(), key, enabled)
             .label(format!("{label} for request {}", request.as_str())),
+        typography.press,
         enabled,
         move |state: &mut State, tx| {
             let answer = match action {
@@ -221,6 +227,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                         panel = panel.child(activate(
                             button(typography, label.clone(), choice_key, enabled)
                                 .label(format!("{label} for {question_label}")),
+                            typography.press,
                             enabled,
                             move |state: &mut State, _| {
                                 let choices =
@@ -278,6 +285,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                 panel = panel.child(activate(
                     button(typography, "Submit answers".into(), action_key, ready)
                         .label(format!("Submit answers for request {}", request.as_str())),
+                    typography.press,
                     ready,
                     move |state: &mut State, tx| {
                         if questions.iter().any(|question| {
@@ -379,6 +387,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                             panel = panel.child(activate(
                                 button(typography, label.clone(), choice_key, enabled)
                                     .label(format!("{label} for {title}")),
+                                typography.press,
                                 enabled,
                                 move |state: &mut State, _| {
                                     if let Some(edit) = state.replies.edits.get_mut(&entry) {
@@ -415,6 +424,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                 panel = panel.child(activate(
                     button(typography, "Submit form".into(), action_key, enabled)
                         .label(format!("Submit form for request {}", request.as_str())),
+                    typography.press,
                     enabled,
                     move |state: &mut State, tx| {
                         if fields.iter().any(|field| {
@@ -506,6 +516,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
             panel = panel.child(activate(
                 button(typography, option.name.clone(), key, enabled)
                     .label(format!("{} for {}", option.name, permission.title)),
+                typography.press,
                 enabled,
                 move |state: &mut State, tx| {
                     native(state, run.clone(), request.clone(), Some(value.clone()), tx)
@@ -519,6 +530,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
         panel = panel.child(activate(
             button(typography, "Cancel".into(), key, enabled)
                 .label(format!("Cancel {}", permission.title)),
+            typography.press,
             enabled,
             move |state: &mut State, tx| native(state, run.clone(), request.clone(), None, tx),
         ));
