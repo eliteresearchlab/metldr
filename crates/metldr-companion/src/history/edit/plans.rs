@@ -110,23 +110,7 @@ impl Edit<'_> {
         let launch: Record<crate::agent_model::Launch> =
             storage(|| record(self.write, super::super::schema::LAUNCHES, execution.run()))?
                 .ok_or(PlanError::Invalid)?;
-        plan.proposer = match launch.value {
-            crate::agent_model::Launch::Pi { .. } => metldr_harness::HarnessId::Pi.label(),
-            crate::agent_model::Launch::Codex { .. } => metldr_harness::HarnessId::Codex.label(),
-            crate::agent_model::Launch::OpenCode { .. } => {
-                metldr_harness::HarnessId::OpenCode.label()
-            }
-            crate::agent_model::Launch::Messages { .. }
-            | crate::agent_model::Launch::ConfiguredMessages { .. } => "Messages",
-            crate::agent_model::Launch::ConfiguredResponses { .. } => "Responses",
-            crate::agent_model::Launch::ConfiguredGoogle { .. } => "Google",
-            crate::agent_model::Launch::ConfiguredChat { .. } => "Chat Completions",
-            crate::agent_model::Launch::Harness { ref harness, .. } => {
-                metldr_harness::HarnessId::from_key(harness).map_or("Agent", |id| id.label())
-            }
-            _ => "Agent",
-        }
-        .to_owned();
+        plan.proposer = launch.value.label().to_owned();
         plan.revision = self
             .task_plan(execution)?
             .map_or(Some(1), |p| p.revision.checked_add(1))
