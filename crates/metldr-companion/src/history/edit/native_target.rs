@@ -41,7 +41,15 @@ impl Edit<'_> {
                         {
                             return Err("preceding native workflow index differs".into());
                         }
-                        previous.value.current
+                        // A session that moved with its chat starts on the newly captured page.
+                        let run_source = |id: &str| -> Result<String> {
+                            Ok(self.saved_run(id)?.ok_or("native run is absent")?.value.source)
+                        };
+                        if run_source(&prior)? == run_source(run)? {
+                            previous.value.current
+                        } else {
+                            Target::from(&source.page)
+                        }
                     }
                     None => Target::from(&source.page),
                 };

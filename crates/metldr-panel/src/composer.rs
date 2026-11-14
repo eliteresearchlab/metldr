@@ -134,7 +134,7 @@ fn ready(view: &PageView, session: &AgentSessionView) -> bool {
             .pi_profile
             .as_ref()
             .is_some_and(|profile| session.profile == profile.fingerprint)
-        && Some(&session.source) == view.source()
+        && view.source().is_some()
 }
 
 fn codex_ready(view: &PageView, session: &AgentSessionView) -> bool {
@@ -143,10 +143,9 @@ fn codex_ready(view: &PageView, session: &AgentSessionView) -> bool {
             .codex_profile
             .as_ref()
             .is_some_and(|profile| session.profile == profile.fingerprint)
-        && Some(&session.source) == view.source()
+        && view.source().is_some()
 }
 
-/// Whether a Claude Code profile is saved and ready.
 /// The chat's most recently created session that can continue now.
 fn newest<'a>(
     sessions: &'a [AgentSessionView],
@@ -158,6 +157,7 @@ fn newest<'a>(
     })
 }
 
+/// Whether a Claude Code profile is saved and ready.
 fn claude_configured(view: &PageView) -> bool {
     view.agent_settings.agents.iter().any(|row| {
         row.agent == crate::model::AgentKind::Claude && row.state == crate::model::AgentSettingState::Ready
@@ -165,7 +165,7 @@ fn claude_configured(view: &PageView) -> bool {
 }
 
 fn claude_ready(view: &PageView, session: &AgentSessionView) -> bool {
-    session.ready && claude_configured(view) && Some(&session.source) == view.source()
+    session.ready && claude_configured(view) && view.source().is_some()
 }
 
 fn opencode_ready(view: &PageView, session: &AgentSessionView) -> bool {
@@ -174,7 +174,7 @@ fn opencode_ready(view: &PageView, session: &AgentSessionView) -> bool {
             .opencode_profile
             .as_ref()
             .is_some_and(|profile| session.profile == profile.fingerprint)
-        && Some(&session.source) == view.source()
+        && view.source().is_some()
 }
 
 fn page_route(view: &PageView, protocol: ProviderProtocol) -> Option<(&str, &str, &str)> {
@@ -419,19 +419,19 @@ pub(crate) async fn dispatch(
         Destination::Codex => flow.codex_prompt(scope, source, text, codex_mode).await,
         Destination::OpenCode => flow.opencode_prompt(scope, source, text).await,
         Destination::Continue { workflow, revision } => {
-            flow.pi_follow_up(scope, workflow, revision, text).await
+            flow.pi_follow_up(scope, workflow, revision, &source, text).await
         }
         Destination::ContinueCodex { workflow, revision } => {
-            flow.codex_follow_up(scope, workflow, revision, text, codex_mode)
+            flow.codex_follow_up(scope, workflow, revision, &source, text, codex_mode)
                 .await
         }
         Destination::ContinueOpenCode { workflow, revision } => {
-            flow.opencode_follow_up(scope, workflow, revision, text)
+            flow.opencode_follow_up(scope, workflow, revision, &source, text)
                 .await
         }
         Destination::Claude => flow.harness_prompt(scope, "claude", source, text).await,
         Destination::ContinueClaude { workflow, revision } => {
-            flow.harness_follow_up(scope, "claude", workflow, revision, text)
+            flow.harness_follow_up(scope, "claude", workflow, revision, &source, text)
                 .await
         }
     }

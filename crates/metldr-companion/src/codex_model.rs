@@ -127,7 +127,7 @@ pub(super) fn validate(state: &Store) -> Result<()> {
                 .get(workflow)
                 .ok_or("missing Codex workflow")?;
             if run.kind != "agent"
-                || run.source != w.source.id
+                || (run.id == w.last_run && run.source != w.source.id)
                 || (run.status == crate::model::Status::Complete && selection.is_none())
                 || activity.len() > 64
                 || activity.iter().any(|item| !item.valid())

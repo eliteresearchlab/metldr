@@ -63,6 +63,7 @@ impl NativeWorkflow {
             ($value:expr) => {{
                 $value.last_run = self.last_run().into();
                 $value.revision = self.revision();
+                $value.source = self.source().clone();
             }};
         }
         match &mut restored {
@@ -75,6 +76,16 @@ impl NativeWorkflow {
             return Err("native continuation changed its profile source or binding".into());
         }
         Ok(())
+    }
+
+    /// Moves the workflow to the chat's current page; admission checks that it is selected.
+    pub(crate) fn set_source(&mut self, source: Source) {
+        match self {
+            Self::Pi(workflow) => workflow.source = source,
+            Self::Codex(workflow) => workflow.source = source,
+            Self::OpenCode(workflow) => workflow.source = source,
+            Self::Harness(workflow) => workflow.source = source,
+        }
     }
 
     pub(crate) fn source(&self) -> &Source {

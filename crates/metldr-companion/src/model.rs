@@ -346,6 +346,9 @@ pub(super) enum ConversationAction {
     PiFollowUp {
         workflow: String,
         revision: u64,
+        /// The chat's current page when it moved since the session began (B1.12.4b).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
         text: String,
     },
     CodexPrompt {
@@ -356,6 +359,9 @@ pub(super) enum ConversationAction {
     CodexFollowUp {
         workflow: String,
         revision: u64,
+        /// The chat's current page when it moved since the session began (B1.12.4b).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
         text: String,
         mode: crate::codex_input::TurnMode,
     },
@@ -368,6 +374,9 @@ pub(super) enum ConversationAction {
     OpenCodeFollowUp {
         workflow: String,
         revision: u64,
+        /// The chat's current page when it moved since the session began (B1.12.4b).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
         text: String,
     },
     /// A new turn for a harness on the generic path, named by its registry key.
@@ -380,6 +389,9 @@ pub(super) enum ConversationAction {
         harness: String,
         workflow: String,
         revision: u64,
+        /// The chat's current page when it moved since the session began (B1.12.4b).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
         text: String,
     },
     #[serde(rename = "native_permission")]

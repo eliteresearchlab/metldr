@@ -294,7 +294,7 @@ pub(super) fn validate(state: &Store) -> Result<()> {
         {
             let workflow = state.workflows.get(workflow).ok_or("missing workflow")?;
             if run.kind != "agent"
-                || run.source != workflow.source.id
+                || (run.id == workflow.last_run && run.source != workflow.source.id)
                 || activity.len() > 16
                 || activity.iter().any(|a| !a.valid())
             {
