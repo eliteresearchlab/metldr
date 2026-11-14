@@ -651,7 +651,7 @@ pub(super) fn button(
             .font(typography.font(12.0, 400.0))
             .color(p.ink_2),
     );
-    pressable(el, p, label, enabled, true, action)
+    pressable(el, p, label, enabled, true, Rc::new(action))
 }
 
 /// A Close or paging control on the Saved chats sheet: 44 points tall with body text.
@@ -669,7 +669,7 @@ fn sheet_button(
         .px(12.0)
         .items_center()
         .child(typography.text(label).color(p.ink));
-    pressable(el, p, label, enabled, true, action)
+    pressable(el, p, label, enabled, true, Rc::new(action))
 }
 
 /// One saved chat in the Saved chats list: a full-width row of wrapped title text. List rows never scale.
@@ -689,18 +689,19 @@ fn chat_row(
         .py(8.0)
         .items_center()
         .child(typography.text(label).color(p.ink).wrap().grow(1.0));
-    pressable(el, p, label, enabled, false, action)
+    pressable(el, p, label, enabled, false, Rc::new(action))
 }
 
 /// The outlined field surface, button semantics and Enter or press handling shared by every
-/// control on these screens. `scale` makes an enabled control shrink while pressed.
+/// control on these screens. `scale` makes an enabled control shrink while pressed. The action is
+/// shared behind one pointer so every caller reuses a single copy of the press and key handlers.
 fn pressable(
     el: El,
     p: &super::preferences::Palette,
     label: &str,
     enabled: bool,
     scale: bool,
-    action: impl Fn(&mut State, &mut Tx) + 'static,
+    action: Rc<dyn Fn(&mut State, &mut Tx)>,
 ) -> El {
     let el = el
         .radius(8.0)
@@ -713,7 +714,6 @@ fn pressable(
     if !enabled {
         return el.opacity(0.5);
     }
-    let action = Rc::new(action);
     let press = Rc::clone(&action);
     let el = if scale {
         el.press_scale(super::theme::PRESS_SCALE)
