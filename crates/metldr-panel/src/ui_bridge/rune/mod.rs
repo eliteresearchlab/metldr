@@ -1749,14 +1749,6 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .flex_wrap()
         .gap(8.0)
         .items_center()
-        .child(
-            typography
-                .text(status)
-                .font(typography.font(12.0, 400.0))
-                .color(p.ink_2)
-                .key("conversation-status")
-                .role("status"),
-        )
         .child(conversations::button(
             p,
             typography,
@@ -1776,6 +1768,20 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     for control in state.conversations.toolbar(state) {
         toolbar = toolbar.child(control);
     }
+    // One fixed line under the controls: a longer status never rewraps the row or moves the
+    // thread below it.
+    let toolbar = col().w_full().gap(6.0).child(toolbar).child(
+        typography
+            .text(status)
+            .font(typography.font(12.0, 400.0).lh(16.0 * typography.scale))
+            .color(p.ink_2)
+            .single_line()
+            .truncate()
+            .h(16.0 * typography.scale)
+            .w_full()
+            .key("conversation-status")
+            .role("status"),
+    );
     let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });
     if welcome {
         // Two lines with tight leading and negative tracking, as the reference's 26 px heading.
