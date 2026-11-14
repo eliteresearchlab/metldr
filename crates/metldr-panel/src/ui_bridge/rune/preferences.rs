@@ -50,6 +50,9 @@ pub(super) struct Preferences {
     failed: bool,
     parking: Option<Control>,
     last_appearance: Control,
+    /// Palette and text scale of `snapshot`, computed once per change instead of on every
+    /// `palette()` and `typography()` call while drawing.
+    look: Option<(Palette, f32)>,
 }
 
 impl Preferences {
@@ -131,6 +134,7 @@ impl Preferences {
             }
         }
         self.snapshot = Some(snapshot);
+        self.look = Some((Palette::for_theme(&snapshot.theme()), scale(&snapshot.font_size())));
         true
     }
 
@@ -197,20 +201,12 @@ impl Preferences {
     }
 
     pub(super) fn palette(&self) -> Palette {
-        Palette::for_theme(
-            self.snapshot
-                .map(|s| s.theme())
-                .as_deref()
-                .unwrap_or("catppuccin"),
-        )
+        self.look
+            .map_or_else(|| Palette::for_theme("catppuccin"), |(palette, _)| palette)
     }
 
     pub(super) fn text_scale(&self) -> f32 {
-        match self.snapshot.map(|s| s.font_size()).as_deref() {
-            Some("small") => 0.9375,
-            Some("large") => 1.125,
-            _ => 1.0,
-        }
+        self.look.map_or(1.0, |(_, scale)| scale)
     }
 
     pub(super) fn typography(&self) -> Typography {
@@ -479,6 +475,14 @@ impl Typography {
         text(value).font(self.font(13.0, 400.0)).color(self.ink)
     }
 }
+fn scale(font_size: &str) -> f32 {
+    match font_size {
+        "small" => 0.9375,
+        "large" => 1.125,
+        _ => 1.0,
+    }
+}
+
 impl Palette {
     fn for_theme(theme: &str) -> Self {
         let (page, canvas, surface, field, hover, hover_2, ink, ink_2, ink_3, line) = match theme {
@@ -635,3 +639,4 @@ mod checks {
         }
     }
 }
+

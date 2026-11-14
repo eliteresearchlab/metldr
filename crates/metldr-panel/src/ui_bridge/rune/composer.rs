@@ -21,7 +21,7 @@
  */
 
 use super::{Menu, Mode, State};
-use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, oklch, row, text};
+use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, oklch, row};
 
 const CONTROL: f32 = 28.0;
 const BORDER: f32 = 1.0;
@@ -29,12 +29,12 @@ const BORDER: f32 = 1.0;
 const INSET: f32 = 14.0 + BORDER;
 const RADIUS: f32 = 22.0;
 
-const PLUS: Icon = Icon {
+pub(super) const PLUS: Icon = Icon {
     name: "metldr-plus",
     view: 24.0,
     body: "<path d=\"M12 5v14M5 12h14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>",
 };
-const CHEVRON: Icon = Icon {
+pub(super) const CHEVRON: Icon = Icon {
     name: "metldr-chevron",
     view: 24.0,
     body: "<path d=\"m6 9 6 6 6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
@@ -435,7 +435,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         )
 }
 
-pub(super) fn menu(state: &State, cx: &mut Cx<State>) -> Option<El> {
+pub(super) fn menu(state: &State) -> Option<El> {
     let p = palette(state);
     let typography = state.preferences.typography();
     match state.menu? {
@@ -749,7 +749,7 @@ mod tests {
                 .w_full()
                 .child(view(state, cx))
                 .on_key(|state: &mut State, key, tx| super::super::key(state, key, tx));
-            if let Some(menu) = menu(state, cx) {
+            if let Some(menu) = menu(state) {
                 tree = tree.child(menu);
             }
             tree

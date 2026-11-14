@@ -1,7 +1,7 @@
 use super::{Core, FlowError, State, Tx};
 use crate::model::{PiUiDialog, RunId};
 use crate::ui_bridge::pi_ui::{Answer, pi_reply_key, pi_suggestion_key};
-use ::rune::{El, TextEdit, TextStyle, col, oklch, text};
+use ::rune::{El, TextEdit, TextStyle, col, oklch};
 use std::collections::{HashMap, HashSet};
 use wasm_bindgen_futures::spawn_local;
 
