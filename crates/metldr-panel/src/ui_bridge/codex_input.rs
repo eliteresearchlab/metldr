@@ -579,5 +579,14 @@ mod tests {
 
 #[cfg(feature = "rune-ui")]
 pub(super) fn rune_reply_key(kind: &str, run: &RunId, request: &RunId, action: &str) -> String {
-    serde_json::to_string(&(kind, run.as_str(), request.as_str(), action)).expect("string key")
+    // The kind is fixed and run ids are hex, a colon and digits, so a newline join is unambiguous.
+    let parts = [kind, run.as_str(), request.as_str(), action];
+    let mut key = String::with_capacity(parts.iter().map(|part| part.len() + 1).sum());
+    for (index, part) in parts.into_iter().enumerate() {
+        if index > 0 {
+            key.push('\n');
+        }
+        key.push_str(part);
+    }
+    key
 }
