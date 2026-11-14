@@ -16,7 +16,9 @@ pub(crate) const MAX_HISTORY_MESSAGES: usize =
 mod message;
 pub(crate) mod run_details;
 pub(crate) mod tools;
-pub(crate) use message::{Activity, AgUiMessage, RunOrigin, TableReference};
+pub(crate) use message::{Activity, AgUiMessage, RunOrigin};
+#[cfg(test)]
+pub(crate) use message::TableReference;
 use run_details::RunDetailsReference;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
