@@ -3,7 +3,7 @@ use super::*;
 use crate::preferences::{
     UiPreferenceSnapshot, UiPreferenceStatus, UiPreferenceSubscription, UiPreferences,
 };
-use ::rune::{Color, El, TextStyle, col, oklch, text};
+use ::rune::{Color, El, TextStyle, col, text};
 use wasm_bindgen_futures::JsFuture;
 
 #[derive(Clone, Copy)]
