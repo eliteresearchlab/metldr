@@ -32,12 +32,6 @@ impl Sse {
         }
     }
 
-    /// Feeds one byte; prefer [`Sse::next`] for whole chunks.
-    pub fn byte(&mut self, byte: u8) -> Result<Option<(String, String)>> {
-        let mut input = &[byte][..];
-        self.next(&mut input)
-    }
-
     /// Consumes `input` up to and including the line that completes the next event, and returns
     /// that event; returns `None` once `input` is used up. Line ends are found with a SIMD scan,
     /// and line bytes are copied in bulk.

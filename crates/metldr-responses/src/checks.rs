@@ -72,13 +72,11 @@ fn replay(events: &[Value], chunk_size: usize) -> Result<(Turn, String)> {
     let mut sse = sse::Sse::new("Responses");
     let mut state = stream::State::default();
     let mut text = String::new();
-    for chunk in stream.as_bytes().chunks(chunk_size) {
-        for &byte in chunk {
-            if let Some((event, data)) = sse.byte(byte)? {
-                for event in state.frame(&event, &data)? {
-                    if let TextEvent::Delta(delta) = event {
-                        text.push_str(&delta);
-                    }
+    for mut chunk in stream.as_bytes().chunks(chunk_size) {
+        while let Some((event, data)) = sse.next(&mut chunk)? {
+            for event in state.frame(&event, &data)? {
+                if let TextEvent::Delta(delta) = event {
+                    text.push_str(&delta);
                 }
             }
         }
@@ -153,9 +151,7 @@ fn rejects_partial_calls_identity_changes_and_false_completion() {
     after.push(json!({"type":"response.in_progress","sequence_number":999}));
     assert!(replay(&after, 4096).is_err());
     let mut sse = sse::Sse::new("Responses");
-    for &byte in b"data: {}" {
-        sse.byte(byte).unwrap();
-    }
+    sse.next(&mut &b"data: {}"[..]).unwrap();
     assert!(sse.finish().is_err());
 }
 
@@ -461,15 +457,13 @@ fn generated_progress_preserves_closed_values_and_requires_terminal_agreement() 
         let mut decoder = sse::Sse::with_bound("Responses", 1_048_576);
         let mut state = stream::State::with_limits(393_216, 65_536, true);
         let mut progress = Vec::new();
-        for chunk in wire.as_bytes().chunks(size) {
-            for &byte in chunk {
-                if let Some((event, data)) = decoder.byte(byte).unwrap() {
-                    assert!(state.frame(&event, &data).unwrap().is_empty());
-                    if let Some(update) = state.presentation_progress().unwrap() {
-                        assert_eq!(update.call_id, "call_owned");
-                        assert_eq!(update.surface_id, "surface");
-                        progress.push(update.content);
-                    }
+        for mut chunk in wire.as_bytes().chunks(size) {
+            while let Some((event, data)) = decoder.next(&mut chunk).unwrap() {
+                assert!(state.frame(&event, &data).unwrap().is_empty());
+                if let Some(update) = state.presentation_progress().unwrap() {
+                    assert_eq!(update.call_id, "call_owned");
+                    assert_eq!(update.surface_id, "surface");
+                    progress.push(update.content);
                 }
             }
         }
@@ -517,7 +511,10 @@ fn constructs_direct_stateless_request_without_provider_credentials() {
     assert_eq!(request["include"], json!(["reasoning.encrypted_content"]));
     assert!(request.get("previous_response_id").is_none());
     assert!(!request.to_string().contains("Bearer owned"));
-    assert_eq!(request["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(
+        request["tools"].as_array().unwrap().len(),
+        metldr_browser_tools::definitions().len()
+    );
     for tool in request["tools"].as_array().unwrap() {
         assert_eq!(tool["strict"], true);
         assert!(tool["parameters"]["required"].is_array());

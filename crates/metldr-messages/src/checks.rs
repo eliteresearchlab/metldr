@@ -50,12 +50,10 @@ fn replay(events: &[Value], chunk: usize) -> Result<(stream::Turn, String)> {
     let mut parser = sse::Sse::new("Messages");
     let mut state = stream::State::new("fixture-model");
     let mut visible = String::new();
-    for bytes in bytes.chunks(chunk) {
-        for &b in bytes {
-            if let Some((event, data)) = parser.byte(b)? {
-                if let Some(TextEvent::Delta(text)) = state.frame(&event, &data)? {
-                    visible.push_str(&text);
-                }
+    for mut bytes in bytes.chunks(chunk) {
+        while let Some((event, data)) = parser.next(&mut bytes)? {
+            if let Some(TextEvent::Delta(text)) = state.frame(&event, &data)? {
+                visible.push_str(&text);
             }
         }
     }
@@ -88,13 +86,13 @@ fn prompt() -> Prompt<'static> {
 fn streams_unicode_and_preserves_exact_tool_continuation() {
     for chunk in [1, 2, 7, 127, 4096] {
         let (turn, text) = replay(&text_and_call(), chunk).unwrap();
+        assert_eq!(text, "Read বাংলা 🦀");
+        assert_eq!(turn.call.as_ref().unwrap().call, Call::Observe);
         let usage = (Some(44), Some(30), Some(12));
         assert_eq!(
             (turn.usage.input, turn.usage.cached, turn.usage.output),
             usage
         );
-        assert_eq!(text, "Read বাংলা 🦀");
-        assert_eq!(turn.call.as_ref().unwrap().call, Call::Observe);
         let expected = json!([
             {"type":"thinking","thinking":"private thought","signature":"opaque-signature","metadata":"kept"},
             {"type":"redacted_thinking","data":"opaque encrypted bytes"},
@@ -230,7 +228,10 @@ fn constructs_native_request_and_enforces_conversation_order() {
     assert_eq!(q["max_tokens"], 2048);
     assert_eq!(q["system"], BROWSER_POLICY);
     assert_eq!(q.as_object().unwrap().len(), 6);
-    assert_eq!(q["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(
+        q["tools"].as_array().unwrap().len(),
+        metldr_browser_tools::definitions().len()
+    );
     assert!(!q.to_string().contains("dummy-key"));
     assert_eq!(
         q["tools"][0]["input_schema"],
