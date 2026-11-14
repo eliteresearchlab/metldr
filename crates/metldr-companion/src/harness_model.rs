@@ -1,7 +1,11 @@
 //! Saved state for harnesses on the generic path (B1.12). A harness is named by its
 //! registry key; its native session id is the continuation key.
 
-use crate::{Result, model::Source};
+use crate::{
+    Result,
+    agent_model::{Launch, digest},
+    model::{Source, Store},
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -68,9 +72,12 @@ impl Binding {
             (Self::Pending, Self::Pending | Self::Bound { .. })
             | (Self::Pending, Self::ReleaseUnknown { previous: None }) => true,
             (Self::Bound { session: a }, Self::Bound { session: b }) => a == b,
-            (Self::Bound { session }, Self::ReleaseUnknown { previous: Some(previous) }) => {
-                session == previous
-            }
+            (
+                Self::Bound { session },
+                Self::ReleaseUnknown {
+                    previous: Some(previous),
+                },
+            ) => session == previous,
             (Self::ReleaseUnknown { previous: a }, Self::ReleaseUnknown { previous: b }) => a == b,
             _ => false,
         }
@@ -103,7 +110,10 @@ pub(crate) struct Workflow {
 
 impl Workflow {
     pub fn validate(&self) -> Result<()> {
-        if !valid_key(&self.harness) || self.revision == 0 {
+        if !valid_key(&self.harness)
+            || self.revision == 0
+            || self.fingerprint != digest(&self.profile)?
+        {
             return Err("invalid harness workflow".into());
         }
         self.profile.validate()?;
@@ -118,6 +128,57 @@ impl Workflow {
     }
 }
 
+/// Checks saved harness workflows against the runs that launched them.
+pub(crate) fn validate(state: &Store) -> Result<()> {
+    let native =
+        state.workflows.len() + state.codex_workflows.len() + state.opencode_workflows.len();
+    if native + state.harness_workflows.len() > 16 {
+        return Err("too many native workflows".into());
+    }
+    let valid_id = |id: &str| {
+        id.strip_prefix(&format!("{}:", state.view.store))
+            .and_then(|s| s.parse::<u64>().ok())
+            .is_some_and(|n| n > 0 && n < state.next)
+    };
+    let launched = |run: &str| match state.launches.get(run) {
+        Some(Launch::Harness {
+            harness, workflow, ..
+        }) => Some((harness, workflow)),
+        _ => None,
+    };
+    for run in &state.view.runs {
+        let Some((harness, workflow)) = launched(&run.id) else {
+            continue;
+        };
+        let w = state
+            .harness_workflows
+            .get(workflow)
+            .ok_or("missing harness workflow")?;
+        if run.kind != "agent" || run.source != w.source.id || &w.harness != harness {
+            return Err("invalid harness task record".into());
+        }
+    }
+    for (id, w) in &state.harness_workflows {
+        w.validate()?;
+        let last = state
+            .view
+            .runs
+            .iter()
+            .rev()
+            .find(|run| launched(&run.id).is_some_and(|(_, w)| w == id));
+        if !valid_id(id)
+            || !valid_id(&w.source.id)
+            || state.workflows.contains_key(id)
+            || state.codex_workflows.contains_key(id)
+            || state.opencode_workflows.contains_key(id)
+            || last.is_none_or(|run| run.id != w.last_run)
+        {
+            return Err("invalid harness workflow identity".into());
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,12 +187,23 @@ mod tests {
     fn bindings_resume_only_a_valid_bound_session() {
         let session = "07070707-0707-4707-8707-070707070707";
         assert_eq!(Binding::Pending.resume("claude").unwrap(), None);
-        let bound = Binding::Bound { session: session.into() };
+        let bound = Binding::Bound {
+            session: session.into(),
+        };
         assert_eq!(bound.resume("claude").unwrap().as_deref(), Some(session));
-        assert!(Binding::Bound { session: "../x".into() }.resume("claude").is_err());
+        assert!(
+            Binding::Bound {
+                session: "../x".into()
+            }
+            .resume("claude")
+            .is_err()
+        );
         let mut lost = bound.clone();
         lost.block_recovery();
         assert!(lost.resume("claude").is_err());
-        assert!(!valid_key("codex"), "codex keeps its own records until it migrates");
+        assert!(
+            !valid_key("codex"),
+            "codex keeps its own records until it migrates"
+        );
     }
 }

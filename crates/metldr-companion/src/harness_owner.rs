@@ -104,7 +104,10 @@ impl Owner {
                 }
                 _ => (),
             }
-            let Launch::Harness { workflow: bound, .. } = launch else {
+            let Launch::Harness {
+                workflow: bound, ..
+            } = launch
+            else {
                 return Err("harness binding has no launch".into());
             };
             if bound.as_str() != workflow {

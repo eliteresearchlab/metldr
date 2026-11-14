@@ -457,6 +457,7 @@ impl Store {
         crate::browser_action::validate(self, valid_id)?;
         crate::codex_model::validate(self)?;
         crate::opencode_model::validate(self)?;
+        crate::harness_model::validate(self)?;
         crate::agent_model::validate(self)
     }
     pub(super) fn id(&mut self) -> Result<String> {
