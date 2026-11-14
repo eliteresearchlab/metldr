@@ -442,6 +442,7 @@ fn native_choices_survive_a_flat_result_without_loading_native_runs() -> Result<
                 .iter()
                 .next()
                 .map(|(id, w)| (id.clone(), w.source.clone(), "opencode_sessions")),
+            Kind::Claude => continue,
         }
         .ok_or("fixture workflow absent")?;
         legacy.view.source = Some(source.clone());
@@ -468,6 +469,7 @@ fn native_choices_survive_a_flat_result_without_loading_native_runs() -> Result<
             Kind::Opencode => {
                 owner.opencode_profile = Some(legacy.opencode_workflows[&workflow].profile.clone())
             }
+            Kind::Claude => continue,
         }
         owner.reply_view(Some("native-choices"), "view", true)?;
         let view = frames(&wire)?.pop().ok_or("view reply absent")?["view"].clone();

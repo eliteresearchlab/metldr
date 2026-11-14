@@ -58,11 +58,7 @@ impl Edit<'_> {
         if storage(|| Ok(self.write.open_table(ACTIVE_RUNS)?.len()? != 0))? {
             return Err("another run is active".into());
         }
-        let exists = storage(|| {
-            Ok(self.write.open_table(PI)?.get(name)?.is_some()
-                || self.write.open_table(CODEX)?.get(name)?.is_some()
-                || self.write.open_table(OPENCODE)?.get(name)?.is_some())
-        })?;
+        let exists = self.native_workflow_saved(name)?;
         let (workflow_revision, initial) = if exists {
             let (latest, target) = self.native_latest(scope, name)?;
             let execution = self.current_execution(scope, &latest)?;
@@ -101,6 +97,7 @@ impl Edit<'_> {
                 selection,
                 ..
             } if activity.is_empty() && selection.is_none() => (),
+            Launch::Harness { activity, .. } if activity.is_empty() => (),
             _ => return Err("new native launch already has activity or selection".into()),
         }
         let execution = super::Execution {
@@ -214,15 +211,24 @@ impl Edit<'_> {
         let exists = storage(|| {
             Ok(self.write.open_table(RUNS)?.get(id)?.is_some()
                 || self.write.open_table(SOURCES)?.get(id)?.is_some()
-                || self.write.open_table(PI)?.get(id)?.is_some()
-                || self.write.open_table(CODEX)?.get(id)?.is_some()
-                || self.write.open_table(OPENCODE)?.get(id)?.is_some()
                 || self.write.open_table(ACTIONS)?.get(id)?.is_some()
                 || self.write.open_table(CONVERSATIONS)?.get(id)?.is_some())
-        })?;
+        })? || self.native_workflow_saved(id)?;
         if exists {
             return Err("allocated native identity already belongs to a record".into());
         }
         Ok(number)
+    }
+
+    /// Whether `name` is a saved workflow of any native agent.
+    pub(super) fn native_workflow_saved(&self, name: &str) -> Result<bool> {
+        storage(|| {
+            for table in NATIVE_WORKFLOWS {
+                if self.write.open_table(table)?.get(name)?.is_some() {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        })
     }
 }

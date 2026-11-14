@@ -966,6 +966,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "metldr-claude-session"
+version = "0.1.0"
+dependencies = [
+ "memchr",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "metldr-codex-session"
 version = "0.1.0"
 dependencies = [
@@ -985,6 +995,7 @@ dependencies = [
  "memchr",
  "metldr-browser-tools",
  "metldr-chat-completions",
+ "metldr-claude-session",
  "metldr-codex-session",
  "metldr-conversation",
  "metldr-google-interactions",

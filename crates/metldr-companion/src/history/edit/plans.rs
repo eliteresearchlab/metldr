@@ -121,6 +121,9 @@ impl Edit<'_> {
             crate::agent_model::Launch::ConfiguredResponses { .. } => "Responses",
             crate::agent_model::Launch::ConfiguredGoogle { .. } => "Google",
             crate::agent_model::Launch::ConfiguredChat { .. } => "Chat Completions",
+            crate::agent_model::Launch::Harness { ref harness, .. } => {
+                metldr_harness::HarnessId::from_key(harness).map_or("Agent", |id| id.label())
+            }
             _ => "Agent",
         }
         .to_owned();

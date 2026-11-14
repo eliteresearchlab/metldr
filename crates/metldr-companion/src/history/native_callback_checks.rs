@@ -162,6 +162,7 @@ fn actual_owner_native_callbacks_bind_persist_and_fail_closed() -> Result<()> {
                 value.binding = crate::opencode_model::Binding::Pending;
                 NativeWorkflow::OpenCode(value)
             }
+            _ => unreachable!("fixtures build no harness workflows"),
         };
         let (workflow_id, run) = history.edit(|edit| {
             let workflow_id = edit.id()?;
@@ -170,6 +171,7 @@ fn actual_owner_native_callbacks_bind_persist_and_fail_closed() -> Result<()> {
                 NativeWorkflow::Pi(w) => w.last_run = run.clone(),
                 NativeWorkflow::Codex(w) => w.last_run = run.clone(),
                 NativeWorkflow::OpenCode(w) => w.last_run = run.clone(),
+                _ => unreachable!("fixtures build no harness workflows"),
             }
             let launch = match &workflow {
                 NativeWorkflow::Pi(_) => Launch::Pi {
@@ -189,6 +191,7 @@ fn actual_owner_native_callbacks_bind_persist_and_fail_closed() -> Result<()> {
                     selection: None,
                     activity: vec![],
                 },
+                _ => unreachable!("fixtures build no harness workflows"),
             };
             edit.admit_native(
                 &selection,
@@ -434,6 +437,7 @@ fn actual_owner_native_callbacks_bind_persist_and_fail_closed() -> Result<()> {
             NativeWorkflow::Pi(w) => w.revision,
             NativeWorkflow::Codex(w) => w.revision,
             NativeWorkflow::OpenCode(w) => w.revision,
+            _ => unreachable!("fixtures build no harness workflows"),
         };
         assert_eq!(revision, 3);
         match (&reopened_task.workflow, &reopened_task.launch) {

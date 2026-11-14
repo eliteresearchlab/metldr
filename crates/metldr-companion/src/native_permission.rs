@@ -16,6 +16,7 @@ impl Owner {
         let kind = match details["agent"].as_str() {
             Some("codex") => Some(crate::agent_settings::Kind::Codex),
             Some("opencode") => Some(crate::agent_settings::Kind::Opencode),
+            Some("claude") => Some(crate::agent_settings::Kind::Claude),
             _ => None,
         };
         let active = if let Some(kind) = kind {
@@ -170,6 +171,7 @@ impl Owner {
         let kind = match self.native_permissions[&request].details["agent"].as_str() {
             Some("codex") => crate::agent_settings::Kind::Codex,
             Some("opencode") => crate::agent_settings::Kind::Opencode,
+            Some("claude") => crate::agent_settings::Kind::Claude,
             _ => return Err("invalid native permission agent".into()),
         };
         let next = self.native_input_state(run)?;
@@ -204,6 +206,7 @@ impl Owner {
         {
             Some("codex") => crate::agent_settings::Kind::Codex,
             Some("opencode") => crate::agent_settings::Kind::Opencode,
+            Some("claude") => crate::agent_settings::Kind::Claude,
             _ => return Err("native permission agent is invalid".into()),
         };
         if !self.native_input_active(run, kind)? {
@@ -280,6 +283,7 @@ impl Owner {
             Some(crate::agent_model::Launch::OpenCode { .. }) => {
                 crate::agent_settings::Kind::Opencode
             }
+            Some(crate::agent_model::Launch::Harness { .. }) => crate::agent_settings::Kind::Claude,
             _ => {
                 let _ = ack.try_send(None);
                 return Ok(());

@@ -325,14 +325,7 @@ impl Store {
             .iter()
             .find(|r| r.id == proposal.run)
             .ok_or("unknown browser run")?;
-        let initial = if matches!(
-            self.launches.get(&proposal.run),
-            Some(
-                crate::agent_model::Launch::Pi { .. }
-                    | crate::agent_model::Launch::Codex { .. }
-                    | crate::agent_model::Launch::OpenCode { .. }
-            )
-        ) {
+        let initial = if self.launches.get(&proposal.run).and_then(|l| l.native_workflow()).is_some() {
             self.native_browser_target(&proposal.run)?
         } else {
             Target::from(&source.page)

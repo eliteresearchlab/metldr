@@ -30,10 +30,7 @@ impl Edit<'_> {
                 let launch: Record<Launch> = storage(|| {
                     record(self.write, LAUNCHES, &id)?.ok_or("recovery launch is absent".into())
                 })?;
-                if matches!(
-                    launch.value,
-                    Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
-                ) {
+                if launch.value.native_workflow().is_some() {
                     let mut task = self.native_task(&execution, &id)?;
                     crate::native_correction::finish(
                         &mut task.run,
@@ -62,6 +59,7 @@ impl Edit<'_> {
                 (PI, Kind::Pi),
                 (CODEX, Kind::Codex),
                 (OPENCODE, Kind::Opencode),
+                (HARNESS, Kind::Claude),
             ] {
                 let mut cursor: Option<String> = None;
                 loop {
@@ -152,5 +150,6 @@ fn block(workflow: &mut NativeWorkflow) {
         NativeWorkflow::Pi(value) => value.binding.block_recovery(),
         NativeWorkflow::Codex(value) => value.binding.block_recovery(),
         NativeWorkflow::OpenCode(value) => value.binding.block_recovery(),
+        NativeWorkflow::Harness(value) => value.binding.block_recovery(),
     }
 }

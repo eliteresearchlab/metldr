@@ -133,6 +133,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                     value.source = source.clone();
                     value.binding = crate::opencode_model::Binding::Pending;
                 }
+                _ => unreachable!("fixtures build no harness workflows"),
             }
             let launch = match &workflow {
                 NativeWorkflow::Pi(_) => Launch::Pi {
@@ -152,6 +153,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                     selection: None,
                     activity: Vec::new(),
                 },
+                _ => unreachable!("fixtures build no harness workflows"),
             };
             edit.admit_native(
                 &selection,
@@ -243,6 +245,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                     };
                     value.revision += 1;
                 }
+                _ => unreachable!("fixtures build no harness workflows"),
             }
             edit.current_execution(&selection, &task.run.id)
                 .and_then(|execution| edit.put_native(&execution, task))
@@ -302,6 +305,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                     if identity.session == "session_fixture_1")
                 );
             }
+            _ => unreachable!("fixtures build no harness workflows"),
         }
         let (latest, target) = history.edit(|edit| edit.native_latest(&selection, workflow_id))?;
         assert_eq!(&latest, run_id);
@@ -349,6 +353,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                     w.last_run = run_id.clone();
                     w.revision += 1;
                 }
+                _ => unreachable!("fixtures build no harness workflows"),
             }
             let mut launch = previous.launch.clone();
             match &mut launch {
@@ -406,6 +411,7 @@ fn native_admission_binding_continuation_and_terminal_output_persist() -> Result
                 NativeWorkflow::Pi(w) => w.revision += 1,
                 NativeWorkflow::Codex(w) => w.revision += 1,
                 NativeWorkflow::OpenCode(w) => w.revision += 1,
+                _ => unreachable!("fixtures build no harness workflows"),
             }
             edit.current_execution(&selection, &task.run.id)
                 .and_then(|execution| edit.put_native(&execution, task))

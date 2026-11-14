@@ -437,6 +437,10 @@ impl AgentDraft {
                 | AgentProfile::Opencode {
                     executable,
                     workspace,
+                }
+                | AgentProfile::Claude {
+                    executable,
+                    workspace,
                 },
             ) => (executable.as_str(), workspace.as_str(), "", "", "", false),
             Some(AgentProfile::Pi {
@@ -473,6 +477,10 @@ impl AgentDraft {
                 executable: self.executable.text.clone(),
                 workspace: self.workspace.text.clone(),
             },
+            AgentKind::Claude => AgentProfile::Claude {
+                executable: self.executable.text.clone(),
+                workspace: self.workspace.text.clone(),
+            },
             AgentKind::Pi => AgentProfile::Pi {
                 executable: self.executable.text.clone(),
                 workspace: self.workspace.text.clone(),
@@ -499,6 +507,10 @@ fn saved_profile(profile: Option<&AgentProfile>) -> String {
                 workspace,
             }
             | AgentProfile::Opencode {
+                executable,
+                workspace,
+            }
+            | AgentProfile::Claude {
                 executable,
                 workspace,
             },

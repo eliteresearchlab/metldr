@@ -149,6 +149,8 @@ pub(super) struct Store {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) opencode_workflows: BTreeMap<String, crate::opencode_model::Workflow>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) harness_workflows: BTreeMap<String, crate::harness_model::Workflow>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) browser_actions: BTreeMap<String, crate::browser_action::Action>,
     pub(super) providers: crate::provider_settings::Settings,
     pub(super) agent_settings: crate::agent_settings::Settings,
@@ -363,6 +365,18 @@ pub(super) enum ConversationAction {
         revision: u64,
         text: String,
     },
+    /// A new turn for a harness on the generic path, named by its registry key.
+    HarnessPrompt {
+        harness: String,
+        source: String,
+        text: String,
+    },
+    HarnessFollowUp {
+        harness: String,
+        workflow: String,
+        revision: u64,
+        text: String,
+    },
     #[serde(rename = "native_permission")]
     NativePermission {
         run: String,
@@ -443,6 +457,7 @@ impl Store {
         crate::browser_action::validate(self, valid_id)?;
         crate::codex_model::validate(self)?;
         crate::opencode_model::validate(self)?;
+        crate::harness_model::validate(self)?;
         crate::agent_model::validate(self)
     }
     pub(super) fn id(&mut self) -> Result<String> {

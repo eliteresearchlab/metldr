@@ -9,6 +9,7 @@ pub(super) enum Kind {
     Pi,
     Codex,
     Opencode,
+    Claude,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -30,6 +31,10 @@ pub(super) enum Profile {
         executable: PathBuf,
         workspace: PathBuf,
     },
+    Claude {
+        executable: PathBuf,
+        workspace: PathBuf,
+    },
 }
 impl Profile {
     fn kind(&self) -> Kind {
@@ -37,6 +42,7 @@ impl Profile {
             Self::Pi { .. } => Kind::Pi,
             Self::Codex { .. } => Kind::Codex,
             Self::Opencode { .. } => Kind::Opencode,
+            Self::Claude { .. } => Kind::Claude,
         }
     }
     fn paths(&self) -> (&PathBuf, &PathBuf, Option<&PathBuf>) {
@@ -52,6 +58,10 @@ impl Profile {
                 workspace,
             }
             | Self::Opencode {
+                executable,
+                workspace,
+            }
+            | Self::Claude {
                 executable,
                 workspace,
             } => (executable, workspace, None),
@@ -126,6 +136,10 @@ impl Profile {
                 executable,
                 workspace,
             },
+            Self::Claude { .. } => Self::Claude {
+                executable,
+                workspace,
+            },
         })
     }
     pub(super) fn native(&self) -> Result<NativeProfile> {
@@ -160,6 +174,16 @@ impl Profile {
                 executable,
                 workspace,
             }),
+            Self::Claude {
+                executable,
+                workspace,
+            } => NativeProfile::Harness(
+                "claude",
+                crate::harness_model::Profile {
+                    executable,
+                    workspace,
+                },
+            ),
         })
     }
 }
@@ -167,6 +191,8 @@ pub(super) enum NativeProfile {
     Pi(crate::agent_model::Profile),
     Codex(crate::codex_model::Profile),
     Opencode(crate::opencode_model::Profile),
+    /// A harness on the generic path, by registry key.
+    Harness(&'static str, crate::harness_model::Profile),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -215,11 +241,17 @@ impl Default for Settings {
     }
 }
 impl Settings {
+    /// The slot for `k`; settings saved before an agent existed read it as unmanaged.
     pub(super) fn slot(&self, k: Kind) -> &Slot {
-        self.slots.get(&k).expect("all agent slots exist")
+        static UNMANAGED: Slot = Slot {
+            revision: 0,
+            selection: Selection::Unmanaged,
+            last_change: None,
+        };
+        self.slots.get(&k).unwrap_or(&UNMANAGED)
     }
     pub(super) fn validate(&self) -> Result<()> {
-        if self.slots.len() != 3 {
+        if !(3..=4).contains(&self.slots.len()) {
             return Err("invalid agent settings slots".into());
         }
         for k in Kind::ALL {
@@ -256,14 +288,17 @@ pub(crate) struct Runtime {
     pub states: BTreeMap<Kind, &'static str>,
     /// Installed agents and desktop apps, refreshed at most every 10 seconds.
     detected: std::cell::RefCell<Option<(std::time::Instant, Value)>>,
+    /// Ready profiles of harnesses on the generic path, by registry key.
+    pub profiles: BTreeMap<&'static str, crate::harness_model::Profile>,
 }
 impl Kind {
-    pub(super) const ALL: [Kind; 3] = [Kind::Pi, Kind::Codex, Kind::Opencode];
+    pub(super) const ALL: [Kind; 4] = [Kind::Pi, Kind::Codex, Kind::Opencode, Kind::Claude];
     fn harness(self) -> metldr_harness::HarnessId {
         match self {
             Self::Pi => metldr_harness::HarnessId::Pi,
             Self::Codex => metldr_harness::HarnessId::Codex,
             Self::Opencode => metldr_harness::HarnessId::OpenCode,
+            Self::Claude => metldr_harness::HarnessId::ClaudeCode,
         }
     }
 }
@@ -347,7 +382,11 @@ impl Owner {
         }
         let profile = profile.resolve()?;
         let mut next = self.state.clone();
-        let slot = next.agent_settings.slots.get_mut(&k).unwrap();
+        let slot = next.agent_settings.slots.entry(k).or_insert_with(|| Slot {
+            revision: 0,
+            selection: Selection::Unmanaged,
+            last_change: None,
+        });
         slot.revision = expected
             .checked_add(1)
             .ok_or("agent revision capacity reached")?;
@@ -371,7 +410,11 @@ impl Owner {
             return self.reply_view(Some(id), "view", true);
         }
         let mut next = self.state.clone();
-        let slot = next.agent_settings.slots.get_mut(&k).unwrap();
+        let slot = next.agent_settings.slots.entry(k).or_insert_with(|| Slot {
+            revision: 0,
+            selection: Selection::Unmanaged,
+            last_change: None,
+        });
         slot.revision = expected
             .checked_add(1)
             .ok_or("agent revision capacity reached")?;
@@ -429,6 +472,14 @@ impl Owner {
                     }
                 })
             }
+            Kind::Claude => match p {
+                Some(NativeProfile::Harness(key, profile)) => {
+                    self.agent_runtime.profiles.insert(key, profile);
+                }
+                _ => {
+                    self.agent_runtime.profiles.remove("claude");
+                }
+            },
         }
     }
     pub(crate) fn refresh_agent_runtime(&mut self, k: Kind) {

@@ -31,6 +31,12 @@ pub(super) const PI: TableDefinition<&str, &[u8]> = TableDefinition::new("pi_wor
 pub(super) const CODEX: TableDefinition<&str, &[u8]> = TableDefinition::new("codex_workflows");
 pub(super) const OPENCODE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("opencode_workflows");
+/// Workflows of harnesses on the generic path. Created on first write, so a read of an
+/// older history treats it as empty.
+pub(super) const HARNESS: TableDefinition<&str, &[u8]> =
+    TableDefinition::new("harness_workflows");
+/// Every saved native workflow table; a workflow name lives in at most one.
+pub(super) const NATIVE_WORKFLOWS: [TableDefinition<&str, &[u8]>; 4] = [PI, CODEX, OPENCODE, HARNESS];
 pub(super) const ACTIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("actions");
 pub(super) const TASK_PLANS: TableDefinition<&str, &[u8]> = TableDefinition::new("task_plans");
 pub(super) const PLAN_GRANTS: TableDefinition<&str, &[u8]> = TableDefinition::new("plan_grants");

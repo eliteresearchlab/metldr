@@ -185,6 +185,7 @@ impl Owner {
                     crate::history::NativeWorkflow::Pi(w) => w.binding.block_recovery(),
                     crate::history::NativeWorkflow::Codex(w) => w.binding.block_recovery(),
                     crate::history::NativeWorkflow::OpenCode(w) => w.binding.block_recovery(),
+                    crate::history::NativeWorkflow::Harness(w) => w.binding.block_recovery(),
                 }
             }
             task.run.status = if disconnected {

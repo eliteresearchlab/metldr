@@ -169,8 +169,47 @@ pub(super) enum Launch {
         protocol: crate::provider_settings::Protocol,
         binding: crate::https_profile::Binding,
     },
+    /// A run on the generic harness path, named by its registry key (B1.12).
+    Harness {
+        input_digest: String,
+        harness: String,
+        workflow: String,
+        activity: Vec<Activity>,
+    },
 }
 impl Launch {
+    /// The native workflow a launched agent runs in; `None` for flat runs.
+    pub fn native_workflow(&self) -> Option<&str> {
+        match self {
+            Self::Pi { workflow, .. }
+            | Self::Codex { workflow, .. }
+            | Self::OpenCode { workflow, .. }
+            | Self::Harness { workflow, .. } => Some(workflow),
+            _ => None,
+        }
+    }
+
+    /// Tool reports of a launched agent; `None` for flat runs.
+    pub fn activity(&self) -> Option<&[Activity]> {
+        match self {
+            Self::Pi { activity, .. }
+            | Self::Codex { activity, .. }
+            | Self::OpenCode { activity, .. }
+            | Self::Harness { activity, .. } => Some(activity),
+            _ => None,
+        }
+    }
+
+    pub fn activity_mut(&mut self) -> Option<&mut Vec<Activity>> {
+        match self {
+            Self::Pi { activity, .. }
+            | Self::Codex { activity, .. }
+            | Self::OpenCode { activity, .. }
+            | Self::Harness { activity, .. } => Some(activity),
+            _ => None,
+        }
+    }
+
     pub fn input_digest(&self) -> Option<&str> {
         match self {
             Self::LegacyUnspecified => None,
@@ -182,7 +221,8 @@ impl Launch {
             | Self::Fixture { input_digest }
             | Self::Pi { input_digest, .. }
             | Self::Codex { input_digest, .. }
-            | Self::OpenCode { input_digest, .. } => Some(input_digest),
+            | Self::OpenCode { input_digest, .. }
+            | Self::Harness { input_digest, .. } => Some(input_digest),
             Self::Text { input_digest, .. } => Some(input_digest),
         }
     }
@@ -245,7 +285,10 @@ pub(super) fn validate(state: &Store) -> Result<()> {
                 return Err("invalid Pi task record".into());
             }
         } else if run.kind == "agent"
-            && !matches!(launch, Launch::Codex { .. } | Launch::OpenCode { .. })
+            && !matches!(
+                launch,
+                Launch::Codex { .. } | Launch::OpenCode { .. } | Launch::Harness { .. }
+            )
         {
             return Err("agent task has no native launch".into());
         }

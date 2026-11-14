@@ -31,6 +31,7 @@ fn state() -> Store {
         workflows: BTreeMap::new(),
         codex_workflows: BTreeMap::new(),
         opencode_workflows: BTreeMap::new(),
+        harness_workflows: Default::default(),
         browser_actions: BTreeMap::new(),
         providers: Default::default(),
         agent_settings: Default::default(),

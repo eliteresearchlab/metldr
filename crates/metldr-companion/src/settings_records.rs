@@ -171,7 +171,9 @@ fn route_source(managed: bool, route: Option<&Profile>) -> &'static str {
 fn agent_detail(profile: &AgentProfile) -> Value {
     match profile {
         AgentProfile::Pi { offline, .. } => json!({"offline": offline}),
-        AgentProfile::Codex { .. } | AgentProfile::Opencode { .. } => json!({}),
+        AgentProfile::Codex { .. } | AgentProfile::Opencode { .. } | AgentProfile::Claude { .. } => {
+            json!({})
+        }
     }
 }
 

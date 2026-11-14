@@ -154,10 +154,7 @@ impl Edit<'_> {
                     record(self.write, LAUNCHES, id)?
                         .ok_or_else(|| "projected launch is absent".into())
                 })?;
-                if matches!(
-                    launch.value,
-                    Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
-                ) {
+                if launch.value.native_workflow().is_some() {
                     return self.project_native(expected, id);
                 }
                 storage(|| {
@@ -187,6 +184,7 @@ impl Edit<'_> {
                 workflows: BTreeMap::new(),
                 codex_workflows: BTreeMap::new(),
                 opencode_workflows: BTreeMap::new(),
+                harness_workflows: Default::default(),
                 browser_actions: BTreeMap::new(),
                 providers: self.profile.providers.clone(),
                 agent_settings: self.profile.agents.clone(),

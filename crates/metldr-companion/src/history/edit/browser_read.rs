@@ -180,10 +180,7 @@ impl Edit<'_> {
         if launch.conversation != execution.conversation() {
             return storage(|| Err("browser launch ownership differs".into()));
         }
-        if matches!(
-            launch.value,
-            Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
-        ) {
+        if launch.value.native_workflow().is_some() {
             return self.native_initial_target(execution, run).map(Some);
         }
         self.source_in(execution.conversation(), &task.source)

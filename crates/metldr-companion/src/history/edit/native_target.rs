@@ -70,12 +70,7 @@ impl Edit<'_> {
                     .map(|(key, id)| (key.value().1, id.value().to_owned())))
             })?;
             let Some((number, id)) = entry else {
-                let exists = storage(|| {
-                    Ok(self.write.open_table(PI)?.get(workflow)?.is_some()
-                        || self.write.open_table(CODEX)?.get(workflow)?.is_some()
-                        || self.write.open_table(OPENCODE)?.get(workflow)?.is_some())
-                })?;
-                return if exists {
+                return if self.native_workflow_saved(workflow)? {
                     storage(|| Err("native workflow order is absent".into()))
                 } else {
                     Err("unknown native workflow".into())

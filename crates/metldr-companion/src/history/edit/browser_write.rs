@@ -183,10 +183,7 @@ impl Edit<'_> {
         }
         let launch: Record<Launch> =
             storage(|| record(self.write, LAUNCHES, id)?.ok_or("browser launch is absent".into()))?;
-        if !matches!(
-            launch.value,
-            Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
-        ) && self
+        if launch.value.native_workflow().is_none() && self
             .saved_conversation(execution.conversation())?
             .source
             .as_deref()
@@ -260,10 +257,7 @@ impl Edit<'_> {
                         .insert(next.proposal.run.as_str(), next.id.as_str())?;
                     let launch: Record<Launch> = record(self.write, LAUNCHES, &next.proposal.run)?
                         .ok_or("navigation launch is absent")?;
-                    if matches!(
-                        launch.value,
-                        Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
-                    ) {
+                    if launch.value.native_workflow().is_some() {
                         let saved: Record<NativeTarget> =
                             record(self.write, NATIVE_TARGETS, &next.proposal.run)?
                                 .ok_or("native destination is absent")?;

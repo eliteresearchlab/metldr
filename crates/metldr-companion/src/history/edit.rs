@@ -571,10 +571,7 @@ impl Edit<'_> {
             }
             Ok(())
         })?;
-        if matches!(
-            launch.value,
-            Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
-        ) {
+        if launch.value.native_workflow().is_some() {
             let mut task = self.native_task(expected, &run.id)?;
             task.run = run;
             return self.put_native(expected, task);
@@ -782,10 +779,7 @@ impl Edit<'_> {
     }
 
     fn validate_flat(&self, run: &Run, launch: &Launch, source: Option<Source>) -> Result<()> {
-        if matches!(
-            launch,
-            Launch::Pi { .. } | Launch::Codex { .. } | Launch::OpenCode { .. }
-        ) {
+        if launch.native_workflow().is_some() {
             return Err("flat task cannot use a native launch".into());
         }
         Store {
@@ -802,6 +796,7 @@ impl Edit<'_> {
             workflows: BTreeMap::new(),
             codex_workflows: BTreeMap::new(),
             opencode_workflows: BTreeMap::new(),
+            harness_workflows: Default::default(),
             browser_actions: BTreeMap::new(),
             providers: self.profile.providers.clone(),
             agent_settings: self.profile.agents.clone(),

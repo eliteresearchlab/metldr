@@ -112,6 +112,7 @@ fn native_group(
                 value.revision = 2;
                 value.binding = crate::opencode_model::Binding::Pending;
             }
+            _ => unreachable!("fixtures build no harness workflows"),
         }
         let input_digest = format!("{:064x}", group * 3 + kind + 1);
         let launch = match &workflow {
@@ -132,6 +133,7 @@ fn native_group(
                 selection: None,
                 activity: Vec::new(),
             },
+            _ => unreachable!("fixtures build no harness workflows"),
         };
         edit.admit_native(
             scope,
@@ -199,6 +201,7 @@ fn native_group(
                 };
                 *selection = Some(selected);
             }
+            _ => unreachable!("fixtures build no harness workflows"),
         }
         edit.put_native(&execution, task)?;
         let (action, created) = edit.propose_browser(

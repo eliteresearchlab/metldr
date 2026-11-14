@@ -41,6 +41,15 @@ impl<'a> Input<'a> {
             ConversationAction::OpenCodePrompt { source, text } => {
                 (Kind::Opencode, Origin::Source(source), text)
             }
+            ConversationAction::HarnessPrompt { harness, source, text } if harness == "claude" => {
+                (Kind::Claude, Origin::Source(source), text)
+            }
+            ConversationAction::HarnessFollowUp {
+                harness,
+                workflow,
+                revision,
+                text,
+            } if harness == "claude" => (Kind::Claude, Origin::Workflow(workflow, *revision), text),
             ConversationAction::PiFollowUp {
                 workflow,
                 revision,
@@ -92,6 +101,9 @@ impl Owner {
             (NativeWorkflow::Pi(value), Kind::Pi) => &value.fingerprint,
             (NativeWorkflow::Codex(value), Kind::Codex) => &value.fingerprint,
             (NativeWorkflow::OpenCode(value), Kind::Opencode) => &value.fingerprint,
+            (NativeWorkflow::Harness(value), Kind::Claude) if value.harness == "claude" => {
+                &value.fingerprint
+            }
             _ => return Err("request identity already names a different task kind".into()),
         };
         if matches!(input.origin,Origin::Source(source) if source != workflow.source().id) {
@@ -113,6 +125,7 @@ impl Owner {
             (NativeProfile::Pi(profile), Kind::Pi) => digest(profile)?,
             (NativeProfile::Codex(profile), Kind::Codex) => digest(profile)?,
             (NativeProfile::Opencode(profile), Kind::Opencode) => digest(profile)?,
+            (NativeProfile::Harness("claude", profile), Kind::Claude) => digest(profile)?,
             _ => return Err("native command and profile differ".into()),
         };
         let (source, prior) = self.record_history.edit(|edit| {
@@ -213,6 +226,17 @@ fn new_workflow(profile: NativeProfile, source: Source, fingerprint: String) -> 
                 binding: crate::opencode_model::Binding::Pending,
             })
         }
+        NativeProfile::Harness(harness, profile) => {
+            NativeWorkflow::Harness(crate::harness_model::Workflow {
+                harness: harness.into(),
+                profile,
+                fingerprint,
+                source,
+                revision: 1,
+                last_run: String::new(),
+                binding: crate::harness_model::Binding::Pending,
+            })
+        }
     }
 }
 
@@ -237,6 +261,11 @@ fn validate_followup(
             if w.revision == revision && w.fingerprint == fingerprint =>
         {
             w.binding.resume()?.is_some()
+        }
+        (NativeWorkflow::Harness(w), NativeProfile::Harness(harness, _))
+            if w.harness == *harness && w.revision == revision && w.fingerprint == fingerprint =>
+        {
+            w.binding.resume(&w.harness)?.is_some()
         }
         _ => return Err("native workflow revision profile or kind changed".into()),
     };
@@ -286,6 +315,15 @@ fn records(
                 input_digest,
                 workflow: workflow.into(),
                 selection: None,
+                activity: vec![],
+            }
+        }
+        NativeWorkflow::Harness(w) => {
+            advance!(w);
+            Launch::Harness {
+                input_digest,
+                harness: w.harness.clone(),
+                workflow: workflow.into(),
                 activity: vec![],
             }
         }

@@ -42,7 +42,8 @@ impl Prepared {
             .iter()
             .chain(state.workflows.values().map(|w| &w.source))
             .chain(state.codex_workflows.values().map(|w| &w.source))
-            .chain(state.opencode_workflows.values().map(|w| &w.source));
+            .chain(state.opencode_workflows.values().map(|w| &w.source))
+            .chain(state.harness_workflows.values().map(|w| &w.source));
         for source in sources {
             match known.get(&source.id) {
                 Some(prior) if prior.page != source.page => {
@@ -92,13 +93,13 @@ impl Prepared {
         }
         let mut native_targets = Vec::new();
         for run in &self.state.view.runs {
-            let workflow = match self.state.launches.get(&run.id) {
-                Some(
-                    crate::agent_model::Launch::Pi { workflow, .. }
-                    | crate::agent_model::Launch::Codex { workflow, .. }
-                    | crate::agent_model::Launch::OpenCode { workflow, .. },
-                ) => workflow,
-                _ => continue,
+            let Some(workflow) = self
+                .state
+                .launches
+                .get(&run.id)
+                .and_then(|launch| launch.native_workflow())
+            else {
+                continue;
             };
             let initial = self.state.native_browser_target(&run.id)?;
             let current = self.state.native_browser_target_after(&run.id)?;
@@ -108,7 +109,7 @@ impl Prepared {
             native_targets.push((
                 run.id.clone(),
                 NativeTarget {
-                    workflow: workflow.clone(),
+                    workflow: workflow.into(),
                     initial,
                     current,
                     navigation,
@@ -124,6 +125,7 @@ impl Prepared {
             workflows,
             codex_workflows,
             opencode_workflows,
+            harness_workflows,
             browser_actions,
             providers,
             agent_settings,
@@ -276,6 +278,7 @@ impl Prepared {
             copy_map!(PI, workflows);
             copy_map!(CODEX, codex_workflows);
             copy_map!(OPENCODE, opencode_workflows);
+            copy_map!(HARNESS, harness_workflows);
             {
                 let mut order = write.open_table(ACTION_ORDER)?;
                 let mut by_tool = write.open_table(ACTION_BY_TOOL)?;

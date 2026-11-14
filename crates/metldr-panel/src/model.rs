@@ -176,6 +176,7 @@ pub(crate) struct PageView {
     pub(crate) codex_sessions: Vec<AgentSessionView>,
     pub(crate) opencode_profile: Option<CodexProfileView>,
     pub(crate) opencode_sessions: Vec<AgentSessionView>,
+    pub(crate) claude_sessions: Vec<AgentSessionView>,
     pub(crate) native_permissions: Vec<NativePermissionView>,
     pub(crate) pi_ui: Option<PiUiView>,
     pub(crate) codex_input: Option<CodexInputView>,
@@ -276,15 +277,17 @@ pub(crate) enum AgentKind {
     Pi,
     Codex,
     Opencode,
+    Claude,
 }
 
 impl AgentKind {
-    pub(crate) const ALL: [Self; 3] = [Self::Codex, Self::Opencode, Self::Pi];
+    pub(crate) const ALL: [Self; 4] = [Self::Codex, Self::Opencode, Self::Claude, Self::Pi];
     pub(crate) fn harness(self) -> metldr_harness::HarnessId {
         match self {
             Self::Pi => metldr_harness::HarnessId::Pi,
             Self::Codex => metldr_harness::HarnessId::Codex,
             Self::Opencode => metldr_harness::HarnessId::OpenCode,
+            Self::Claude => metldr_harness::HarnessId::ClaudeCode,
         }
     }
     pub(crate) fn name(self) -> &'static str {
@@ -323,6 +326,10 @@ pub(crate) enum AgentProfile {
         executable: String,
         workspace: String,
     },
+    Claude {
+        executable: String,
+        workspace: String,
+    },
 }
 
 impl AgentProfile {
@@ -331,6 +338,7 @@ impl AgentProfile {
             Self::Pi { .. } => AgentKind::Pi,
             Self::Codex { .. } => AgentKind::Codex,
             Self::Opencode { .. } => AgentKind::Opencode,
+            Self::Claude { .. } => AgentKind::Claude,
         }
     }
 }
@@ -364,6 +372,10 @@ pub(crate) fn valid_agent_profile(profile: &AgentProfile) -> bool {
             workspace,
         }
         | AgentProfile::Opencode {
+            executable,
+            workspace,
+        }
+        | AgentProfile::Claude {
             executable,
             workspace,
         } => valid_agent_path(executable) && valid_agent_path(workspace),
@@ -1060,6 +1072,11 @@ pub(crate) enum RunRoute {
         model: Option<String>,
         mode: Option<String>,
     },
+    /// A harness on the generic path, by registry key.
+    Harness {
+        harness: String,
+        workflow: RunId,
+    },
 }
 
 impl RunRoute {
@@ -1069,6 +1086,7 @@ impl RunRoute {
             Self::Pi { .. } => Some(metldr_harness::HarnessId::Pi),
             Self::Codex { .. } => Some(metldr_harness::HarnessId::Codex),
             Self::OpenCode { .. } => Some(metldr_harness::HarnessId::OpenCode),
+            Self::Harness { harness, .. } => metldr_harness::HarnessId::from_key(harness),
             _ => None,
         }
     }
@@ -1079,6 +1097,7 @@ impl RunRoute {
 pub(crate) enum NativePermissionAgent {
     Codex,
     Opencode,
+    Claude,
 }
 
 impl NativePermissionAgent {
@@ -1086,6 +1105,7 @@ impl NativePermissionAgent {
         match self {
             Self::Codex => "Codex",
             Self::Opencode => "OpenCode",
+            Self::Claude => "Claude Code",
         }
     }
 }
@@ -1490,6 +1510,8 @@ struct WireView {
     #[serde(default)]
     opencode_sessions: Vec<AgentSessionView>,
     #[serde(default)]
+    claude_sessions: Vec<AgentSessionView>,
+    #[serde(default)]
     native_permissions: Vec<NativePermissionView>,
     #[serde(default, deserialize_with = "Option::deserialize")]
     pi_ui: Option<PiUiView>,
@@ -1676,6 +1698,7 @@ impl PageView {
             || wire.agent_sessions.len() > MAX_RUNS
             || wire.codex_sessions.len() > MAX_RUNS
             || wire.opencode_sessions.len() > MAX_RUNS
+            || wire.claude_sessions.len() > MAX_RUNS
             || wire.native_permissions.len() > 8
             || wire.pi_ui.as_ref().is_some_and(|ui| {
                 ui.pending.len() > 8
@@ -1764,14 +1787,14 @@ impl PageView {
         {
             return Err(FlowError::Protocol("invalid OpenCode profile".into()));
         }
-        for session in &wire.opencode_sessions {
+        for session in wire.opencode_sessions.iter().chain(&wire.claude_sessions) {
             if !valid_id(session.workflow.as_str())
                 || !valid_id(session.source.as_str())
                 || !sessions.insert(session.workflow.as_str())
                 || !valid_fingerprint(&session.profile)
                 || session.revision == 0
             {
-                return Err(FlowError::Protocol("invalid OpenCode session".into()));
+                return Err(FlowError::Protocol("invalid native session".into()));
             }
         }
         let mut active = false;
@@ -1879,6 +1902,7 @@ impl PageView {
                             (&permission.agent, &run.route),
                             (NativePermissionAgent::Codex, RunRoute::Codex { .. })
                                 | (NativePermissionAgent::Opencode, RunRoute::OpenCode { .. })
+                                | (NativePermissionAgent::Claude, RunRoute::Harness { .. })
                         )
                 })
                 || !valid_label(&permission.tool, 128)
@@ -2207,6 +2231,7 @@ impl PageView {
             codex_sessions: wire.codex_sessions,
             opencode_profile: wire.opencode_profile,
             opencode_sessions: wire.opencode_sessions,
+            claude_sessions: wire.claude_sessions,
             native_permissions: wire.native_permissions,
             pi_ui: wire.pi_ui,
             codex_input: wire.codex_input,
@@ -2776,6 +2801,7 @@ mod tests {
         view["agent_settings"] = serde_json::json!({"busy":false,"agents":[
             {"agent":"codex","revision":0,"state":"unmanaged","profile":null,"last_request":null,"last_digest":null},
             {"agent":"opencode","revision":0,"state":"unmanaged","profile":null,"last_request":null,"last_digest":null},
+            {"agent":"claude","revision":0,"state":"unmanaged","profile":null,"last_request":null,"last_digest":null},
             {"agent":"pi","revision":0,"state":"unmanaged","profile":null,"last_request":null,"last_digest":null}
         ]});
         let decoded = PageView::decode(&serde_json::to_vec(&view).unwrap()).unwrap();
@@ -2787,6 +2813,7 @@ mod tests {
         configured["agent_settings"] = serde_json::json!({"busy":false,"agents":[
             {"agent":"codex","revision":1,"state":"ready","profile":{"kind":"codex","executable":"/tool/codex","workspace":"/output"},"last_request":"req-01","last_digest":"a".repeat(64)},
             {"agent":"opencode","revision":0,"state":"unmanaged","profile":null,"last_request":null,"last_digest":null},
+            {"agent":"claude","revision":0,"state":"unmanaged","profile":null,"last_request":null,"last_digest":null},
             {"agent":"pi","revision":0,"state":"unmanaged","profile":null,"last_request":null,"last_digest":null}
         ]});
         assert!(PageView::decode(&serde_json::to_vec(&configured).unwrap()).is_ok());
@@ -3456,3 +3483,4 @@ mod tests {
         assert!(PageView::decode(&serde_json::to_vec(&view).unwrap()).is_err());
     }
 }
+

@@ -383,6 +383,7 @@ pub(super) fn legacy() -> Store {
         workflows,
         codex_workflows,
         opencode_workflows,
+        harness_workflows: Default::default(),
         browser_actions,
         providers,
         agent_settings,

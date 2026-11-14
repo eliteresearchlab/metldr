@@ -636,6 +636,48 @@ impl FlowClient {
         self.start(scope, json!({"op":"codex_follow_up","workflow":workflow,"revision":revision,"text":text.as_str(),"mode":mode})).await
     }
 
+    /// A new turn for a harness on the generic path.
+    pub(crate) async fn harness_prompt(
+        &self,
+        scope: metldr_history_pages::Scope,
+        harness: &str,
+        source: SourceId,
+        text: UserText,
+    ) -> Result<RunId> {
+        if self.inner.protocol.borrow().latest.as_ref().and_then(PageView::source) != Some(&source) {
+            return Err(FlowError::NoSource);
+        }
+        self.start(
+            scope,
+            json!({"op":"harness_prompt","harness":harness,"source":source,"text":text.as_str()}),
+        )
+        .await
+    }
+
+    pub(crate) async fn harness_follow_up(
+        &self,
+        scope: metldr_history_pages::Scope,
+        harness: &str,
+        workflow: RunId,
+        revision: u64,
+        text: UserText,
+    ) -> Result<RunId> {
+        let available = self.inner.protocol.borrow().latest.as_ref().is_some_and(|view| {
+            view.claude_sessions.iter().any(|session| {
+                session.workflow == workflow
+                    && session.revision == revision
+                    && session.ready
+                    && Some(&session.source) == view.source()
+            })
+        });
+        if !available {
+            return Err(FlowError::InvalidInput(
+                "The selected session is unavailable.".into(),
+            ));
+        }
+        self.start(scope, json!({"op":"harness_follow_up","harness":harness,"workflow":workflow,"revision":revision,"text":text.as_str()})).await
+    }
+
     pub(crate) async fn opencode_follow_up(
         &self,
         scope: metldr_history_pages::Scope,

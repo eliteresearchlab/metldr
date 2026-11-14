@@ -105,6 +105,11 @@ pub(crate) enum Destination {
         workflow: RunId,
         revision: u64,
     },
+    Claude,
+    ContinueClaude {
+        workflow: RunId,
+        revision: u64,
+    },
 }
 
 fn codex_mode(panel: &Rc<RefCell<Panel>>) -> &'static str {
@@ -139,6 +144,17 @@ fn codex_ready(view: &PageView, session: &AgentSessionView) -> bool {
             .as_ref()
             .is_some_and(|profile| session.profile == profile.fingerprint)
         && Some(&session.source) == view.source()
+}
+
+/// Whether a Claude Code profile is saved and ready.
+fn claude_configured(view: &PageView) -> bool {
+    view.agent_settings.agents.iter().any(|row| {
+        row.agent == crate::model::AgentKind::Claude && row.state == crate::model::AgentSettingState::Ready
+    })
+}
+
+fn claude_ready(view: &PageView, session: &AgentSessionView) -> bool {
+    session.ready && claude_configured(view) && Some(&session.source) == view.source()
 }
 
 fn opencode_ready(view: &PageView, session: &AgentSessionView) -> bool {
@@ -222,6 +238,7 @@ fn unavailable_destination(value: &str) -> String {
                 .into()
         }
         "opencode" => "OpenCode is unavailable. Configure an OpenCode profile first.".into(),
+        "claude" => "Claude Code is unavailable. Configure a Claude Code profile first.".into(),
         value if value.starts_with("page:") => {
             "The selected page questions provider is unavailable.".into()
         }
@@ -306,7 +323,17 @@ pub(crate) fn resolve(view: &PageView, value: &str) -> Result<Destination, Strin
         ),
         "opencode" if view.opencode_profile.is_some() => Ok(Destination::OpenCode),
         "opencode" => Err("OpenCode is unavailable. Configure an OpenCode profile first.".into()),
+        "claude" if claude_configured(view) => Ok(Destination::Claude),
+        "claude" => Err("Claude Code is unavailable. Configure a Claude Code profile first.".into()),
         _ => {
+            if let Some(id) = value.strip_prefix("claude:") {
+                let session = view.claude_sessions.iter().find(|session| session.workflow.as_str() == id && claude_ready(view, session))
+                    .ok_or_else(|| "The selected Claude Code session is unavailable. Choose a destination before sending.".to_owned())?;
+                return Ok(Destination::ContinueClaude {
+                    workflow: session.workflow.clone(),
+                    revision: session.revision,
+                });
+            }
             if let Some(id) = value.strip_prefix("opencode:") {
                 let session = view.opencode_sessions.iter().find(|session| session.workflow.as_str() == id && opencode_ready(view, session))
                     .ok_or_else(|| "The selected OpenCode session is unavailable. Choose a destination before sending.".to_owned())?;
@@ -384,6 +411,11 @@ pub(crate) async fn dispatch(
         }
         Destination::ContinueOpenCode { workflow, revision } => {
             flow.opencode_follow_up(scope, workflow, revision, text)
+                .await
+        }
+        Destination::Claude => flow.harness_prompt(scope, "claude", source, text).await,
+        Destination::ContinueClaude { workflow, revision } => {
+            flow.harness_follow_up(scope, "claude", workflow, revision, text)
                 .await
         }
     }
@@ -596,6 +628,7 @@ pub(super) fn render(panel: &Panel) -> Result<(), JsValue> {
                     match option.get_attribute("data-provider").as_deref() {
                         Some("codex") => "Codex session unavailable",
                         Some("opencode") => "OpenCode session unavailable",
+                        Some("claude") => "Claude Code session unavailable",
                         _ => "Pi session unavailable",
                     },
                 ));
@@ -698,6 +731,8 @@ pub(super) fn render(panel: &Panel) -> Result<(), JsValue> {
             Ok(Destination::Continue { workflow, revision }) => format!("Pi continues workflow {workflow}, revision {revision}, with the saved source and its configured profile."),
             Ok(Destination::ContinueCodex { workflow, revision }) => format!("Codex continues workflow {workflow}, revision {revision}, with the saved source and its configured profile."),
             Ok(Destination::ContinueOpenCode { workflow, revision }) => format!("OpenCode continues workflow {workflow}, revision {revision}, with the saved source and its configured profile."),
+            Ok(Destination::Claude) => "Claude Code starts a native session with the saved source. Claude Code manages its model, tools and permissions.".into(),
+            Ok(Destination::ContinueClaude { workflow, revision }) => format!("Claude Code continues workflow {workflow}, revision {revision}, with the saved source and its configured profile."),
             Err(error) => error.to_string(),
         }
     };

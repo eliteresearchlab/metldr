@@ -259,12 +259,13 @@ pub(super) fn run_record(state: &Store, record: &crate::model::Run) -> Result<Va
         } => {
             json!({"kind":"opencode","workflow":workflow,"model":selection.as_ref().map(|s|&s.model),"mode":selection.as_ref().map(|s|&s.mode)})
         }
+        Launch::Harness {
+            harness, workflow, ..
+        } => json!({"kind":"harness","harness":harness,"workflow":workflow}),
     };
-    run["activity"] = match launch {
-        Launch::Pi { activity, .. }
-        | Launch::Codex { activity, .. }
-        | Launch::OpenCode { activity, .. } => serde_json::to_value(activity)?,
-        _ => json!([]),
+    run["activity"] = match launch.activity() {
+        Some(activity) => serde_json::to_value(activity)?,
+        None => json!([]),
     };
     Ok(run)
 }

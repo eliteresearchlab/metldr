@@ -50,7 +50,7 @@ pub(super) fn install(
         unknown: Cell::new(false),
         unknown_store: RefCell::new(None),
     });
-    for agent in AgentKind::ALL {
+    for agent in LEGACY_AGENTS {
         for suffix in if agent == AgentKind::Pi {
             vec![
                 "executable",
@@ -140,7 +140,12 @@ pub(super) fn render(
         .get_element_by_id("agent-settings")
         .ok_or_else(|| err("Agent settings section missing."))?
         .remove_attribute("hidden")?;
-    for row in &view.agent_settings.agents {
+    for row in view
+        .agent_settings
+        .agents
+        .iter()
+        .filter(|row| LEGACY_AGENTS.contains(&row.agent))
+    {
         let agent = row.agent;
         let state_label = match row.state {
             AgentSettingState::Unmanaged => "Not configured",
@@ -183,7 +188,7 @@ pub(super) fn render(
             state.mutation_busy.get() || state.server_busy.get() || conversation_busy
         })
     });
-    for agent in AgentKind::ALL {
+    for agent in LEGACY_AGENTS {
         for action in ["save", "remove"] {
             if let Some(button) = document.get_element_by_id(&control_id(agent, action)) {
                 if disabled {
@@ -506,7 +511,7 @@ fn update_controls(state: &SettingsPanel) {
         || state.server_busy.get()
         || state.unknown.get()
         || conversation_busy;
-    for agent in AgentKind::ALL {
+    for agent in LEGACY_AGENTS {
         for action in ["save", "remove"] {
             if let Some(button) = state.document.get_element_by_id(&control_id(agent, action)) {
                 if disabled {
@@ -533,6 +538,10 @@ fn read_profile(document: &Document, agent: AgentKind) -> AgentProfile {
             workspace: get("workspace"),
         },
         AgentKind::Opencode => AgentProfile::Opencode {
+            executable: get("executable"),
+            workspace: get("workspace"),
+        },
+        AgentKind::Claude => AgentProfile::Claude {
             executable: get("executable"),
             workspace: get("workspace"),
         },
@@ -585,6 +594,13 @@ fn write_profile(document: &Document, profile: &AgentProfile) {
             set_value(document, AgentKind::Opencode, "executable", executable);
             set_value(document, AgentKind::Opencode, "workspace", workspace);
         }
+        AgentProfile::Claude {
+            executable,
+            workspace,
+        } => {
+            set_value(document, AgentKind::Claude, "executable", executable);
+            set_value(document, AgentKind::Claude, "workspace", workspace);
+        }
     }
 }
 fn clear_profile(document: &Document, agent: AgentKind) {
@@ -613,8 +629,11 @@ fn clear_profile(document: &Document, agent: AgentKind) {
 fn control_id(agent: AgentKind, suffix: &str) -> String {
     format!("agent-{}-{suffix}", agent.name())
 }
+/// Agents the legacy settings page has controls for. Claude Code is configured in the Rune chat.
+const LEGACY_AGENTS: [AgentKind; 3] = [AgentKind::Codex, AgentKind::Opencode, AgentKind::Pi];
+
 fn index(agent: AgentKind) -> usize {
-    AgentKind::ALL
+    LEGACY_AGENTS
         .iter()
         .position(|item| *item == agent)
         .unwrap_or(0)

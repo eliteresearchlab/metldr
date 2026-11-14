@@ -20,6 +20,7 @@ async-tungstenite = { version = "=0.32.1", features = ["tokio-runtime"] }
 metldr-pi-session = { path = "../metldr-pi-session" }
 metldr-codex-session = { path = "../metldr-codex-session" }
 metldr-opencode-session = { path = "../metldr-opencode-session" }
+metldr-claude-session = { path = "../metldr-claude-session" }
 metldr-browser-tools = { path = "../metldr-browser-tools" }
 metldr-harness = { path = "../metldr-harness" }
 metldr-responses = { path = "../metldr-responses" }

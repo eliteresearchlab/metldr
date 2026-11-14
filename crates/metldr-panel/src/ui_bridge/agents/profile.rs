@@ -61,6 +61,7 @@ impl UiAgentProfile {
         match &self.profile {
             AgentProfile::Codex { executable, .. }
             | AgentProfile::Opencode { executable, .. }
+            | AgentProfile::Claude { executable, .. }
             | AgentProfile::Pi { executable, .. } => executable.clone(),
         }
     }
@@ -69,6 +70,7 @@ impl UiAgentProfile {
         match &self.profile {
             AgentProfile::Codex { workspace, .. }
             | AgentProfile::Opencode { workspace, .. }
+            | AgentProfile::Claude { workspace, .. }
             | AgentProfile::Pi { workspace, .. } => workspace.clone(),
         }
     }
