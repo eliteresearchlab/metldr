@@ -1557,11 +1557,13 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             State::session_plan,
         ));
     }
-    let empty = !core.history_loading.get()
-        && state
-            .updates
-            .as_ref()
-            .is_some_and(|updates| updates.presentation.borrow().messages.messages.is_empty());
+    // Layout follows whether the chat has messages, so it does not jump when history finishes
+    // loading; only the welcome waits for the load.
+    let empty = state
+        .updates
+        .as_ref()
+        .is_none_or(|updates| updates.presentation.borrow().messages.messages.is_empty());
+    let welcome = empty && !core.history_loading.get();
     if state.conversations.is_open() {
         return col()
             .w_full()
@@ -1775,7 +1777,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         toolbar = toolbar.child(control);
     }
     let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });
-    if empty {
+    if welcome {
         // Two lines with tight leading and negative tracking, as the reference's 26 px heading.
         let hero = |line: &str| {
             typography
@@ -1794,7 +1796,15 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .child(hero("What do you want to do?").color(p.ink)),
         );
     }
-    head = head.child(toolbar).child(state.sources.view(typography, p));
+    // An empty chat shows the toolbar under the welcome; a chat with messages pins it under the
+    // tabs, so Settings and paging stay reachable while the thread scrolls.
+    let pinned = if empty {
+        head = head.child(toolbar);
+        None
+    } else {
+        Some(col().w_full().px(16.0).py(8.0).items_center().child(toolbar.max_w(720.0)))
+    };
+    head = head.child(state.sources.view(typography, p));
     let body = col()
         .w_full()
         .max_w(720.0)
@@ -1830,6 +1840,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .clip_rounded(14.0)
                 .child(state.conversations.tabs(state, core))
                 .child(col().w_full().h(1.0).fill(p.line))
+                .children(pinned)
                 .child(if empty { scroll.justify_center() } else { scroll })
                 .child(col().w_full().px(16.0).pb(24.0).center_y().child(composer)),
         )
