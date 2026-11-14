@@ -287,7 +287,9 @@ impl NativeWorkflow {
                     _ => false,
                 }
             }
-            (Self::Harness(before), Self::Harness(after)) => before.binding.can_become(&after.binding),
+            (Self::Harness(before), Self::Harness(after)) => {
+                before.binding.can_become(&after.binding)
+            }
             _ => false,
         };
         if binding_valid {

@@ -65,6 +65,7 @@ fn make_owner_without_plan(directory: &Directory) -> crate::Result<(Owner, Strin
         output: Default::default(),
         error: None,
         corrections: Vec::new(),
+        ledger: None,
     });
     let profile = codex_model::Profile {
         executable: PathBuf::from("/usr/bin/true"),

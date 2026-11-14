@@ -47,6 +47,7 @@ fn replay(v: &[Value], size: usize) -> Result<(stream::Turn, String, Vec<TextEve
                 for event in state.frame(&event, &data)? {
                     if let TextEvent::Delta(delta) = &event {
                         text.push_str(delta);
+                events.push(event);
                     }
                     events.push(event);
                 }

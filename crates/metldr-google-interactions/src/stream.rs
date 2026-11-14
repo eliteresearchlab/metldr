@@ -1,6 +1,6 @@
 use crate::{Invocation, Result};
 use metldr_browser_tools::decode_call;
-use metldr_conversation::TextEvent;
+use metldr_conversation::{TextEvent, Usage};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -8,6 +8,7 @@ pub(super) struct Turn {
     pub steps: Vec<Value>,
     pub call: Option<Invocation>,
     pub text: String,
+    pub usage: Usage,
 }
 
 struct Step {
@@ -28,6 +29,7 @@ pub(super) struct State {
     events: usize,
     text_bytes: usize,
     cursor: u64,
+    usage: Usage,
 }
 
 fn string<'a>(v: &'a Value, key: &str) -> Result<&'a str> {
@@ -311,6 +313,16 @@ impl State {
                         return Err("invalid Google usage count".into());
                     }
                 }
+                let count = |key: &str| interaction["usage"][key].as_u64();
+                let (answer, thought) =
+                    (count("total_output_tokens"), count("total_thought_tokens"));
+                self.usage = Usage {
+                    input: count("total_input_tokens"),
+                    cached: count("total_cached_tokens"),
+                    output: (answer.is_some() || thought.is_some())
+                        .then(|| answer.unwrap_or(0).saturating_add(thought.unwrap_or(0))),
+                    reasoning: thought,
+                };
                 let status = string(interaction, "status")?;
                 if self
                     .announced_terminal
@@ -385,6 +397,11 @@ impl State {
         if (status == "requires_action") != call.is_some() || (call.is_none() && text.is_empty()) {
             return Err("Google terminal status and output disagree".into());
         }
-        Ok(Turn { steps, call, text })
+        Ok(Turn {
+            steps,
+            call,
+            text,
+            usage: self.usage,
+        })
     }
 }

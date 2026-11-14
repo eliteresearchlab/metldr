@@ -10,6 +10,7 @@ pub struct PresentationConversation {
     pub(super) client: Client,
     pub(super) request: Value,
     pub(super) phase: Phase,
+    pub(super) usage: Option<crate::Usage>,
 }
 
 pub struct PresentationInvocation {
@@ -132,7 +133,7 @@ impl Client {
         input: &str,
         stop: &AtomicBool,
         emit: impl FnMut(TextEvent) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<crate::Usage> {
         let turn = self
             .send(
                 &self.text_request(system, input),
@@ -145,7 +146,7 @@ impl Client {
         if turn.call.is_some() {
             return Err("Responses text request returned a tool call".into());
         }
-        Ok(())
+        Ok(turn.usage)
     }
 
     fn text_request(&self, system: &str, input: &str) -> Value {
@@ -181,6 +182,7 @@ impl Client {
             client: self,
             request,
             phase: Phase::Ready,
+            usage: None,
         })
     }
 
@@ -261,6 +263,11 @@ impl Client {
                         if let TextEvent::Delta(text) = &text_event {
                             rendered.push_str(text);
                         }
+                    emit(text_event)?;
+                }
+                if let Some(update) = state.presentation_progress()? {
+                    cancelled(stop)?;
+                    progress(update)?;
                         emit(text_event)?;
                     }
                     if let Some(update) = state.presentation_progress()? {
@@ -280,6 +287,11 @@ impl Client {
         }
         if rendered != turn.text {
             return Err("Responses streamed text differs from completed output".into());
+    /// Usage from the most recent completed response.
+    pub fn usage(&self) -> Option<crate::Usage> {
+        self.usage
+    }
+
         }
         Ok(turn)
     }
@@ -296,6 +308,7 @@ impl PresentationConversation {
             Phase::Ready => {}
             Phase::Pending(_) => return Err("Responses tool result missing".into()),
             Phase::Closed => return Err("Responses conversation is closed".into()),
+        self.usage = Some(turn.usage);
         }
         self.phase = Phase::Closed;
         let turn = self

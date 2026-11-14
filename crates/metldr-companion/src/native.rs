@@ -269,7 +269,11 @@ pub(super) fn run() -> Result<()> {
                 owner.texts(&run, changes)?;
             }
             Event::Presentation { run, update, ack } => owner.presentation(&run, update, ack)?,
-            Event::Settled { run, result } => owner.settled(&run, result, closed)?,
+            Event::Settled {
+                run,
+                result,
+                ledger,
+            } => owner.settled(&run, result, ledger, closed)?,
             Event::PiBound {
                 run,
                 workflow,

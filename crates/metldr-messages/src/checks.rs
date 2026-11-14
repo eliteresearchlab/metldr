@@ -4,7 +4,7 @@ use metldr_browser_tools::{BROWSER_POLICY, Call};
 fn initial() -> Value {
     json!({"type":"message_start","message":{"id":"msg_1","type":"message",
         "role":"assistant","model":"fixture-model","content":[],"stop_reason":null,
-        "stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0}}})
+        "stop_sequence":null,"usage":{"input_tokens":10,"cache_creation_input_tokens":4,"cache_read_input_tokens":30,"output_tokens":0}}})
 }
 
 fn stop(reason: &str) -> Vec<Value> {
@@ -88,6 +88,11 @@ fn prompt() -> Prompt<'static> {
 fn streams_unicode_and_preserves_exact_tool_continuation() {
     for chunk in [1, 2, 7, 127, 4096] {
         let (turn, text) = replay(&text_and_call(), chunk).unwrap();
+        let usage = (Some(44), Some(30), Some(12));
+        assert_eq!(
+            (turn.usage.input, turn.usage.cached, turn.usage.output),
+            usage
+        );
         assert_eq!(text, "Read বাংলা 🦀");
         assert_eq!(turn.call.as_ref().unwrap().call, Call::Observe);
         let expected = json!([

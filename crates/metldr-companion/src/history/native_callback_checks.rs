@@ -205,6 +205,7 @@ fn actual_owner_native_callbacks_bind_persist_and_fail_closed() -> Result<()> {
                     output: Content::native(),
                     error: None,
                     corrections: Vec::new(),
+                    ledger: None,
                 },
                 launch,
                 workflow.clone(),

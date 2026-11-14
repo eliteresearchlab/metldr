@@ -65,6 +65,15 @@ impl Protocol {
         Ok(invocation)
     }
 
+    pub fn usage(&self) -> Option<metldr_conversation::Usage> {
+        match self {
+            Self::Messages { conversation } => conversation.usage(),
+            Self::Responses { conversation } => conversation.usage(),
+            Self::Google { conversation } => conversation.usage(),
+            Self::Chat { conversation } => conversation.usage(),
+        }
+    }
+
     pub fn continuation(&mut self, result: &Value) -> Result<()> {
         match self {
             Self::Messages { conversation } => conversation.submit_tool_result(result),

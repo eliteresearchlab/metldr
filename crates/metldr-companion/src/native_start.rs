@@ -382,6 +382,7 @@ fn records(
         output: metldr_conversation::Content::native(),
         error: None,
         corrections: Vec::new(),
+        ledger: None,
     };
     Ok((value, record, launch))
 }

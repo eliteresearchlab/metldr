@@ -56,6 +56,7 @@ fn add(
         output: metldr_conversation::Content::flat(output).unwrap(),
         error: None,
         corrections: Vec::new(),
+        ledger: None,
     });
     state.launches.insert(
         id,

@@ -144,7 +144,7 @@ async fn call(
                 Some(include_bytes!("../../test-tls/ca.pem")),
             )?
             .text(SYSTEM, INPUT, stop, emit)
-            .await
+            .await?;
         }
         Protocol::Responses => {
             metldr_responses::Client::new(
@@ -154,7 +154,7 @@ async fn call(
                 Some(include_bytes!("../../test-tls/ca.pem")),
             )?
             .text(SYSTEM, INPUT, stop, emit)
-            .await
+            .await?;
         }
         Protocol::Google => {
             metldr_google_interactions::Client::new(
@@ -164,7 +164,7 @@ async fn call(
                 Some(include_bytes!("../../test-tls/ca.pem")),
             )?
             .text(SYSTEM, INPUT, stop, emit)
-            .await
+            .await?;
         }
         Protocol::Chat => {
             metldr_chat_completions::Client::new(
@@ -175,9 +175,10 @@ async fn call(
                 metldr_chat_completions::DEFAULT_TIMEOUT_SECS,
             )?
             .text(SYSTEM, INPUT, stop, emit)
-            .await
+            .await?;
         }
-    }
+    };
+    Ok(())
 }
 
 fn assert_request(protocol: Protocol, request: &Value) {

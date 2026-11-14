@@ -192,6 +192,7 @@ pub(crate) mod checks {
                 {"tool":"execute","phase":"started"}
             ])).unwrap(),
             corrections: CorrectionHistory { total: 0, entries: vec![] },
+            ledger: None,
         }
     }
 

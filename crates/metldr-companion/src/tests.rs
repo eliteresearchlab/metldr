@@ -109,6 +109,7 @@ mod tests {
             output: metldr_conversation::Content::flat("Pending ".into()).unwrap(),
             error: None,
             corrections: Vec::new(),
+            ledger: None,
         });
         state.starts.insert("fixture:request".into(), run.clone());
         state.launches.insert(
@@ -147,6 +148,7 @@ mod tests {
                 .send(Event::Settled {
                     run: worker_run,
                     result: Err("stopped".into()),
+                    ledger: None,
                 })
                 .unwrap();
         });
@@ -200,7 +202,11 @@ mod tests {
         );
         let worker = owner.operations[&run].worker.thread().id();
         let sibling_worker = owner.operations[&sibling].worker.thread().id();
-        assert!(owner.settled("stale", Err("stale".into()), false).is_err());
+        assert!(
+            owner
+                .settled("stale", Err("stale".into()), None, false)
+                .is_err()
+        );
         assert!(owner.operations.contains_key(&run));
         assert!(
             owner
@@ -214,7 +220,7 @@ mod tests {
             owner.operations[&sibling].worker.thread().id(),
             sibling_worker
         );
-        owner.settled(&sibling, Ok(()), false).unwrap();
+        owner.settled(&sibling, Ok(()), None, false).unwrap();
         assert_eq!(owner.operations.len(), 1);
         assert_eq!(owner.operations[&run].worker.thread().id(), worker);
         assert_eq!(saved_run(&mut owner, &run).status, Status::StopRequested);
@@ -226,10 +232,13 @@ mod tests {
         let stopping = saved_run(&mut owner, &run);
         assert_eq!(stopping.status, Status::StopRequested);
         assert_eq!(stopping.output.text(), "Pending in flight");
-        let Event::Settled { run: id, result } = rx.recv().unwrap() else {
+        let Event::Settled {
+            run: id, result, ..
+        } = rx.recv().unwrap()
+        else {
             panic!("settlement must follow the queued chunk");
         };
-        owner.settled(&id, result, false).unwrap();
+        owner.settled(&id, result, None, false).unwrap();
         assert!(owner.operations.is_empty());
         let before = saved_run(&mut owner, &run);
         assert_eq!(before.status, Status::Cancelled);
@@ -466,6 +475,7 @@ mod tests {
             output: metldr_conversation::Content::native(),
             error: None,
             corrections: Vec::new(),
+            ledger: None,
         });
         state.workflows.insert(
             workflow.clone(),

@@ -102,11 +102,16 @@ pub(super) struct Run {
     pub(super) error: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) corrections: Vec<crate::native_correction::Receipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) ledger: Option<metldr_conversation::Ledger>,
 }
 impl Run {
     pub(super) fn validate(&self, valid_id: impl Fn(&str) -> bool) -> Result<()> {
         self.output.validate()?;
         crate::native_correction::validate(self)?;
+        if self.ledger.as_ref().is_some_and(|ledger| !ledger.valid()) {
+            return Err("invalid saved run ledger".into());
+        }
         if !valid_id(&self.id)
             || !valid_id(&self.source)
             || !matches!(

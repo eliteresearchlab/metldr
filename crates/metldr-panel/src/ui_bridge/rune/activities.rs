@@ -486,6 +486,9 @@ impl Activities {
                         details.route(),
                         details.status()
                     )));
+                    if let Some(ledger) = details.ledger() {
+                        out = out.child(typography.text(ledger).wrap().selectable(true));
+                    }
                     let open = entry.open.contains("reports");
                     out = out.child(self.disclosure(
                         id,

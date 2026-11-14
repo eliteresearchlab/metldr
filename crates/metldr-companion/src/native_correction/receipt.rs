@@ -214,6 +214,7 @@ mod checks {
             output: metldr_conversation::Content::native(),
             error: None,
             corrections: vec![Receipt::pending("correction:1", 1, &"🙂".repeat(200)).unwrap()],
+            ledger: None,
         };
         let saved = public(&run, false);
         let live = public(&run, true);

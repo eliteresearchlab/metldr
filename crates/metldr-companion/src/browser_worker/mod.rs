@@ -199,6 +199,7 @@ impl Owner {
                     output: metldr_conversation::Content::native(),
                     error: None,
                     corrections: Vec::new(),
+                    ledger: None,
                 },
                 route.launch(digest),
             )?;
@@ -216,6 +217,7 @@ impl Owner {
         let instruction = text.to_owned();
         let tx = self.tx.clone();
         let worker = thread::spawn(move || {
+            let mut recorder = crate::ledger::Recorder::start();
             let result = (|| -> Result<()> {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -223,13 +225,15 @@ impl Owner {
                 runtime.block_on(async {
                     let protocol =
                         protocol::Protocol::open(&route, &source.page, &instruction, &worker_stop)?;
+                    let recorder = &mut recorder;
                     let mut tools = Tools::new(
                         client.clone(),
                         (&source.page).into(),
                         events,
                         worker_stop.clone(),
                     );
-                    let result = execute(protocol, &mut tools, &client, &worker_stop).await;
+                    let result =
+                        execute(protocol, &mut tools, &client, &worker_stop, recorder).await;
                     let detached = tools.close().await;
                     match (result, detached) {
                         (_, Err(error)) => Err(error),
@@ -242,6 +246,7 @@ impl Owner {
             let _ = tx.send(Event::Settled {
                 run: worker_run,
                 result,
+                ledger: recorder.finish(),
             });
         });
         self.operations.insert(
@@ -262,12 +267,18 @@ async fn execute(
     tools: &mut Tools,
     client: &Client,
     stop: &AtomicBool,
+    recorder: &mut crate::ledger::Recorder,
 ) -> Result<()> {
     let mut output = crate::direct_output::DirectOutput::new(&client.run, &client.tx);
     for used in 0..=MAX_TOOL_CALLS {
+        recorder.begin_step();
         let invocation = protocol
-            .next(stop, MAX_TOOL_CALLS - used, |event| output.accept(event))
+            .next(stop, MAX_TOOL_CALLS - used, |event| {
+                recorder.text();
+                output.accept(event)
+            })
             .await?;
+        recorder.end_step(protocol.usage(), invocation.is_some());
         let Some(invocation) = invocation else {
             return Ok(());
         };

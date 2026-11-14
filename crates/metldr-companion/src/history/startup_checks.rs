@@ -681,6 +681,7 @@ fn recovered_before_ready() -> Result<()> {
         output: Default::default(),
         error: None,
         corrections: Vec::new(),
+        ledger: None,
     });
     initial.launches.insert(
         run.clone(),

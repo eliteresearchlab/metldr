@@ -75,14 +75,14 @@ impl Client {
         input: &str,
         stop: &AtomicBool,
         emit: impl FnMut(TextEvent) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<crate::Usage> {
         let turn = self
             .send(&self.text_request(system, input), stop, emit)
             .await?;
         if turn.call.is_some() {
             return Err("Messages text request returned a tool call".into());
         }
-        Ok(())
+        Ok(turn.usage)
     }
 
     fn text_request(&self, system: &str, input: &str) -> Value {
@@ -164,6 +164,7 @@ impl Client {
                         if let TextEvent::Delta(text) = &event {
                             rendered.push_str(text);
                         }
+                    emit(event)?;
                         emit(event)?;
                     }
                 }

@@ -709,6 +709,7 @@ fn public_responses_presentation_preserves_text_and_opaque_tool_continuation_ove
                 &tx,
                 &worker_stop,
                 &mut output,
+                &mut crate::ledger::Recorder::start(),
             ))
             .map_err(|error| error.to_string())
     });

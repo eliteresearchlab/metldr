@@ -1,5 +1,5 @@
 use crate::Result;
-use metldr_conversation::TextEvent;
+use metldr_conversation::{TextEvent, Usage};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -8,6 +8,7 @@ pub(crate) struct Turn {
     pub call: Option<FunctionCall>,
     pub text: String,
     pub deferred: Vec<TextEvent>,
+    pub usage: Usage,
 }
 
 pub(crate) struct FunctionCall {
@@ -44,6 +45,7 @@ pub(super) struct State {
     emit_item: u64,
     emit_part: u64,
     limits: Limits,
+    usage: Usage,
 }
 
 struct Limits {
@@ -304,6 +306,7 @@ impl State {
                         return Err("Responses terminal output differs".into());
                     }
                 }
+                self.usage = usage(&response["usage"])?;
                 self.terminal = Some(output.clone());
             }
             "response.failed" | "response.incomplete" | "error" => {
@@ -432,6 +435,23 @@ impl State {
             call,
             text,
             deferred,
+            usage: self.usage,
         })
     }
+}
+
+fn usage(value: &Value) -> Result<Usage> {
+    let count = |value: &Value| match value {
+        Value::Null => Ok::<_, Box<dyn std::error::Error + Send + Sync>>(None),
+        value => value
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| "invalid Responses usage count".into()),
+    };
+    Ok(Usage {
+        input: count(&value["input_tokens"])?,
+        cached: count(&value["input_tokens_details"]["cached_tokens"])?,
+        output: count(&value["output_tokens"])?,
+        reasoning: count(&value["output_tokens_details"]["reasoning_tokens"])?,
+    })
 }

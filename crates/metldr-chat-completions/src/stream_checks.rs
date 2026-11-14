@@ -59,7 +59,7 @@ fn ordered_calls_wait_for_done_and_keep_usage() {
         "{}"
     );
     assert!(turn.assistant["reasoning_content"].is_null());
-    assert_eq!(turn.usage.unwrap().cached_input_tokens, Some(2));
+    assert_eq!(turn.usage.unwrap().cached, Some(2));
 }
 
 #[test]
@@ -215,7 +215,7 @@ fn encrypted_reasoning_allows_tool_calls_with_stop() {
         let turn = state.finish().unwrap();
         assert_eq!(turn.calls.len(), 1);
         assert_eq!(turn.assistant["content"], content);
-        assert_eq!(turn.usage.unwrap().cached_input_tokens, Some(2));
+        assert_eq!(turn.usage.unwrap().cached, Some(2));
     }
     let mut state = State::default();
     frame(

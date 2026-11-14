@@ -664,6 +664,7 @@ fn actual_owner_native_start_admission_and_failure_boundaries() -> crate::Result
                     output: Default::default(),
                     error: None,
                     corrections: Vec::new(),
+                    ledger: None,
                 },
                 Launch::Fixture {
                     input_digest: "f".repeat(64),

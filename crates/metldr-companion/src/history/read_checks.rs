@@ -73,6 +73,7 @@ fn saved_reads_page_details_and_fail_closed() -> Result<()> {
                 output: Default::default(),
                 error: None,
                 corrections: Vec::new(),
+                ledger: None,
             };
             edit.admit(
                 &selection,
@@ -162,6 +163,7 @@ fn saved_reads_page_details_and_fail_closed() -> Result<()> {
             output: Default::default(),
             error: None,
             corrections: Vec::new(),
+            ledger: None,
         };
         edit.admit(
             &selection,
@@ -370,6 +372,7 @@ fn escaped_pages(history: &mut History, selection: &super::Selection) -> Result<
                     output: Default::default(),
                     error: None,
                     corrections: Vec::new(),
+                    ledger: None,
                 },
                 Launch::Fixture {
                     input_digest: "e".repeat(64),
