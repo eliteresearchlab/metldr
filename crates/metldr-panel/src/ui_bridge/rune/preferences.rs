@@ -298,6 +298,7 @@ impl Preferences {
             ("gruvbox", "Gruvbox", "preferences-theme-gruvbox"),
             ("cyberpunk", "Cyberpunk", "preferences-theme-cyberpunk"),
             ("light", "Light", "preferences-theme-light"),
+            ("hardware", "Hardware", "preferences-theme-hardware"),
         ]
         .into_iter()
         .map(|(key, label, id)| option(typography, label, id, snapshot.theme() == key, enabled, Action::Theme(key), &action));
@@ -322,7 +323,7 @@ impl Preferences {
         result = result.child(sizes).child(self.notice(
             Control::Theme,
             appearance,
-            status("Appearance", appearance),
+            status(true, appearance),
         ));
         if failed(appearance) {
             result = result.child(button(
@@ -337,7 +338,7 @@ impl Preferences {
         let sound = snapshot.sound_status();
         result = result
             .child(sound_switch(typography, palette, snapshot.sounds_enabled(), !busy(sound), &action))
-            .child(self.notice(Control::Sound, sound, status("Sound", sound)));
+            .child(self.notice(Control::Sound, sound, status(false, sound)));
         if failed(sound) {
             result = result.child(button(
                 typography,
@@ -364,30 +365,44 @@ fn failed(status: UiPreferenceStatus) -> bool {
         UiPreferenceStatus::LoadFailed | UiPreferenceStatus::SaveFailed
     )
 }
-fn status(domain: &str, status: UiPreferenceStatus) -> String {
-    match status {
-        UiPreferenceStatus::Loading => format!("Loading {domain} preferences."),
-        UiPreferenceStatus::Saving => format!("Saving {domain} preferences."),
-        UiPreferenceStatus::Saved => format!("{domain} preferences saved."),
-        UiPreferenceStatus::LoadFailed => {
-            format!("{domain} preferences could not be loaded. Choose a setting or retry.")
+/// A preference domain's status line, spelled out so a frame formats nothing.
+fn status(appearance: bool, status: UiPreferenceStatus) -> &'static str {
+    match (appearance, status) {
+        (true, UiPreferenceStatus::Loading) => "Loading Appearance preferences.",
+        (true, UiPreferenceStatus::Saving) => "Saving Appearance preferences.",
+        (true, UiPreferenceStatus::Saved) => "Appearance preferences saved.",
+        (true, UiPreferenceStatus::LoadFailed) => {
+            "Appearance preferences could not be loaded. Choose a setting or retry."
         }
-        UiPreferenceStatus::SaveFailed => format!(
-            "{domain} preferences could not be saved. The current setting remains active. Retry to save it."
-        ),
+        (true, UiPreferenceStatus::SaveFailed) => {
+            "Appearance preferences could not be saved. The current setting remains active. Retry to save it."
+        }
+        (false, UiPreferenceStatus::Loading) => "Loading Sound preferences.",
+        (false, UiPreferenceStatus::Saving) => "Saving Sound preferences.",
+        (false, UiPreferenceStatus::Saved) => "Sound preferences saved.",
+        (false, UiPreferenceStatus::LoadFailed) => {
+            "Sound preferences could not be loaded. Choose a setting or retry."
+        }
+        (false, UiPreferenceStatus::SaveFailed) => {
+            "Sound preferences could not be saved. The current setting remains active. Retry to save it."
+        }
     }
 }
 
 fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<String>) -> El {
     let label = label.into();
-    typography
+    let el = typography
         .text(label.clone())
         .label(label)
         .key(key.into())
         .px(10.0)
         .py(6.0)
         .radius(8.0)
-        .fill(typography.field)
+        .fill(typography.field);
+    match typography.lip {
+        Some(lip) => el.shadow(2.0, 0.0, lip),
+        None => el,
+    }
 }
 
 fn button(
@@ -503,13 +518,16 @@ pub(super) struct Typography {
     /// Hairline and fill of an outlined control.
     pub(super) line: Color,
     pub(super) field: Color,
+    /// The lip a key stands on, on a molded theme.
+    pub(super) lip: Option<Color>,
 }
 
 impl Typography {
     pub(super) fn new(scale: f32, palette: &Palette) -> Self {
         Self {
             line: palette.line,
-            field: palette.field,
+            field: if palette.molded { palette.surface } else { palette.field },
+            lip: palette.molded.then_some(palette.lip),
             scale,
             ink: palette.ink,
             press: palette.press,
