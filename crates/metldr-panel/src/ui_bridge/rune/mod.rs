@@ -12,6 +12,7 @@ mod conversations;
 mod corrections;
 mod fonts;
 mod dots;
+use theme::Root as _;
 mod glimm;
 mod messages;
 mod pi_replies;
@@ -399,7 +400,7 @@ impl State {
         }
     }
 
-    fn decide_browser_action(&mut self, decision: browser_actions::DecisionKey, tx: &mut Tx) {
+    fn decide_browser_action(&self, decision: browser_actions::DecisionKey, tx: &mut Tx) {
         let Some(core) = self.core().cloned() else {
             return;
         };
@@ -1635,6 +1636,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             .fill(palette.canvas)
             .color(ink)
             .padding(10.0)
+            .material(palette)
             .child(
                 col()
                     .key("settings-card")
@@ -1918,7 +1920,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .fill(p.canvas)
         .color(ink)
         .padding(10.0)
-        .children(p.molded.then(dots::ground))
+        .material(p)
         .child(
             theme::module(col(), p)
                 .key("chat-card")

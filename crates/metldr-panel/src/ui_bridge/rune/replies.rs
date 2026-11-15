@@ -150,7 +150,7 @@ fn activate(
     }
 }
 
-fn send(state: &mut State, run: RunId, request: RunId, answer: UiCodexAnswer, tx: &mut Tx) {
+fn send(state: &State, run: RunId, request: RunId, answer: UiCodexAnswer, tx: &mut Tx) {
     let Some(core) = state.core().cloned() else {
         return;
     };
@@ -165,7 +165,7 @@ fn send(state: &mut State, run: RunId, request: RunId, answer: UiCodexAnswer, tx
     }
 }
 
-fn native(state: &mut State, run: RunId, request: RunId, option: Option<String>, tx: &mut Tx) {
+fn native(state: &State, run: RunId, request: RunId, option: Option<String>, tx: &mut Tx) {
     let Some(core) = state.core().cloned() else {
         return;
     };

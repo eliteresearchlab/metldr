@@ -256,7 +256,7 @@ fn menu_row(
         })
 }
 
-pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
+pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     let p = palette(state);
     let typography = state.preferences.typography();
     // The label moves into the text node: a route label built for this frame is never copied again.

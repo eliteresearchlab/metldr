@@ -26,6 +26,8 @@ pub(crate) struct FocusSpec {
     pub ring: Option<Outline>,
     /// `no_focus_ring`: no default ring on this control, and none from this element.
     pub ring_off: bool,
+    /// `focus_ring_default`: the default ring for controls inside this element.
+    pub ring_default: Option<Outline>,
     /// `default_button`: Return presses it.
     pub default: bool,
     pub highlight: Option<Color>,
@@ -56,6 +58,7 @@ impl crate::cold::Empty for FocusSpec {
         preserve_on_press: crate::runtime::selectable::OnPress { focus: false, selection: false },
         ring: None,
         ring_off: false,
+        ring_default: None,
         default: false,
         highlight: None,
         follows: false,

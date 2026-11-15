@@ -1100,6 +1100,13 @@ impl El {
         self.focus.ring_off = false;
         self
     }
+    /// The default focus ring for every control inside this element that sets none of its own,
+    /// in place of AppKit's: a theme's ring, set once on its root. The nearest such element
+    /// above the focused control decides.
+    pub fn focus_ring_default(mut self, width: f32, offset: f32, color: Color) -> Self {
+        self.focus.ring_default = Some(Outline { width, offset, color });
+        self
+    }
     /// No focus ring: not the default one, and not one set with [`El::focus_ring`]. A control
     /// that shows focus its own way (a fill, an outline it animates) sets it on itself or on
     /// the child that would draw the ring.
