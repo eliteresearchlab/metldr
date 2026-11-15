@@ -650,6 +650,10 @@ mod tests {
     }
 }
 
+/// A control's press, shared behind one pointer so every copy of the control reuses it.
+type Press = Rc<dyn Fn(&mut State, &mut Tx)>;
+
+/// A toolbar chip: 32 points tall with a small muted legend.
 pub(super) fn button(
     p: &super::preferences::Palette,
     typography: super::preferences::Typography,
@@ -658,13 +662,28 @@ pub(super) fn button(
     enabled: bool,
     action: impl Fn(&mut State, &mut Tx) + 'static,
 ) -> El {
-    let el = row().key(key).min_h(32.0).px(8.0).items_center().child(
-        typography
-            .legend(label)
-            .font(typography.font(12.0, 400.0))
-            .color(p.ink_2),
-    );
-    pressable(el, p, label, enabled, true, Rc::new(action))
+    keyed(p, typography, label, key, enabled, false, Rc::new(action))
+}
+
+/// A labelled key: a toolbar chip, or (`sheet`) a control on the Saved chats sheet, 44 points
+/// tall with body text.
+fn keyed(
+    p: &super::preferences::Palette,
+    typography: super::preferences::Typography,
+    label: &str,
+    key: String,
+    enabled: bool,
+    sheet: bool,
+    action: Press,
+) -> El {
+    let legend = typography.legend(label);
+    let (height, inset, legend) = if sheet {
+        (44.0, 12.0, legend.color(p.ink))
+    } else {
+        (32.0, 8.0, legend.font(typography.font(12.0, 400.0)).color(p.ink_2))
+    };
+    let el = row().key(key).min_h(height).px(inset).items_center().child(legend);
+    pressable(el, p, label, enabled, true, action)
 }
 
 /// A toolbar entry: a chip, or on an empty chat under a flat theme, a row with `icon` as the
@@ -728,7 +747,7 @@ const LATEST: Icon = Icon {
     body: "<path d=\"M12 5v14M6 13l6 6 6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
 };
 
-/// A Close or paging control on the Saved chats sheet: 44 points tall with body text.
+/// A Close or paging control on the Saved chats sheet.
 fn sheet_button(
     p: &super::preferences::Palette,
     typography: super::preferences::Typography,
@@ -737,13 +756,7 @@ fn sheet_button(
     enabled: bool,
     action: impl Fn(&mut State, &mut Tx) + 'static,
 ) -> El {
-    let el = row()
-        .key(key)
-        .min_h(44.0)
-        .px(12.0)
-        .items_center()
-        .child(typography.legend(label).color(p.ink));
-    pressable(el, p, label, enabled, true, Rc::new(action))
+    keyed(p, typography, label, key, enabled, true, Rc::new(action))
 }
 
 /// One saved chat in the Saved chats list: a full-width row of wrapped title text. List rows never scale.
@@ -775,7 +788,7 @@ fn pressable(
     label: &str,
     enabled: bool,
     scale: bool,
-    action: Rc<dyn Fn(&mut State, &mut Tx)>,
+    action: Press,
 ) -> El {
     let el = super::theme::keycap(el, p).label(label);
     let props = metldr_ui::button::Props {
