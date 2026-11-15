@@ -189,6 +189,8 @@ impl<S: 'static> Runtime<S> {
             }
             // Text fields: selection under the text, placeholder, caret over it.
             let mut caret = None;
+            // A block caret's byte and the ink of the character under it.
+            let mut block_at = None;
             if let Some(inp) = &n.input {
                 let e = &inp.edit;
                 let departing = self.flights.iter().any(|f| f.departs(&n.path, n.key.as_deref())
@@ -217,6 +219,14 @@ impl<S: 'static> Runtime<S> {
                             origin, tk, premul(inp.selection, o, srgb), s, clip, fade);
                     }
                     caret = input_caret;
+                    // A block caret steps aside while there is a selection or a composition.
+                    if let Some(ink) = inp.caret_block {
+                        if a == b && e.preedit.is_none() {
+                            block_at = Some((caret_index(e, &spec.content) as u32, ink));
+                        } else {
+                            caret = None;
+                        }
+                    }
                     if let Some((_, _)) = &e.preedit
                         && let (_, Some((pa, pb))) = e.display()
                     {
@@ -328,7 +338,7 @@ impl<S: 'static> Runtime<S> {
                 } else {
                     f32::NEG_INFINITY..f32::INFINITY
                 };
-                let bytes = reveal.is_some() || !link_fx.is_empty() || has_hl_fg;
+                let bytes = reveal.is_some() || !link_fx.is_empty() || has_hl_fg || block_at.is_some();
                 // A secret's glyphs aren't kept past the frame that draws them.
                 if spec.redacted || n.input.as_ref().is_some_and(|i| i.edit.is_secure()) {
                     self.text.glyphs_in_band(layout, r_origin, raster, bytes, band, &mut self.glyph_scratch);
@@ -338,6 +348,10 @@ impl<S: 'static> Runtime<S> {
                 tk / raster
             };
             self.text.set_glide([0.0; 2]);
+            // A block caret sits under the glyphs; the one it covers takes the block's ink.
+            if let (Some(c), Some(inp)) = (caret.filter(|_| block_at.is_some()), &n.input) {
+                self.instances.push(rect_inst(c, premul(inp.caret, o, srgb), 0.0, clip, fade));
+            }
             let base = premul(color, o, srgb);
             let lands = self.flights.iter().any(|f| f.lands(&n.path, n.key.as_deref()));
             for q in if lands { &[][..] } else { &self.glyph_scratch[..] } {
@@ -367,6 +381,9 @@ impl<S: 'static> Runtime<S> {
                 if !link_fx.is_empty() && let Some(c) = link_fx.glyph_color(q.byte) {
                     f = premul(c, o, srgb);
                 }
+                if let Some((at, ink)) = block_at && q.byte == at {
+                    f = premul(ink, o, srgb);
+                }
                 if let Some(st) = reveal {
                     let a = Self::reveal_alpha(st, q.byte, self.scene.store().node_time(n.id));
                     if a <= 0.0 {
@@ -378,7 +395,7 @@ impl<S: 'static> Runtime<S> {
                     .map(|g| zoom_glyph(g, origin, r_origin, zoom)));
                 *glyph_count += 1;
             }
-            if let (Some(c), Some(inp)) = (caret, &n.input) {
+            if let (Some(c), Some(inp)) = (caret.filter(|_| block_at.is_none()), &n.input) {
                 self.instances.push(rect_inst(c, premul(inp.caret, o, srgb), 0.0, clip, fade));
             }
         }

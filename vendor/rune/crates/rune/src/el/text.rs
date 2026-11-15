@@ -358,6 +358,14 @@ impl El {
         }
         self
     }
+    /// Draws the caret as a block the width of the character after it (a space's width at a
+    /// line end), as CSS `caret-shape: block`; that character turns `ink` so it reads on the block.
+    pub fn caret_block(mut self, ink: Color) -> Self {
+        if let Some(i) = &mut self.input {
+            i.caret_block = Some(ink);
+        }
+        self
+    }
     /// Lets people select this read-only text and copy it, as SwiftUI's
     /// `.textSelection(.enabled)`: drag across it, double-click a word, triple-click a paragraph,
     /// shift-click to extend; Cmd+C (Ctrl+C elsewhere) copies and Cmd+A selects all of it while it

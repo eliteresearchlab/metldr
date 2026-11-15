@@ -209,6 +209,15 @@ pub(super) fn input_caret(n: &Node, r: [f32; 4], scale: f32, s: f32, gliding: bo
     let bb = crate::text::cursor_geometry(&cur, layout, 1.5 * s);
     let (cx, cy) = (x + bb.x0 as f32 * scale, r[1] + ins[1] + bb.y0 as f32 * scale);
     let h = (if bb.y1 > bb.y0 { (bb.y1 - bb.y0) as f32 } else { spec.style.line_px() * s }) * scale;
+    if input.caret_block.is_some() {
+        // The cluster after the caret, unless the caret ends its line; then a space's width.
+        let after = (ci < spec.content.len()).then(|| parley::layout::Cluster::from_byte_index(layout, ci)).flatten()
+            .filter(|c| !c.is_hard_line_break());
+        let (bx, bw) = after.and_then(|c| Some((c.visual_offset()?, c.advance())))
+            .map_or((cx, 0.6 * spec.style.size * s * scale), |(at, w)| (x + at * scale, w * scale));
+        let bh = h.min(1.25 * spec.style.size * s * scale);
+        return Some(([bx, cy + (h - bh) / 2.0, bw.max(1.0), bh], [cx / s, cy / s, 2.0 * scale, h / s]));
+    }
     let (caret_x, caret_w) = if (scale - 1.0).abs() <= 1e-5 {
         let gx = if gliding { pixel_snap::text_glide(r[0]) } else { 0.0 };
         ((cx - gx).round() + gx, (1.5 * s).round().max(1.0))
