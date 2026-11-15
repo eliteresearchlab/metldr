@@ -294,23 +294,25 @@ impl Preferences {
             ..Default::default()
         };
         let themes = [
-            ("catppuccin", "Catppuccin"),
-            ("gruvbox", "Gruvbox"),
-            ("cyberpunk", "Cyberpunk"),
-            ("light", "Light"),
+            ("catppuccin", "Catppuccin", "preferences-theme-catppuccin"),
+            ("gruvbox", "Gruvbox", "preferences-theme-gruvbox"),
+            ("cyberpunk", "Cyberpunk", "preferences-theme-cyberpunk"),
+            ("light", "Light", "preferences-theme-light"),
         ]
         .into_iter()
-        .map(|(key, label)| option(typography, label, format!("preferences-theme-{key}"), snapshot.theme() == key, enabled, Action::Theme(key), &action));
+        .map(|(key, label, id)| option(typography, label, id, snapshot.theme() == key, enabled, Action::Theme(key), &action));
         result = result.child(
             metldr_ui::choice::radio_group(col().key("preferences-theme").w_full().gap(6.0), "Theme", group(::rune::FocusAxis::Vertical))
                 .children(themes),
         );
         result = result.child(typography.text("Text size").role("heading"));
-        let sizes = [("small", "Small"), ("medium", "Medium"), ("large", "Large")]
-            .into_iter()
-            .map(|(key, label)| {
-                segment(typography, palette, label, format!("preferences-size-{key}"), snapshot.font_size() == key, enabled, Action::Size(key), &action)
-            });
+        let sizes = [
+            ("small", "Small", "preferences-size-small"),
+            ("medium", "Medium", "preferences-size-medium"),
+            ("large", "Large", "preferences-size-large"),
+        ]
+        .into_iter()
+        .map(|(key, label, id)| segment(typography, palette, label, id, snapshot.font_size() == key, enabled, Action::Size(key), &action));
         let sizes = metldr_ui::choice::radio_group(
             ::rune::row().key("preferences-text-size").w_full().padding(2.0).gap(2.0).radius(10.0).fill(typography.field),
             "Text size",
@@ -439,7 +441,7 @@ fn segment(
     typography: Typography,
     palette: &Palette,
     label: &'static str,
-    key: String,
+    key: &'static str,
     checked: bool,
     enabled: bool,
     value: Action,
