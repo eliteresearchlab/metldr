@@ -352,19 +352,14 @@ pub(super) fn card(palette: &Palette) -> El {
 /// it keeps the outline and field fill of an outlined control.
 pub(super) fn keycap(el: El, p: &Palette) -> El {
     if p.neon {
-        return neon(el, p);
+        return neon_key(el.fill(p.surface), p.accent);
     }
     let el = el.radius(if p.molded { 6.0 } else { 8.0 }).fill(if p.molded { p.surface } else { p.field }).border(1.0, p.line);
     if p.molded { on_lip(el, p.lip, false) } else { el }
 }
 
-/// A neon key: sharp 2 point corners, a lit hairline in the accent with a soft glow around it,
-/// and the accent washing in while it is pressed. It sounds its down-stroke as the pointer lands.
-pub(super) fn neon(el: El, p: &Palette) -> El {
-    neon_key(el.fill(p.surface), p.accent)
-}
-
-/// A neon key's outline, glow, pressed wash and down-stroke, in `accent`.
+/// A neon key: sharp 2 point corners, a lit hairline in `accent` with a soft glow around it, and
+/// the accent washing in while it is pressed. It sounds its down-stroke as the pointer lands.
 pub(super) fn neon_key(el: El, accent: Color) -> El {
     el.radius(2.0)
         .border(1.0, accent.alpha(0.55))
@@ -401,15 +396,15 @@ impl Root for El {
     }
 }
 
-/// A text field's caret on a molded theme.
-pub(super) trait MoldedCaret {
-    /// On a molded theme, a block caret in the key colour with the character under it in the
-    /// key's legend colour; a flat theme keeps the field's own caret.
-    fn molded_caret(self, p: &Palette) -> Self;
+/// A text field's caret on a theme with a material of its own.
+pub(super) trait ThemeCaret {
+    /// On a molded or neon theme, a block caret in the accent with the character under it in
+    /// the accent's legend colour; a flat theme keeps the field's own caret.
+    fn theme_caret(self, p: &Palette) -> Self;
 }
 
-impl MoldedCaret for El {
-    fn molded_caret(self, p: &Palette) -> Self {
+impl ThemeCaret for El {
+    fn theme_caret(self, p: &Palette) -> Self {
         if p.molded || p.neon { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
     }
 }

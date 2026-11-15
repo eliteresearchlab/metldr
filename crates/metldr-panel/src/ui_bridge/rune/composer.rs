@@ -20,7 +20,7 @@
  * SOFTWARE.
  */
 
-use super::theme::MoldedCaret;
+use super::theme::ThemeCaret;
 use super::theme::Palette;
 use super::{Menu, Mode, State};
 use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, row};
@@ -284,7 +284,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     .label("Prompt")
     .placeholder("Write a message…", p.ink_3)
     .caret(p.ink, p.accent.alpha(0.28))
-    .molded_caret(p)
+    .theme_caret(p)
     .on_edit(|state: &mut State| &mut state.draft)
     .on_input_change(|state: &mut State, _| {
         state.draft_changed();
