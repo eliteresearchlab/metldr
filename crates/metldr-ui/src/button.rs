@@ -7,8 +7,7 @@
 //!   announcer says "Loading" so a slow action doesn't pass in silence.
 //! - A failed action leaves its error until the next press.
 
-use rune::{El, Key, KeyEvent, Tx};
-use std::rc::Rc;
+use rune::{El, Tx};
 
 /// How long a press may stay pending before screen readers hear it is loading.
 pub const PENDING_ANNOUNCE_AFTER: f64 = 1.0;
@@ -130,18 +129,7 @@ fn control<S: 'static>(
     } else {
         el.focusable(true).unavailable(props.disabled || pending)
     };
-    let press = Rc::new(press);
-    let key_press = Rc::clone(&press);
-    el.on_press_tx(move |s: &mut S, tx| press(s, tx))
-        .on_key(move |s: &mut S, key: &KeyEvent, tx| {
-            if key.key != Key::Enter && key.key != Key::Text(" ".into()) {
-                return false;
-            }
-            if !tx.key_repeat() {
-                key_press(s, tx);
-            }
-            true
-        })
+    crate::press::activate(el, press)
 }
 
 #[cfg(test)]
@@ -149,7 +137,7 @@ mod tests {
     //! The button spec's cases. Not ported: form submit and reset (the canvas has no forms) and
     //! rendering as a link (a link is its own element).
     use super::*;
-    use rune::{Cx, Env, Mods, Runtime, col, row, text};
+    use rune::{Cx, Env, Key, KeyEvent, Mods, Runtime, col, row, text};
     use serde_json::Value;
 
     #[derive(Default)]

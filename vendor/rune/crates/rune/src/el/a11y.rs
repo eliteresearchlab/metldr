@@ -53,8 +53,6 @@ pub(crate) struct A11yMore {
     pub busy: bool,
     /// `El::unavailable`: reads as disabled but keeps focus.
     pub unavailable: bool,
-    /// `El::has_popup`: what kind of popup it opens.
-    pub has_popup: Option<&'static str>,
 }
 
 /// Accessibility state beyond role and label (`El::level`, `El::expanded`, `El::secure`, and
@@ -62,6 +60,9 @@ pub(crate) struct A11yMore {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct A11y {
     pub native_activation: bool,
+    /// `El::has_popup`: what kind of popup it opens. Inline, as popup triggers render every
+    /// frame and a box per trigger would be an allocation per frame.
+    pub has_popup: Option<&'static str>,
     pub level: Option<u32>,
     pub expanded: Option<bool>,
     pub secure: bool,
@@ -75,6 +76,7 @@ pub(crate) struct A11y {
 impl A11y {
     pub(crate) const EMPTY: A11y = A11y {
         native_activation: false,
+        has_popup: None,
         level: None, expanded: None, secure: false, checked: None, disabled: false, hidden: false, live: None, more: None,
     };
 
@@ -157,7 +159,7 @@ impl El {
     /// The kind of popup this control opens (ARIA `aria-haspopup`): `"menu"`, `"listbox"`,
     /// `"dialog"` and so on, so a screen reader says a press opens one.
     pub fn has_popup(mut self, kind: &'static str) -> Self {
-        self.a11y.more().has_popup = Some(kind);
+        self.a11y.has_popup = Some(kind);
         self
     }
     /// A control that reads as unavailable (ARIA `aria-disabled`) yet keeps its focus and its

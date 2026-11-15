@@ -11,8 +11,7 @@
 //!   keeps its tab stop and presses nothing.
 //! - Every change goes through the app, which may refuse it.
 
-use rune::{El, FocusAxis, Key, KeyEvent, Tx};
-use std::rc::Rc;
+use rune::{El, FocusAxis, Tx};
 
 /// The options a toggle takes each render.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -34,20 +33,10 @@ pub fn toggle<S: 'static>(
         .focus_selected(pressed)
         .focusable(true)
         .unavailable(props.disabled);
-    let press = Rc::new(move |s: &mut S, tx: &mut Tx| {
+    crate::press::activate(el, move |s: &mut S, tx: &mut Tx| {
         if !props.disabled {
             on_pressed_change(s, !pressed, tx);
         }
-    });
-    let key_press = Rc::clone(&press);
-    el.on_press_tx(move |s: &mut S, tx| press(s, tx)).on_key(move |s: &mut S, key: &KeyEvent, tx: &mut Tx| {
-        if key.key != Key::Enter && key.key != Key::Text(" ".into()) {
-            return false;
-        }
-        if !tx.key_repeat() {
-            key_press(s, tx);
-        }
-        true
     })
 }
 
@@ -122,7 +111,7 @@ mod tests {
     //! has no right-to-left locale yet), rendering as a link and form submit (a toggle is a
     //! control on the canvas), and the pending cases, which the button module covers.
     use super::*;
-    use rune::{Cx, Env, Mods, Runtime, col, row, text};
+    use rune::{Cx, Env, Key, KeyEvent, Mods, Runtime, col, row, text};
     use serde_json::Value;
 
     const ORDER: &[&str] = &["left", "center", "right"];

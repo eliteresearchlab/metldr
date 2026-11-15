@@ -9,8 +9,7 @@
 //! - The panel enters and leaves with the element transition the app gives it; one open from
 //!   the first frame does not animate, and Reduce Motion turns it into a short fade.
 
-use rune::{El, Key, KeyEvent, Tx};
-use std::rc::Rc;
+use rune::{El, Tx};
 
 /// Why the open state changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,20 +68,10 @@ pub fn trigger<S: 'static>(
     on_open_change: impl Fn(&mut S, bool, Reason) + 'static,
 ) -> El {
     let el = el.role("button").expanded(open).focusable(true).unavailable(props.disabled);
-    let press = Rc::new(move |s: &mut S| {
+    crate::press::activate(el, move |s: &mut S, _: &mut Tx| {
         if !props.disabled {
             on_open_change(s, !open, Reason::TriggerPress);
         }
-    });
-    let key_press = Rc::clone(&press);
-    el.on_press(move |s: &mut S| press(s)).on_key(move |s: &mut S, key: &KeyEvent, tx: &mut Tx| {
-        if key.key != Key::Enter && key.key != Key::Text(" ".into()) {
-            return false;
-        }
-        if !tx.key_repeat() {
-            key_press(s);
-        }
-        true
     })
 }
 
@@ -104,7 +93,7 @@ mod tests {
     //! holds only what is open), a class setting display, and the open-change-complete
     //! callback (Rune transitions settle on their own; nothing in metldr waits on one).
     use super::*;
-    use rune::{Cx, Env, Mods, Runtime, col, row, text};
+    use rune::{Cx, Env, Key, KeyEvent, Mods, Runtime, col, row, text};
     use serde_json::Value;
 
     #[derive(Default)]
