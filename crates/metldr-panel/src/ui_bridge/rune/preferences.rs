@@ -408,7 +408,7 @@ fn status(appearance: bool, status: UiPreferenceStatus) -> &'static str {
     }
 }
 
-fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<String>) -> El {
+pub(super) fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<String>) -> El {
     let label = label.into();
     let el = typography
         .legend(&label)

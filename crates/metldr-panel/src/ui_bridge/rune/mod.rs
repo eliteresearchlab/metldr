@@ -1609,7 +1609,10 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .as_ref()
         .is_none_or(|updates| updates.presentation.borrow().messages.messages.is_empty());
     if state.settings_open {
-        let (providers, agents) = state.settings.view(core, cx, typography, palette);
+        // Only an open section builds its body: a collapsed one would be dropped unseen.
+        let open = |section: &Section| state.settings_sections.contains(section.key);
+        let (providers, agents) = state.settings.view(core, cx, typography, palette, (open(&PROVIDERS), open(&AGENTS)));
+        let appearance = open(&APPEARANCE).then(|| state.preferences.view(State::preference));
         let title = row()
             .w_full()
             .items_center()
@@ -1654,7 +1657,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                         col()
                             .w_full()
                             .gap(10.0)
-                            .child(settings_section(state, &APPEARANCE, state.preferences.view(State::preference)))
+                            .child(settings_section(state, &APPEARANCE, appearance))
                             .child(settings_section(state, &PROVIDERS, providers))
                             .child(settings_section(state, &AGENTS, agents))
                             .grow(1.0)
@@ -1986,7 +1989,7 @@ const AGENTS: Section = Section {
     title: "Installed agents",
 };
 
-fn settings_section(state: &State, section: &'static Section, body: El) -> El {
+fn settings_section(state: &State, section: &'static Section, body: Option<El>) -> El {
     let Section { key, trigger, panel, title } = *section;
     let palette = state.preferences.palette();
     let typography = state.preferences.typography();
@@ -2025,7 +2028,7 @@ fn settings_section(state: &State, section: &'static Section, body: El) -> El {
         .fill(palette.surface)
         .border(1.0, palette.line)
         .child(header);
-    let body = col().w_full().px(14.0).pb(14.0).child(body);
+    let body = col().w_full().px(14.0).pb(14.0).children(body);
     if let Some(panel) = collapsible::panel(
         body,
         panel,

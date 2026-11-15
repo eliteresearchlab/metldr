@@ -547,6 +547,7 @@ enum AgentField {
     Model,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn provider_input(
     index: usize,
     field: ProviderField,
@@ -558,44 +559,35 @@ fn provider_input(
     palette: &super::preferences::Palette,
 ) -> El {
     let ink = palette.ink;
-    let mut input = ::rune::el::text_input(
+    let input = |input: El| match field {
+        ProviderField::Key => input.secure().placeholder("Leave blank to keep the saved key", ink.alpha(0.55)),
+        ProviderField::Timeout => input.placeholder("45", ink.alpha(0.55)),
+        _ => input,
+    };
+    text_field(
+        format!("settings-provider-{index}-{label}"),
+        label,
+        context,
         edit,
-        TextStyle::new((16.0 * typography.scale).max(16.0), 400.0),
+        enabled,
+        typography,
+        palette,
+        move |state: &mut State| match field {
+            ProviderField::Endpoint => &mut state.settings.providers[index].endpoint,
+            ProviderField::Model => &mut state.settings.providers[index].model,
+            ProviderField::Key => &mut state.settings.providers[index].key,
+            ProviderField::Timeout => &mut state.settings.providers[index].timeout,
+        },
+        move |state: &mut State| {
+            let draft = &mut state.settings.providers[index];
+            draft.dirty = true;
+            draft.version = draft.version.wrapping_add(1);
+        },
+        input,
     )
-    .key(format!("settings-provider-{index}-{label}"))
-    .label(format!("{context} {label}"))
-    .w_full()
-    .min_h(36.0)
-    .padding(6.0)
-    .single_line()
-    .fill(palette.field)
-    .border(1.0, palette.line)
-    .color(ink)
-    .caret(ink, palette.selection)
-    .theme_caret(palette)
-    .disabled(!enabled)
-    .on_edit(move |state: &mut State| match field {
-        ProviderField::Endpoint => &mut state.settings.providers[index].endpoint,
-        ProviderField::Model => &mut state.settings.providers[index].model,
-        ProviderField::Key => &mut state.settings.providers[index].key,
-        ProviderField::Timeout => &mut state.settings.providers[index].timeout,
-    })
-    .on_input_change(move |state: &mut State, _| {
-        let draft = &mut state.settings.providers[index];
-        draft.dirty = true;
-        draft.version = draft.version.wrapping_add(1);
-    });
-    if matches!(field, ProviderField::Key) {
-        input = input
-            .secure()
-            .placeholder("Leave blank to keep the saved key", ink.alpha(0.55));
-    }
-    if matches!(field, ProviderField::Timeout) {
-        input = input.placeholder("45", ink.alpha(0.55));
-    }
-    col().gap(3.0).child(typography.text(label)).child(input)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn agent_input(
     index: usize,
     field: AgentField,
@@ -606,38 +598,72 @@ fn agent_input(
     typography: super::preferences::Typography,
     palette: &super::preferences::Palette,
 ) -> El {
-    let ink = palette.ink;
-    let input = ::rune::el::text_input(
+    text_field(
+        format!("settings-agent-{index}-{label}"),
+        label,
+        context,
         edit,
-        TextStyle::new((16.0 * typography.scale).max(16.0), 400.0),
+        enabled,
+        typography,
+        palette,
+        move |state: &mut State| match field {
+            AgentField::Executable => &mut state.settings.agents[index].executable,
+            AgentField::Workspace => &mut state.settings.agents[index].workspace,
+            AgentField::Session => &mut state.settings.agents[index].session_dir,
+            AgentField::Provider => &mut state.settings.agents[index].provider,
+            AgentField::Model => &mut state.settings.agents[index].model,
+        },
+        move |state: &mut State| {
+            let draft = &mut state.settings.agents[index];
+            draft.dirty = true;
+            draft.version = draft.version.wrapping_add(1);
+        },
+        |input| input,
     )
-    .key(format!("settings-agent-{index}-{label}"))
-    .label(format!("{context} {label}"))
-    .w_full()
-    .min_h(36.0)
-    .padding(6.0)
-    .single_line()
-    .fill(palette.field)
-    .border(1.0, palette.line)
-    .color(ink)
-    .caret(ink, palette.selection)
-    .theme_caret(palette)
-    .disabled(!enabled)
-    .on_edit(move |state: &mut State| match field {
-        AgentField::Executable => &mut state.settings.agents[index].executable,
-        AgentField::Workspace => &mut state.settings.agents[index].workspace,
-        AgentField::Session => &mut state.settings.agents[index].session_dir,
-        AgentField::Provider => &mut state.settings.agents[index].provider,
-        AgentField::Model => &mut state.settings.agents[index].model,
-    })
-    .on_input_change(move |state: &mut State, _| {
-        let draft = &mut state.settings.agents[index];
-        draft.dirty = true;
-        draft.version = draft.version.wrapping_add(1);
-    });
-    col().gap(3.0).child(typography.text(label)).child(input)
 }
 
+/// One settings text field: its label over a single line input named "`context` `label`" that
+/// edits through `edit_of`, marks its draft changed through `changed`, and takes `extra` (a
+/// secret, a placeholder).
+#[allow(clippy::too_many_arguments)]
+fn text_field(
+    key: String,
+    label: &'static str,
+    context: &str,
+    edit: &TextEdit,
+    enabled: bool,
+    typography: super::preferences::Typography,
+    palette: &super::preferences::Palette,
+    edit_of: impl Fn(&mut State) -> &mut TextEdit + 'static,
+    changed: impl Fn(&mut State) + 'static,
+    extra: impl FnOnce(El) -> El,
+) -> El {
+    let ink = palette.ink;
+    let input = ::rune::el::text_input(edit, TextStyle::new((16.0 * typography.scale).max(16.0), 400.0))
+        .key(key)
+        .w_full()
+        .min_h(36.0)
+        .padding(6.0)
+        .single_line()
+        .fill(palette.field)
+        .border(1.0, palette.line)
+        .color(ink)
+        .caret(ink, palette.selection)
+        .theme_caret(palette)
+        .disabled(!enabled)
+        .on_edit(edit_of)
+        .on_input_change(move |state: &mut State, _| changed(state));
+    metldr_ui::field::field(
+        typography.text(label),
+        extra(input),
+        format!("{context} {label}"),
+        Default::default(),
+        |line| typography.text(line.to_owned()),
+    )
+}
+
+/// A settings action: an outlined key on the theme's material, read by `accessible_name`, that
+/// sounds `label`'s cue and runs `action` when pressed or activated from the keyboard.
 fn button(
     typography: super::preferences::Typography,
     label: &'static str,
@@ -652,40 +678,19 @@ fn button(
         "Offline: on" | "Offline: off" => crate::interaction_audio::Cue::Tick,
         _ => crate::interaction_audio::Cue::Press,
     };
-    let element = typography
-        .text(label)
-        .label(accessible_name)
-        .key(key)
-        .role("button")
-        .focusable(true)
-        .disabled(!enabled)
-        .px(10.0)
-        .py(6.0)
-        .radius(8.0)
-        .border(1.0, typography.line)
-        .fill(typography.field);
+    let el = super::preferences::outlined(typography, label, key).border(1.0, typography.line).label(accessible_name);
+    let props = metldr_ui::button::Props { disabled: !enabled, ..Default::default() };
+    let el = metldr_ui::button::button(el, props, move |state: &mut State, _| {
+        state.sound(cue);
+        action(state)
+    });
     if !enabled {
-        return element.opacity(0.5);
+        el.opacity(0.5)
+    } else if typography.lip.is_some() {
+        el.press(typography.press)
+    } else {
+        el.press(typography.press).press_scale(super::theme::PRESS_SCALE)
     }
-    let action = Rc::new(action);
-    let press = Rc::clone(&action);
-    element
-        .press(typography.press)
-        .press_scale(super::theme::PRESS_SCALE)
-        .on_press(move |state: &mut State| {
-            state.sound(cue);
-            press(state)
-        })
-        .on_key(move |state: &mut State, key, tx| {
-            if key.key != ::rune::Key::Enter {
-                return false;
-            }
-            if !tx.key_repeat() {
-                state.sound(cue);
-                action(state);
-            }
-            true
-        })
 }
 
 impl Settings {
@@ -696,7 +701,8 @@ impl Settings {
         _cx: &mut Cx<State>,
         typography: super::preferences::Typography,
         palette: &super::preferences::Palette,
-    ) -> (El, El) {
+        open: (bool, bool),
+    ) -> (Option<El>, Option<El>) {
         use crate::ui_bridge::settings::Family;
         let page = &core.page;
         let connected = page.flow.borrow().is_connected();
@@ -708,369 +714,464 @@ impl Settings {
         let provider_uncertain = page.settings.borrow().uncertain(Family::Providers);
         let agent_uncertain = page.settings.borrow().uncertain(Family::Agents);
         let view = page.view.borrow();
-        let mut out = col().w_full().gap(12.0).color(palette.ink);
-        out = out.child(button(
-            typography,
-            "Refresh providers",
-            "Refresh providers".into(),
-            "settings-provider-refresh".into(),
-            provider_refresh,
-            |state| Settings::refresh(state, Family::Providers),
-        ));
-        if provider_uncertain {
-            out = out.child(
-                typography
-                    .text("The last provider change is uncertain. Refresh before trying again.")
-                    .wrap(),
-            );
-        }
-        if view.provider_settings.cleanup_pending {
-            out = out.child(
-                typography
-                    .text("A saved provider entry is waiting to be removed.")
-                    .wrap(),
-            );
-        }
-        if let Some(notice) = &view.provider_settings.notice {
-            out = out.child(typography.text(notice).wrap());
-        }
-        for (i, draft) in self.providers.iter().enumerate() {
-            let row = view
-                .provider_settings
-                .connections
-                .iter()
-                .find(|row| row.protocol == draft.protocol);
-            let conflict = row.is_some_and(|row| draft.dirty && row.revision != draft.revision);
-            let enabled = !busy && row.is_some();
-            let version = draft.version;
-            let seen_revision = row.map(|row| row.revision);
-            let label = match draft.protocol {
-                ProviderProtocol::Messages => "Messages",
-                ProviderProtocol::ChatCompletions => "Chat Completions",
-                ProviderProtocol::Responses => "OpenAI Responses",
-                ProviderProtocol::GoogleInteractions => "Google Interactions",
-            };
-            let mut section = col()
-                .key(format!("settings-provider-{i}"))
-                .w_full()
-                .gap(6.0)
-                .child(typography.text(label).role("heading"));
-            if let Some(row) = row {
-                let wrapper = UiProviderConnection::new(Rc::clone(page), row.clone());
-                section = section.child(typography.text(wrapper.state()));
+        let providers = if open.0 {
+            let mut out = col().w_full().gap(12.0).color(palette.ink);
+            out = out.child(button(
+                typography,
+                "Refresh providers",
+                "Refresh providers".into(),
+                "settings-provider-refresh".into(),
+                provider_refresh,
+                |state| Settings::refresh(state, Family::Providers),
+            ));
+            if provider_uncertain {
+                out = out.child(
+                    typography
+                        .text("The last provider change is uncertain. Refresh before trying again.")
+                        .wrap(),
+                );
             }
-            section = section
-                .child(provider_input(
-                    i,
-                    ProviderField::Endpoint,
-                    "Endpoint",
-                    label,
-                    &draft.endpoint,
-                    enabled,
-                    typography,
-                    palette,
-                ))
-                .child(provider_input(
-                    i,
-                    ProviderField::Model,
-                    "Model",
-                    label,
-                    &draft.model,
-                    enabled,
-                    typography,
-                    palette,
-                ));
-            if draft.protocol == ProviderProtocol::ChatCompletions {
-                let mut presets = ::rune::el::row().flex_wrap().gap(6.0);
-                for (index, &(name, _, _)) in crate::model::CHAT_PRESETS.iter().enumerate() {
-                    presets = presets.child(button(
-                        typography,
-                        name,
-                        format!("Use the {name} endpoint for {label}"),
-                        format!("settings-provider-{i}-preset-{index}"),
-                        enabled,
-                        move |state| Settings::chat_preset(state, i, version, index),
-                    ));
+            if view.provider_settings.cleanup_pending {
+                out = out.child(
+                    typography
+                        .text("A saved provider entry is waiting to be removed.")
+                        .wrap(),
+                );
+            }
+            if let Some(notice) = &view.provider_settings.notice {
+                out = out.child(typography.text(notice).wrap());
+            }
+            for (i, draft) in self.providers.iter().enumerate() {
+                let row = view
+                    .provider_settings
+                    .connections
+                    .iter()
+                    .find(|row| row.protocol == draft.protocol);
+                let conflict = row.is_some_and(|row| draft.dirty && row.revision != draft.revision);
+                let enabled = !busy && row.is_some();
+                let version = draft.version;
+                let seen_revision = row.map(|row| row.revision);
+                let label = match draft.protocol {
+                    ProviderProtocol::Messages => "Messages",
+                    ProviderProtocol::ChatCompletions => "Chat Completions",
+                    ProviderProtocol::Responses => "OpenAI Responses",
+                    ProviderProtocol::GoogleInteractions => "Google Interactions",
+                };
+                let mut section = col()
+                    .key(format!("settings-provider-{i}"))
+                    .w_full()
+                    .gap(6.0)
+                    .child(typography.text(label).role("heading"));
+                if let Some(row) = row {
+                    let wrapper = UiProviderConnection::new(Rc::clone(page), row.clone());
+                    section = section.child(typography.text(wrapper.state()));
                 }
-                section = section.child(presets);
-                let keyless = draft.keyless;
                 section = section
-                    .child(button(
-                        typography,
-                        if keyless {
-                            "No API key: on"
-                        } else {
-                            "No API key: off"
-                        },
-                        format!("{label} No API key: {}", if keyless { "on" } else { "off" }),
-                        format!("settings-provider-{i}-keyless"),
+                    .child(provider_input(
+                        i,
+                        ProviderField::Endpoint,
+                        "Endpoint",
+                        label,
+                        &draft.endpoint,
                         enabled,
-                        move |state| {
-                            let Some(core) = state.core().cloned() else {
-                                return;
-                            };
-                            if !core.page.controls_ready() || core.page.settings_blocked() {
-                                return;
-                            }
-                            if let Some(draft) = state.settings.providers.get_mut(i)
-                                && draft.version == version
-                            {
-                                draft.keyless = !draft.keyless;
-                                draft.key.clear();
-                                draft.dirty = true;
-                                draft.version = draft.version.wrapping_add(1);
-                            }
-                        },
+                        typography,
+                        palette,
                     ))
                     .child(provider_input(
                         i,
-                        ProviderField::Timeout,
-                        "Response timeout (seconds)",
-                        label,
-                        &draft.timeout,
-                        enabled,
-                        typography,
-                        palette,
-                    ));
-            }
-            if !(draft.protocol == ProviderProtocol::ChatCompletions && draft.keyless) {
-                section = section.child(provider_input(
-                    i,
-                    ProviderField::Key,
-                    "API key",
-                    label,
-                    &draft.key,
-                    enabled,
-                    typography,
-                    palette,
-                ));
-            }
-            if conflict {
-                let saved = row.unwrap();
-                section = section
-                    .child(
-                        typography
-                            .text(format!(
-                                "Saved settings changed. Endpoint: {}. Model: {}.",
-                                saved.endpoint.as_deref().unwrap_or("None"),
-                                saved.model.as_deref().unwrap_or("None")
-                            ))
-                            .wrap(),
-                    )
-                    .child(button(
-                        typography,
-                        "Keep my edits",
-                        format!("Keep my edits for {label} provider connection"),
-                        format!("settings-provider-{i}-keep"),
-                        enabled,
-                        move |state| {
-                            let Some(core) = state.core().cloned() else {
-                                return;
-                            };
-                            if !core.page.controls_ready() || core.page.settings_blocked() {
-                                return;
-                            }
-                            let Some(draft) = state.settings.providers.get_mut(i) else {
-                                return;
-                            };
-                            if draft.version != version {
-                                return;
-                            }
-                            let revision = core
-                                .page
-                                .view
-                                .borrow()
-                                .provider_settings
-                                .connections
-                                .iter()
-                                .find(|row| row.protocol == draft.protocol)
-                                .map(|row| row.revision);
-                            if revision == seen_revision
-                                && let Some(revision) = revision
-                            {
-                                draft.revision = revision;
-                                draft.version = draft.version.wrapping_add(1);
-                            }
-                        },
-                    ));
-            }
-            section = section
-                .child(button(
-                    typography,
-                    "Save",
-                    format!("Save {label} provider connection"),
-                    format!("settings-provider-{i}-save"),
-                    enabled && !conflict,
-                    move |state| Settings::provider_action(state, i, version, true),
-                ))
-                .child(button(
-                    typography,
-                    "Remove",
-                    format!("Remove {label} provider connection"),
-                    format!("settings-provider-{i}-remove"),
-                    enabled && !conflict,
-                    move |state| Settings::provider_action(state, i, version, false),
-                ))
-                .child(button(
-                    typography,
-                    "Use saved values",
-                    format!("Use saved values for {label} provider connection"),
-                    format!("settings-provider-{i}-reset"),
-                    enabled,
-                    move |state| {
-                        let Some(core) = state.core().cloned() else {
-                            return;
-                        };
-                        if !core.page.controls_ready() || core.page.settings_blocked() {
-                            return;
-                        }
-                        if let Some(draft) = state.settings.providers.get_mut(i) {
-                            if draft.version != version
-                                || !core
-                                    .page
-                                    .view
-                                    .borrow()
-                                    .provider_settings
-                                    .connections
-                                    .iter()
-                                    .any(|row| {
-                                        row.protocol == draft.protocol
-                                            && Some(row.revision) == seen_revision
-                                    })
-                            {
-                                return;
-                            }
-                            draft.key.clear();
-                            draft.dirty = false;
-                            draft.version = draft.version.wrapping_add(1);
-                        }
-                        state.settings.sync(&core);
-                    },
-                ));
-            out = out.child(section);
-        }
-        let providers = out;
-        let mut out = col()
-            .w_full()
-            .gap(12.0)
-            .color(palette.ink)
-            .child(button(
-                typography,
-                "Refresh agents",
-                "Refresh agents".into(),
-                "settings-agent-refresh".into(),
-                agent_refresh,
-                |state| Settings::refresh(state, Family::Agents),
-            ));
-        if agent_uncertain {
-            out = out.child(
-                typography
-                    .text("The last agent change is uncertain. Refresh before trying again.")
-                    .wrap(),
-            );
-        }
-        for (i, draft) in self.agents.iter().enumerate() {
-            let row = view
-                .agent_settings
-                .agents
-                .iter()
-                .find(|row| row.agent == draft.agent);
-            let conflict = row.is_some_and(|row| draft.dirty && row.revision != draft.revision);
-            let enabled = !busy && row.is_some();
-            let version = draft.version;
-            let seen_revision = row.map(|row| row.revision);
-            let label = draft.agent.label();
-            let mut section = col()
-                .key(format!("settings-agent-{i}"))
-                .w_full()
-                .gap(6.0)
-                .child(typography.text(label).role("heading"));
-            if let Some(row) = row {
-                let wrapper = UiAgentConfiguration::new(Rc::clone(page), row.clone());
-                section = section.child(typography.text(wrapper.state()));
-                match &row.found {
-                    Some(path) => {
-                        section = section.child(typography.text(format!("Found at {path}")).wrap());
-                        if draft.executable.text != *path {
-                            let path = path.clone();
-                            section = section.child(button(
-                                typography,
-                                "Use found",
-                                format!("Use the {label} found at {path}"),
-                                format!("settings-agent-{i}-found"),
-                                enabled,
-                                move |state| Settings::use_found(state, i, version, &path),
-                            ));
-                        }
-                    }
-                    None => section = section.child(typography.text("Not found on this computer").wrap()),
-                }
-            }
-            section = section
-                .child(agent_input(
-                    i,
-                    AgentField::Executable,
-                    "Executable",
-                    label,
-                    &draft.executable,
-                    enabled,
-                    typography,
-                    palette,
-                ))
-                .child(agent_input(
-                    i,
-                    AgentField::Workspace,
-                    "Workspace",
-                    label,
-                    &draft.workspace,
-                    enabled,
-                    typography,
-                    palette,
-                ));
-            if draft.agent == AgentKind::Pi {
-                section = section
-                    .child(agent_input(
-                        i,
-                        AgentField::Session,
-                        "Session directory",
-                        label,
-                        &draft.session_dir,
-                        enabled,
-                        typography,
-                        palette,
-                    ))
-                    .child(agent_input(
-                        i,
-                        AgentField::Provider,
-                        "Provider",
-                        label,
-                        &draft.provider,
-                        enabled,
-                        typography,
-                        palette,
-                    ))
-                    .child(agent_input(
-                        i,
-                        AgentField::Model,
+                        ProviderField::Model,
                         "Model",
                         label,
                         &draft.model,
                         enabled,
                         typography,
                         palette,
+                    ));
+                if draft.protocol == ProviderProtocol::ChatCompletions {
+                    let mut presets = ::rune::el::row().flex_wrap().gap(6.0);
+                    for (index, &(name, _, _)) in crate::model::CHAT_PRESETS.iter().enumerate() {
+                        presets = presets.child(button(
+                            typography,
+                            name,
+                            format!("Use the {name} endpoint for {label}"),
+                            format!("settings-provider-{i}-preset-{index}"),
+                            enabled,
+                            move |state| Settings::chat_preset(state, i, version, index),
+                        ));
+                    }
+                    section = section.child(presets);
+                    let keyless = draft.keyless;
+                    section = section
+                        .child(button(
+                            typography,
+                            if keyless {
+                                "No API key: on"
+                            } else {
+                                "No API key: off"
+                            },
+                            format!("{label} No API key: {}", if keyless { "on" } else { "off" }),
+                            format!("settings-provider-{i}-keyless"),
+                            enabled,
+                            move |state| {
+                                let Some(core) = state.core().cloned() else {
+                                    return;
+                                };
+                                if !core.page.controls_ready() || core.page.settings_blocked() {
+                                    return;
+                                }
+                                if let Some(draft) = state.settings.providers.get_mut(i)
+                                    && draft.version == version
+                                {
+                                    draft.keyless = !draft.keyless;
+                                    draft.key.clear();
+                                    draft.dirty = true;
+                                    draft.version = draft.version.wrapping_add(1);
+                                }
+                            },
+                        ))
+                        .child(provider_input(
+                            i,
+                            ProviderField::Timeout,
+                            "Response timeout (seconds)",
+                            label,
+                            &draft.timeout,
+                            enabled,
+                            typography,
+                            palette,
+                        ));
+                }
+                if !(draft.protocol == ProviderProtocol::ChatCompletions && draft.keyless) {
+                    section = section.child(provider_input(
+                        i,
+                        ProviderField::Key,
+                        "API key",
+                        label,
+                        &draft.key,
+                        enabled,
+                        typography,
+                        palette,
+                    ));
+                }
+                if conflict {
+                    let saved = row.unwrap();
+                    section = section
+                        .child(
+                            typography
+                                .text(format!(
+                                    "Saved settings changed. Endpoint: {}. Model: {}.",
+                                    saved.endpoint.as_deref().unwrap_or("None"),
+                                    saved.model.as_deref().unwrap_or("None")
+                                ))
+                                .wrap(),
+                        )
+                        .child(button(
+                            typography,
+                            "Keep my edits",
+                            format!("Keep my edits for {label} provider connection"),
+                            format!("settings-provider-{i}-keep"),
+                            enabled,
+                            move |state| {
+                                let Some(core) = state.core().cloned() else {
+                                    return;
+                                };
+                                if !core.page.controls_ready() || core.page.settings_blocked() {
+                                    return;
+                                }
+                                let Some(draft) = state.settings.providers.get_mut(i) else {
+                                    return;
+                                };
+                                if draft.version != version {
+                                    return;
+                                }
+                                let revision = core
+                                    .page
+                                    .view
+                                    .borrow()
+                                    .provider_settings
+                                    .connections
+                                    .iter()
+                                    .find(|row| row.protocol == draft.protocol)
+                                    .map(|row| row.revision);
+                                if revision == seen_revision
+                                    && let Some(revision) = revision
+                                {
+                                    draft.revision = revision;
+                                    draft.version = draft.version.wrapping_add(1);
+                                }
+                            },
+                        ));
+                }
+                section = section
+                    .child(button(
+                        typography,
+                        "Save",
+                        format!("Save {label} provider connection"),
+                        format!("settings-provider-{i}-save"),
+                        enabled && !conflict,
+                        move |state| Settings::provider_action(state, i, version, true),
                     ))
                     .child(button(
                         typography,
-                        if draft.offline {
-                            "Offline: on"
-                        } else {
-                            "Offline: off"
+                        "Remove",
+                        format!("Remove {label} provider connection"),
+                        format!("settings-provider-{i}-remove"),
+                        enabled && !conflict,
+                        move |state| Settings::provider_action(state, i, version, false),
+                    ))
+                    .child(button(
+                        typography,
+                        "Use saved values",
+                        format!("Use saved values for {label} provider connection"),
+                        format!("settings-provider-{i}-reset"),
+                        enabled,
+                        move |state| {
+                            let Some(core) = state.core().cloned() else {
+                                return;
+                            };
+                            if !core.page.controls_ready() || core.page.settings_blocked() {
+                                return;
+                            }
+                            if let Some(draft) = state.settings.providers.get_mut(i) {
+                                if draft.version != version
+                                    || !core
+                                        .page
+                                        .view
+                                        .borrow()
+                                        .provider_settings
+                                        .connections
+                                        .iter()
+                                        .any(|row| {
+                                            row.protocol == draft.protocol
+                                                && Some(row.revision) == seen_revision
+                                        })
+                                {
+                                    return;
+                                }
+                                draft.key.clear();
+                                draft.dirty = false;
+                                draft.version = draft.version.wrapping_add(1);
+                            }
+                            state.settings.sync(&core);
                         },
-                        format!(
-                            "{label} Offline: {}",
-                            if draft.offline { "on" } else { "off" }
-                        ),
-                        format!("settings-agent-{i}-offline"),
+                    ));
+                out = out.child(section);
+            }
+            Some(out)
+        } else {
+            None
+        };
+        let agents = if open.1 {
+            let mut out = col()
+                .w_full()
+                .gap(12.0)
+                .color(palette.ink)
+                .child(button(
+                    typography,
+                    "Refresh agents",
+                    "Refresh agents".into(),
+                    "settings-agent-refresh".into(),
+                    agent_refresh,
+                    |state| Settings::refresh(state, Family::Agents),
+                ));
+            if agent_uncertain {
+                out = out.child(
+                    typography
+                        .text("The last agent change is uncertain. Refresh before trying again.")
+                        .wrap(),
+                );
+            }
+            for (i, draft) in self.agents.iter().enumerate() {
+                let row = view
+                    .agent_settings
+                    .agents
+                    .iter()
+                    .find(|row| row.agent == draft.agent);
+                let conflict = row.is_some_and(|row| draft.dirty && row.revision != draft.revision);
+                let enabled = !busy && row.is_some();
+                let version = draft.version;
+                let seen_revision = row.map(|row| row.revision);
+                let label = draft.agent.label();
+                let mut section = col()
+                    .key(format!("settings-agent-{i}"))
+                    .w_full()
+                    .gap(6.0)
+                    .child(typography.text(label).role("heading"));
+                if let Some(row) = row {
+                    let wrapper = UiAgentConfiguration::new(Rc::clone(page), row.clone());
+                    section = section.child(typography.text(wrapper.state()));
+                    match &row.found {
+                        Some(path) => {
+                            section = section.child(typography.text(format!("Found at {path}")).wrap());
+                            if draft.executable.text != *path {
+                                let path = path.clone();
+                                section = section.child(button(
+                                    typography,
+                                    "Use found",
+                                    format!("Use the {label} found at {path}"),
+                                    format!("settings-agent-{i}-found"),
+                                    enabled,
+                                    move |state| Settings::use_found(state, i, version, &path),
+                                ));
+                            }
+                        }
+                        None => section = section.child(typography.text("Not found on this computer").wrap()),
+                    }
+                }
+                section = section
+                    .child(agent_input(
+                        i,
+                        AgentField::Executable,
+                        "Executable",
+                        label,
+                        &draft.executable,
+                        enabled,
+                        typography,
+                        palette,
+                    ))
+                    .child(agent_input(
+                        i,
+                        AgentField::Workspace,
+                        "Workspace",
+                        label,
+                        &draft.workspace,
+                        enabled,
+                        typography,
+                        palette,
+                    ));
+                if draft.agent == AgentKind::Pi {
+                    section = section
+                        .child(agent_input(
+                            i,
+                            AgentField::Session,
+                            "Session directory",
+                            label,
+                            &draft.session_dir,
+                            enabled,
+                            typography,
+                            palette,
+                        ))
+                        .child(agent_input(
+                            i,
+                            AgentField::Provider,
+                            "Provider",
+                            label,
+                            &draft.provider,
+                            enabled,
+                            typography,
+                            palette,
+                        ))
+                        .child(agent_input(
+                            i,
+                            AgentField::Model,
+                            "Model",
+                            label,
+                            &draft.model,
+                            enabled,
+                            typography,
+                            palette,
+                        ))
+                        .child(button(
+                            typography,
+                            if draft.offline {
+                                "Offline: on"
+                            } else {
+                                "Offline: off"
+                            },
+                            format!(
+                                "{label} Offline: {}",
+                                if draft.offline { "on" } else { "off" }
+                            ),
+                            format!("settings-agent-{i}-offline"),
+                            enabled,
+                            move |state| {
+                                let Some(core) = state.core().cloned() else {
+                                    return;
+                                };
+                                if !core.page.controls_ready() || core.page.settings_blocked() {
+                                    return;
+                                }
+                                if let Some(draft) = state.settings.agents.get_mut(i) {
+                                    if draft.version != version {
+                                        return;
+                                    }
+                                    draft.offline = !draft.offline;
+                                    draft.dirty = true;
+                                    draft.version = draft.version.wrapping_add(1);
+                                }
+                            },
+                        ));
+                }
+                if conflict {
+                    section = section
+                        .child(
+                            typography
+                                .text("Saved settings changed. Review them before keeping your edits.")
+                                .wrap(),
+                        )
+                        .child(
+                            typography
+                                .text(saved_profile(row.and_then(|row| row.profile.as_ref())))
+                                .wrap(),
+                        )
+                        .child(button(
+                            typography,
+                            "Keep my edits",
+                            format!("Keep my edits for {label} profile"),
+                            format!("settings-agent-{i}-keep"),
+                            enabled,
+                            move |state| {
+                                let Some(core) = state.core().cloned() else {
+                                    return;
+                                };
+                                if !core.page.controls_ready() || core.page.settings_blocked() {
+                                    return;
+                                }
+                                let Some(draft) = state.settings.agents.get_mut(i) else {
+                                    return;
+                                };
+                                if draft.version != version {
+                                    return;
+                                }
+                                let revision = core
+                                    .page
+                                    .view
+                                    .borrow()
+                                    .agent_settings
+                                    .agents
+                                    .iter()
+                                    .find(|row| row.agent == draft.agent)
+                                    .map(|row| row.revision);
+                                if revision == seen_revision
+                                    && let Some(revision) = revision
+                                {
+                                    draft.revision = revision;
+                                    draft.version = draft.version.wrapping_add(1);
+                                }
+                            },
+                        ));
+                }
+                section = section
+                    .child(button(
+                        typography,
+                        "Save",
+                        format!("Save {label} profile"),
+                        format!("settings-agent-{i}-save"),
+                        enabled && !conflict,
+                        move |state| Settings::agent_action(state, i, version, true),
+                    ))
+                    .child(button(
+                        typography,
+                        "Remove",
+                        format!("Remove {label} profile"),
+                        format!("settings-agent-{i}-remove"),
+                        enabled && !conflict,
+                        move |state| Settings::agent_action(state, i, version, false),
+                    ))
+                    .child(button(
+                        typography,
+                        "Use saved values",
+                        format!("Use saved values for {label} profile"),
+                        format!("settings-agent-{i}-reset"),
                         enabled,
                         move |state| {
                             let Some(core) = state.core().cloned() else {
@@ -1080,140 +1181,54 @@ impl Settings {
                                 return;
                             }
                             if let Some(draft) = state.settings.agents.get_mut(i) {
-                                if draft.version != version {
+                                if draft.version != version
+                                    || !core.page.view.borrow().agent_settings.agents.iter().any(
+                                        |row| {
+                                            row.agent == draft.agent
+                                                && Some(row.revision) == seen_revision
+                                        },
+                                    )
+                                {
                                     return;
                                 }
-                                draft.offline = !draft.offline;
-                                draft.dirty = true;
+                                draft.dirty = false;
                                 draft.version = draft.version.wrapping_add(1);
                             }
+                            state.settings.sync(&core);
                         },
                     ));
+                out = out.child(section);
             }
-            if conflict {
-                section = section
-                    .child(
-                        typography
-                            .text("Saved settings changed. Review them before keeping your edits.")
-                            .wrap(),
-                    )
-                    .child(
-                        typography
-                            .text(saved_profile(row.and_then(|row| row.profile.as_ref())))
-                            .wrap(),
-                    )
-                    .child(button(
-                        typography,
-                        "Keep my edits",
-                        format!("Keep my edits for {label} profile"),
-                        format!("settings-agent-{i}-keep"),
-                        enabled,
-                        move |state| {
-                            let Some(core) = state.core().cloned() else {
-                                return;
-                            };
-                            if !core.page.controls_ready() || core.page.settings_blocked() {
-                                return;
-                            }
-                            let Some(draft) = state.settings.agents.get_mut(i) else {
-                                return;
-                            };
-                            if draft.version != version {
-                                return;
-                            }
-                            let revision = core
-                                .page
-                                .view
-                                .borrow()
-                                .agent_settings
-                                .agents
-                                .iter()
-                                .find(|row| row.agent == draft.agent)
-                                .map(|row| row.revision);
-                            if revision == seen_revision
-                                && let Some(revision) = revision
-                            {
-                                draft.revision = revision;
-                                draft.version = draft.version.wrapping_add(1);
-                            }
-                        },
-                    ));
+            if !view.agent_settings.apps.is_empty() {
+                let mut apps = col()
+                    .key("settings-desktop-apps")
+                    .w_full()
+                    .gap(6.0)
+                    .child(typography.text("Desktop apps").role("heading"));
+                for app in &view.agent_settings.apps {
+                    let status = match (&app.config, app.local_config) {
+                        (Some(path), _) => format!("{}: config at {path}", app.label),
+                        (None, true) => format!("{}: not found", app.label),
+                        (None, false) => format!("{}: add MetLDR in its own settings", app.label),
+                    };
+                    apps = apps.child(typography.text(status).wrap());
+                }
+                out = out.child(apps);
             }
-            section = section
-                .child(button(
-                    typography,
-                    "Save",
-                    format!("Save {label} profile"),
-                    format!("settings-agent-{i}-save"),
-                    enabled && !conflict,
-                    move |state| Settings::agent_action(state, i, version, true),
-                ))
-                .child(button(
-                    typography,
-                    "Remove",
-                    format!("Remove {label} profile"),
-                    format!("settings-agent-{i}-remove"),
-                    enabled && !conflict,
-                    move |state| Settings::agent_action(state, i, version, false),
-                ))
-                .child(button(
-                    typography,
-                    "Use saved values",
-                    format!("Use saved values for {label} profile"),
-                    format!("settings-agent-{i}-reset"),
-                    enabled,
-                    move |state| {
-                        let Some(core) = state.core().cloned() else {
-                            return;
-                        };
-                        if !core.page.controls_ready() || core.page.settings_blocked() {
-                            return;
-                        }
-                        if let Some(draft) = state.settings.agents.get_mut(i) {
-                            if draft.version != version
-                                || !core.page.view.borrow().agent_settings.agents.iter().any(
-                                    |row| {
-                                        row.agent == draft.agent
-                                            && Some(row.revision) == seen_revision
-                                    },
-                                )
-                            {
-                                return;
-                            }
-                            draft.dirty = false;
-                            draft.version = draft.version.wrapping_add(1);
-                        }
-                        state.settings.sync(&core);
-                    },
-                ));
-            out = out.child(section);
-        }
-        if !view.agent_settings.apps.is_empty() {
-            let mut apps = col()
-                .key("settings-desktop-apps")
-                .w_full()
-                .gap(6.0)
-                .child(typography.text("Desktop apps").role("heading"));
-            for app in &view.agent_settings.apps {
-                let status = match (&app.config, app.local_config) {
-                    (Some(path), _) => format!("{}: config at {path}", app.label),
-                    (None, true) => format!("{}: not found", app.label),
-                    (None, false) => format!("{}: add MetLDR in its own settings", app.label),
-                };
-                apps = apps.child(typography.text(status).wrap());
+            if !connected {
+                out = out.child(
+                    typography
+                        .text("Refresh to reconnect, or reload the panel.")
+                        .wrap(),
+                );
             }
-            out = out.child(apps);
-        }
-        if !connected {
-            out = out.child(
-                typography
-                    .text("Refresh to reconnect, or reload the panel.")
-                    .wrap(),
-            );
-        }
-        if let Some(message) = self.message {
-            out = out.child(typography.text(message).wrap());
-        }
-        (providers, out)
+            if let Some(message) = self.message {
+                out = out.child(typography.text(message).wrap());
+            }
+            Some(out)
+        } else {
+            None
+        };
+        (providers, agents)
     }
 }
