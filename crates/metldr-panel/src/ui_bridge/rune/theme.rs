@@ -375,6 +375,21 @@ pub(super) fn sheet(p: &Palette) -> Transition {
         .springs(SpringPair::with_exit_ratio(settle(p, 0.25, 0.3), 0.75))
 }
 
+/// The reference's card elevation on a flat theme: a 1 point ring just outside the border (the
+/// line on a light theme, a faint white edge on a dark one that dissolves into the shadow), then
+/// soft layered shadows. A theme with a material of its own keeps its own.
+pub(super) fn card_shadow(el: El, p: &Palette) -> El {
+    let ring = |color: Color| ::rune::Shadow { spread: 1.0, color, ..Default::default() };
+    let drop = |y: f32, blur: f32, alpha: f32| ::rune::Shadow { y, blur, color: Color::BLACK.alpha(alpha), ..Default::default() };
+    if p.crafted() {
+        el
+    } else if p.light {
+        el.box_shadow(ring(p.line)).box_shadow(drop(18.0, 47.0, 0.03)).box_shadow(drop(7.5, 19.0, 0.02)).box_shadow(drop(4.0, 10.5, 0.02))
+    } else {
+        el.box_shadow(ring(Color::WHITE.alpha(0.11))).box_shadow(drop(1.0, 2.0, 0.2)).box_shadow(drop(2.0, 6.0, 0.2))
+    }
+}
+
 /// A reply card: surface, 10 px radius, hairline ring and a soft shadow, 12 px padding. It fades
 /// in rising 8 px on a critically damped 380 ms spring; Reduce Motion keeps only the fade.
 pub(super) fn card(palette: &Palette) -> El {
