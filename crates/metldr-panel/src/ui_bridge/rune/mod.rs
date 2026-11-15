@@ -1983,7 +1983,6 @@ fn settings_section(state: &State, section: &'static Section, body: El) -> El {
                 .color(palette.ink_3)
                 .icon_rotation(if open { std::f32::consts::PI } else { 0.0 }),
         )
-        .label(title)
         .hover(palette.hover)
         .press(palette.press);
     let header = collapsible::trigger(header, Default::default(), open, move |state: &mut State, open, _| {
