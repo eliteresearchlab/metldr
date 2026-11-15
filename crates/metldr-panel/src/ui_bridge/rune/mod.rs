@@ -1191,6 +1191,36 @@ mod followup_tests {
     }
 
     #[test]
+    fn an_empty_chat_centres_and_an_overflowing_one_starts_at_the_top() {
+        fn view(tall: &bool, _: &mut Cx<bool>) -> El {
+            col().h_full().child(
+                col()
+                    .w_full()
+                    .grow(1.0)
+                    .min_h(0.0)
+                    .child(
+                        col()
+                            .key("body")
+                            .w_full()
+                            .h(if *tall { 300.0 } else { 40.0 })
+                            .my_auto(),
+                    )
+                    .scroll(ScrollSpec { stick_bottom: false }),
+            )
+        }
+        for (tall, top) in [(false, 30.0), (true, 0.0)] {
+            let mut rt = Runtime::new(tall, view, (200.0, 100.0), Env::default());
+            rt.frame(0.0);
+            let body = rt
+                .elements()
+                .into_iter()
+                .find(|el| el.key.as_deref() == Some("body"))
+                .unwrap();
+            assert_eq!(body.rect[1], top);
+        }
+    }
+
+    #[test]
     fn enter_activates_each_followup_once_and_ignores_repeat() {
         fn view(_: &[u32; 2], _: &mut Cx<[u32; 2]>) -> El {
             followup_controls(
@@ -1571,12 +1601,11 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         ));
     }
     // Layout follows whether the chat has messages, so it does not jump when history finishes
-    // loading; only the welcome waits for the load.
+    // loading; the welcome holds its space and only its reveal waits for the load.
     let empty = state
         .updates
         .as_ref()
         .is_none_or(|updates| updates.presentation.borrow().messages.messages.is_empty());
-    let welcome = empty && !core.history_loading.get();
     if state.conversations.is_open() {
         return col()
             .w_full()
@@ -1817,7 +1846,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     );
     let shown = cx.is_reduced_motion() || state.welcome_revealed;
     let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });
-    if welcome {
+    if empty {
         // Two lines with tight leading and negative tracking, as the reference's 26 px heading.
         let hero = |line: &str| {
             typography
@@ -1832,14 +1861,22 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         };
         let greeting = hero("Welcome to metldr").color(p.ink_3).role("heading").level(1);
         let question = hero("What do you want to do?").color(p.ink);
-        let mut lines = col()
-            .child(theme::reveal(greeting, shown, theme::REVEAL_GREETING))
-            .child(theme::reveal(question, shown, theme::REVEAL_QUESTION));
-        if !shown {
-            lines = lines.on_drawn_layout_tx(|state: &mut State, _, _| {
-                state.welcome_revealed = true;
-            });
-        }
+        // While history loads the lines hold their space unseen, so the toolbar and composer under
+        // them never move when the reveal starts.
+        let lines = if core.history_loading.get() {
+            col().child(greeting).child(question).opacity(0.0).a11y_hidden()
+        } else {
+            let lines = col()
+                .child(theme::reveal(greeting, shown, theme::REVEAL_GREETING))
+                .child(theme::reveal(question, shown, theme::REVEAL_QUESTION));
+            if shown {
+                lines
+            } else {
+                lines.on_drawn_layout_tx(|state: &mut State, _, _| {
+                    state.welcome_revealed = true;
+                })
+            }
+        };
         head = head.child(lines);
     }
     // An empty chat shows the toolbar under the welcome; a chat with messages pins it under the
@@ -1851,12 +1888,23 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         Some(col().w_full().px(16.0).py(8.0).items_center().child(toolbar.max_w(720.0)))
     };
     head = head.child(state.sources.view(typography, p));
+    // An empty chat keeps the composer in the centred group, 56 px under the welcome as the
+    // reference spaces it; a chat with messages docks it under the thread.
+    let composer = if empty {
+        head = head.child(composer.pt(28.0));
+        None
+    } else {
+        Some(col().w_full().px(16.0).pb(24.0).center_y().child(composer))
+    };
     let body = col()
         .w_full()
         .max_w(720.0)
         .gap(32.0)
         .child(head)
         .child(thread);
+    // Auto margins centre an empty chat and, unlike centring the viewport, keep an overflowing
+    // welcome reachable at the top of a short panel or at 200% zoom.
+    let body = if empty { body.my_auto() } else { body };
     let scroll = col()
         .w_full()
         .px(16.0)
@@ -1888,8 +1936,8 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .child(state.conversations.tabs(state, core))
                 .child(col().w_full().h(1.0).fill(p.line))
                 .children(pinned)
-                .child(if empty { scroll.justify_center() } else { scroll })
-                .child(col().w_full().px(16.0).pb(24.0).center_y().child(composer)),
+                .child(scroll)
+                .children(composer),
         )
 }
 

@@ -15,6 +15,7 @@ Local changes:
 * Text test fixtures use the identical font already bundled in the runtime.
 * Focus and semantic mirror regressions cover these changes.
 * A composition whose end event is refused as untrusted is finished by the next trusted input or key that is no longer composing, so the field never stays in a preedit. Mirror nodes rewrite their style only when it changes.
+* `El::my_auto` sets auto top and bottom margins, so a centred column in a scroll viewport keeps its top reachable when it overflows.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.
