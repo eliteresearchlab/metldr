@@ -6,6 +6,7 @@ mod storage;
 use crate::{await_call, call, chrome_api, err, get};
 use js_sys::{Function, Promise};
 use model::{Appearance, Change, Phase, TextSize, Theme};
+pub(crate) use model::KeyColor;
 pub use observe::UiPreferenceSubscription;
 use std::{
     cell::{Cell, RefCell},
@@ -36,6 +37,7 @@ struct Core {
     chrome: Option<JsValue>,
     appearance: RefCell<Appearance>,
     sound: Cell<Sound>,
+    key: Cell<KeyColor>,
     closed: Cell<bool>,
     chrome_listener: RefCell<Option<storage::Listener>>,
     sound_listener: RefCell<Option<sound::Listener>>,
@@ -65,6 +67,7 @@ impl Core {
             size: appearance.values.size,
             appearance: status,
             sound: self.sound.get(),
+            key: self.key.get(),
         }
     }
 
@@ -90,6 +93,21 @@ pub struct UiPreferenceSnapshot {
     size: TextSize,
     appearance: UiPreferenceStatus,
     sound: Sound,
+    key: KeyColor,
+}
+
+impl UiPreferenceSnapshot {
+    /// The theme's stored name, without a new string.
+    pub(crate) fn theme_key(&self) -> &'static str {
+        self.theme.key()
+    }
+    /// The text size's stored name, without a new string.
+    pub(crate) fn size_key(&self) -> &'static str {
+        self.size.key()
+    }
+    pub(crate) fn key_color(&self) -> KeyColor {
+        self.key
+    }
 }
 
 #[wasm_bindgen]
@@ -114,6 +132,10 @@ impl UiPreferenceSnapshot {
     pub fn sound_status(&self) -> UiPreferenceStatus {
         self.sound.status
     }
+    #[wasm_bindgen(getter, js_name = keyColor)]
+    pub fn key_color_name(&self) -> String {
+        self.key.key().into()
+    }
 }
 
 #[wasm_bindgen]
@@ -132,6 +154,7 @@ impl UiPreferences {
                 enabled: true,
                 status: UiPreferenceStatus::Saved,
             }),
+            key: Cell::new(KeyColor::default()),
             closed: Cell::new(false),
             chrome_listener: RefCell::new(None),
             sound_listener: RefCell::new(None),
@@ -140,6 +163,7 @@ impl UiPreferences {
         storage::install(&core)?;
         sound::install(&core)?;
         core.read_sound();
+        core.read_key();
         let load = Rc::clone(&core);
         wasm_bindgen_futures::spawn_local(async move {
             load.load_appearance().await;
@@ -195,6 +219,16 @@ impl UiPreferences {
     pub fn set_sounds_enabled(&self, enabled: bool) -> Result<(), JsValue> {
         self.core.ensure_open()?;
         self.core.save_sound(enabled)
+    }
+
+    pub fn key_colors(&self) -> Vec<String> {
+        KeyColor::ALL.into_iter().map(|color| color.key().into()).collect()
+    }
+
+    pub fn set_key_color(&self, value: String) -> Result<(), JsValue> {
+        self.core.ensure_open()?;
+        let color = KeyColor::parse(&value).ok_or_else(|| err("Choose a supported key colour."))?;
+        self.core.save_key(color)
     }
 
     pub fn retry_sound(&self) -> Result<(), JsValue> {

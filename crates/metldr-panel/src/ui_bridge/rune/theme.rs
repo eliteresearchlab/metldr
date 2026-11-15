@@ -40,9 +40,40 @@ pub(super) struct Palette {
     /// A screen's glass and its lit ink: the status line on a molded theme.
     pub(super) screen: Color,
     pub(super) screen_ink: Color,
+    /// A legend on a key in the accent: near-white on a key darker than 0.8 lightness, ink on a
+    /// lighter one (yellow), so it always reads.
+    pub(super) on_accent: Color,
 }
 
-type Lch = (f32, f32, f32);
+pub(super) type Lch = (f32, f32, f32);
+
+/// `lch` with its chroma lowered until it fits sRGB, keeping its lightness and hue: a key colour
+/// that reaches into P3 keeps its hue on an sRGB canvas instead of clipping toward another
+/// (an orange-red clipped channel by channel turns red).
+pub(super) fn in_srgb((l, c, h): Lch) -> Lch {
+    let fits = |c: f32| {
+        let (a, b) = (c * h.to_radians().cos(), c * h.to_radians().sin());
+        let l_ = (l + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+        let m_ = (l - 0.105_561_346 * a - 0.063_854_17 * b).powi(3);
+        let s_ = (l - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+        [
+            4.076_741_7 * l_ - 3.307_711_6 * m_ + 0.230_969_94 * s_,
+            -1.268_438 * l_ + 2.609_757_4 * m_ - 0.341_319_38 * s_,
+            -0.004_196_086_3 * l_ - 0.703_418_6 * m_ + 1.707_614_7 * s_,
+        ]
+        .iter()
+        .all(|v| (-1e-4..=1.0001).contains(v))
+    };
+    if fits(c) {
+        return (l, c, h);
+    }
+    let (mut lo, mut hi) = (0.0, c);
+    for _ in 0..20 {
+        let mid = (lo + hi) / 2.0;
+        if fits(mid) { lo = mid } else { hi = mid }
+    }
+    (l, lo, h)
+}
 
 /// One theme's roles as oklch triples, in the order of [`Palette`]'s first fifteen fields, then
 /// the lip and highlight of molded material.
@@ -186,6 +217,11 @@ const CYBERPUNK: Ramp = Ramp {
 
 impl Palette {
     pub(super) fn for_theme(theme: &str) -> Self {
+        Self::with_key(theme, None)
+    }
+
+    /// The palette for `theme`; a molded theme's keys take `key` (OKLCH) in place of its own.
+    pub(super) fn with_key(theme: &str, key: Option<Lch>) -> Self {
         let ramp = match theme {
             "light" => &LIGHT,
             "gruvbox" => &GRUVBOX,
@@ -196,6 +232,7 @@ impl Palette {
         let c = |(l, c, h): Lch| oklch(l, c, h);
         let molded = std::ptr::eq(ramp, &HARDWARE);
         let light = std::ptr::eq(ramp, &LIGHT) || molded;
+        let accent = key.filter(|_| molded).unwrap_or(ramp.accent);
         Self {
             page: c(ramp.page),
             canvas: c(ramp.canvas),
@@ -208,20 +245,21 @@ impl Palette {
             ink_3: c(ramp.ink_3),
             line: c(ramp.line),
             line_strong: c(ramp.line_strong),
-            accent: c(ramp.accent),
+            accent: c(accent),
             green: c(ramp.green),
             orange: c(ramp.orange),
             red: c(ramp.red),
             // A neutral overlay that reads on both grounds; darker ink on light themes.
             press: c(ramp.ink).alpha(if light { 0.08 } else { 0.12 }),
             press_solid: c(ramp.surface).alpha(0.16),
-            selection: c(ramp.accent).alpha(0.3),
+            selection: c(accent).alpha(0.3),
             light,
             molded,
             lip: c(ramp.lip),
             highlight: c(ramp.highlight),
             screen: c(ramp.screen),
             screen_ink: c(ramp.screen_ink),
+            on_accent: if accent.0 < 0.8 { oklch(0.98, 0.0, 0.0) } else { oklch(0.18, 0.0, 0.0) },
         }
     }
 
@@ -335,14 +373,14 @@ pub(super) fn on_lip(el: El, lip: Color, primary: bool) -> El {
 
 /// A text field's caret on a molded theme.
 pub(super) trait MoldedCaret {
-    /// On a molded theme, a block caret in the key colour with the character under it in
-    /// `ground`, the fill behind the text; a flat theme keeps the field's own caret.
-    fn molded_caret(self, p: &Palette, ground: Color) -> Self;
+    /// On a molded theme, a block caret in the key colour with the character under it in the
+    /// key's legend colour; a flat theme keeps the field's own caret.
+    fn molded_caret(self, p: &Palette) -> Self;
 }
 
 impl MoldedCaret for El {
-    fn molded_caret(self, p: &Palette, ground: Color) -> Self {
-        if p.molded { self.caret(p.accent, p.selection).caret_block(ground) } else { self }
+    fn molded_caret(self, p: &Palette) -> Self {
+        if p.molded { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
     }
 }
 

@@ -572,7 +572,7 @@ fn provider_input(
     .border(1.0, palette.line)
     .color(ink)
     .caret(ink, palette.selection)
-    .molded_caret(palette, palette.field)
+    .molded_caret(palette)
     .disabled(!enabled)
     .on_edit(move |state: &mut State| match field {
         ProviderField::Endpoint => &mut state.settings.providers[index].endpoint,
@@ -621,7 +621,7 @@ fn agent_input(
     .border(1.0, palette.line)
     .color(ink)
     .caret(ink, palette.selection)
-    .molded_caret(palette, palette.field)
+    .molded_caret(palette)
     .disabled(!enabled)
     .on_edit(move |state: &mut State| match field {
         AgentField::Executable => &mut state.settings.agents[index].executable,

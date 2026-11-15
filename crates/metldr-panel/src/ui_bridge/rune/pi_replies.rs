@@ -296,7 +296,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                     .fill(palette.field)
                     .color(ink)
                     .caret(ink, ink.alpha(0.25))
-                    .molded_caret(palette, palette.field)
+                    .molded_caret(palette)
                     .label(label)
                     .disabled(!enabled)
                     .on_edit(::rune::edit_access(move |state: &mut State| {

@@ -11,6 +11,8 @@ pub(super) enum Action {
     Theme(&'static str),
     Size(&'static str),
     Sound(bool),
+    /// A molded theme's key colour.
+    KeyColor(crate::preferences::KeyColor),
     RetryAppearance,
     RetrySound,
     RetrySetup,
@@ -123,13 +125,13 @@ impl Preferences {
         {
             if self
                 .snapshot
-                .is_none_or(|old| old.theme() != snapshot.theme())
+                .is_none_or(|old| old.theme_key() != snapshot.theme_key())
             {
-                let _ = root.set_attribute("data-theme", &snapshot.theme());
+                let _ = root.set_attribute("data-theme", snapshot.theme_key());
                 if let Some(root) = root.dyn_ref::<web_sys::HtmlElement>() {
                     let _ = root.style().set_property(
                         "color-scheme",
-                        if snapshot.theme() == "light" {
+                        if snapshot.theme_key() == "light" {
                             "light"
                         } else {
                             "dark"
@@ -139,19 +141,19 @@ impl Preferences {
             }
             if self
                 .snapshot
-                .is_none_or(|old| old.font_size() != snapshot.font_size())
+                .is_none_or(|old| old.size_key() != snapshot.size_key())
             {
-                if snapshot.font_size() == "medium" {
+                if snapshot.size_key() == "medium" {
                     let _ = root.remove_attribute("data-font-size");
                 } else {
-                    let _ = root.set_attribute("data-font-size", &snapshot.font_size());
+                    let _ = root.set_attribute("data-font-size", snapshot.size_key());
                 }
             }
         }
         self.snapshot = Some(snapshot);
         self.look = Look {
-            palette: Palette::for_theme(&snapshot.theme()),
-            scale: scale(&snapshot.font_size()),
+            palette: Palette::with_key(snapshot.theme_key(), Some(super::theme::in_srgb(snapshot.key_color().lch()))),
+            scale: scale(snapshot.size_key()),
         };
         true
     }
@@ -180,6 +182,12 @@ impl Preferences {
     }
 
     pub(super) fn apply(&mut self, action: Action, tx: &mut Tx) {
+        if let Action::KeyColor(color) = action {
+            if let Some(preferences) = &self.preferences {
+                let _ = preferences.set_key_color(color.key().into());
+            }
+            return;
+        }
         let control = match action {
             Action::Theme(_) => {
                 self.last_appearance = Control::Theme;
@@ -191,7 +199,7 @@ impl Preferences {
             }
             Action::RetryAppearance => self.last_appearance,
             Action::Sound(_) | Action::RetrySound => Control::Sound,
-            Action::RetrySetup => return,
+            Action::RetrySetup | Action::KeyColor(_) => return,
         };
         self.park(control, tx);
         let Some(preferences) = &self.preferences else {
@@ -209,7 +217,7 @@ impl Preferences {
                 let _ = preferences.retry_sound();
                 return;
             }
-            Action::RetrySetup => return,
+            Action::RetrySetup | Action::KeyColor(_) => return,
         };
         if let Ok(promise) = promise {
             spawn_local(async move {
@@ -301,11 +309,22 @@ impl Preferences {
             ("hardware", "Hardware", "preferences-theme-hardware"),
         ]
         .into_iter()
-        .map(|(key, label, id)| option(typography, label, id, snapshot.theme() == key, enabled, Action::Theme(key), &action));
+        .map(|(key, label, id)| option(typography, label, id, snapshot.theme_key() == key, enabled, Action::Theme(key), &action));
         result = result.child(
             metldr_ui::choice::radio_group(col().key("preferences-theme").w_full().gap(6.0), "Theme", group(::rune::FocusAxis::Vertical))
                 .children(themes),
         );
+        if palette.molded {
+            result = result.child(typography.text("Key colour").role("heading"));
+            let current = snapshot.key_color();
+            let keys = crate::preferences::KeyColor::ALL
+                .into_iter()
+                .map(|color| swatch(palette, color, color == current, enabled, &action));
+            result = result.child(
+                metldr_ui::choice::radio_group(row().key("preferences-key-colour").w_full().gap(8.0).flex_wrap(), "Key colour", group(::rune::FocusAxis::Horizontal))
+                    .children(keys),
+            );
+        }
         result = result.child(typography.text("Text size").role("heading"));
         let sizes = [
             ("small", "Small", "preferences-size-small"),
@@ -313,7 +332,7 @@ impl Preferences {
             ("large", "Large", "preferences-size-large"),
         ]
         .into_iter()
-        .map(|(key, label, id)| segment(typography, palette, label, id, snapshot.font_size() == key, enabled, Action::Size(key), &action));
+        .map(|(key, label, id)| segment(typography, palette, label, id, snapshot.size_key() == key, enabled, Action::Size(key), &action));
         let sizes = metldr_ui::choice::radio_group(
             ::rune::row().key("preferences-text-size").w_full().padding(2.0).gap(2.0).radius(10.0).fill(typography.field),
             "Text size",
@@ -450,6 +469,28 @@ fn option(
     let el = outlined(typography, label, key).border(if checked { 1.5 } else { 1.0 }, if checked { typography.ink } else { typography.line });
     let el = metldr_ui::choice::radio(el, !enabled, checked, move |state: &mut State, tx| press(state, value, tx));
     if enabled { el.press(typography.press) } else { el.opacity(0.5) }
+}
+
+/// One key colour: a key cap in that colour, ringed in ink while chosen.
+fn swatch(
+    palette: &Palette,
+    color: crate::preferences::KeyColor,
+    checked: bool,
+    enabled: bool,
+    action: &Rc<impl Fn(&mut State, Action, &mut Tx) + 'static>,
+) -> El {
+    let press = Rc::clone(action);
+    let (l, c, h) = super::theme::in_srgb(color.lch());
+    let key = ::rune::el()
+        .key(format!("preferences-key-{}", color.key()))
+        .label(color.label())
+        .size(28.0, 28.0)
+        .radius(6.0)
+        .fill(::rune::oklch(l, c, h))
+        .border(if checked { 2.0 } else { 1.0 }, if checked { palette.ink } else { palette.line });
+    let key = super::theme::on_lip(key, ::rune::oklch(l, c, h).mix(::rune::Color::BLACK, 0.45), false);
+    let key = metldr_ui::choice::radio(key, !enabled, checked, move |state: &mut State, tx| press(state, Action::KeyColor(color), tx));
+    if enabled { key } else { key.opacity(0.5) }
 }
 
 /// One segment of a segmented setting: its label over the indicator while checked.

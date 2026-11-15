@@ -268,7 +268,7 @@ pub(super) fn rune(
     let Some(snapshot) = snapshot.filter(|snapshot| snapshot.sounds_enabled()) else {
         return Ok(());
     };
-    if snapshot.theme() == "hardware" {
+    if snapshot.theme_key() == "hardware" {
         return AUDIO.with(|audio| play_molded(audio, cue));
     }
     let cue = match cue {
