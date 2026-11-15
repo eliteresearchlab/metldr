@@ -37,12 +37,12 @@ pub(super) struct Palette {
     /// A key's lip below it, and a module's lit top edge.
     pub(super) lip: Color,
     pub(super) highlight: Color,
-    /// A screen's glass and its lit ink: the status line on a molded theme.
-    pub(super) screen: Color,
-    pub(super) screen_ink: Color,
     /// A legend on a key in the accent: near-white on a key darker than 0.8 lightness, ink on a
     /// lighter one (yellow), so it always reads.
     pub(super) on_accent: Color,
+    /// A molded theme's gray LCD: its glass from top to bottom and the dark print on it.
+    pub(super) glass: [Color; 3],
+    pub(super) print: Color,
 }
 
 pub(super) type Lch = (f32, f32, f32);
@@ -96,9 +96,6 @@ struct Ramp {
     /// A key's lip and a module's lit top edge.
     lip: Lch,
     highlight: Lch,
-    /// A screen's glass and the ink lit on it.
-    screen: Lch,
-    screen_ink: Lch,
 }
 
 const LIGHT: Ramp = Ramp {
@@ -119,8 +116,6 @@ const LIGHT: Ramp = Ramp {
     red: (0.621, 0.192, 23.042),
     lip: (0.912, 0.005, 258.326),
     highlight: (1.0, 0.0, 0.0),
-    screen: (0.961, 0.002, 247.84),
-    screen_ink: (0.506, 0.01, 264.477),
 };
 
 // 0.318 is a lightness, not an approximation of 1/π.
@@ -143,8 +138,6 @@ const DARK: Ramp = Ramp {
     red: (0.666, 0.18, 21.433),
     lip: (0.356, 0.007, 264.474),
     highlight: (0.26, 0.006, 271.191),
-    screen: (0.231, 0.004, 264.487),
-    screen_ink: (0.731, 0.008, 260.731),
 };
 
 const GRUVBOX: Ramp = Ramp {
@@ -165,8 +158,6 @@ const GRUVBOX: Ramp = Ramp {
     red: (0.64, 0.19, 28.0),
     lip: (0.44, 0.035, 75.0),
     highlight: (0.3, 0.03, 75.0),
-    screen: (0.26, 0.025, 75.0),
-    screen_ink: (0.74, 0.045, 80.0),
 };
 
 /// Light molded panels: paper ground, metal modules, keys standing on their lips, and a black
@@ -189,8 +180,6 @@ const HARDWARE: Ramp = Ramp {
     red: (0.6, 0.22, 25.0),
     lip: (0.797, 0.008, 106.6),
     highlight: (1.0, 0.0, 0.0),
-    screen: (0.182, 0.002, 106.6),
-    screen_ink: (0.96, 0.005, 106.5),
 };
 
 const CYBERPUNK: Ramp = Ramp {
@@ -211,8 +200,6 @@ const CYBERPUNK: Ramp = Ramp {
     red: (0.66, 0.24, 15.0),
     lip: (0.37, 0.07, 290.0),
     highlight: (0.23, 0.06, 290.0),
-    screen: (0.19, 0.045, 290.0),
-    screen_ink: (0.78, 0.07, 195.0),
 };
 
 impl Palette {
@@ -257,9 +244,9 @@ impl Palette {
             molded,
             lip: c(ramp.lip),
             highlight: c(ramp.highlight),
-            screen: c(ramp.screen),
-            screen_ink: c(ramp.screen_ink),
             on_accent: if accent.0 < 0.8 { oklch(0.98, 0.0, 0.0) } else { oklch(0.18, 0.0, 0.0) },
+            glass: ["#b6b7b1", "#c8c9c3", "#c2c3bd"].map(|hex| ::rune::color::hex(hex).unwrap_or(Color::WHITE)),
+            print: ::rune::color::hex("#141413").unwrap_or(Color::BLACK),
         }
     }
 
@@ -392,6 +379,16 @@ pub(super) fn module(el: El, p: &Palette) -> El {
     } else {
         el.fill(p.page).border(1.0, p.line)
     }
+}
+
+/// A molded readout's gray LCD: a recessed window of reflective glass, darker at its top edge,
+/// lit by the room rather than from behind, with a light catch under its lower lip.
+pub(super) fn lcd(el: El, p: &Palette) -> El {
+    el.radius(7.0)
+        .linear_gradient(std::f32::consts::PI, [(0.0, p.glass[0]), (0.35, p.glass[1]), (1.0, p.glass[2])])
+        .box_shadow(::rune::Shadow { y: 1.0, blur: 3.0, color: Color::BLACK.alpha(0.25), inset: true, ..Default::default() })
+        .border(0.5, Color::BLACK.alpha(0.15))
+        .shadow(1.0, 0.0, Color::WHITE)
 }
 
 /// A lamp: a small round light in `color`, glowing on a molded theme.
