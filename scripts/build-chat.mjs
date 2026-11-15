@@ -8,7 +8,6 @@ const workerSourceImportPattern = /\?worker-source$/;
 const wasmBinaryImportPattern = /\.wasm\?binary$/;
 const anyImportPattern = /.*/;
 const answerCodecImportPattern = /answer_codec\.js$/;
-const panelImportPattern = /metldr_panel\.js$/;
 const externalModuleImportPattern = /^[^./]/;
 
 
@@ -16,15 +15,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ui = join(root, 'extension/chat-ui');
 const output = join(root, 'public/chat');
 
-async function options(frame = false) {
+async function options() {
   const { dependencies } = JSON.parse(await readFile(join(ui, 'package.json'), 'utf8'));
   const morphNotice = await readFile(join(ui, 'node_modules/idiomorph/LICENSE'), 'utf8');
   return {
-    entryPoints: frame ? { 'answer-frame': join(ui, 'answer-frame.ts') } : { chat: join(ui, 'main.tsx') },
+    entryPoints: { 'answer-frame': join(ui, 'answer-frame.ts') },
     outdir: output,
     entryNames: '[name]',
-    chunkNames: 'chunks/[name]-[hash]',
-    splitting: !frame,
     bundle: true,
     jsx: 'automatic',
     format: 'esm',
@@ -43,7 +40,7 @@ async function options(frame = false) {
         const runtime = Object.entries(result.metafile?.outputs ?? {}).find(([name]) => resolve(name) === join(output, 'answer-frame.js'))?.[1];
         if (runtime && runtime.imports.length) throw new Error('The saved answer runtime must be self contained.');
         checkReceipt();
-        if (frame) await copyBindings();
+        await copyRune();
         checkReceipt();
       });
       builder.onResolve({ filter: workerSourceImportPattern }, args => ({
@@ -70,7 +67,6 @@ async function options(frame = false) {
         });
         return { ...result, ...watchPaths() };
       });
-      builder.onResolve({ filter: panelImportPattern }, () => ({ path: '/chat/wasm/metldr_panel.js', external: true, ...watchPaths() }));
       builder.onResolve({ filter: externalModuleImportPattern }, async args => {
         if (args.pluginData === 'canonical-dependency') return;
         const parts = args.path.split('/');
@@ -85,15 +81,8 @@ async function options(frame = false) {
   };
 }
 
-async function copyBindings() {
-  const destination = join(output, 'wasm');
-  await mkdir(destination, { recursive: true });
-  for (const name of ['metldr_panel.js', 'metldr_panel_bg.wasm']) {
-    await copyFile(join(root, 'crates/metldr-panel/pkg', name), join(destination, name));
-  }
-  await rm(join(destination, 'snippets'), { recursive: true, force: true });
-  await cp(join(root, 'crates/metldr-panel/pkg/snippets'), join(destination, 'snippets'), { recursive: true }).catch(error => { if (error.code !== 'ENOENT') throw error; });
-  // Only rune-chat.html loads the Rune renderer and its fonts; they ship beside it, not in the wasm.
+async function copyRune() {
+  // The chat pages load the Rune renderer and its fonts; they ship beside it, not in the wasm.
   await cp(join(root, 'target/wasm/metldr-panel-rune/pkg'), join(output, 'rune'), { recursive: true });
   const source = await readFile(join(root, 'crates/metldr-panel/src/ui_bridge/rune/fonts.rs'), 'utf8');
   const names = [...source.slice(source.indexOf('NAMES'), source.indexOf('];')).matchAll(/"([^"]+\.tt[fc])"/g)].map(match => match[1]);
@@ -109,25 +98,22 @@ async function copyBindings() {
 export async function buildChat() {
   checkReceipt();
   await rm(output, { recursive: true, force: true });
-  const results = [await build(await options()), await build(await options(true))];
+  const result = await build(await options());
   checkReceipt();
-  return { inputs: new Set(results.flatMap(result => Object.keys(result.metafile.inputs))).size,
-    outputs: new Set(results.flatMap(result => Object.keys(result.metafile.outputs))).size };
+  return { inputs: Object.keys(result.metafile.inputs).length, outputs: Object.keys(result.metafile.outputs).length };
 }
 
 export async function watchChat() {
   checkReceipt();
   await rm(output, { recursive: true, force: true });
-  const compilers = [];
+  const compiler = await context(await options());
   try {
-    compilers.push(await context(await options()));
-    compilers.push(await context(await options(true)));
-    for (const compiler of compilers) await compiler.rebuild();
+    await compiler.rebuild();
     checkReceipt();
-    for (const compiler of compilers) await compiler.watch();
-    return async () => { await Promise.all(compilers.map(compiler => compiler.dispose())); };
+    await compiler.watch();
+    return () => compiler.dispose();
   } catch (error) {
-    await Promise.all(compilers.map(compiler => compiler.dispose()));
+    await compiler.dispose();
     throw error;
   }
 }
