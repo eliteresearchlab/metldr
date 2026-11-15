@@ -158,7 +158,10 @@ pub fn separator(el: El) -> El {
     el.a11y_hidden()
 }
 
-fn with_activation<S: 'static>(el: El, run: Rc<dyn Fn(&mut S, &mut Tx)>) -> El {
+/// An item's action, shared by its press and its keys.
+type Run<S> = Rc<dyn Fn(&mut S, &mut Tx)>;
+
+fn with_activation<S: 'static>(el: El, run: Run<S>) -> El {
     crate::press::activate(el, move |s: &mut S, tx: &mut Tx| run(s, tx))
 }
 
