@@ -424,6 +424,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         .label("Choose model");
     let model = metldr_ui::menu::trigger(
         model,
+        "rune-model-menu",
         state.menu == Some(Menu::Models),
         model_ends,
         |state: &mut State, open, _| {

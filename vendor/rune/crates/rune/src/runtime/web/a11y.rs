@@ -26,6 +26,16 @@ pub(crate) struct A11yItem {
     pub font_size: f32,
     pub text: String,
     pub runs: Vec<A11yRun>,
+    /// The paths of the elements it controls and the one active inside it, if any.
+    pub relate: Option<Box<Relations>>,
+}
+
+/// An item's relations to other mirror elements, by path (ARIA `aria-controls`,
+/// `aria-activedescendant`).
+#[derive(Debug, PartialEq)]
+pub(crate) struct Relations {
+    pub controls: Option<String>,
+    pub active: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -44,6 +54,9 @@ pub(crate) enum A11yKind {
     Article,
     /// A named scroll region (`El::scroll_stop`); `true` while it is a Tab stop.
     Region(bool),
+    /// A plain container another element names (`El::controls`, `El::active_descendant`), so the
+    /// name has an element to point at.
+    Box,
 }
 
 /// A pressable control's ARIA role and state, so the mirror button reads as what it is: a
@@ -116,6 +129,7 @@ impl A11yItem {
             A11yKind::Group => Some("group"),
             A11yKind::Article => Some("article"),
             A11yKind::Region(_) => Some("region"),
+            A11yKind::Box => Some("box"),
             A11yKind::Text => Some("text"),
             A11yKind::Status => Some("status"),
             A11yKind::Alert => Some("alert"),
@@ -123,6 +137,14 @@ impl A11yItem {
         };
         if let Some(kind) = plain {
             obj.insert("k".into(), json!(kind));
+        }
+        if let Some(relate) = &self.relate {
+            if let Some(path) = &relate.controls {
+                obj.insert("ctl".into(), json!(path));
+            }
+            if let Some(path) = &relate.active {
+                obj.insert("ad".into(), json!(path));
+            }
         }
         match &self.kind {
             A11yKind::Region(true) => {
@@ -327,18 +349,28 @@ impl<S: 'static> Runtime<S> {
         h.finish()
     }
 
-    fn subtree_end(&self, root: usize) -> usize {
-        let mut j = root + 1;
-        while j < self.nodes.len() {
-            if std::iter::successors(self.nodes[j].parent, |&p| self.nodes[p].parent)
-                .any(|p| p == root)
-            {
-                j += 1;
-            } else {
-                break;
+    /// Node `i`'s `El::controls` and `El::active_descendant` targets, from their keys to the paths
+    /// the mirror names them by. A key with no element now relates to nothing.
+    fn relations(&self, i: usize) -> Option<Box<Relations>> {
+        let more = self.nodes[i].a11y.more.as_deref()?;
+        let path = |key: &Option<String>| {
+            key.as_deref().and_then(|key| self.nodes.iter().find(|n| n.key.as_deref() == Some(key))).map(|n| n.path.clone())
+        };
+        let relate = Relations { controls: path(&more.controls), active: path(&more.active) };
+        (relate.controls.is_some() || relate.active.is_some()).then(|| Box::new(relate))
+    }
+
+    /// Every node's subtree end in one pass: nodes are in tree order, so walking back from the
+    /// last, each node's end is the furthest end among its children, without walking any
+    /// node's ancestors.
+    fn subtree_ends(&self) -> Vec<usize> {
+        let mut ends: Vec<usize> = (1..=self.nodes.len()).collect();
+        for j in (0..self.nodes.len()).rev() {
+            if let Some(p) = self.nodes[j].parent {
+                ends[p] = ends[p].max(ends[j]);
             }
         }
-        j
+        ends
     }
 
     fn descendant_label(&self, root: usize, end: usize) -> String {
@@ -383,10 +415,17 @@ impl<S: 'static> Runtime<S> {
         let mut out: Vec<A11yItem> = Vec::new();
         let mut last_flow_parent: Option<usize> = None;
         let mut groups: Vec<Option<usize>> = vec![None; self.nodes.len()];
+        let ends = self.subtree_ends();
+        // The elements another one names: each needs an element in the mirror to point at.
+        let named: std::collections::HashSet<&str> = self.nodes.iter()
+            .filter_map(|n| n.a11y.more.as_deref())
+            .flat_map(|more| [more.controls.as_deref(), more.active.as_deref()])
+            .flatten()
+            .collect();
         let mut i = 0;
         while i < self.nodes.len() {
             let n = &self.nodes[i];
-            let end = self.subtree_end(i);
+            let end = ends[i];
             let parent_group = n.parent.and_then(|parent| groups[parent]);
             groups[i] = parent_group;
             if self.subtree_exiting(i) || n.vis.opacity <= 0.01 || n.a11y.hidden {
@@ -430,6 +469,7 @@ impl<S: 'static> Runtime<S> {
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
                     ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
+                    _ if n.key.as_deref().is_some_and(|key| named.contains(key)) => Some(A11yKind::Box),
                     _ => None,
                 }
             } else {
@@ -454,6 +494,7 @@ impl<S: 'static> Runtime<S> {
                     font_size: 0.0,
                     text: n.label.clone().unwrap_or_default(),
                     runs: Vec::new(),
+                    relate: self.relations(i),
                 });
                 last_flow_parent = None;
             }
@@ -466,6 +507,7 @@ impl<S: 'static> Runtime<S> {
                             | A11yKind::Group
                             | A11yKind::Article
                             | A11yKind::Region(_)
+                            | A11yKind::Box
                     )
                 })
                 .map(|index| out[index].path.clone());
@@ -503,6 +545,7 @@ impl<S: 'static> Runtime<S> {
                         font_size: n.text.as_deref().map_or(14.0, |t| round1(t.style.size)),
                         text: String::new(),
                         runs: Vec::new(),
+                        relate: self.relations(i),
                     });
                 }
                 i = end;
@@ -540,6 +583,7 @@ impl<S: 'static> Runtime<S> {
                         font_size: 0.0,
                         text: label,
                         runs: Vec::new(),
+                        relate: self.relations(i),
                     });
                     i = end;
                     last_flow_parent = None;
@@ -640,6 +684,7 @@ impl<S: 'static> Runtime<S> {
                         font_size: round1(spec.style.size),
                         text: plain,
                         runs: rich_runs,
+                        relate: self.relations(i),
                     });
                     last_flow_parent = if semantic_text { None } else { flow_group };
                 }
@@ -654,6 +699,7 @@ impl<S: 'static> Runtime<S> {
                     font_size: 16.0,
                     text: lbl,
                     runs: Vec::new(),
+                    relate: self.relations(i),
                 });
                 last_flow_parent = None;
             }

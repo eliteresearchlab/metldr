@@ -45,6 +45,8 @@ pub(crate) struct A11yMore {
     pub shortcut: Option<String>,
     /// `El::active_descendant`'s key.
     pub active: Option<String>,
+    /// `El::controls`'s key.
+    pub controls: Option<String>,
     pub invalid: bool,
     pub read_only: bool,
     /// `El::sorted`: ascending or descending.
@@ -103,6 +105,13 @@ impl El {
     /// container or search field holds focus. `key` names it as `Cx::layout` does.
     pub fn active_descendant(mut self, key: impl Into<String>) -> Self {
         self.a11y.more().active = Some(key.into());
+        self
+    }
+    /// The element this one shows, hides or drives (ARIA `aria-controls`): a disclosure's panel, a
+    /// menu button's menu, a dialog trigger's dialog. `key` names it; a key with nothing on screen
+    /// relates to nothing, so pass it only while the target is shown.
+    pub fn controls(mut self, key: impl Into<String>) -> Self {
+        self.a11y.more().controls = Some(key.into());
         self
     }
     /// Whether the value entered here fails validation (ARIA `aria-invalid`).

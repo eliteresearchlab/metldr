@@ -63,11 +63,17 @@ impl Collapsible {
 /// other state with its reason; the app applies it (or refuses by doing nothing).
 pub fn trigger<S: 'static>(
     el: El,
+    panel: Option<&str>,
     props: Props,
     open: bool,
     on_open_change: impl Fn(&mut S, bool, Reason) + 'static,
 ) -> El {
     let el = el.role("button").expanded(open).focusable(true).unavailable(props.disabled);
+    // It names the panel it shows while that panel is open (ARIA `aria-controls`).
+    let el = match panel.filter(|_| open) {
+        Some(panel) => el.controls(panel),
+        None => el,
+    };
     crate::press::activate(el, move |s: &mut S, _: &mut Tx| {
         if !props.disabled {
             on_open_change(s, !open, Reason::TriggerPress);
@@ -107,7 +113,7 @@ mod tests {
     fn view(app: &App, _: &mut Cx<App>) -> El {
         let props = Props { disabled: app.disabled, keep_mounted: app.keep };
         let mut out = col().child(row().key("before").size(80.0, 24.0).focusable(true).on_press(|_: &mut App| {})).child(
-            trigger(row().key("trigger").size(120.0, 24.0).child(text("Details")), props, app.section.is_open(), |a: &mut App, open, reason| {
+            trigger(row().key("trigger").size(120.0, 24.0).child(text("Details")), Some("panel"), props, app.section.is_open(), |a: &mut App, open, reason| {
                 let refuse = a.refuse;
                 a.section.set_open(open, reason, |_, _| !refuse);
             }),
@@ -171,9 +177,11 @@ mod tests {
     #[test]
     fn clicking_the_trigger_opens_the_panel_and_clicking_again_closes_it() {
         let mut rt = rig(App::default());
+        assert!(trigger_item(&rt).get("ctl").is_none(), "a closed trigger names no panel");
         click(&mut rt, "trigger");
         assert!(has(&rt, "inside"));
         assert_eq!(trigger_item(&rt)["x"], true);
+        assert!(trigger_item(&rt)["ctl"].as_str().is_some_and(|path| path.ends_with("panel")), "an open trigger names its panel");
         click(&mut rt, "trigger");
         assert!(!has(&rt, "inside"));
         assert_eq!(trigger_item(&rt)["x"], false);

@@ -29,12 +29,14 @@ pub enum Open {
 /// it focuses) or to close; the app keeps the open state.
 pub fn trigger<S: 'static>(
     el: El,
+    popup: &str,
     open: bool,
     ends: impl Fn(&S) -> (String, String) + 'static,
     on_open_change: impl Fn(&mut S, Option<Open>, &mut Tx) + 'static,
 ) -> El {
     let on_open_change = Rc::new(on_open_change);
     let on_key = Rc::clone(&on_open_change);
+    let el = if open { el.controls(popup) } else { el };
     el.role("button")
         .has_popup("menu")
         .expanded(open)
@@ -156,7 +158,10 @@ pub fn separator(el: El) -> El {
     el.a11y_hidden()
 }
 
-fn with_activation<S: 'static>(el: El, run: Rc<dyn Fn(&mut S, &mut Tx)>) -> El {
+/// An item's action, shared by its press and its keys.
+type Run<S> = Rc<dyn Fn(&mut S, &mut Tx)>;
+
+fn with_activation<S: 'static>(el: El, run: Run<S>) -> El {
     crate::press::activate(el, move |s: &mut S, tx: &mut Tx| run(s, tx))
 }
 
@@ -186,7 +191,7 @@ mod tests {
     fn view(app: &App, _: &mut Cx<App>) -> El {
         let mut out = col()
             .child(row().key("outside").size(200.0, 30.0).focusable(true).on_press(|_: &mut App| {}))
-            .child(trigger(row().key("file").size(80.0, 24.0).child(text("File")), app.open, |_: &App| ("New file".into(), "Delete".into()), |a: &mut App, to, _| {
+            .child(trigger(row().key("file").size(80.0, 24.0).child(text("File")), "menu", app.open, |_: &App| ("New file".into(), "Delete".into()), |a: &mut App, to, _| {
                 a.open = to.is_some();
                 if let Some(to) = to {
                     a.log.push(if to == Open::First { "first" } else { "last" });
