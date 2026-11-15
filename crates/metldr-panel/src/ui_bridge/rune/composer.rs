@@ -246,7 +246,7 @@ fn menu_row(
         .child(if active {
             ::rune::el::icon(&CHECK, 13.0).color(p.ink)
         } else {
-            typography.text("").size(13.0, 13.0)
+            ::rune::el().size(13.0, 13.0)
         })
         .focusable(true)
 }
@@ -691,7 +691,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .child(if state.mode == mode {
                                 ::rune::el::icon(&CHECK, 13.0).color(p.ink)
                             } else {
-                                typography.text("").size(13.0, 13.0)
+                                ::rune::el().size(13.0, 13.0)
                             })
                             .label(label)
                             .press(p.strong);
