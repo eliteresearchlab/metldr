@@ -662,6 +662,8 @@ fn text_field(
     )
 }
 
+/// A settings action: an outlined key on the theme's material, read by `accessible_name`, that
+/// sounds `label`'s cue and runs `action` when pressed or activated from the keyboard.
 fn button(
     typography: super::preferences::Typography,
     label: &'static str,
@@ -676,40 +678,19 @@ fn button(
         "Offline: on" | "Offline: off" => crate::interaction_audio::Cue::Tick,
         _ => crate::interaction_audio::Cue::Press,
     };
-    let element = typography
-        .text(label)
-        .label(accessible_name)
-        .key(key)
-        .role("button")
-        .focusable(true)
-        .disabled(!enabled)
-        .px(10.0)
-        .py(6.0)
-        .radius(8.0)
-        .border(1.0, typography.line)
-        .fill(typography.field);
+    let el = super::preferences::outlined(typography, label, key).border(1.0, typography.line).label(accessible_name);
+    let props = metldr_ui::button::Props { disabled: !enabled, ..Default::default() };
+    let el = metldr_ui::button::button(el, props, move |state: &mut State, _| {
+        state.sound(cue);
+        action(state)
+    });
     if !enabled {
-        return element.opacity(0.5);
+        el.opacity(0.5)
+    } else if typography.lip.is_some() {
+        el.press(typography.press)
+    } else {
+        el.press(typography.press).press_scale(super::theme::PRESS_SCALE)
     }
-    let action = Rc::new(action);
-    let press = Rc::clone(&action);
-    element
-        .press(typography.press)
-        .press_scale(super::theme::PRESS_SCALE)
-        .on_press(move |state: &mut State| {
-            state.sound(cue);
-            press(state)
-        })
-        .on_key(move |state: &mut State, key, tx| {
-            if key.key != ::rune::Key::Enter {
-                return false;
-            }
-            if !tx.key_repeat() {
-                state.sound(cue);
-                action(state);
-            }
-            true
-        })
 }
 
 impl Settings {
