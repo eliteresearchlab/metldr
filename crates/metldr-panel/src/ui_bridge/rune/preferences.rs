@@ -577,6 +577,8 @@ pub(super) struct Typography {
     /// A neon theme's accent: its keys are outlined in it, and its legends print in capitals
     /// with a little tracking, as a HUD's do.
     pub(super) neon: Option<Color>,
+    /// Legends print in lowercase, as a molded theme's keys are printed.
+    pub(super) lower: bool,
 }
 
 impl Typography {
@@ -587,6 +589,7 @@ impl Typography {
             lip: (palette.molded() || palette.retro()).then_some(palette.lip),
             mono: palette.crafted(),
             neon: palette.neon().then_some(palette.accent),
+            lower: palette.molded(),
             scale,
             ink: palette.ink,
             press: palette.press,
@@ -609,7 +612,7 @@ impl Typography {
     pub(super) fn legend(self, label: impl Into<String>) -> El {
         let mut label = label.into();
         // Legends are almost always ASCII: change those in place, without a second string.
-        match (self.neon.is_some(), self.mono, label.is_ascii()) {
+        match (self.neon.is_some(), self.lower, label.is_ascii()) {
             (true, _, true) => label.make_ascii_uppercase(),
             (true, _, false) => label = label.to_uppercase(),
             (false, true, true) => label.make_ascii_lowercase(),
