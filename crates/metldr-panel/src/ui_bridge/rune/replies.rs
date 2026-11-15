@@ -1,3 +1,4 @@
+use super::theme::MoldedCaret;
 use super::{Core, FlowError, State, Tx};
 use crate::model::{CodexInputPrompt, RunId};
 use crate::ui_bridge::codex_input::{
@@ -95,7 +96,7 @@ fn pill(
         .fill(fill)
         .child(
             typography
-                .text(label.clone())
+                .legend(label.as_str())
                 .font(typography.font(12.5, 500.0))
                 .color(ink)
                 .wrap(),
@@ -127,6 +128,7 @@ fn input(
     .color(ink)
     .single_line()
     .caret(ink, ink.alpha(0.25))
+    .molded_caret(palette, palette.field)
 }
 
 fn activate(
@@ -275,25 +277,25 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                             panel = panel.child(typography.text(&option.description).wrap());
                         }
                     }
-                    if question.other {
-                        if let Some(edit) = state.replies.edits.get(&key) {
-                            panel = panel.child(typography.text("Other").wrap());
-                            let entry = key.clone();
-                            panel = panel.child(
-                                input(edit, typography, palette)
-                                    .key(format!("other:{key}"))
-                                    .w_full()
-                                    .label(format!("Other answer for {question_label}"))
-                                    .disabled(!enabled)
-                                    .on_edit(::rune::edit_access(move |state: &mut State| {
-                                        state
-                                            .replies
-                                            .edits
-                                            .get_mut(&entry)
-                                            .expect("synced reply field")
-                                    })),
-                            );
-                        }
+                    if question.other
+                        && let Some(edit) = state.replies.edits.get(&key)
+                    {
+                        panel = panel.child(typography.text("Other").wrap());
+                        let entry = key.clone();
+                        panel = panel.child(
+                            input(edit, typography, palette)
+                                .key(format!("other:{key}"))
+                                .w_full()
+                                .label(format!("Other answer for {question_label}"))
+                                .disabled(!enabled)
+                                .on_edit(::rune::edit_access(move |state: &mut State| {
+                                    state
+                                        .replies
+                                        .edits
+                                        .get_mut(&entry)
+                                        .expect("synced reply field")
+                                })),
+                        );
                     }
                 }
                 let ready = enabled

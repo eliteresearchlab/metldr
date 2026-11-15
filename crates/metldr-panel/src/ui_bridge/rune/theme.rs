@@ -92,6 +92,8 @@ const LIGHT: Ramp = Ramp {
     screen_ink: (0.506, 0.01, 264.477),
 };
 
+// 0.318 is a lightness, not an approximation of 1/π.
+#[allow(clippy::approx_constant)]
 const DARK: Ramp = Ramp {
     page: (0.209, 0.004, 264.477),
     canvas: (0.231, 0.004, 264.487),
@@ -304,6 +306,19 @@ pub(super) fn card(palette: &Palette) -> El {
 pub(super) fn keycap(el: El, p: &Palette) -> El {
     let el = el.radius(if p.molded { 6.0 } else { 8.0 }).fill(if p.molded { p.surface } else { p.field }).border(1.0, p.line);
     if p.molded { el.shadow(2.0, 0.0, p.lip).press_travel(2.0) } else { el }
+}
+
+/// A text field's caret on a molded theme.
+pub(super) trait MoldedCaret {
+    /// On a molded theme, a block caret in the key colour with the character under it in
+    /// `ground`, the fill behind the text; a flat theme keeps the field's own caret.
+    fn molded_caret(self, p: &Palette, ground: Color) -> Self;
+}
+
+impl MoldedCaret for El {
+    fn molded_caret(self, p: &Palette, ground: Color) -> Self {
+        if p.molded { self.caret(p.accent, p.selection).caret_block(ground) } else { self }
+    }
 }
 
 /// A module: on a molded theme it shades from a lighter top to its metal with a lit top edge;

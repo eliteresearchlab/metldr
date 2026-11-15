@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+use super::theme::MoldedCaret;
 use super::theme::Palette;
 use super::{Menu, Mode, State};
 use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, row};
@@ -206,7 +207,7 @@ fn menu_row(
         .focus_highlight(p.hover)
         .child(
             typography
-                .text(name)
+                .legend(name)
                 .grow(1.0)
                 .font(typography.font(12.5, 500.0))
                 .color(p.ink)
@@ -214,7 +215,7 @@ fn menu_row(
         )
         .child(
             typography
-                .text(tag)
+                .legend(tag)
                 .font(typography.font(11.0, 400.0))
                 .color(p.ink_3),
         )
@@ -249,9 +250,11 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     .min_h(68.0)
     .max_h(100.0)
     .padding(8.0)
+    .color(p.ink)
     .label("Prompt")
     .placeholder("Write a message…", p.ink_3)
     .caret(p.ink, p.accent.alpha(0.28))
+    .molded_caret(p, p.surface)
     .on_edit(|state: &mut State| &mut state.draft)
     .on_input_change(|state: &mut State, _| {
         state.draft_changed();
@@ -336,7 +339,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .radius(8.0)
         .child(
             typography
-                .text(model_label)
+                .legend(model_label)
                 .font(typography.font(12.0, 500.0))
                 .color(p.ink_2)
                 .truncate(),
@@ -478,14 +481,14 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     )
                     .child(
                         typography
-                            .text("Current page")
+                            .legend("Current page")
                             .font(typography.font(12.5, 500.0))
                             .color(p.ink)
                             .truncate(),
                     )
                     .child(
                         typography
-                            .text("Use the page you are viewing")
+                            .legend("Use the page you are viewing")
                             .grow(1.0)
                             .font(typography.font(12.0, 400.0))
                             .color(p.ink_3)
@@ -515,14 +518,14 @@ pub(super) fn menu(state: &State) -> Option<El> {
                         .child(::rune::el::icon(&PAPERCLIP, 16.0).color(p.ink_3))
                         .child(
                             typography
-                                .text("Photos and files")
+                                .legend("Photos and files")
                                 .grow(1.0)
                                 .font(typography.font(12.5, 500.0))
                                 .color(p.ink),
                         )
                         .child(
                             typography
-                                .text("Unavailable")
+                                .legend("Unavailable")
                                 .font(typography.font(12.0, 400.0))
                                 .color(p.ink_3),
                         )
@@ -602,7 +605,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     section = Some(heading);
                     rows = rows.child(
                         typography
-                            .text(heading.heading())
+                            .legend(heading.heading())
                             .font(typography.font(11.0, 500.0))
                             .color(p.ink_3)
                             .px(8.0)
@@ -667,7 +670,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .focus_highlight(p.hover)
                             .child(
                                 typography
-                                    .text(label)
+                                    .legend(label)
                                     .grow(1.0)
                                     .font(typography.font(12.5, 500.0))
                                     .color(p.ink),

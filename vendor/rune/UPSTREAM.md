@@ -24,6 +24,7 @@ Local changes:
 * `El::has_popup` names the kind of popup a control opens (ARIA `aria-haspopup`), on the web mirror.
 * `El::press_travel` sinks a control while it is pressed and keeps its outer shadows in place, so a key comes down onto its lip.
 * The web host tracks effect marks when a compositor is attached, as the native window does, so compositor effect slots draw in the browser.
+* `El::caret_block` draws a text field's caret as a block the width of the character after it (a space wide at a line end), as CSS `caret-shape: block`; that character takes the given ink, and a selection or composition hides the block (`tests/caret_block.rs`).
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.

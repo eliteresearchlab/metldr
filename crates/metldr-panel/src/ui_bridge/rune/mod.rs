@@ -678,12 +678,12 @@ impl Drop for State {
                 Owner::Starting { ui, .. } | Owner::Running { ui, .. } => Some(ui.clone()),
                 _ => None,
             };
-            if let Some(ui) = ui {
-                if let Ok(stopping) = core.stop(&ui) {
-                    spawn_local(async move {
-                        let _ = stopping.await;
-                    });
-                }
+            if let Some(ui) = ui
+                && let Ok(stopping) = core.stop(&ui)
+            {
+                spawn_local(async move {
+                    let _ = stopping.await;
+                });
             }
         }
     }
@@ -867,18 +867,18 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
         }
     }
     let accepted = updates.presentation.borrow_mut().accepted_draft.take();
-    if let Some(accepted) = accepted {
-        if state.draft.text == accepted {
-            state.clear_draft();
-        }
+    if let Some(accepted) = accepted
+        && state.draft.text == accepted
+    {
+        state.clear_draft();
     }
     if !state.running() {
         state.observation = None;
     }
-    if state.selection.is_empty() {
-        if let Some(choice) = state.choices().into_iter().find(|choice| choice.enabled) {
-            state.selection = choice.value.into_owned();
-        }
+    if state.selection.is_empty()
+        && let Some(choice) = state.choices().into_iter().find(|choice| choice.enabled)
+    {
+        state.selection = choice.value.into_owned();
     }
     replies::sync(state);
     pi_replies::sync(state);
@@ -1544,7 +1544,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 thread = thread.child(
                     state
                         .activities
-                        .view(id, updates, typography, &palette)
+                        .view(id, updates, typography, palette)
                         .key(id)
                         .w_full(),
                 );
@@ -1703,8 +1703,10 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .filter(|action| action.display.receipt)
         .collect();
     if !receipts.is_empty() {
+        let toggle_label = format!("Browser action results ({})", receipts.len());
         let toggle = typography
-            .text(format!("Browser action results ({})", receipts.len()))
+            .legend(toggle_label.as_str())
+            .label(toggle_label)
             .key("browser-receipts-toggle");
         thread = thread.child(collapsible::trigger(
             toggle,
@@ -1828,7 +1830,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .grow(1.0)
         .key("conversation-status")
         .role("status");
-    let readout = row().w_full().gap(6.0).items_center().child(theme::led(lamp, &p)).child(line);
+    let readout = row().w_full().gap(6.0).items_center().child(theme::led(lamp, p)).child(line);
     let readout = if p.molded { readout.px(8.0).py(4.0).radius(6.0).fill(p.screen) } else { readout };
     let toolbar = col().w_full().gap(6.0).child(toolbar).child(readout);
     let shown = cx.is_reduced_motion() || state.welcome_revealed;
@@ -1974,6 +1976,7 @@ fn settings_section(state: &State, section: &'static Section, body: El) -> El {
     let open = state.settings_sections.contains(key);
     let header = row()
         .key(trigger)
+        .label(title)
         .w_full()
         .min_h(44.0)
         .px(14.0)
@@ -1981,7 +1984,7 @@ fn settings_section(state: &State, section: &'static Section, body: El) -> El {
         .items_center()
         .child(
             typography
-                .text(title)
+                .legend(title)
                 .font(typography.font(14.0, 600.0))
                 .grow(1.0),
         )

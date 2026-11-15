@@ -182,6 +182,8 @@ pub struct InputSpec {
     pub placeholder: String,
     pub placeholder_color: Color,
     pub caret: Color,
+    /// A block caret over the character after it, which turns this colour (`El::caret_block`).
+    pub caret_block: Option<Color>,
     pub selection: Color,
     /// One unwrapped line that scrolls sideways to keep the caret visible, like `<input>`.
     pub single_line: bool,
@@ -694,6 +696,7 @@ pub fn text_input(edit: &TextEdit, style: TextStyle) -> El {
         placeholder: String::new(),
         placeholder_color: Color::WHITE.alpha(0.4),
         caret: Color::WHITE,
+        caret_block: None,
         selection: DEFAULT_SELECTION,
         single_line: false,
         revealed_override: None,
