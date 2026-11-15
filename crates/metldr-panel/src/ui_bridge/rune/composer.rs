@@ -187,24 +187,37 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
 }
 
 /// One 30 px menu row: name, muted tag, then the check.
-/// The composer's frame on the theme's material: a neon frame glows while focused, a retro one is
-/// stamped on its hard shadow, and the others keep a hairline that darkens while focused.
+/// The composer's corner radius on the theme's material.
+fn radius(p: &Palette) -> f32 {
+    if p.neon() { 3.0 } else if p.retro() { 6.0 } else { RADIUS }
+}
+
+/// The composer's frame on the theme's material: a neon frame's hairline lights while focused,
+/// and the others keep a hairline that darkens while focused. It clips what it holds to its
+/// corners, so its shadows go on [`lift`].
 fn frame(el: El, p: &Palette, focused: bool) -> El {
-    let (line, radius) = match (p.neon(), p.retro(), focused) {
-        (true, _, true) => (p.accent.alpha(0.7), 3.0),
-        (true, _, false) => (p.accent.alpha(0.35), 3.0),
-        (_, true, _) => (p.line_strong, 6.0),
-        (_, _, true) => (p.line_strong, RADIUS),
-        _ => (p.line, RADIUS),
+    let line = match (p.neon(), p.retro(), focused) {
+        (true, _, true) => p.accent.alpha(0.7),
+        (true, _, false) => p.accent.alpha(0.35),
+        (_, true, _) | (_, _, true) => p.line_strong,
+        _ => p.line,
     };
-    let el = el.border(BORDER, line).radius(radius).clip_rounded(radius);
-    if p.neon() {
-        el.shadow(0.0, 18.0, p.accent.alpha(if focused { 0.25 } else { 0.0 }))
+    el.border(BORDER, line).radius(radius(p)).clip_rounded(radius(p))
+}
+
+/// The composer lifted off the page on an unclipped holder of its shape: a neon one glows while
+/// focused, a retro one is stamped on its hard shadow, a flat one takes the reference's card
+/// elevation. The frame's own clip would cut its outer shadows off.
+fn lift(composer: El, p: &Palette, focused: bool) -> El {
+    let holder = col().w_full().radius(radius(p));
+    let holder = if p.neon() {
+        holder.shadow(0.0, 18.0, p.accent.alpha(if focused { 0.25 } else { 0.0 }))
     } else if p.retro() {
-        el.shadow(4.0, 0.0, p.lip)
+        holder.shadow(4.0, 0.0, p.lip)
     } else {
-        el
-    }
+        super::theme::card_shadow(holder, p)
+    };
+    holder.child(composer)
 }
 
 /// The sound a key makes in the composer: a switch going down (deeper for the space bar,
@@ -464,7 +477,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         }
         send
     };
-    frame(col().key("rune-composer").w_full().gap(6.0).padding(INSET).fill(p.surface), p, state.draft.focused)
+    let composer = frame(col().key("rune-composer").w_full().gap(6.0).padding(INSET).fill(p.surface), p, state.draft.focused)
         .child(
             ::rune::el::el()
                 .absolute(0.0, 0.0)
@@ -490,7 +503,8 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
                 .child(row().grow(1.0))
                 .child(dictate)
                 .child(action),
-        )
+        );
+    lift(composer, p, state.draft.focused)
 }
 
 pub(super) fn menu(state: &State) -> Option<El> {

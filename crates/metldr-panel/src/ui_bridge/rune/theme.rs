@@ -50,7 +50,7 @@ pub(super) enum Material {
     /// Plain fills and hairlines, no ground, no voices of its own.
     Flat,
     /// Modules shade from a lighter top with a lit top edge, and keys stand on a hard lip they
-    /// sink onto when pressed, over a dot grid.
+    /// sink onto when pressed, over a GPU dot grid.
     Molded,
     /// A dark HUD over scanlines, keys outlined by a lit hairline that glows, sharp corners,
     /// uppercase monospaced legends and synth voices.
@@ -375,6 +375,21 @@ pub(super) fn sheet(p: &Palette) -> Transition {
         .springs(SpringPair::with_exit_ratio(settle(p, 0.25, 0.3), 0.75))
 }
 
+/// The reference's card elevation on a flat theme: a 1 point ring just outside the border (the
+/// line on a light theme, a faint white edge on a dark one that dissolves into the shadow), then
+/// soft layered shadows. A theme with a material of its own keeps its own.
+pub(super) fn card_shadow(el: El, p: &Palette) -> El {
+    let ring = |color: Color| ::rune::Shadow { spread: 1.0, color, ..Default::default() };
+    let drop = |y: f32, blur: f32, alpha: f32| ::rune::Shadow { y, blur, color: Color::BLACK.alpha(alpha), ..Default::default() };
+    if p.crafted() {
+        el
+    } else if p.light {
+        el.box_shadow(ring(p.line)).box_shadow(drop(18.0, 47.0, 0.03)).box_shadow(drop(7.5, 19.0, 0.02)).box_shadow(drop(4.0, 10.5, 0.02))
+    } else {
+        el.box_shadow(ring(Color::WHITE.alpha(0.11))).box_shadow(drop(1.0, 2.0, 0.2)).box_shadow(drop(2.0, 6.0, 0.2))
+    }
+}
+
 /// A reply card: surface, 10 px radius, hairline ring and a soft shadow, 12 px padding. It fades
 /// in rising 8 px on a critically damped 380 ms spring; Reduce Motion keeps only the fade.
 pub(super) fn card(palette: &Palette) -> El {
@@ -425,23 +440,22 @@ pub(super) fn on_lip(el: El, lip: Color, primary: bool) -> El {
 
 /// A screen's root on a theme's material.
 pub(super) trait Root {
-    /// On a molded theme, the dot ground under everything and its keyboard focus ring: 2 points
-    /// in the key colour, 3 points out from the control.
+    /// The theme's ground under everything and its keyboard focus ring in the accent, as
+    /// (width, offset) points: molded 2 at 3, neon 1.5 at 2, retro 2 at 2. A flat theme keeps
+    /// the default ring and no ground.
     fn material(self, p: &Palette) -> Self;
 }
 
 impl Root for El {
     fn material(self, p: &Palette) -> Self {
         let el = self.children(super::ground::ground(p));
-        if p.molded() {
-            el.focus_ring_default(2.0, 3.0, p.accent)
-        } else if p.neon() {
-            el.focus_ring_default(1.5, 2.0, p.accent)
-        } else if p.retro() {
-            el.focus_ring_default(2.0, 2.0, p.accent)
-        } else {
-            el
-        }
+        let (width, offset) = match p.material {
+            Material::Molded => (2.0, 3.0),
+            Material::Neon => (1.5, 2.0),
+            Material::Retro => (2.0, 2.0),
+            Material::Flat => return el,
+        };
+        el.focus_ring_default(width, offset, p.accent)
     }
 }
 
