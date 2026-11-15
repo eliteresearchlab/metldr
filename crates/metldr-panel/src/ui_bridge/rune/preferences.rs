@@ -323,7 +323,7 @@ impl Preferences {
         result = result.child(sizes).child(self.notice(
             Control::Theme,
             appearance,
-            status("Appearance", appearance),
+            status(true, appearance),
         ));
         if failed(appearance) {
             result = result.child(button(
@@ -338,7 +338,7 @@ impl Preferences {
         let sound = snapshot.sound_status();
         result = result
             .child(sound_switch(typography, palette, snapshot.sounds_enabled(), !busy(sound), &action))
-            .child(self.notice(Control::Sound, sound, status("Sound", sound)));
+            .child(self.notice(Control::Sound, sound, status(false, sound)));
         if failed(sound) {
             result = result.child(button(
                 typography,
@@ -365,17 +365,27 @@ fn failed(status: UiPreferenceStatus) -> bool {
         UiPreferenceStatus::LoadFailed | UiPreferenceStatus::SaveFailed
     )
 }
-fn status(domain: &str, status: UiPreferenceStatus) -> String {
-    match status {
-        UiPreferenceStatus::Loading => format!("Loading {domain} preferences."),
-        UiPreferenceStatus::Saving => format!("Saving {domain} preferences."),
-        UiPreferenceStatus::Saved => format!("{domain} preferences saved."),
-        UiPreferenceStatus::LoadFailed => {
-            format!("{domain} preferences could not be loaded. Choose a setting or retry.")
+/// A preference domain's status line, spelled out so a frame formats nothing.
+fn status(appearance: bool, status: UiPreferenceStatus) -> &'static str {
+    match (appearance, status) {
+        (true, UiPreferenceStatus::Loading) => "Loading Appearance preferences.",
+        (true, UiPreferenceStatus::Saving) => "Saving Appearance preferences.",
+        (true, UiPreferenceStatus::Saved) => "Appearance preferences saved.",
+        (true, UiPreferenceStatus::LoadFailed) => {
+            "Appearance preferences could not be loaded. Choose a setting or retry."
         }
-        UiPreferenceStatus::SaveFailed => format!(
-            "{domain} preferences could not be saved. The current setting remains active. Retry to save it."
-        ),
+        (true, UiPreferenceStatus::SaveFailed) => {
+            "Appearance preferences could not be saved. The current setting remains active. Retry to save it."
+        }
+        (false, UiPreferenceStatus::Loading) => "Loading Sound preferences.",
+        (false, UiPreferenceStatus::Saving) => "Saving Sound preferences.",
+        (false, UiPreferenceStatus::Saved) => "Sound preferences saved.",
+        (false, UiPreferenceStatus::LoadFailed) => {
+            "Sound preferences could not be loaded. Choose a setting or retry."
+        }
+        (false, UiPreferenceStatus::SaveFailed) => {
+            "Sound preferences could not be saved. The current setting remains active. Retry to save it."
+        }
     }
 }
 
