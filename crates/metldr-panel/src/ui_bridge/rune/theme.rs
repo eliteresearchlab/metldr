@@ -41,7 +41,8 @@ pub(super) struct Palette {
 
 type Lch = (f32, f32, f32);
 
-/// One theme's roles as oklch triples, in the order of [`Palette`]'s first fifteen fields.
+/// One theme's roles as oklch triples, in the order of [`Palette`]'s first fifteen fields, then
+/// the lip and highlight of molded material.
 struct Ramp {
     page: Lch,
     canvas: Lch,
@@ -58,6 +59,9 @@ struct Ramp {
     green: Lch,
     orange: Lch,
     red: Lch,
+    /// A key's lip and a module's lit top edge.
+    lip: Lch,
+    highlight: Lch,
 }
 
 const LIGHT: Ramp = Ramp {
@@ -76,6 +80,8 @@ const LIGHT: Ramp = Ramp {
     green: (0.603, 0.155, 150.883),
     orange: (0.689, 0.179, 49.902),
     red: (0.621, 0.192, 23.042),
+    lip: (0.912, 0.005, 258.326),
+    highlight: (1.0, 0.0, 0.0),
 };
 
 const DARK: Ramp = Ramp {
@@ -94,6 +100,8 @@ const DARK: Ramp = Ramp {
     green: (0.705, 0.154, 153.814),
     orange: (0.746, 0.156, 55.642),
     red: (0.666, 0.18, 21.433),
+    lip: (0.356, 0.007, 264.474),
+    highlight: (0.26, 0.006, 271.191),
 };
 
 const GRUVBOX: Ramp = Ramp {
@@ -112,6 +120,8 @@ const GRUVBOX: Ramp = Ramp {
     green: (0.72, 0.13, 125.0),
     orange: (0.72, 0.16, 55.0),
     red: (0.64, 0.19, 28.0),
+    lip: (0.44, 0.035, 75.0),
+    highlight: (0.3, 0.03, 75.0),
 };
 
 /// Light molded panels: paper ground, metal modules, keys standing on their lips, and a black
@@ -132,6 +142,8 @@ const HARDWARE: Ramp = Ramp {
     green: (0.623, 0.149, 153.1),
     orange: (0.64, 0.31, 48.0),
     red: (0.6, 0.22, 25.0),
+    lip: (0.797, 0.008, 106.6),
+    highlight: (1.0, 0.0, 0.0),
 };
 
 const CYBERPUNK: Ramp = Ramp {
@@ -150,6 +162,8 @@ const CYBERPUNK: Ramp = Ramp {
     green: (0.8, 0.18, 150.0),
     orange: (0.76, 0.17, 60.0),
     red: (0.66, 0.24, 15.0),
+    lip: (0.37, 0.07, 290.0),
+    highlight: (0.23, 0.06, 290.0),
 };
 
 impl Palette {
@@ -186,8 +200,8 @@ impl Palette {
             selection: c(ramp.accent).alpha(0.3),
             light,
             molded,
-            lip: if molded { oklch(0.797, 0.008, 106.6) } else { c(ramp.line_strong) },
-            highlight: if molded { oklch(1.0, 0.0, 0.0) } else { c(ramp.surface) },
+            lip: c(ramp.lip),
+            highlight: c(ramp.highlight),
         }
     }
 
