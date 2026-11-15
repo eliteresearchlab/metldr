@@ -321,6 +321,14 @@ export function syncA11y(h, json, revision) {
         if (tag === 'button') {
             if (item.x === true || item.x === false) el.setAttribute('aria-expanded', String(item.x));
             else el.removeAttribute('aria-expanded');
+            // The control's own role and state: a toggle says pressed, a menu item radio checked,
+            // a tab selected, and any of them unavailable or busy.
+            setOptionalAttribute(el, 'role', item.role);
+            setOptionalAttribute(el, item.role ? 'aria-checked' : 'aria-pressed', item.c);
+            setOptionalAttribute(el, item.role ? 'aria-pressed' : 'aria-checked', undefined);
+            setOptionalAttribute(el, 'aria-selected', item.sel === undefined ? undefined : String(item.sel));
+            setOptionalAttribute(el, 'aria-disabled', item.d ? 'true' : undefined);
+            setOptionalAttribute(el, 'aria-busy', item.b ? 'true' : undefined);
         }
         const sig = item.k === 'input' ? item.value ?? '' : item.u?.length ? JSON.stringify(item.u) : item.t ?? '';
         if (!group && el._sig !== sig) {

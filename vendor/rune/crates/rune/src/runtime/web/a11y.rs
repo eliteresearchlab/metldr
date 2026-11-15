@@ -1,6 +1,7 @@
 //! Hidden semantic DOM mirror for the browser shell: headings, text runs with inline links, and
 //! buttons positioned over the canvas so assistive tech and browser Find-in-page see the scene.
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+use crate::el::Checked;
 use std::hash::{Hash, Hasher};
 
 use serde_json::{Value, json};
@@ -33,7 +34,7 @@ pub(crate) enum A11yKind {
     Status,
     Alert,
     Heading(u32),
-    Button(Option<bool>),
+    Button(Box<ControlSemantics>),
     Input(Box<InputSemantics>),
     Table,
     Row,
@@ -41,6 +42,38 @@ pub(crate) enum A11yKind {
     Cell,
     Group,
     Article,
+}
+
+/// A pressable control's ARIA role and state, so the mirror button reads as what it is: a
+/// toggle that says pressed, a menu item radio that says checked, a tab that says selected, a
+/// button that says unavailable or busy.
+#[derive(Debug, PartialEq)]
+pub(crate) struct ControlSemantics {
+    /// The ARIA role when it isn't a plain button.
+    role: Option<&'static str>,
+    expanded: Option<bool>,
+    /// `aria-checked`, or `aria-pressed` for a toggle button (no role).
+    checked: Option<Checked>,
+    /// `aria-selected` for tabs and options.
+    selected: Option<bool>,
+    disabled: bool,
+    busy: bool,
+}
+
+/// The mirror's ARIA role for a pressable element's Rune role.
+fn control_role(role: &str) -> Option<&'static str> {
+    Some(match role {
+        "checkbox" => "checkbox",
+        "switch" => "switch",
+        "radio" | "segment" => "radio",
+        "menuitem" => "menuitem",
+        "menuitemcheckbox" => "menuitemcheckbox",
+        "menuitemradio" => "menuitemradio",
+        "tab" => "tab",
+        "option" => "option",
+        "treeitem" => "treeitem",
+        _ => return None,
+    })
 }
 
 #[derive(Debug, PartialEq)]
@@ -104,10 +137,29 @@ impl A11yItem {
                 obj.insert("k".into(), json!("heading"));
                 obj.insert("l".into(), json!(level));
             }
-            A11yKind::Button(expanded) => {
+            A11yKind::Button(control) => {
                 obj.insert("k".into(), json!("button"));
-                if let Some(expanded) = expanded {
+                if let Some(role) = control.role {
+                    obj.insert("role".into(), json!(role));
+                }
+                if let Some(expanded) = control.expanded {
                     obj.insert("x".into(), json!(expanded));
+                }
+                if let Some(checked) = control.checked {
+                    obj.insert("c".into(), json!(match checked {
+                        Checked::True => "true",
+                        Checked::False => "false",
+                        Checked::Mixed => "mixed",
+                    }));
+                }
+                if let Some(selected) = control.selected {
+                    obj.insert("sel".into(), json!(selected));
+                }
+                if control.disabled {
+                    obj.insert("d".into(), json!(true));
+                }
+                if control.busy {
+                    obj.insert("b".into(), json!(true));
                 }
             }
             A11yKind::Input(input) => {
@@ -471,7 +523,15 @@ impl<S: 'static> Runtime<S> {
                     .unwrap_or_else(|| self.descendant_label(i, end));
                 if !label.is_empty() {
                     out.push(A11yItem {
-                        kind: A11yKind::Button(n.a11y.expanded),
+                        kind: A11yKind::Button(Box::new(ControlSemantics {
+                            role: control_role(n.role),
+                            expanded: n.a11y.expanded,
+                            checked: n.a11y.checked.or_else(|| matches!(n.role, "radio" | "segment")
+                                .then_some(if n.focus.selected { Checked::True } else { Checked::False })),
+                            selected: matches!(n.role, "tab" | "option").then_some(n.focus.selected),
+                            disabled: n.a11y.disabled || n.inert,
+                            busy: n.a11y.more.as_deref().is_some_and(|m| m.busy),
+                        })),
                         path: n.path.clone(),
                         parent: content_parent.clone(),
                         rect,
@@ -794,6 +854,32 @@ mod tests {
         assert!(!updated.contains("Hideable"));
         assert!(!rt.web_a11y_action(&json!({"kind":"a11y_focus", "path":fields[5]["p"]})));
         assert_eq!(context.key, fields[1]["p"].as_str().unwrap());
+    }
+
+    #[test]
+    fn mirrors_each_controls_role_and_state() {
+        fn view(_: &(), _: &mut Cx<()>) -> El {
+            let control = |key: &'static str, role: &'static str| crate::row().key(key).role(role).label(key).size(80.0, 20.0).on_press(|_: &mut ()| {});
+            crate::col()
+                .child(control("pressed", "toggle").checked(true))
+                .child(control("model", "menuitemradio").checked(true))
+                .child(control("chat", "tab").focus_selected(true))
+                .child(control("dark", "segment").focus_selected(false))
+                .child(crate::row().key("older").role("button").label("older").size(80.0, 20.0).disabled(true))
+                .child(control("publish", "button").busy(true))
+        }
+        let mut rt = Runtime::new((), view, (200.0, 200.0), Env::default());
+        rt.frame(0.0);
+        let items: Vec<Value> = serde_json::from_str(&rt.a11y_json()).unwrap();
+        let item = |name: &str| items.iter().find(|i| i["t"] == name).unwrap().clone();
+        let pressed = item("pressed");
+        assert_eq!((pressed.get("role"), pressed["c"].as_str()), (None, Some("true")), "a toggle says pressed");
+        assert_eq!((item("model")["role"].as_str(), item("model")["c"].as_str()), (Some("menuitemradio"), Some("true")));
+        assert_eq!((item("chat")["role"].as_str(), item("chat")["sel"].as_bool()), (Some("tab"), Some(true)));
+        assert_eq!((item("dark")["role"].as_str(), item("dark")["c"].as_str()), (Some("radio"), Some("false")));
+        assert_eq!(item("older")["d"].as_bool(), Some(true), "a disabled button says so");
+        assert_eq!(item("publish")["b"].as_bool(), Some(true), "a busy button says so");
+        assert!(item("publish").get("d").is_none());
     }
 
     #[test]
