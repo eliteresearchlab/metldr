@@ -392,7 +392,7 @@ fn status(appearance: bool, status: UiPreferenceStatus) -> &'static str {
 fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<String>) -> El {
     let label = label.into();
     let el = typography
-        .text(label.clone())
+        .legend(&label)
         .label(label)
         .key(key.into())
         .px(10.0)
@@ -475,7 +475,7 @@ fn segment(
                 .border(1.0, palette.line),
         );
     }
-    let el = el.child(typography.text(label).color(if checked { palette.ink } else { palette.ink_2 }));
+    let el = el.child(typography.legend(label).color(if checked { palette.ink } else { palette.ink_2 }));
     let el = metldr_ui::choice::radio(el, !enabled, checked, move |state: &mut State, tx| press(state, value, tx));
     if enabled { el.press(typography.press) } else { el.opacity(0.5) }
 }
@@ -501,11 +501,12 @@ fn sound_switch(
     let track = if on { track.justify_end() } else { track.justify_start() };
     let el = ::rune::row()
         .key("preferences-sound")
+        .label("Interaction sounds")
         .w_full()
         .min_h(32.0)
         .gap(8.0)
         .items_center()
-        .child(typography.text("Interaction sounds").grow(1.0))
+        .child(typography.legend("Interaction sounds").grow(1.0))
         .child(track);
     let el = metldr_ui::choice::switch(el, !enabled, on, move |state: &mut State, on, tx| press(state, Action::Sound(on), tx));
     if enabled { el } else { el.opacity(0.5) }
@@ -546,6 +547,21 @@ impl Typography {
 
     pub(super) fn text(self, value: impl Into<String>) -> El {
         text(value).font(self.font(13.0, 400.0)).color(self.ink)
+    }
+
+    /// A control's printed legend: lowercase on a molded theme, as its keys are printed. The
+    /// control keeps the original wording as its accessible name.
+    pub(super) fn legend(self, label: impl Into<String>) -> El {
+        let mut label = label.into();
+        if self.mono {
+            // Legends are almost always ASCII: lowercase those in place, without a second string.
+            if label.is_ascii() {
+                label.make_ascii_lowercase();
+            } else {
+                label = label.to_lowercase();
+            }
+        }
+        self.text(label)
     }
 }
 fn scale(font_size: &str) -> f32 {

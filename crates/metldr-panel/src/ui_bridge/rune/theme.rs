@@ -306,6 +306,19 @@ pub(super) fn keycap(el: El, p: &Palette) -> El {
     if p.molded { el.shadow(2.0, 0.0, p.lip).press_travel(2.0) } else { el }
 }
 
+/// A text field's caret on a molded theme.
+pub(super) trait MoldedCaret {
+    /// On a molded theme, a block caret in the key colour with the character under it in
+    /// `ground`, the fill behind the text; a flat theme keeps the field's own caret.
+    fn molded_caret(self, p: &Palette, ground: Color) -> Self;
+}
+
+impl MoldedCaret for El {
+    fn molded_caret(self, p: &Palette, ground: Color) -> Self {
+        if p.molded { self.caret(p.accent, p.selection).caret_block(ground) } else { self }
+    }
+}
+
 /// A module: on a molded theme it shades from a lighter top to its metal with a lit top edge;
 /// on a flat theme it is the plain page fill.
 pub(super) fn module(el: El, p: &Palette) -> El {

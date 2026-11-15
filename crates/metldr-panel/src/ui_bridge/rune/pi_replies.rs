@@ -1,3 +1,4 @@
+use super::theme::MoldedCaret;
 use super::{Core, FlowError, State, Tx};
 use crate::model::{PiUiDialog, RunId};
 use crate::ui_bridge::pi_ui::{Answer, pi_reply_key, pi_suggestion_key};
@@ -295,6 +296,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                     .fill(palette.field)
                     .color(ink)
                     .caret(ink, ink.alpha(0.25))
+                    .molded_caret(palette, palette.field)
                     .label(label)
                     .disabled(!enabled)
                     .on_edit(::rune::edit_access(move |state: &mut State| {

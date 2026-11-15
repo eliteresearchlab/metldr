@@ -655,7 +655,7 @@ pub(super) fn button(
 ) -> El {
     let el = row().key(key).min_h(32.0).px(8.0).items_center().child(
         typography
-            .text(label)
+            .legend(label)
             .font(typography.font(12.0, 400.0))
             .color(p.ink_2),
     );
@@ -676,7 +676,7 @@ fn sheet_button(
         .min_h(44.0)
         .px(12.0)
         .items_center()
-        .child(typography.text(label).color(p.ink));
+        .child(typography.legend(label).color(p.ink));
     pressable(el, p, label, enabled, true, Rc::new(action))
 }
 

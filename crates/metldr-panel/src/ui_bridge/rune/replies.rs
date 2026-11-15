@@ -1,3 +1,4 @@
+use super::theme::MoldedCaret;
 use super::{Core, FlowError, State, Tx};
 use crate::model::{CodexInputPrompt, RunId};
 use crate::ui_bridge::codex_input::{
@@ -95,7 +96,7 @@ fn pill(
         .fill(fill)
         .child(
             typography
-                .text(label.clone())
+                .legend(label.as_str())
                 .font(typography.font(12.5, 500.0))
                 .color(ink)
                 .wrap(),
@@ -127,6 +128,7 @@ fn input(
     .color(ink)
     .single_line()
     .caret(ink, ink.alpha(0.25))
+    .molded_caret(palette, palette.field)
 }
 
 fn activate(

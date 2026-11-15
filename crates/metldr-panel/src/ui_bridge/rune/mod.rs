@@ -1703,8 +1703,10 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .filter(|action| action.display.receipt)
         .collect();
     if !receipts.is_empty() {
+        let toggle_label = format!("Browser action results ({})", receipts.len());
         let toggle = typography
-            .text(format!("Browser action results ({})", receipts.len()))
+            .legend(toggle_label.as_str())
+            .label(toggle_label)
             .key("browser-receipts-toggle");
         thread = thread.child(collapsible::trigger(
             toggle,
@@ -1974,6 +1976,7 @@ fn settings_section(state: &State, section: &'static Section, body: El) -> El {
     let open = state.settings_sections.contains(key);
     let header = row()
         .key(trigger)
+        .label(title)
         .w_full()
         .min_h(44.0)
         .px(14.0)
@@ -1981,7 +1984,7 @@ fn settings_section(state: &State, section: &'static Section, body: El) -> El {
         .items_center()
         .child(
             typography
-                .text(title)
+                .legend(title)
                 .font(typography.font(14.0, 600.0))
                 .grow(1.0),
         )

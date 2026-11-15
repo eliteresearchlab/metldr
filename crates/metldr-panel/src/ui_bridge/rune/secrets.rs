@@ -3,6 +3,7 @@
 //! The user types the secret into a masked field that never echoes, copies or saves it. Enter
 //! sends it for this entry only and wipes the field; any change of the pending entry wipes it too.
 
+use super::theme::MoldedCaret;
 use super::{State, Tx, browser_actions, preferences};
 use crate::browser_action_display::origin;
 use crate::model::{BrowserActionId, BrowserActionIntent, BrowserActionPhase};
@@ -137,6 +138,7 @@ pub(super) fn card(
     .border(1.0, palette.line)
     .color(ink)
     .caret(ink, palette.selection)
+    .molded_caret(palette, palette.field)
     .disabled(!row.approve)
     .on_edit(|state: &mut State| &mut state.secret.edit);
     let mut card = col()
