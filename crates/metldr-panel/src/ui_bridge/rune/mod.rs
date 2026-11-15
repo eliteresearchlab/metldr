@@ -1659,14 +1659,9 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                         col()
                             .w_full()
                             .gap(10.0)
-                            .child(settings_section(
-                                state,
-                                "appearance",
-                                "Appearance and sound",
-                                state.preferences.view(State::preference),
-                            ))
-                            .child(settings_section(state, "providers", "AI providers", providers))
-                            .child(settings_section(state, "agents", "Installed agents", agents))
+                            .child(settings_section(state, &APPEARANCE, state.preferences.view(State::preference)))
+                            .child(settings_section(state, &PROVIDERS, providers))
+                            .child(settings_section(state, &AGENTS, agents))
                             .grow(1.0)
                             .min_h(0.0)
                             .scroll(ScrollSpec {
@@ -1938,12 +1933,40 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
 
 /// A collapsible settings card: a 44 px header with the title and a chevron, and the body below
 /// it while open.
-fn settings_section(state: &State, key: &'static str, title: &'static str, body: El) -> El {
+/// One collapsible card of the settings page, with its keys spelled out so a frame builds none.
+struct Section {
+    key: &'static str,
+    trigger: &'static str,
+    panel: &'static str,
+    title: &'static str,
+}
+
+const APPEARANCE: Section = Section {
+    key: "appearance",
+    trigger: "settings-section-appearance",
+    panel: "settings-panel-appearance",
+    title: "Appearance and sound",
+};
+const PROVIDERS: Section = Section {
+    key: "providers",
+    trigger: "settings-section-providers",
+    panel: "settings-panel-providers",
+    title: "AI providers",
+};
+const AGENTS: Section = Section {
+    key: "agents",
+    trigger: "settings-section-agents",
+    panel: "settings-panel-agents",
+    title: "Installed agents",
+};
+
+fn settings_section(state: &State, section: &'static Section, body: El) -> El {
+    let Section { key, trigger, panel, title } = *section;
     let palette = state.preferences.palette();
     let typography = state.preferences.typography();
     let open = state.settings_sections.contains(key);
     let header = row()
-        .key(format!("settings-section-{key}"))
+        .key(trigger)
         .w_full()
         .min_h(44.0)
         .px(14.0)
@@ -1979,8 +2002,8 @@ fn settings_section(state: &State, key: &'static str, title: &'static str, body:
     let body = col().w_full().px(14.0).pb(14.0).child(body);
     if let Some(panel) = collapsible::panel(
         body,
-        &format!("settings-panel-{key}"),
-        &format!("settings-section-{key}"),
+        panel,
+        trigger,
         Default::default(),
         open,
     ) {
