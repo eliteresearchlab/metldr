@@ -222,9 +222,6 @@ impl Preferences {
         &self.look.palette
     }
 
-    pub(super) fn text_scale(&self) -> f32 {
-        self.look.scale
-    }
 
     pub(super) fn typography(&self) -> Typography {
         Typography::new(self.look.scale, &self.look.palette)
@@ -459,8 +456,6 @@ pub(super) struct Typography {
     pub(super) ink: Color,
     /// The overlay a pressed control shows.
     pub(super) press: Color,
-    /// Text caret and selection in fields.
-    pub(super) selection: Color,
     /// Hairline and fill of an outlined control.
     pub(super) line: Color,
     pub(super) field: Color,
@@ -474,7 +469,6 @@ impl Typography {
             scale,
             ink: palette.ink,
             press: palette.press,
-            selection: palette.selection,
         }
     }
 
