@@ -9,4 +9,5 @@ pub mod collapsible;
 pub mod dialog;
 pub mod menu;
 pub mod press;
+pub mod scroll_area;
 pub mod toggle;
