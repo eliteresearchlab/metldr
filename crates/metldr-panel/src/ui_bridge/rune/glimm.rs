@@ -14,6 +14,8 @@ pub(super) struct Glimm {
     epoch: u32,
     elapsed: Option<f64>,
     gpu: Option<Gpu>,
+    /// The molded theme's dot ground, made on the first frame that has one.
+    dots: Option<(DeviceKey, super::dots::Dots)>,
 }
 
 fn phase(elapsed: f64) -> Option<(f32, f32)> {
@@ -66,12 +68,31 @@ impl Compositor<State> for Glimm {
         let active = self
             .elapsed
             .and_then(|elapsed| phase(elapsed).map(|(progress, alpha)| (elapsed, progress, alpha)));
+        let has_dots = frame.rt.marks.contains(&super::dots::MARK);
+        if has_dots {
+            let key = frame.device_key();
+            if self.dots.as_ref().is_none_or(|(k, _)| *k != key) {
+                self.dots = Some((key, super::dots::Dots::new(frame.device)));
+            }
+        }
         let Some((elapsed, progress, alpha)) = active else {
             self.elapsed = None;
             if let Some(gpu) = &mut self.gpu {
                 gpu.image = None;
             }
-            frame.draw_ui();
+            match (has_dots, self.dots.as_mut()) {
+                (true, Some((_, dots))) => {
+                    let clear = frame.rt.clear_color();
+                    let (device, queue) = (frame.device, frame.queue);
+                    frame.ui.prepare(device, queue, &mut frame.rt.text.atlas, &frame.rt.instances, frame.size);
+                    frame.ui.draw_with(frame.encoder, frame.target, clear, &mut |pass, site| {
+                        if site.mark == super::dots::MARK {
+                            dots.draw(device, queue, pass, site);
+                        }
+                    });
+                }
+                _ => frame.draw_ui(),
+            }
             return;
         };
         let rect = frame.rt.instances[slot.unwrap()].rect;
@@ -129,11 +150,14 @@ impl Compositor<State> for Glimm {
             &frame.rt.instances,
             frame.size,
         );
+        let mut dots = self.dots.as_mut().filter(|_| has_dots);
         frame
             .ui
             .draw_with(frame.encoder, frame.target, clear, &mut |pass, site| {
                 if site.mark == MARK {
                     gpu.draw(device, queue, pass, site);
+                } else if site.mark == super::dots::MARK && let Some((_, dots)) = dots.as_mut() {
+                    dots.draw(device, queue, pass, site);
                 }
             });
     }
@@ -164,7 +188,7 @@ struct Gpu {
     image: Option<Image>,
 }
 
-fn uniform(binding: u32) -> wgpu::BindGroupLayoutEntry {
+pub(super) fn uniform(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -177,7 +201,7 @@ fn uniform(binding: u32) -> wgpu::BindGroupLayoutEntry {
     }
 }
 
-fn pipeline(
+pub(super) fn pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     shader: &wgpu::ShaderModule,
