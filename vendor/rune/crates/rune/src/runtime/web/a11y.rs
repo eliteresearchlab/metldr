@@ -54,6 +54,9 @@ pub(crate) enum A11yKind {
     Article,
     /// A named scroll region (`El::scroll_stop`); `true` while it is a Tab stop.
     Region(bool),
+    /// A plain container another element names (`El::controls`, `El::active_descendant`), so the
+    /// name has an element to point at.
+    Box,
 }
 
 /// A pressable control's ARIA role and state, so the mirror button reads as what it is: a
@@ -126,6 +129,7 @@ impl A11yItem {
             A11yKind::Group => Some("group"),
             A11yKind::Article => Some("article"),
             A11yKind::Region(_) => Some("region"),
+            A11yKind::Box => Some("box"),
             A11yKind::Text => Some("text"),
             A11yKind::Status => Some("status"),
             A11yKind::Alert => Some("alert"),
@@ -412,6 +416,12 @@ impl<S: 'static> Runtime<S> {
         let mut last_flow_parent: Option<usize> = None;
         let mut groups: Vec<Option<usize>> = vec![None; self.nodes.len()];
         let ends = self.subtree_ends();
+        // The elements another one names: each needs an element in the mirror to point at.
+        let named: std::collections::HashSet<&str> = self.nodes.iter()
+            .filter_map(|n| n.a11y.more.as_deref())
+            .flat_map(|more| [more.controls.as_deref(), more.active.as_deref()])
+            .flatten()
+            .collect();
         let mut i = 0;
         while i < self.nodes.len() {
             let n = &self.nodes[i];
@@ -459,6 +469,7 @@ impl<S: 'static> Runtime<S> {
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
                     ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
+                    _ if n.key.as_deref().is_some_and(|key| named.contains(key)) => Some(A11yKind::Box),
                     _ => None,
                 }
             } else {
@@ -496,6 +507,7 @@ impl<S: 'static> Runtime<S> {
                             | A11yKind::Group
                             | A11yKind::Article
                             | A11yKind::Region(_)
+                            | A11yKind::Box
                     )
                 })
                 .map(|index| out[index].path.clone());

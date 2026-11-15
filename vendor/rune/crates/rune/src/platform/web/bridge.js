@@ -277,7 +277,7 @@ export function syncA11y(h, json, revision) {
     const focused = document.activeElement;
     let restoreNativeFocus = false;
     for (const item of items) {
-        const group = ['table', 'row', 'columnheader', 'cell', 'group', 'article', 'region'].includes(item.k);
+        const group = ['table', 'row', 'columnheader', 'cell', 'group', 'article', 'region', 'box'].includes(item.k);
         const tag = group || item.k === 'input' ? 'div' : item.k === 'heading' ? `h${item.l || 2}` : item.k === 'button' ? 'button' : 'p';
         const key = group ? `semantic:${item.p}` : item.k === 'input' ? `input:${item.p}` : `${tag}:${item.p}`;
         seen.add(key);
@@ -318,8 +318,9 @@ export function syncA11y(h, json, revision) {
         // Each write goes through setOptionalAttribute, which leaves an unchanged value alone: an
         // attribute rewrite still mutates the node, and most nodes keep their state between syncs.
         if (group) {
-            setOptionalAttribute(el, 'role', item.k);
-            setOptionalAttribute(el, 'aria-label', item.t);
+            // A box is only something another element names: it keeps no role of its own.
+            setOptionalAttribute(el, 'role', item.k === 'box' ? undefined : item.k);
+            setOptionalAttribute(el, 'aria-label', item.k === 'box' ? undefined : item.t);
             // A region the keyboard can reach scrolls; focus reaches it through the runtime's Tab.
             setOptionalAttribute(el, 'tabindex', item.focus ? '-1' : undefined);
         }
