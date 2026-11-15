@@ -53,7 +53,7 @@ impl<S: 'static> Runtime<S> {
         n.a11y.disabled.hash(&mut h);
         n.a11y.live.hash(&mut h);
         if let Some(m) = n.a11y.more.as_deref() {
-            (&m.description, &m.value, &m.set, &m.shortcut, m.invalid, m.read_only, m.sorted).hash(&mut h);
+            (&m.description, &m.value, &m.set, &m.shortcut, m.invalid, m.read_only, m.sorted, m.busy, m.unavailable).hash(&mut h);
             if let Some(r) = m.range { [r.value, r.min, r.max, r.step.unwrap_or(f64::NAN)].map(f64::to_bits).hash(&mut h); }
             self.a11y_active_descendant(i).map(|j| self.nodes[j].id.0).hash(&mut h);
         }
@@ -184,7 +184,9 @@ impl<S: 'static> Runtime<S> {
             _ => {}
         }
         if modal { node.set_modal(); }
-        if !enabled { node.set_disabled(); }
+        let more = n.a11y.more.as_deref();
+        if !enabled || more.is_some_and(|m| m.unavailable) { node.set_disabled(); }
+        if more.is_some_and(|m| m.busy) { node.set_busy(); }
         // Bounds: a scroll viewport's own box sits in the space its offset moves.
         let mut shift = w.shift;
         if let Some(st) = scroll {

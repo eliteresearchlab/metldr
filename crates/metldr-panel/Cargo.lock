@@ -1532,6 +1532,7 @@ dependencies = [
  "metldr-conversation",
  "metldr-harness",
  "metldr-history-pages",
+ "metldr-ui",
  "rune",
  "serde",
  "serde_json",
@@ -1539,6 +1540,13 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
+]
+
+[[package]]
+name = "metldr-ui"
+version = "0.1.0"
+dependencies = [
+ "rune",
 ]
 
 [[package]]

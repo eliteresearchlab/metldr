@@ -19,6 +19,7 @@ Local changes:
 * On the web every keyed control with a press handler takes the native mirror button path for focus and keyboard or assistive activation, not only controls marked `native_activation`; pointer presses on the canvas are unchanged. A focused mirror button forwards Tab, Escape, the arrows, Home, End, Page Up and Page Down to the runtime, and a held Enter or Space does not repeat the press.
 * A touch holds the focus change its press asked for until the finger lifts, and drops it when the touch turns into a pan, as a browser focuses only on a tap. A scroll step after the press is cancelled skips the press search.
 * The web mirror gives each pressable control its ARIA role (checkbox, switch, radio, menu item, tab, option, tree item) and state (pressed, checked, selected, disabled, busy), and `El::busy` marks a control whose action is still running. Mirror attributes are rewritten only when they change.
+* `El::unavailable` marks a control that reads as disabled yet keeps focus and its place in the tab order (ARIA `aria-disabled`), in the web mirror and the native tree; the native tree also reports busy.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.

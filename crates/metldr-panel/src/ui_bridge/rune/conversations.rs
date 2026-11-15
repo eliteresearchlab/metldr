@@ -703,37 +703,22 @@ fn pressable(
     scale: bool,
     action: Rc<dyn Fn(&mut State, &mut Tx)>,
 ) -> El {
-    let el = el
-        .radius(8.0)
-        .border(1.0, p.line)
-        .fill(p.field)
-        .role("button")
-        .label(label)
-        .focusable(true)
-        .disabled(!enabled);
+    let el = el.radius(8.0).border(1.0, p.line).fill(p.field).label(label);
+    let props = metldr_ui::button::Props {
+        disabled: !enabled,
+        ..Default::default()
+    };
+    let el = metldr_ui::button::button(el, props, move |state: &mut State, tx| {
+        state.sound(crate::interaction_audio::Cue::Page);
+        action(state, tx)
+    });
     if !enabled {
         return el.opacity(0.5);
     }
-    let press = Rc::clone(&action);
     let el = if scale {
         el.press_scale(super::theme::PRESS_SCALE)
     } else {
         el
     };
-    el.hover(p.hover)
-        .press(p.hover_2)
-        .on_press_tx(move |state: &mut State, tx| {
-            state.sound(crate::interaction_audio::Cue::Page);
-            press(state, tx)
-        })
-        .on_key(move |state: &mut State, key, tx| {
-            if key.key != ::rune::Key::Enter {
-                return false;
-            }
-            if !tx.key_repeat() {
-                state.sound(crate::interaction_audio::Cue::Page);
-                action(state, tx);
-            }
-            true
-        })
+    el.hover(p.hover).press(p.hover_2)
 }
