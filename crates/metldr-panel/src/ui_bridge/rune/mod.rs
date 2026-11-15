@@ -1761,36 +1761,56 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     if let Some(menu) = composer::menu(state) {
         composer = composer.child(menu);
     }
-    let error = state
-        .updates
-        .as_ref()
-        .and_then(|updates| updates.presentation.borrow().error.clone());
-    let status = if connection.stale() {
-                    "The conversation changed. Reload the panel."
-                } else if connection.reconnecting() {
-                    "Reconnecting"
-                } else if !connection.connected() {
-                    "Connection lost"
-                } else if connection.uncertain() {
-                    "Check saved work before starting again"
-                } else if let Some(error) = &error {
-                    error
-                } else if let Some(error) = &state.conversations.error {
-                    error
-                } else if matches!(*core.owner.borrow(), Owner::Capturing) {
-                    "Reading current page"
-                } else if core.rune_has_native_requests()
-                    || core.rune_browser_action().is_some()
-                {
-                    "Waiting for approval"
-                } else if state.running() {
-                    "Running"
-                } else if state.conversations.busy || core.history_loading.get() {
-                    "Loading history"
-                } else {
-                    "Ready"
-                };
+    // The status reads the error in place: the presentation stays borrowed only while this
+    // block builds the line, and no message is copied for it.
     let p = palette;
+    let (line, lamp) = {
+        let presentation = state.updates.as_ref().map(|updates| updates.presentation.borrow());
+        let error = presentation.as_ref().and_then(|presentation| presentation.error.as_deref());
+        let status = if connection.stale() {
+                        "The conversation changed. Reload the panel."
+                    } else if connection.reconnecting() {
+                        "Reconnecting"
+                    } else if !connection.connected() {
+                        "Connection lost"
+                    } else if connection.uncertain() {
+                        "Check saved work before starting again"
+                    } else if let Some(error) = error {
+                        error
+                    } else if let Some(error) = &state.conversations.error {
+                        error
+                    } else if matches!(*core.owner.borrow(), Owner::Capturing) {
+                        "Reading current page"
+                    } else if core.rune_has_native_requests()
+                        || core.rune_browser_action().is_some()
+                    {
+                        "Waiting for approval"
+                    } else if state.running() {
+                        "Running"
+                    } else if state.conversations.busy || core.history_loading.get() {
+                        "Loading history"
+                    } else {
+                        "Ready"
+                    };
+        // One fixed line under the controls: a longer status never rewraps the row or moves the
+        // thread below it.
+        // The lamp beside the status: lost or failing is red, working amber, ready green. A molded
+        // theme prints the line on its gray LCD.
+        let fault = connection.stale() || !connection.connected() || connection.uncertain() || error.is_some()
+            || state.conversations.error.is_some();
+        let lamp = if fault { p.red } else if status == "Ready" { p.green } else { p.orange };
+        let line = typography
+            .text(status)
+            .font(typography.font(12.0, 400.0).lh(16.0 * typography.scale))
+            .color(if p.molded { p.print } else { p.ink_2 })
+            .single_line()
+            .truncate()
+            .h(16.0 * typography.scale)
+            .grow(1.0)
+            .key("conversation-status")
+            .role("status");
+        (line, lamp)
+    };
     let mut toolbar = row()
         .w_full()
         .flex_wrap()
@@ -1816,25 +1836,8 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     for control in state.conversations.toolbar(state) {
         toolbar = toolbar.child(control);
     }
-    // One fixed line under the controls: a longer status never rewraps the row or moves the
-    // thread below it.
-    // The lamp beside the status: lost or failing is red, working amber, ready green. A molded
-    // theme sets the line on a screen, as an LCD.
-    let fault = connection.stale() || !connection.connected() || connection.uncertain() || error.is_some()
-        || state.conversations.error.is_some();
-    let lamp = if fault { p.red } else if status == "Ready" { p.green } else { p.orange };
-    let line = typography
-        .text(status)
-        .font(typography.font(12.0, 400.0).lh(16.0 * typography.scale))
-        .color(if p.molded { p.screen_ink } else { p.ink_2 })
-        .single_line()
-        .truncate()
-        .h(16.0 * typography.scale)
-        .grow(1.0)
-        .key("conversation-status")
-        .role("status");
     let readout = row().w_full().gap(6.0).items_center().child(theme::led(lamp, p)).child(line);
-    let readout = if p.molded { readout.px(8.0).py(4.0).radius(6.0).fill(p.screen) } else { readout };
+    let readout = if p.molded { theme::lcd(readout.px(10.0).py(5.0), p) } else { readout };
     let toolbar = col().w_full().gap(6.0).child(toolbar).child(readout);
     let shown = cx.is_reduced_motion() || state.welcome_revealed;
     let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });

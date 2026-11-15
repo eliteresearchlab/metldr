@@ -43,6 +43,9 @@ pub(super) struct Palette {
     /// A legend on a key in the accent: near-white on a key darker than 0.8 lightness, ink on a
     /// lighter one (yellow), so it always reads.
     pub(super) on_accent: Color,
+    /// A molded theme's gray LCD: its glass from top to bottom and the dark print on it.
+    pub(super) glass: [Color; 3],
+    pub(super) print: Color,
 }
 
 pub(super) type Lch = (f32, f32, f32);
@@ -260,6 +263,8 @@ impl Palette {
             screen: c(ramp.screen),
             screen_ink: c(ramp.screen_ink),
             on_accent: if accent.0 < 0.8 { oklch(0.98, 0.0, 0.0) } else { oklch(0.18, 0.0, 0.0) },
+            glass: ["#b6b7b1", "#c8c9c3", "#c2c3bd"].map(|hex| ::rune::color::hex(hex).unwrap_or(Color::WHITE)),
+            print: ::rune::color::hex("#141413").unwrap_or(Color::BLACK),
         }
     }
 
@@ -392,6 +397,16 @@ pub(super) fn module(el: El, p: &Palette) -> El {
     } else {
         el.fill(p.page).border(1.0, p.line)
     }
+}
+
+/// A molded readout's gray LCD: a recessed window of reflective glass, darker at its top edge,
+/// lit by the room rather than from behind, with a light catch under its lower lip.
+pub(super) fn lcd(el: El, p: &Palette) -> El {
+    el.radius(7.0)
+        .linear_gradient(std::f32::consts::PI, [(0.0, p.glass[0]), (0.35, p.glass[1]), (1.0, p.glass[2])])
+        .box_shadow(::rune::Shadow { y: 1.0, blur: 3.0, color: Color::BLACK.alpha(0.25), inset: true, ..Default::default() })
+        .border(0.5, Color::BLACK.alpha(0.15))
+        .shadow(1.0, 0.0, Color::WHITE)
 }
 
 /// A lamp: a small round light in `color`, glowing on a molded theme.
