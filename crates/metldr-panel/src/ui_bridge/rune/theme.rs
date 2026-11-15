@@ -50,7 +50,7 @@ pub(super) enum Material {
     /// Plain fills and hairlines, no ground, no voices of its own.
     Flat,
     /// Modules shade from a lighter top with a lit top edge, and keys stand on a hard lip they
-    /// sink onto when pressed, over a dot grid.
+    /// sink onto when pressed, over a GPU dot grid.
     Molded,
     /// A dark HUD over scanlines, keys outlined by a lit hairline that glows, sharp corners,
     /// uppercase monospaced legends and synth voices.
@@ -440,23 +440,22 @@ pub(super) fn on_lip(el: El, lip: Color, primary: bool) -> El {
 
 /// A screen's root on a theme's material.
 pub(super) trait Root {
-    /// On a molded theme, the dot ground under everything and its keyboard focus ring: 2 points
-    /// in the key colour, 3 points out from the control.
+    /// The theme's ground under everything and its keyboard focus ring in the accent, as
+    /// (width, offset) points: molded 2 at 3, neon 1.5 at 2, retro 2 at 2. A flat theme keeps
+    /// the default ring and no ground.
     fn material(self, p: &Palette) -> Self;
 }
 
 impl Root for El {
     fn material(self, p: &Palette) -> Self {
         let el = self.children(super::ground::ground(p));
-        if p.molded() {
-            el.focus_ring_default(2.0, 3.0, p.accent)
-        } else if p.neon() {
-            el.focus_ring_default(1.5, 2.0, p.accent)
-        } else if p.retro() {
-            el.focus_ring_default(2.0, 2.0, p.accent)
-        } else {
-            el
-        }
+        let (width, offset) = match p.material {
+            Material::Molded => (2.0, 3.0),
+            Material::Neon => (1.5, 2.0),
+            Material::Retro => (2.0, 2.0),
+            Material::Flat => return el,
+        };
+        el.focus_ring_default(width, offset, p.accent)
     }
 }
 
