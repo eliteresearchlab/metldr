@@ -53,6 +53,8 @@ pub(crate) struct A11yMore {
     pub busy: bool,
     /// `El::unavailable`: reads as disabled but keeps focus.
     pub unavailable: bool,
+    /// `El::has_popup`: what kind of popup it opens.
+    pub has_popup: Option<&'static str>,
 }
 
 /// Accessibility state beyond role and label (`El::level`, `El::expanded`, `El::secure`, and
@@ -150,6 +152,12 @@ impl El {
     /// its work. Presses should do nothing meanwhile, which the control's own handler decides.
     pub fn busy(mut self, busy: bool) -> Self {
         if busy || self.a11y.more.is_some() { self.a11y.more().busy = busy; }
+        self
+    }
+    /// The kind of popup this control opens (ARIA `aria-haspopup`): `"menu"`, `"listbox"`,
+    /// `"dialog"` and so on, so a screen reader says a press opens one.
+    pub fn has_popup(mut self, kind: &'static str) -> Self {
+        self.a11y.more().has_popup = Some(kind);
         self
     }
     /// A control that reads as unavailable (ARIA `aria-disabled`) yet keeps its focus and its

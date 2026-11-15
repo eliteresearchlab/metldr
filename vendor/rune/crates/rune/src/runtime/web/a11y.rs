@@ -58,6 +58,7 @@ pub(crate) struct ControlSemantics {
     selected: Option<bool>,
     disabled: bool,
     busy: bool,
+    popup: Option<&'static str>,
 }
 
 /// The mirror's ARIA role for a pressable element's Rune role.
@@ -148,6 +149,9 @@ impl A11yItem {
                 }
                 if control.busy {
                     obj.insert("b".into(), json!(true));
+                }
+                if let Some(popup) = control.popup {
+                    obj.insert("popup".into(), json!(popup));
                 }
             }
             A11yKind::Input(input) => {
@@ -520,6 +524,7 @@ impl<S: 'static> Runtime<S> {
                             selected: matches!(n.role, "tab" | "option").then_some(n.focus.selected),
                             disabled: n.a11y.disabled || n.inert || n.a11y.more.as_deref().is_some_and(|m| m.unavailable),
                             busy: n.a11y.more.as_deref().is_some_and(|m| m.busy),
+                            popup: n.a11y.more.as_deref().and_then(|m| m.has_popup),
                         })),
                         path: n.path.clone(),
                         parent: content_parent.clone(),
