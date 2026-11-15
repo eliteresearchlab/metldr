@@ -1603,17 +1603,6 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .updates
         .as_ref()
         .is_none_or(|updates| updates.presentation.borrow().messages.messages.is_empty());
-    if state.conversations.is_open() {
-        return col()
-            .w_full()
-            .h_full()
-            .min_h(0.0)
-            .fill(palette.canvas)
-            .color(ink)
-            .padding(10.0)
-            .justify_center()
-            .child(state.conversations.view(state));
-    }
     if state.settings_open {
         let (providers, agents) = state.settings.view(core, cx, typography, palette);
         let title = row()
@@ -1808,7 +1797,8 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             "saved-chats-open".into(),
             true,
             |state: &mut State, tx| state.open_conversations(tx),
-        ))
+        )
+        .has_popup("dialog"))
         .child(conversations::button(
             p,
             typography,
@@ -1929,6 +1919,17 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .child(scroll)
                 .children(composer),
         )
+        .children(state.conversations.is_open().then(|| {
+            let saved = metldr_ui::dialog::dialog(
+                state.conversations.view(state),
+                "Saved chats",
+                None,
+                "saved-chats-open",
+                Default::default(),
+                |state: &mut State| state.conversations.dismiss(),
+            );
+            metldr_ui::dialog::backdrop(saved, ::rune::oklch(0.0, 0.0, 0.0).alpha(0.35))
+        }))
 }
 
 /// A collapsible settings card: a 44 px header with the title and a chevron, and the body below

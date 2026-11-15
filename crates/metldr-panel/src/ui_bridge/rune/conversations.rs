@@ -107,6 +107,11 @@ impl Conversations {
         tx.focus("saved-chats-open");
     }
 
+    /// Closes the dialog from Escape or its backdrop; the dialog returns focus to its trigger.
+    pub(super) fn dismiss(&mut self) {
+        self.open = false;
+    }
+
     pub(super) fn is_open(&self) -> bool {
         self.open
     }

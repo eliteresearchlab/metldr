@@ -6,5 +6,6 @@ pub mod announcer;
 pub mod button;
 pub mod choice;
 pub mod collapsible;
+pub mod dialog;
 pub mod menu;
 pub mod toggle;
