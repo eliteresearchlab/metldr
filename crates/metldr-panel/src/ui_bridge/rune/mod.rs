@@ -193,7 +193,10 @@ impl State {
                 self.preferences.retry_setup(updates.wake.clone(), tx);
             }
         } else {
-            self.sound(crate::interaction_audio::Cue::Tick);
+            self.sound(match action {
+                preferences::Action::Sound(on) => crate::interaction_audio::Cue::Latch(on),
+                _ => crate::interaction_audio::Cue::Tick,
+            });
             self.preferences.apply(action, tx);
         }
     }
