@@ -1,6 +1,6 @@
 //! A theme's ground under its canvas, painted by the GPU in one pass over its slot instead of as
-//! hundreds of elements: a molded theme's grid of small dots, one every 16 points, or a neon
-//! theme's scanlines, one every 3 points.
+//! hundreds of elements: a molded theme's grid of small dots, one every 16 points, a neon
+//! theme's scanlines, one every 3 points, or a retro theme's still film grain.
 
 use ::rune::render::{CLIP_WGSL, EffectSite};
 use std::borrow::Cow;
@@ -12,10 +12,12 @@ const WORDS: usize = 24;
 /// The slot to put under a theme's canvas: it fills its parent and draws the theme's ground, or
 /// nothing on a flat theme. Its data carries the kind, the opacity and the colour.
 pub(super) fn ground(p: &super::theme::Palette) -> Option<::rune::El> {
-    let (kind, opacity, color) = if p.molded {
+    let (kind, opacity, color) = if p.molded() {
         (0.0, 0.14, ::rune::Color::BLACK)
-    } else if p.neon {
+    } else if p.neon() {
         (1.0, 0.07, p.accent)
+    } else if p.retro() {
+        (2.0, 0.06, p.ink)
     } else {
         return None;
     };
@@ -118,7 +120,12 @@ impl Ground {
         );
         // Dots: 16 point cells with a 1 point radius. Scanlines: a 1 point line every 3 points.
         let [kind, opacity, packed, _] = site.data;
-        let (pitch, size) = if kind == 0.0 { (16.0, 1.0) } else { (3.0, 1.0) };
+        // Grain: one random speck per point.
+        let (pitch, size) = match kind as u32 {
+            0 => (16.0, 1.0),
+            1 => (3.0, 1.0),
+            _ => (1.0, 1.0),
+        };
         words[16..20].copy_from_slice(&[pitch * site.scale, size * site.scale, opacity, kind].map(f32::to_bits));
         let packed = packed as u32;
         let channel = |shift: u32| ((packed >> shift) & 0xff) as f32 / 255.0;

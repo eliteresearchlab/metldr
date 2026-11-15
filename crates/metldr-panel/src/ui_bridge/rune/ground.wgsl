@@ -4,7 +4,7 @@ struct Geometry {
     fade: vec4<u32>,
     viewport: vec4<f32>,
     // Cell pitch and dot radius (or line thickness) in device pixels, the opacity, then the kind:
-    // 0 dots, 1 scanlines.
+    // 0 dots, 1 scanlines, 2 grain.
     params: vec4<f32>,
     // The mark's colour, linear.
     color: vec4<f32>,
@@ -33,8 +33,12 @@ fn fs(vertex: Vertex) -> @location(0) vec4<f32> {
     if (geometry.params.w < 0.5) {
         let d = distance(cell, vec2(pitch * 0.5));
         mark = 1.0 - smoothstep(geometry.params.y - 0.5, geometry.params.y + 0.5, d);
-    } else {
+    } else if (geometry.params.w < 1.5) {
         mark = 1.0 - smoothstep(geometry.params.y - 0.5, geometry.params.y + 0.5, cell.y);
+    } else {
+        // Still grain: a fixed random level for each point's cell.
+        let speck = floor((vertex.window - geometry.rect.xy) / pitch);
+        mark = fract(sin(dot(speck, vec2(12.9898, 78.233))) * 43758.5453);
     }
     let a = mark * geometry.params.z * clip_alpha(vertex.window, geometry.clip, geometry.fade);
     return vec4(geometry.color.rgb * a, a);

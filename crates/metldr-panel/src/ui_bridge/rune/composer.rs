@@ -187,6 +187,26 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
 }
 
 /// One 30 px menu row: name, muted tag, then the check.
+/// The composer's frame on the theme's material: a neon frame glows while focused, a retro one is
+/// stamped on its hard shadow, and the others keep a hairline that darkens while focused.
+fn frame(el: El, p: &Palette, focused: bool) -> El {
+    let (line, radius) = match (p.neon(), p.retro(), focused) {
+        (true, _, true) => (p.accent.alpha(0.7), 3.0),
+        (true, _, false) => (p.accent.alpha(0.35), 3.0),
+        (_, true, _) => (p.line_strong, 6.0),
+        (_, _, true) => (p.line_strong, RADIUS),
+        _ => (p.line, RADIUS),
+    };
+    let el = el.border(BORDER, line).radius(radius).clip_rounded(radius);
+    if p.neon() {
+        el.shadow(0.0, 18.0, p.accent.alpha(if focused { 0.25 } else { 0.0 }))
+    } else if p.retro() {
+        el.shadow(4.0, 0.0, p.lip)
+    } else {
+        el
+    }
+}
+
 /// The sound a key makes in the composer: a switch going down (deeper for the space bar,
 /// heavier for Enter, Backspace, Delete and Tab), a lighter one coming up, and a held key's
 /// repeats only ticking. Shortcuts with a modifier and keys that type nothing stay silent.
@@ -269,7 +289,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     };
     let mut field = ::rune::el::text_input(
         &state.draft,
-        if p.molded || p.neon {
+        if p.crafted() {
             TextStyle::new((16.0 * typography.scale).max(16.0), 400.0).mono()
         } else {
             TextStyle::new((16.0 * typography.scale).max(16.0), 400.0)
@@ -418,16 +438,16 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     } else {
         let can_send = state.can_send();
         // A molded or neon send is the primary key, in the accent with its legend in `on_accent`.
-        let (ink, fill) = match (can_send, p.molded || p.neon) {
+        let (ink, fill) = match (can_send, p.crafted()) {
             (true, true) => (p.on_accent, p.accent),
             (true, false) => (p.surface, p.ink),
             (false, _) => (p.ink_2, p.line_strong),
         };
         let mut send = button("rune-send", "Send", &SEND, ink).fill(fill).disabled(!can_send);
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
-        if p.molded && can_send {
+        if (p.molded() || p.retro()) && can_send {
             send = super::theme::on_lip(send, p.accent.mix(::rune::Color::BLACK, 0.45), true);
-        } else if p.neon && can_send {
+        } else if p.neon() && can_send {
             // A neon primary key glows in its accent and sounds the deeper down-stroke.
             send = send.radius(2.0).shadow(0.0, 14.0, p.accent.alpha(0.5)).on_press_down(|state: &mut State, _| {
                 state.sound(crate::interaction_audio::Cue::KeyDown(true))
@@ -435,7 +455,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         }
         if can_send {
             send = send.press(p.press_solid);
-            if !p.molded {
+            if !p.molded() {
                 send = send.press_scale(super::theme::PRESS_SCALE);
             }
             send = send
@@ -444,24 +464,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         }
         send
     };
-    col()
-        .key("rune-composer")
-        .w_full()
-        .gap(6.0)
-        .padding(INSET)
-        .fill(p.surface)
-        .border(
-            BORDER,
-            match (p.neon, state.draft.focused) {
-                (true, true) => p.accent.alpha(0.7),
-                (true, false) => p.accent.alpha(0.35),
-                (false, true) => p.line_strong,
-                (false, false) => p.line,
-            },
-        )
-        .shadow(0.0, if p.neon { 18.0 } else { 0.0 }, p.accent.alpha(if p.neon && state.draft.focused { 0.25 } else { 0.0 }))
-        .radius(if p.neon { 3.0 } else { RADIUS })
-        .clip_rounded(if p.neon { 3.0 } else { RADIUS })
+    frame(col().key("rune-composer").w_full().gap(6.0).padding(INSET).fill(p.surface), p, state.draft.focused)
         .child(
             ::rune::el::el()
                 .absolute(0.0, 0.0)

@@ -72,7 +72,7 @@ impl Compositor<State> for Glimm {
         // skips the scan over every instance.
         let has_ground = {
             let p = frame.rt.state.preferences.palette();
-            (p.molded || p.neon) && frame.rt.marks.contains(&super::ground::MARK)
+            p.crafted() && frame.rt.marks.contains(&super::ground::MARK)
         };
         if has_ground {
             let key = frame.device_key();
