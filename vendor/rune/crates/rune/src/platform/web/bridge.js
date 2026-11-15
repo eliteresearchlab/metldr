@@ -255,6 +255,14 @@ export function syncCopy(h, text) {
     h.copyText = text;
 }
 
+// A mirror element's id: a short hash of its runtime path, so relations name it as the runtime
+// does (aria-controls, aria-activedescendant) and the same element keeps its id between syncs.
+function mirrorId(path) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < path.length; i++) h = Math.imul(h ^ path.charCodeAt(i), 0x01000193);
+    return `rune-${(h >>> 0).toString(36)}`;
+}
+
 function webLink(url) {
     return url.startsWith('https://') || url.startsWith('http://') || url.startsWith('mailto:');
 }
@@ -302,6 +310,9 @@ export function syncA11y(h, json, revision) {
         const css = group
             ? 'position:static;margin:0;padding:0;border:0;pointer-events:none;'
             : `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${bh}px;margin:0;padding:0;border:0;outline:none;background:transparent;color:transparent;font:${fs}px/1.25 sans-serif;overflow:hidden;white-space:pre-wrap;pointer-events:none;`;
+        setOptionalAttribute(el, 'id', mirrorId(item.p));
+        setOptionalAttribute(el, 'aria-controls', item.ctl ? mirrorId(item.ctl) : undefined);
+        setOptionalAttribute(el, 'aria-activedescendant', item.ad ? mirrorId(item.ad) : undefined);
         // Writing an unchanged style still invalidates it; most nodes keep their geometry between syncs.
         if (el._css !== css) { el._css = css; el.style.cssText = css; }
         // Each write goes through setOptionalAttribute, which leaves an unchanged value alone: an
