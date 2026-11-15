@@ -539,6 +539,7 @@ impl<S: 'static> Running<S> {
                 }
             }
             Some("key") => activate = self.rt.web_key(event),
+            Some("physical") => self.rt.web_physical(event),
             Some("a11y_focus") => activate = self.rt.web_a11y_action(event),
             Some("a11y_press" | "a11y_link") => {
                 let _ = self.rt.web_a11y_action(event);
