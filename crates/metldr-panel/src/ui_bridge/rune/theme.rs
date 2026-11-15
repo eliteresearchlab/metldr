@@ -31,6 +31,12 @@ pub(super) struct Palette {
     /// Text caret and selection in fields.
     pub(super) selection: Color,
     pub(super) light: bool,
+    /// Molded material: modules shade from a lighter top with a lit top edge, and keys stand on
+    /// a hard lip they sink onto when pressed. Flat themes draw neither.
+    pub(super) molded: bool,
+    /// A key's lip below it, and a module's lit top edge.
+    pub(super) lip: Color,
+    pub(super) highlight: Color,
 }
 
 type Lch = (f32, f32, f32);
@@ -108,6 +114,26 @@ const GRUVBOX: Ramp = Ramp {
     red: (0.64, 0.19, 28.0),
 };
 
+/// Light molded panels: paper ground, metal modules, keys standing on their lips, and a black
+/// key colour unless the user picks one.
+const HARDWARE: Ramp = Ramp {
+    page: (0.911, 0.007, 106.5),
+    canvas: (0.951, 0.005, 106.5),
+    surface: (0.978, 0.004, 106.5),
+    field: (0.955, 0.004, 91.4),
+    hover: (0.939, 0.007, 106.5),
+    hover_2: (0.915, 0.005, 95.1),
+    ink: (0.221, 0.004, 106.7),
+    ink_2: (0.448, 0.01, 106.8),
+    ink_3: (0.632, 0.009, 106.6),
+    line: (0.862, 0.008, 106.6),
+    line_strong: (0.831, 0.008, 106.6),
+    accent: (0.24, 0.0, 0.0),
+    green: (0.623, 0.149, 153.1),
+    orange: (0.64, 0.31, 48.0),
+    red: (0.6, 0.22, 25.0),
+};
+
 const CYBERPUNK: Ramp = Ramp {
     page: (0.17, 0.045, 290.0),
     canvas: (0.19, 0.045, 290.0),
@@ -132,10 +158,12 @@ impl Palette {
             "light" => &LIGHT,
             "gruvbox" => &GRUVBOX,
             "cyberpunk" => &CYBERPUNK,
+            "hardware" => &HARDWARE,
             _ => &DARK,
         };
         let c = |(l, c, h): Lch| oklch(l, c, h);
-        let light = std::ptr::eq(ramp, &LIGHT);
+        let molded = std::ptr::eq(ramp, &HARDWARE);
+        let light = std::ptr::eq(ramp, &LIGHT) || molded;
         Self {
             page: c(ramp.page),
             canvas: c(ramp.canvas),
@@ -157,6 +185,9 @@ impl Palette {
             press_solid: c(ramp.surface).alpha(0.16),
             selection: c(ramp.accent).alpha(0.3),
             light,
+            molded,
+            lip: if molded { oklch(0.797, 0.008, 106.6) } else { c(ramp.line_strong) },
+            highlight: if molded { oklch(1.0, 0.0, 0.0) } else { c(ramp.surface) },
         }
     }
 
@@ -233,4 +264,21 @@ pub(super) fn card(palette: &Palette) -> El {
         .border(1.0, palette.line)
         .shadow(1.0, 2.0, oklch(0.0, 0.0, 0.0).alpha(0.05))
         .transition(rise_over(0.38))
+}
+
+/// A key: on a molded theme it stands on a hard 2 px lip, ringed by a hairline; on a flat theme
+/// it keeps the outline and field fill of an outlined control.
+pub(super) fn keycap(el: El, p: &Palette) -> El {
+    let el = el.radius(if p.molded { 6.0 } else { 8.0 }).fill(if p.molded { p.surface } else { p.field }).border(1.0, p.line);
+    if p.molded { el.shadow(2.0, 0.0, p.lip) } else { el }
+}
+
+/// A module: on a molded theme it shades from a lighter top to its metal with a lit top edge;
+/// on a flat theme it is the plain page fill.
+pub(super) fn module(el: El, p: &Palette) -> El {
+    if p.molded {
+        el.gradient(p.hover, p.page).border_gradient(1.0, p.highlight, p.line_strong)
+    } else {
+        el.fill(p.page).border(1.0, p.line)
+    }
 }

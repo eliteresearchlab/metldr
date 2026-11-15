@@ -711,7 +711,7 @@ fn pressable(
     scale: bool,
     action: Rc<dyn Fn(&mut State, &mut Tx)>,
 ) -> El {
-    let el = el.radius(8.0).border(1.0, p.line).fill(p.field).label(label);
+    let el = super::theme::keycap(el, p).label(label);
     let props = metldr_ui::button::Props {
         disabled: !enabled,
         ..Default::default()

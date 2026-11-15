@@ -5,14 +5,16 @@ pub(super) enum Theme {
     Gruvbox,
     Cyberpunk,
     Light,
+    Hardware,
 }
 
 impl Theme {
-    pub(super) const ALL: [Self; 4] = [
+    pub(super) const ALL: [Self; 5] = [
         Self::Catppuccin,
         Self::Gruvbox,
         Self::Cyberpunk,
         Self::Light,
+        Self::Hardware,
     ];
 
     pub(super) fn key(self) -> &'static str {
@@ -21,6 +23,7 @@ impl Theme {
             Self::Gruvbox => "gruvbox",
             Self::Cyberpunk => "cyberpunk",
             Self::Light => "light",
+            Self::Hardware => "hardware",
         }
     }
 

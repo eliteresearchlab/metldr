@@ -298,6 +298,7 @@ impl Preferences {
             ("gruvbox", "Gruvbox", "preferences-theme-gruvbox"),
             ("cyberpunk", "Cyberpunk", "preferences-theme-cyberpunk"),
             ("light", "Light", "preferences-theme-light"),
+            ("hardware", "Hardware", "preferences-theme-hardware"),
         ]
         .into_iter()
         .map(|(key, label, id)| option(typography, label, id, snapshot.theme() == key, enabled, Action::Theme(key), &action));
@@ -380,14 +381,18 @@ fn status(domain: &str, status: UiPreferenceStatus) -> String {
 
 fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<String>) -> El {
     let label = label.into();
-    typography
+    let el = typography
         .text(label.clone())
         .label(label)
         .key(key.into())
         .px(10.0)
         .py(6.0)
         .radius(8.0)
-        .fill(typography.field)
+        .fill(typography.field);
+    match typography.lip {
+        Some(lip) => el.shadow(2.0, 0.0, lip),
+        None => el,
+    }
 }
 
 fn button(
@@ -503,13 +508,16 @@ pub(super) struct Typography {
     /// Hairline and fill of an outlined control.
     pub(super) line: Color,
     pub(super) field: Color,
+    /// The lip a key stands on, on a molded theme.
+    pub(super) lip: Option<Color>,
 }
 
 impl Typography {
     pub(super) fn new(scale: f32, palette: &Palette) -> Self {
         Self {
             line: palette.line,
-            field: palette.field,
+            field: if palette.molded { palette.surface } else { palette.field },
+            lip: palette.molded.then_some(palette.lip),
             scale,
             ink: palette.ink,
             press: palette.press,
