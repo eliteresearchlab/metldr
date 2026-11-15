@@ -336,7 +336,7 @@ impl Preferences {
         }
         let sound = snapshot.sound_status();
         result = result
-            .child(sound_switch(typography, self.palette(), snapshot.sounds_enabled(), !busy(sound), &action))
+            .child(sound_switch(typography, palette, snapshot.sounds_enabled(), !busy(sound), &action))
             .child(self.notice(Control::Sound, sound, status("Sound", sound)));
         if failed(sound) {
             result = result.child(button(
