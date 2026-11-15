@@ -1,6 +1,9 @@
 //! Keyboard, IME, focused-field editing and clipboard paste routing.
 use super::*;
 
+/// How far an arrow key scrolls a focused scroll stop, in points, as a browser's line.
+const LINE: f64 = 40.0;
+
 impl<S: 'static> Runtime<S> {
     /// Offer a logical key that already passed `held_gate` to the app, the focused
     /// input's handler, focus traversal and the focused editor, in that order.
@@ -108,6 +111,14 @@ impl<S: 'static> Runtime<S> {
     /// another view paged there routes the key itself with `Tx::scroll_page`.
     pub(super) fn page_scroll(&mut self, ev: &KeyEvent) -> bool {
         use crate::Key::*;
+        // A focused `El::scroll_stop` takes the up and down arrows a line at a time, as a browser
+        // scrolls a focused scroller.
+        if matches!(ev.key, Up | Down) && !(ev.mods.cmd || ev.mods.alt || ev.mods.ctrl || ev.mods.shift)
+            && let Some(i) = self.focused_index().filter(|&i| self.scroll_stop_live(i))
+        {
+            let line = if ev.key == Down { LINE } else { -LINE };
+            return self.page_to(i, |offset, _, _| offset + line);
+        }
         if !matches!(ev.key, PageUp | PageDown | Home | End) || ev.mods.cmd || ev.mods.alt || ev.mods.ctrl { return false; }
         // A focused field in a virtual row that scrolled out has no node: page its list.
         let focused = self.focused.as_deref().and_then(|path| {

@@ -28,6 +28,7 @@ Local changes:
 * `El::on_press_down` runs as a primary pointer press lands on an enabled element, before the release activates it, so a key can sound its down-stroke (`tests/press_down.rs`).
 * On the web the hidden text field reports the keys it types and every key it releases as physical input, so a focused field's `El::on_physical_input` hears typing as it does on a native host; the password field reports none.
 * `El::focus_ring_default` sets the default keyboard focus ring for every control inside an element that sets none of its own, so a theme draws its ring once at its root (`tests/focus_ring_default.rs`). Painting checks an element's own ring before walking up to the focus, so elements without one skip the walk.
+* `El::scroll_stop` makes a scroll view a Tab stop while its content overflows and nothing inside it can take focus; focused, the arrow keys scroll it a 40 point line and the page keys a page, and the web mirror shows it as a named region that takes native focus. The web host reconciles its native controls only when the mirror changes, not on every frame.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.

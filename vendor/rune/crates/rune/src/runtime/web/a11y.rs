@@ -42,6 +42,8 @@ pub(crate) enum A11yKind {
     Cell,
     Group,
     Article,
+    /// A named scroll region (`El::scroll_stop`); `true` while it is a Tab stop.
+    Region(bool),
 }
 
 /// A pressable control's ARIA role and state, so the mirror button reads as what it is: a
@@ -113,6 +115,7 @@ impl A11yItem {
             A11yKind::Cell => Some("cell"),
             A11yKind::Group => Some("group"),
             A11yKind::Article => Some("article"),
+            A11yKind::Region(_) => Some("region"),
             A11yKind::Text => Some("text"),
             A11yKind::Status => Some("status"),
             A11yKind::Alert => Some("alert"),
@@ -122,6 +125,9 @@ impl A11yItem {
             obj.insert("k".into(), json!(kind));
         }
         match &self.kind {
+            A11yKind::Region(true) => {
+                obj.insert("focus".into(), json!(true));
+            }
             A11yKind::Heading(level) => {
                 obj.insert("k".into(), json!("heading"));
                 obj.insert("l".into(), json!(level));
@@ -420,6 +426,7 @@ impl<S: 'static> Runtime<S> {
                         "article",
                         None | Some(A11yKind::Cell | A11yKind::Group | A11yKind::Article),
                     ) => Some(A11yKind::Article),
+                    ("region", _) if labelled => Some(A11yKind::Region(self.scroll_stop_live(i))),
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
                     ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
@@ -458,6 +465,7 @@ impl<S: 'static> Runtime<S> {
                             | A11yKind::ColumnHeader
                             | A11yKind::Group
                             | A11yKind::Article
+                            | A11yKind::Region(_)
                     )
                 })
                 .map(|index| out[index].path.clone());

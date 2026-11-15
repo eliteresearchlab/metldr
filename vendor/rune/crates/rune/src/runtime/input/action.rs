@@ -261,7 +261,7 @@ impl<S: 'static> Runtime<S> {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn native_controls(&self) -> Vec<(String, String)> {
         self.nodes.iter().enumerate().filter_map(|(i, n)| {
-            (self.native_live(i) && n.handlers.on_press.is_some()).then_some(())?;
+            (self.native_live(i) && (n.handlers.on_press.is_some() || self.scroll_stop_live(i))).then_some(())?;
             Some((n.path.clone(), n.key.clone()?))
         }).collect()
     }
@@ -271,7 +271,8 @@ impl<S: 'static> Runtime<S> {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn native_control(&self, path: &str, key: &str) -> bool {
         self.nodes.iter().enumerate().any(|(i, n)| {
-            n.path == path && n.key.as_deref() == Some(key) && n.handlers.on_press.is_some() && self.native_live(i)
+            n.path == path && n.key.as_deref() == Some(key) && (n.handlers.on_press.is_some() || self.scroll_stop_live(i))
+                && self.native_live(i)
         })
     }
 
@@ -294,7 +295,7 @@ impl<S: 'static> Runtime<S> {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn native_eligible(&self, i: usize) -> bool {
         let n = &self.nodes[i];
-        n.a11y.native_activation || (n.key.is_some() && n.handlers.on_press.is_some())
+        n.a11y.native_activation || (n.key.is_some() && (n.handlers.on_press.is_some() || n.focus.scroll_stop))
     }
 
     #[cfg(target_arch = "wasm32")]

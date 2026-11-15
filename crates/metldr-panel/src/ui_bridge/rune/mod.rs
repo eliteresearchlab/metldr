@@ -1920,8 +1920,8 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .child(body)
         .drawn_rect_into(&state.thread_rect)
         .grow(1.0)
-        .min_h(0.0)
-        .scroll(ScrollSpec { stick_bottom: true });
+        .min_h(0.0);
+    let scroll = metldr_ui::scroll_area::viewport(scroll, "Messages", true);
     col()
         .w_full()
         .h_full()

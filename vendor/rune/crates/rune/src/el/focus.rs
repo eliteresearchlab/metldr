@@ -28,6 +28,8 @@ pub(crate) struct FocusSpec {
     pub ring_off: bool,
     /// `focus_ring_default`: the default ring for controls inside this element.
     pub ring_default: Option<Outline>,
+    /// `scroll_stop`: a Tab stop while this scroll view overflows and holds nothing focusable.
+    pub scroll_stop: bool,
     /// `default_button`: Return presses it.
     pub default: bool,
     pub highlight: Option<Color>,
@@ -59,6 +61,7 @@ impl crate::cold::Empty for FocusSpec {
         ring: None,
         ring_off: false,
         ring_default: None,
+        scroll_stop: false,
         default: false,
         highlight: None,
         follows: false,
