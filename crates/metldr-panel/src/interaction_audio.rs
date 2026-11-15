@@ -15,7 +15,7 @@ const SILENCE: f64 = 0.0001;
 
 thread_local! {
     static LISTENER: RefCell<Option<Listener>> = const { RefCell::new(None) };
-    static AUDIO: RefCell<AudioState> = const { RefCell::new(AudioState { context: None, master: None, noise: None, initialized: false, down_at: f64::NEG_INFINITY, played_at: f64::NEG_INFINITY }) };
+    static AUDIO: RefCell<AudioState> = const { RefCell::new(AudioState { context: None, master: None, noise: None, down_at: f64::NEG_INFINITY, played_at: f64::NEG_INFINITY }) };
     static RELEASE_LABEL: RegExp = RegExp::new("close|dismiss|remove|delete|collapse|cancel|clear", "i");
     static PULSE_LABEL: RegExp = RegExp::new("send|save|submit|calculate|create|add|upgrade|replay", "i");
 }
@@ -46,7 +46,6 @@ struct AudioState {
     master: Option<GainNode>,
     /// Half a second of white noise for this context: every noise layer plays a slice of it.
     noise: Option<AudioBuffer>,
-    initialized: bool,
     /// When a molded key last sounded its down-stroke, so its activation sounds the return.
     down_at: f64,
     /// When the last sound played, so a popup the same press opened stays silent.
@@ -314,24 +313,17 @@ fn cue_for(element: &Element) -> Cue {
 
 /// The context, the bus every sound plays into and this context's noise, made on first use.
 fn ready(audio: &mut AudioState) -> Result<(AudioContext, AudioNode, AudioBuffer), JsValue> {
-    let initialize = !audio.initialized
-        || audio
-            .context
-            .as_ref()
-            .is_some_and(|context| context.state() == AudioContextState::Closed);
-    if initialize {
-        // ensureReady() is intentionally not awaited by the reference caller.
-        if let Ok(context) = get_context(audio) {
-            if context.state() == AudioContextState::Suspended {
-                let _ = context.resume();
-            }
-        }
-        get_master_bus(audio)?.gain().set_value(0.32);
-        audio.initialized = true;
-    }
-    // defineSound() and getDestination() each call getContext() in the source.
     let context = get_context(audio)?;
-    let destination = get_destination(audio)?;
+    let master = match &audio.master {
+        Some(master) => master.clone(),
+        None => {
+            let master = context.create_gain()?;
+            master.gain().set_value(0.32);
+            master.connect_with_audio_node(&context.destination())?;
+            audio.master = Some(master.clone());
+            master
+        }
+    };
     let noise = match &audio.noise {
         Some(noise) => noise.clone(),
         None => {
@@ -340,7 +332,7 @@ fn ready(audio: &mut AudioState) -> Result<(AudioContext, AudioNode, AudioBuffer
             noise
         }
     };
-    Ok((context, destination, noise))
+    Ok((context, master.unchecked_into(), noise))
 }
 
 fn play(audio: &RefCell<AudioState>, cue: Cue) -> Result<(), JsValue> {
@@ -403,7 +395,6 @@ fn get_context(audio: &mut AudioState) -> Result<AudioContext, JsValue> {
             let context = AudioContext::new()?;
             audio.master = None;
             audio.noise = None;
-            audio.initialized = false;
             context
         }
     };
@@ -412,42 +403,6 @@ fn get_context(audio: &mut AudioState) -> Result<AudioContext, JsValue> {
         let _ = context.resume()?;
     }
     Ok(context)
-}
-
-fn get_master_bus(audio: &mut AudioState) -> Result<GainNode, JsValue> {
-    let context = get_context(audio)?;
-    let master_matches = audio.master.as_ref().is_some_and(|master| {
-        let context: web_sys::BaseAudioContext = context.clone().unchecked_into();
-        master.context() == context
-    });
-    if !master_matches {
-        let master = context.create_gain()?;
-        audio.master = Some(master.clone());
-        master.connect_with_audio_node(&context.destination())?;
-    }
-    Ok(audio
-        .master
-        .as_ref()
-        .expect("master bus created above")
-        .clone())
-}
-
-fn get_destination(audio: &mut AudioState) -> Result<AudioNode, JsValue> {
-    let context = get_context(audio)?;
-    let master_matches = audio.master.as_ref().is_some_and(|master| {
-        let context: web_sys::BaseAudioContext = context.clone().unchecked_into();
-        master.context() == context
-    });
-    Ok(if master_matches {
-        audio
-            .master
-            .as_ref()
-            .expect("matched master exists")
-            .clone()
-            .unchecked_into()
-    } else {
-        context.destination().unchecked_into()
-    })
 }
 
 fn play_layer(
