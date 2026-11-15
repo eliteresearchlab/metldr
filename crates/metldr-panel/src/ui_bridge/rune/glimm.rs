@@ -16,6 +16,9 @@ pub(super) struct Glimm {
     gpu: Option<Gpu>,
     /// A theme ground (dots or scanlines), made on the first frame that has one.
     ground: Option<(DeviceKey, super::ground::Ground)>,
+    /// Where the composer's slot sat in last frame's marks: it rarely moves, so each frame checks
+    /// there before scanning.
+    last_slot: usize,
 }
 
 fn phase(elapsed: f64) -> Option<(f32, f32)> {
@@ -51,7 +54,15 @@ fn extent(rect: [f32; 4], scale: f32) -> [u32; 2] {
 
 impl Compositor<State> for Glimm {
     fn render(&mut self, frame: &mut Frame<'_, State>) {
-        let slot = frame.rt.marks.iter().position(|mark| *mark == MARK);
+        let marks = &frame.rt.marks;
+        let slot = if marks.get(self.last_slot) == Some(&MARK) {
+            Some(self.last_slot)
+        } else {
+            marks.iter().position(|mark| *mark == MARK)
+        };
+        if let Some(slot) = slot {
+            self.last_slot = slot;
+        }
         let reduced = slot.is_none_or(|index| frame.rt.instances[index].uv[1] > 0.5);
         if let Some(elapsed) = &mut self.elapsed {
             *elapsed += frame.dt;
