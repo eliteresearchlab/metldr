@@ -1,18 +1,12 @@
 use super::*;
-use crate::model::{
-    CodexFormField, CodexInputPrompt, CodexInputView, CodexQuestion, CodexQuestionOption, RunRoute,
-    RunStatus,
-};
+use crate::model::{CodexFormField, CodexInputPrompt, CodexInputView, RunRoute, RunStatus};
 use serde_json::{Map, Value, json};
 
 mod answer;
 mod display;
 mod observe;
 pub use answer::{UiCodexAnswer, UiCodexFieldAnswer, UiCodexQuestionAnswer};
-pub use display::{
-    UiCodexField, UiCodexOption, UiCodexPromptKind, UiCodexQuestion, UiCodexRequest,
-    UiCodexSnapshot,
-};
+pub use display::UiCodexSnapshot;
 pub(super) use observe::Observer;
 pub use observe::UiCodexSubscription;
 
@@ -402,6 +396,7 @@ fn validate_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{CodexQuestion, CodexQuestionOption};
     use answer::{Field, Kind, Question};
     #[cfg(feature = "rune-ui")]
     #[test]
@@ -579,5 +574,14 @@ mod tests {
 
 #[cfg(feature = "rune-ui")]
 pub(super) fn rune_reply_key(kind: &str, run: &RunId, request: &RunId, action: &str) -> String {
-    serde_json::to_string(&(kind, run.as_str(), request.as_str(), action)).expect("string key")
+    // The kind is fixed and run ids are hex, a colon and digits, so a newline join is unambiguous.
+    let parts = [kind, run.as_str(), request.as_str(), action];
+    let mut key = String::with_capacity(parts.iter().map(|part| part.len() + 1).sum());
+    for (index, part) in parts.into_iter().enumerate() {
+        if index > 0 {
+            key.push('\n');
+        }
+        key.push_str(part);
+    }
+    key
 }
