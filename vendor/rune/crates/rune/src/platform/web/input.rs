@@ -305,36 +305,46 @@ impl<S: 'static> Running<S> {
             });
             let weak = self.input.running.clone();
             let b = binding.clone(); let g = getters.clone(); let w = window.clone();
-            // Tab and the navigation keys reach the runtime as they would from the canvas, so a
-            // focused mirror button keeps menu arrows and Escape. Enter and Space stay with the
-            // button's own click; a held key does not repeat the press.
+            // Keys reach the runtime as they would from the canvas, so a focused mirror button keeps
+            // menu arrows, typeahead, Escape and app shortcuts. Enter and Space stay with the
+            // button's own click, and a held one does not repeat the press. A shortcut is not
+            // prevented, so the browser's own still work.
             let tab = Closure::<dyn FnMut(web_sys::Event)>::new(move |event| {
-                if !b.live.get() || !g.connected(&b.node) || !g.valid(&event, "keydown", b.node.as_ref(), b.node.as_ref())
-                    || [&g.ctrl, &g.alt, &g.meta].iter().any(|get| g.value(get, &event).and_then(|v| v.as_bool()) != Some(false)) { return; }
+                if !b.live.get() || !g.connected(&b.node) || !g.valid(&event, "keydown", b.node.as_ref(), b.node.as_ref()) { return; }
+                let held = |get: &Function| g.value(get, &event).and_then(|v| v.as_bool()) == Some(true);
+                let (shift, ctrl, alt, meta) = (held(&g.shift), held(&g.ctrl), held(&g.alt), held(&g.meta));
+                let mods = crate::Mods { shift, ctrl, alt, logo: meta, cmd: ctrl || meta };
                 let name = g.value(&g.key, &event).and_then(|v| v.as_string()).unwrap_or_default();
-                let key = match name.as_str() {
-                    "Tab" => crate::Key::Tab,
-                    "Escape" => crate::Key::Escape,
-                    "ArrowUp" => crate::Key::Up,
-                    "ArrowDown" => crate::Key::Down,
-                    "ArrowLeft" => crate::Key::Left,
-                    "ArrowRight" => crate::Key::Right,
-                    "Home" => crate::Key::Home,
-                    "End" => crate::Key::End,
-                    "PageUp" => crate::Key::PageUp,
-                    "PageDown" => crate::Key::PageDown,
-                    "Enter" | " " if g.value(&g.repeat, &event).and_then(|v| v.as_bool()) == Some(true) => {
-                        event.prevent_default();
-                        return;
-                    }
+                let navigation = match name.as_str() {
+                    "Tab" => Some(crate::Key::Tab),
+                    "Escape" => Some(crate::Key::Escape),
+                    "ArrowUp" => Some(crate::Key::Up),
+                    "ArrowDown" => Some(crate::Key::Down),
+                    "ArrowLeft" => Some(crate::Key::Left),
+                    "ArrowRight" => Some(crate::Key::Right),
+                    "Home" => Some(crate::Key::Home),
+                    "End" => Some(crate::Key::End),
+                    "PageUp" => Some(crate::Key::PageUp),
+                    "PageDown" => Some(crate::Key::PageDown),
+                    _ => None,
+                };
+                if name == "Enter" || name == " " {
+                    if held(&g.repeat) { event.prevent_default(); }
+                    return;
+                }
+                let mut chars = name.chars();
+                let (key, shortcut) = match (navigation, chars.next(), chars.next()) {
+                    (Some(key), _, _) if !(ctrl || alt || meta) => (key, false),
+                    (Some(_), _, _) => return,
+                    (None, Some(c), None) if mods.cmd => (crate::Key::Command(c.to_ascii_lowercase()), true),
+                    (None, Some(_), None) if !alt => (crate::Key::Text(name.clone()), false),
                     _ => return,
                 };
                 let Some(shared) = weak.upgrade() else { return }; let Ok(mut shared) = shared.try_borrow_mut() else { return };
                 let Some(r) = shared.as_mut() else { return };
                 if !r.native_registered(&b) || !r.rt.native_control(&b.path, &b.key) { return; }
-                event.prevent_default(); event.stop_propagation();
-                let shift = g.value(&g.shift, &event).and_then(|v| v.as_bool()) == Some(true);
-                r.rt.key(crate::KeyEvent { key, mods: crate::Mods { shift, ..Default::default() } });
+                if !shortcut { event.prevent_default(); event.stop_propagation(); }
+                r.rt.key(crate::KeyEvent { key, mods });
                 r.rt.frame(0.0); r.apply_frame_requests(&w); r.sync_input(true); w.request_redraw();
             });
             set_native_button(&self.input.handle, &node, true);
