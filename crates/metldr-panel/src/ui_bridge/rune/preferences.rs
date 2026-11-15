@@ -418,9 +418,10 @@ fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<Str
         .py(6.0)
         .radius(8.0)
         .fill(typography.field);
-    match typography.lip {
-        Some(lip) => super::theme::on_lip(el, lip, false),
-        None => el,
+    match (typography.lip, typography.neon) {
+        (Some(lip), _) => super::theme::on_lip(el, lip, false),
+        (None, Some(accent)) => super::theme::neon_key(el, accent),
+        (None, None) => el,
     }
 }
 
@@ -571,8 +572,11 @@ pub(super) struct Typography {
     pub(super) field: Color,
     /// The lip a key stands on, on a molded theme.
     pub(super) lip: Option<Color>,
-    /// Set in a monospaced face, as a molded theme's legends are.
+    /// Set in a monospaced face, as a molded or neon theme's legends are.
     pub(super) mono: bool,
+    /// A neon theme's accent: its keys are outlined in it, and its legends print in capitals
+    /// with a little tracking, as a HUD's do.
+    pub(super) neon: Option<Color>,
 }
 
 impl Typography {
@@ -581,7 +585,8 @@ impl Typography {
             line: palette.line,
             field: if palette.molded { palette.surface } else { palette.field },
             lip: palette.molded.then_some(palette.lip),
-            mono: palette.molded,
+            mono: palette.molded || palette.neon,
+            neon: palette.neon.then_some(palette.accent),
             scale,
             ink: palette.ink,
             press: palette.press,
@@ -590,24 +595,26 @@ impl Typography {
 
     pub(super) fn font(self, size: f32, weight: f32) -> TextStyle {
         let style = TextStyle::new(size * self.scale, weight);
-        if self.mono { style.mono() } else { style }
+        let style = if self.mono { style.mono() } else { style };
+        if self.neon.is_some() { style.tracking(0.3) } else { style }
     }
 
     pub(super) fn text(self, value: impl Into<String>) -> El {
         text(value).font(self.font(13.0, 400.0)).color(self.ink)
     }
 
-    /// A control's printed legend: lowercase on a molded theme, as its keys are printed. The
-    /// control keeps the original wording as its accessible name.
+    /// A control's printed legend: lowercase on a molded theme, as its keys are printed, and
+    /// capitals on a neon one, as a HUD's are. The control keeps the original wording as its
+    /// accessible name.
     pub(super) fn legend(self, label: impl Into<String>) -> El {
         let mut label = label.into();
-        if self.mono {
-            // Legends are almost always ASCII: lowercase those in place, without a second string.
-            if label.is_ascii() {
-                label.make_ascii_lowercase();
-            } else {
-                label = label.to_lowercase();
-            }
+        // Legends are almost always ASCII: change those in place, without a second string.
+        match (self.neon.is_some(), self.mono, label.is_ascii()) {
+            (true, _, true) => label.make_ascii_uppercase(),
+            (true, _, false) => label = label.to_uppercase(),
+            (false, true, true) => label.make_ascii_lowercase(),
+            (false, true, false) => label = label.to_lowercase(),
+            (false, false, _) => {}
         }
         self.text(label)
     }

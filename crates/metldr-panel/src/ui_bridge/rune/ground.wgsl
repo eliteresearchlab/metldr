@@ -3,8 +3,11 @@ struct Geometry {
     clip: vec4<f32>,
     fade: vec4<u32>,
     viewport: vec4<f32>,
-    // Cell pitch and dot radius in device pixels, then the dot's opacity.
+    // Cell pitch and dot radius (or line thickness) in device pixels, the opacity, then the kind:
+    // 0 dots, 1 scanlines.
     params: vec4<f32>,
+    // The mark's colour, linear.
+    color: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> geometry: Geometry;
 
@@ -26,8 +29,13 @@ fn vs(@builtin(vertex_index) index: u32) -> Vertex {
 fn fs(vertex: Vertex) -> @location(0) vec4<f32> {
     let pitch = geometry.params.x;
     let cell = (vertex.window - geometry.rect.xy) - floor((vertex.window - geometry.rect.xy) / pitch) * pitch;
-    let d = distance(cell, vec2(pitch * 0.5));
-    let dot = 1.0 - smoothstep(geometry.params.y - 0.5, geometry.params.y + 0.5, d);
-    let a = dot * geometry.params.z * clip_alpha(vertex.window, geometry.clip, geometry.fade);
-    return vec4(0.0, 0.0, 0.0, a);
+    var mark: f32;
+    if (geometry.params.w < 0.5) {
+        let d = distance(cell, vec2(pitch * 0.5));
+        mark = 1.0 - smoothstep(geometry.params.y - 0.5, geometry.params.y + 0.5, d);
+    } else {
+        mark = 1.0 - smoothstep(geometry.params.y - 0.5, geometry.params.y + 0.5, cell.y);
+    }
+    let a = mark * geometry.params.z * clip_alpha(vertex.window, geometry.clip, geometry.fade);
+    return vec4(geometry.color.rgb * a, a);
 }
