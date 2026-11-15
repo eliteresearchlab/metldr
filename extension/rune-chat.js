@@ -12,10 +12,15 @@ async function loadFonts() {
   return Promise.all(fonts.map(async name => new Uint8Array(await (await load(`/chat/fonts/${name}`)).arrayBuffer())));
 }
 
-// The chat draws with WebGPU, or with WebGL2 where WebGPU is missing. Without either, say what
-// to change instead of failing on a blank page.
-function canDraw() {
-  if ("gpu" in navigator && navigator.gpu) return true;
+// The chat draws with WebGPU, or with WebGL2 where WebGPU has no adapter. Without either, say
+// what to change instead of showing the renderer's error. `navigator.gpu` alone is not enough:
+// with graphics acceleration off it is there and finds no adapter.
+async function canDraw() {
+  try {
+    if (await navigator.gpu?.requestAdapter()) return true;
+  } catch {
+    // An adapter request that throws is no adapter.
+  }
   try {
     return Boolean(document.createElement("canvas").getContext("webgl2"));
   } catch {
@@ -37,7 +42,7 @@ function explain(detail) {
   if (detail) console.error("metldr chat could not start", detail);
 }
 
-if (!canDraw()) {
+if (!(await canDraw())) {
   explain();
 } else try {
   const fonts = loadFonts();
