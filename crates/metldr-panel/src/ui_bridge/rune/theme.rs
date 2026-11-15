@@ -358,6 +358,23 @@ pub(super) fn on_lip(el: El, lip: Color, primary: bool) -> El {
         .on_press_down(move |state: &mut super::State, _| state.sound(crate::interaction_audio::Cue::KeyDown(primary)))
 }
 
+/// A screen's root on a theme's material.
+pub(super) trait Root {
+    /// On a molded theme, the dot ground under everything and its keyboard focus ring: 2 points
+    /// in the key colour, 3 points out from the control.
+    fn material(self, p: &Palette) -> Self;
+}
+
+impl Root for El {
+    fn material(self, p: &Palette) -> Self {
+        if p.molded {
+            self.child(super::dots::ground()).focus_ring_default(2.0, 3.0, p.accent)
+        } else {
+            self
+        }
+    }
+}
+
 /// A text field's caret on a molded theme.
 pub(super) trait MoldedCaret {
     /// On a molded theme, a block caret in the key colour with the character under it in the
