@@ -31,18 +31,8 @@ pub(super) struct Palette {
     /// Text caret and selection in fields.
     pub(super) selection: Color,
     pub(super) light: bool,
-    /// Molded material: modules shade from a lighter top with a lit top edge, and keys stand on
-    /// a hard lip they sink onto when pressed. Flat themes draw neither.
-    pub(super) molded: bool,
-    /// Neon material: a dark HUD over scanlines, keys outlined by a lit hairline that glows,
-    /// sharp corners, uppercase monospaced legends and synth voices.
-    pub(super) neon: bool,
-    /// Retro material: warm panels over film grain, keys stamped on a hard dark shadow they press
-    /// into, monospaced type, a terminal's block caret and wooden voices.
-    pub(super) retro: bool,
-    /// Any material of a theme's own (molded, neon or retro): a ground under the canvas, mono
-    /// type, a block caret, a primary send key and voices; flat themes have none of these.
-    pub(super) crafted: bool,
+    /// The theme's material: what its panels, keys, ground, type, caret and voices are made of.
+    pub(super) material: Material,
     /// A key's lip below it, and a module's lit top edge.
     pub(super) lip: Color,
     pub(super) highlight: Color,
@@ -52,6 +42,39 @@ pub(super) struct Palette {
     /// A molded theme's gray LCD: its glass from top to bottom and the dark print on it.
     pub(super) glass: [Color; 3],
     pub(super) print: Color,
+}
+
+/// What a theme is made of.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Material {
+    /// Plain fills and hairlines, no ground, no voices of its own.
+    Flat,
+    /// Modules shade from a lighter top with a lit top edge, and keys stand on a hard lip they
+    /// sink onto when pressed, over a dot grid.
+    Molded,
+    /// A dark HUD over scanlines, keys outlined by a lit hairline that glows, sharp corners,
+    /// uppercase monospaced legends and synth voices.
+    Neon,
+    /// Warm panels over film grain, keys stamped on a hard dark shadow they press into,
+    /// monospaced type, a terminal's block caret and wooden voices.
+    Retro,
+}
+
+impl Palette {
+    pub(super) fn molded(&self) -> bool {
+        self.material == Material::Molded
+    }
+    pub(super) fn neon(&self) -> bool {
+        self.material == Material::Neon
+    }
+    pub(super) fn retro(&self) -> bool {
+        self.material == Material::Retro
+    }
+    /// Any material of a theme's own: a ground under the canvas, mono type, a block caret, a
+    /// primary send key and voices; a flat theme has none of these.
+    pub(super) fn crafted(&self) -> bool {
+        self.material != Material::Flat
+    }
 }
 
 pub(super) type Lch = (f32, f32, f32);
@@ -250,10 +273,15 @@ impl Palette {
             press_solid: c(ramp.surface).alpha(0.16),
             selection: c(accent).alpha(0.3),
             light,
-            molded,
-            neon: std::ptr::eq(ramp, &CYBERPUNK),
-            retro: std::ptr::eq(ramp, &GRUVBOX),
-            crafted: molded || std::ptr::eq(ramp, &CYBERPUNK) || std::ptr::eq(ramp, &GRUVBOX),
+            material: if molded {
+                Material::Molded
+            } else if std::ptr::eq(ramp, &CYBERPUNK) {
+                Material::Neon
+            } else if std::ptr::eq(ramp, &GRUVBOX) {
+                Material::Retro
+            } else {
+                Material::Flat
+            },
             lip: c(ramp.lip),
             highlight: c(ramp.highlight),
             on_accent: if accent.0 < 0.8 { oklch(0.98, 0.0, 0.0) } else { oklch(0.18, 0.0, 0.0) },
@@ -309,7 +337,7 @@ pub(super) fn detent(el: El) -> El {
 fn settle(p: &Palette, flat: f32, molded: f32) -> Spring {
     // A neon HUD snaps: its surfaces land in three quarters of a flat theme's time. A retro
     // theme grooves: its surfaces take a little longer and settle with a soft bounce.
-    match (p.molded, p.neon, p.retro) {
+    match (p.molded(), p.neon(), p.retro()) {
         (true, _, _) => Spring::from_motion(molded, 0.0),
         (_, true, _) => Spring::from_motion(flat * 0.75, 0.0),
         (_, _, true) => Spring::from_motion(flat * 1.15, 0.12),
@@ -365,16 +393,16 @@ pub(super) fn card(palette: &Palette) -> El {
 /// it while pressed instead of shrinking; on a flat theme
 /// it keeps the outline and field fill of an outlined control.
 pub(super) fn keycap(el: El, p: &Palette) -> El {
-    if p.neon {
+    if p.neon() {
         return neon_key(el.fill(p.surface), p.accent);
     }
-    if p.retro {
+    if p.retro() {
         // A retro key is stamped: a heavier hairline, softened corners, and a hard dark shadow
         // it presses into.
         return on_lip(el.radius(4.0).fill(p.surface).border(1.5, p.line_strong), p.lip, false);
     }
-    let el = el.radius(if p.molded { 6.0 } else { 8.0 }).fill(if p.molded { p.surface } else { p.field }).border(1.0, p.line);
-    if p.molded { on_lip(el, p.lip, false) } else { el }
+    let el = el.radius(if p.molded() { 6.0 } else { 8.0 }).fill(if p.molded() { p.surface } else { p.field }).border(1.0, p.line);
+    if p.molded() { on_lip(el, p.lip, false) } else { el }
 }
 
 /// A neon key: sharp 2 point corners, a lit hairline in `accent` with a soft glow around it, and
@@ -405,11 +433,11 @@ pub(super) trait Root {
 impl Root for El {
     fn material(self, p: &Palette) -> Self {
         let el = self.children(super::ground::ground(p));
-        if p.molded {
+        if p.molded() {
             el.focus_ring_default(2.0, 3.0, p.accent)
-        } else if p.neon {
+        } else if p.neon() {
             el.focus_ring_default(1.5, 2.0, p.accent)
-        } else if p.retro {
+        } else if p.retro() {
             el.focus_ring_default(2.0, 2.0, p.accent)
         } else {
             el
@@ -426,18 +454,18 @@ pub(super) trait ThemeCaret {
 
 impl ThemeCaret for El {
     fn theme_caret(self, p: &Palette) -> Self {
-        if p.crafted { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
+        if p.crafted() { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
     }
 }
 
 /// A module: on a molded theme it shades from a lighter top to its metal with a lit top edge;
 /// on a flat theme it is the plain page fill.
 pub(super) fn module(el: El, p: &Palette) -> El {
-    if p.neon {
+    if p.neon() {
         el.fill(p.page).border(1.0, p.accent.alpha(0.3)).shadow(0.0, 24.0, p.accent.alpha(0.1))
-    } else if p.retro {
+    } else if p.retro() {
         el.fill(p.page).border(1.5, p.line_strong).shadow(4.0, 0.0, p.lip)
-    } else if p.molded {
+    } else if p.molded() {
         el.gradient(p.hover, p.page).border_gradient(1.0, p.highlight, p.line_strong)
     } else {
         el.fill(p.page).border(1.0, p.line)
@@ -457,5 +485,5 @@ pub(super) fn lcd(el: El, p: &Palette) -> El {
 /// A lamp: a small round light in `color`, glowing on a molded theme.
 pub(super) fn led(color: Color, p: &Palette) -> El {
     let lamp = ::rune::el().size(6.0, 6.0).radius(3.0).fill(color).a11y_hidden();
-    if p.crafted { lamp.shadow(0.0, 6.0, color.alpha(0.6)) } else { lamp }
+    if p.crafted() { lamp.shadow(0.0, 6.0, color.alpha(0.6)) } else { lamp }
 }

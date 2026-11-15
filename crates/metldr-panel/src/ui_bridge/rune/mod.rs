@@ -1804,7 +1804,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         let line = typography
             .text(status)
             .font(typography.font(12.0, 400.0).lh(16.0 * typography.scale))
-            .color(if p.molded { p.print } else if p.neon || p.retro { p.accent } else { p.ink_2 })
+            .color(if p.molded() { p.print } else if p.neon() || p.retro() { p.accent } else { p.ink_2 })
             .single_line()
             .truncate()
             .h(16.0 * typography.scale)
@@ -1839,12 +1839,12 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         toolbar = toolbar.child(control);
     }
     let readout = row().w_full().gap(6.0).items_center().child(theme::led(lamp, p)).child(line);
-    let readout = if p.molded {
+    let readout = if p.molded() {
         theme::lcd(readout.px(10.0).py(5.0), p)
-    } else if p.neon {
+    } else if p.neon() {
         // A neon status reads as a HUD strip: the line in the accent over a dark glass edged in it.
         readout.px(10.0).py(5.0).radius(2.0).fill(p.page).border(1.0, p.accent.alpha(0.35))
-    } else if p.retro {
+    } else if p.retro() {
         // A retro status is a terminal line: the accent on the darkest ground, stamped in.
         readout.px(10.0).py(5.0).radius(4.0).fill(p.lip).border(1.5, p.line_strong)
     } else {

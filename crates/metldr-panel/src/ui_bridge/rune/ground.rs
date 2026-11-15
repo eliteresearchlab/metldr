@@ -12,11 +12,11 @@ const WORDS: usize = 24;
 /// The slot to put under a theme's canvas: it fills its parent and draws the theme's ground, or
 /// nothing on a flat theme. Its data carries the kind, the opacity and the colour.
 pub(super) fn ground(p: &super::theme::Palette) -> Option<::rune::El> {
-    let (kind, opacity, color) = if p.molded {
+    let (kind, opacity, color) = if p.molded() {
         (0.0, 0.14, ::rune::Color::BLACK)
-    } else if p.neon {
+    } else if p.neon() {
         (1.0, 0.07, p.accent)
-    } else if p.retro {
+    } else if p.retro() {
         (2.0, 0.06, p.ink)
     } else {
         return None;

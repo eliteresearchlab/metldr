@@ -723,7 +723,7 @@ fn pressable(
     if !enabled {
         return el.opacity(0.5);
     }
-    let el = if scale && !p.molded {
+    let el = if scale && !p.molded() {
         el.press_scale(super::theme::PRESS_SCALE)
     } else {
         el

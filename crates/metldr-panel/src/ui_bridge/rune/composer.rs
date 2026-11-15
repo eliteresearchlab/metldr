@@ -190,7 +190,7 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
 /// The composer's frame on the theme's material: a neon frame glows while focused, a retro one is
 /// stamped on its hard shadow, and the others keep a hairline that darkens while focused.
 fn frame(el: El, p: &Palette, focused: bool) -> El {
-    let (line, radius) = match (p.neon, p.retro, focused) {
+    let (line, radius) = match (p.neon(), p.retro(), focused) {
         (true, _, true) => (p.accent.alpha(0.7), 3.0),
         (true, _, false) => (p.accent.alpha(0.35), 3.0),
         (_, true, _) => (p.line_strong, 6.0),
@@ -198,9 +198,9 @@ fn frame(el: El, p: &Palette, focused: bool) -> El {
         _ => (p.line, RADIUS),
     };
     let el = el.border(BORDER, line).radius(radius).clip_rounded(radius);
-    if p.neon {
+    if p.neon() {
         el.shadow(0.0, 18.0, p.accent.alpha(if focused { 0.25 } else { 0.0 }))
-    } else if p.retro {
+    } else if p.retro() {
         el.shadow(4.0, 0.0, p.lip)
     } else {
         el
@@ -289,7 +289,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     };
     let mut field = ::rune::el::text_input(
         &state.draft,
-        if p.crafted {
+        if p.crafted() {
             TextStyle::new((16.0 * typography.scale).max(16.0), 400.0).mono()
         } else {
             TextStyle::new((16.0 * typography.scale).max(16.0), 400.0)
@@ -438,16 +438,16 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     } else {
         let can_send = state.can_send();
         // A molded or neon send is the primary key, in the accent with its legend in `on_accent`.
-        let (ink, fill) = match (can_send, p.crafted) {
+        let (ink, fill) = match (can_send, p.crafted()) {
             (true, true) => (p.on_accent, p.accent),
             (true, false) => (p.surface, p.ink),
             (false, _) => (p.ink_2, p.line_strong),
         };
         let mut send = button("rune-send", "Send", &SEND, ink).fill(fill).disabled(!can_send);
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
-        if (p.molded || p.retro) && can_send {
+        if (p.molded() || p.retro()) && can_send {
             send = super::theme::on_lip(send, p.accent.mix(::rune::Color::BLACK, 0.45), true);
-        } else if p.neon && can_send {
+        } else if p.neon() && can_send {
             // A neon primary key glows in its accent and sounds the deeper down-stroke.
             send = send.radius(2.0).shadow(0.0, 14.0, p.accent.alpha(0.5)).on_press_down(|state: &mut State, _| {
                 state.sound(crate::interaction_audio::Cue::KeyDown(true))
@@ -455,7 +455,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         }
         if can_send {
             send = send.press(p.press_solid);
-            if !p.molded {
+            if !p.molded() {
                 send = send.press_scale(super::theme::PRESS_SCALE);
             }
             send = send
