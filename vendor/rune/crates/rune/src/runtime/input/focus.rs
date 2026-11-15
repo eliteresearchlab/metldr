@@ -161,9 +161,12 @@ impl<S: 'static> Runtime<S> {
             .any(|(j, m)| (m.focus.ring.is_some() || m.focus.ring_off) && self.focus_ring_visible(j));
         (!own).then_some(i)
     }
-    /// AppKit's focus ring: 3 points just outside the border box.
-    pub(super) fn default_focus_ring(&self) -> crate::el::Outline {
-        crate::el::Outline { width: 3.0, offset: 0.0, color: self.system_accent.focus(self.env.system_dark) }
+    /// Node `i`'s default ring: the nearest `focus_ring_default` above it, else AppKit's, 3
+    /// points just outside the border box.
+    pub(super) fn default_focus_ring(&self, i: usize) -> crate::el::Outline {
+        std::iter::successors(Some(i), |&p| self.nodes[p].parent)
+            .find_map(|p| self.nodes[p].focus.ring_default)
+            .unwrap_or(crate::el::Outline { width: 3.0, offset: 0.0, color: self.system_accent.focus(self.env.system_dark) })
     }
     pub(super) fn set_focus(&mut self, path: Option<String>, keyboard: bool) -> bool {
         let path = path.filter(|p| !self.nodes.iter().any(|n| n.path == *p && n.a11y.disabled));
