@@ -616,7 +616,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .color(p.ink_3),
                     )
                     .anchored_fit("rune-composer", Side::Top, Align::Start, 8.0)
-                    .transition(super::theme::pop_in())
+                    .transition(super::theme::pop_in(p))
                     .focus_return("rune-source-trigger")
                     .on_key(|state: &mut State, key, _| {
                         if key.key == Key::Escape {
@@ -689,7 +689,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                 .scroll(::rune::ScrollSpec {
                     stick_bottom: false,
                 });
-            let mut menu = metldr_ui::menu::popup(menu, "Models", "rune-model-trigger", Side::Top, super::theme::pop_in(), close_menu);
+            let mut menu = metldr_ui::menu::popup(menu, "Models", "rune-model-trigger", Side::Top, super::theme::pop_in(p), close_menu);
             if supports_plan(&state.selection) {
                 let modes = [
                     (Mode::Configured, "Codex configured mode"),

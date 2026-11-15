@@ -257,11 +257,27 @@ pub(super) fn reveal(el: El, shown: bool, delay: f32) -> El {
         .blur_motion(anim())
 }
 
+/// A molded control snapping to its next stop, slow off the mark and decisive into place.
+pub(super) const EASE_DETENT: Easing = Easing::cubic(0.45, 0.0, 0.15, 1.0);
+
+/// Moves `el`'s offset to its next stop as a molded detent does: 120 ms on [`EASE_DETENT`]. Under
+/// Reduce Motion the offset lands at once.
+pub(super) fn detent(el: El) -> El {
+    el.offset_motion(Anim::new(Curve::tween(0.12, EASE_DETENT)))
+}
+
+/// How long a surface takes to settle into place: a molded theme's parts are heavier, so its
+/// popups take 260 ms and its sheets 300 ms on a critically damped spring, fast off the mark
+/// and landing softly.
+fn settle(p: &Palette, flat: f32, molded: f32) -> Spring {
+    Spring::from_motion(if p.molded { molded } else { flat }, 0.0)
+}
+
 /// A menu that opens above its trigger grows from the trigger's
-/// corner, 0.95 to 1 with opacity, on a critically damped 160 ms spring; the exit is shorter.
-/// Under Reduce Motion Rune turns it into a short fade without the scale.
-pub(super) fn pop_in() -> Transition {
-    let enter = Spring::from_motion(0.16, 0.0);
+/// corner, 0.95 to 1 with opacity, on a critically damped 160 ms spring (260 ms molded); the
+/// exit is shorter. Under Reduce Motion Rune turns it into a short fade without the scale.
+pub(super) fn pop_in(p: &Palette) -> Transition {
+    let enter = settle(p, 0.16, 0.26);
     Transition::scale_anchor(0.95, Vec2 { x: 0.0, y: 1.0 })
         .springs(SpringPair::with_exit_ratio(enter, 0.75))
 }
@@ -280,10 +296,11 @@ fn rise_over(seconds: f32) -> Transition {
 }
 
 /// A sheet such as Saved chats opens from its centre, 0.96 to 1 with opacity, on a critically damped
-/// 250 ms spring; the exit is shorter. Under Reduce Motion Rune turns it into a short fade without the scale.
-pub(super) fn sheet() -> Transition {
+/// 250 ms spring (300 ms molded); the exit is shorter. Under Reduce Motion Rune turns it into a
+/// short fade without the scale.
+pub(super) fn sheet(p: &Palette) -> Transition {
     Transition::scale_anchor(0.96, Vec2 { x: 0.5, y: 0.5 })
-        .springs(SpringPair::with_exit_ratio(Spring::from_motion(0.25, 0.0), 0.75))
+        .springs(SpringPair::with_exit_ratio(settle(p, 0.25, 0.3), 0.75))
 }
 
 /// A reply card: surface, 10 px radius, hairline ring and a soft shadow, 12 px padding. It fades
