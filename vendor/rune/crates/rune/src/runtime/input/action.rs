@@ -78,6 +78,12 @@ impl ActionQueue {
     pub(super) fn is_empty(&self) -> bool { self.0.is_empty() }
     pub(super) fn retain(&mut self, mut keep: impl FnMut(&Action) -> bool) { self.0.retain(|q| keep(&q.action)); }
     pub(super) fn remove(&mut self, index: usize) -> Action { self.0.remove(index).action }
+    /// Takes out every queued action `pick` matches, in order, in one pass.
+    pub(super) fn take_where(&mut self, pick: impl Fn(&Action) -> bool) -> Vec<Action> {
+        let (taken, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.0).into_iter().partition(|q| pick(&q.action));
+        self.0 = kept;
+        taken.into_iter().map(|q| q.action).collect()
+    }
 }
 
 impl Extend<Action> for ActionQueue {

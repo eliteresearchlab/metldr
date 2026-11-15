@@ -72,11 +72,7 @@ impl<S: 'static> Runtime<S> {
         let scroll = self.touch_scroll_start(x, y);
         self.pointer_move(x, y);
         self.pointer_down(x, y);
-        let mut focus = Vec::new();
-        let focusing = |a: &Action| matches!(a, Action::FocusControl(_) | Action::Focus(..) | Action::Blur);
-        while let Some(i) = { let at = self.queue.iter().position(focusing); at } {
-            focus.push(self.queue.remove(i));
-        }
+        let focus = self.queue.take_where(|a| matches!(a, Action::FocusControl(_) | Action::Focus(..) | Action::Blur));
         self.touch.finger = Some(Finger { id, origin: (x, y), last: 0.0, at: time, velocity: 0.0, mode: Mode::Pending, scroll, horizontal: false, focus });
     }
 
