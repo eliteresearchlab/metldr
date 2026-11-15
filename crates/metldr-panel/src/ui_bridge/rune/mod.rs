@@ -1812,18 +1812,24 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     }
     // One fixed line under the controls: a longer status never rewraps the row or moves the
     // thread below it.
-    let toolbar = col().w_full().gap(6.0).child(toolbar).child(
-        typography
-            .text(status)
-            .font(typography.font(12.0, 400.0).lh(16.0 * typography.scale))
-            .color(p.ink_2)
-            .single_line()
-            .truncate()
-            .h(16.0 * typography.scale)
-            .w_full()
-            .key("conversation-status")
-            .role("status"),
-    );
+    // The lamp beside the status: lost or failing is red, working amber, ready green. A molded
+    // theme sets the line on a screen, as an LCD.
+    let fault = connection.stale() || !connection.connected() || connection.uncertain() || error.is_some()
+        || state.conversations.error.is_some();
+    let lamp = if fault { p.red } else if status == "Ready" { p.green } else { p.orange };
+    let line = typography
+        .text(status)
+        .font(typography.font(12.0, 400.0).lh(16.0 * typography.scale))
+        .color(if p.molded { p.screen_ink } else { p.ink_2 })
+        .single_line()
+        .truncate()
+        .h(16.0 * typography.scale)
+        .grow(1.0)
+        .key("conversation-status")
+        .role("status");
+    let readout = row().w_full().gap(6.0).items_center().child(theme::led(lamp, &p)).child(line);
+    let readout = if p.molded { readout.px(8.0).py(4.0).radius(6.0).fill(p.screen) } else { readout };
+    let toolbar = col().w_full().gap(6.0).child(toolbar).child(readout);
     let shown = cx.is_reduced_motion() || state.welcome_revealed;
     let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });
     if empty {

@@ -522,6 +522,8 @@ pub(super) struct Typography {
     pub(super) field: Color,
     /// The lip a key stands on, on a molded theme.
     pub(super) lip: Option<Color>,
+    /// Set in a monospaced face, as a molded theme's legends are.
+    pub(super) mono: bool,
 }
 
 impl Typography {
@@ -530,6 +532,7 @@ impl Typography {
             line: palette.line,
             field: if palette.molded { palette.surface } else { palette.field },
             lip: palette.molded.then_some(palette.lip),
+            mono: palette.molded,
             scale,
             ink: palette.ink,
             press: palette.press,
@@ -537,7 +540,8 @@ impl Typography {
     }
 
     pub(super) fn font(self, size: f32, weight: f32) -> TextStyle {
-        TextStyle::new(size * self.scale, weight)
+        let style = TextStyle::new(size * self.scale, weight);
+        if self.mono { style.mono() } else { style }
     }
 
     pub(super) fn text(self, value: impl Into<String>) -> El {
