@@ -524,7 +524,7 @@ impl<S: 'static> Runtime<S> {
                             selected: matches!(n.role, "tab" | "option").then_some(n.focus.selected),
                             disabled: n.a11y.disabled || n.inert || n.a11y.more.as_deref().is_some_and(|m| m.unavailable),
                             busy: n.a11y.more.as_deref().is_some_and(|m| m.busy),
-                            popup: n.a11y.more.as_deref().and_then(|m| m.has_popup),
+                            popup: n.a11y.has_popup,
                         })),
                         path: n.path.clone(),
                         parent: content_parent.clone(),
