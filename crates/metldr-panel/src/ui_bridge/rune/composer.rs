@@ -162,14 +162,22 @@ fn sources(state: &mut State, _: &mut Tx) {
     };
 }
 
-fn models(state: &mut State, _: &mut Tx) {
-    state.sound(crate::interaction_audio::Cue::Press);
-    state.source_engaged = false;
-    state.menu = if state.menu == Some(Menu::Models) {
-        None
-    } else {
-        Some(Menu::Models)
+/// The keys of the model menu's first and last items, in the order the menu shows them.
+fn model_ends(state: &State) -> (String, String) {
+    let all = state.choices();
+    let total = all.len();
+    let mut choices: Vec<_> = all.into_iter().filter(|choice| choice.enabled).collect();
+    choices.sort_by_key(|choice| choice.short().0);
+    let key = |choice: Option<&crate::composer::choices::Choice>| {
+        choice.map_or_else(|| "model:setup".to_owned(), |choice| format!("model:{}", choice.value))
     };
+    let last = if choices.len() < total { "model:setup".to_owned() } else { key(choices.last()) };
+    (key(choices.first()), last)
+}
+
+fn close_menu(state: &mut State) {
+    state.menu = None;
+    state.source_engaged = false;
 }
 
 pub(super) fn source_menu_owns_enter(state: &State) -> bool {
@@ -238,9 +246,8 @@ fn menu_row(
         .child(if active {
             ::rune::el::icon(&CHECK, 13.0).color(p.ink)
         } else {
-            typography.text("").size(13.0, 13.0)
+            ::rune::el().size(13.0, 13.0)
         })
-        .focusable(true)
 }
 
 pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
@@ -359,34 +366,17 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .hover(p.hover)
         .press(p.strong)
         .press_scale(super::theme::PRESS_SCALE)
-        .role("button")
-        .focusable(true)
-        .label("Choose model")
-        .expanded(state.menu == Some(Menu::Models))
-        .on_press_tx(models)
-        .on_key(|state: &mut State, key, tx| {
-            if !matches!(&key.key, Key::Down | Key::Up) {
-                return enter(state, key, tx, models);
-            }
-            state.menu = Some(Menu::Models);
+        .label("Choose model");
+    let model = metldr_ui::menu::trigger(
+        model,
+        state.menu == Some(Menu::Models),
+        model_ends,
+        |state: &mut State, open, _| {
+            state.sound(crate::interaction_audio::Cue::Press);
             state.source_engaged = false;
-            let choices = state.choices();
-            let choice = if key.key == Key::Down {
-                choices
-                    .iter()
-                    .find(|choice| choice.enabled && !state.running())
-            } else {
-                choices
-                    .iter()
-                    .rev()
-                    .find(|choice| choice.enabled && !state.running())
-            };
-            let Some(choice) = choice else { return true };
-            let focus_key = format!("model:{}", choice.value);
-            state.menu = Some(Menu::Models);
-            tx.focus(focus_key);
-            true
-        });
+            state.menu = open.map(|_| Menu::Models);
+        },
+    );
     let running = state.running();
     let dictate = button("rune-dictate", "Dictation unavailable", &MIC, p.muted)
         .opacity(0.48)
@@ -638,43 +628,27 @@ pub(super) fn menu(state: &State) -> Option<El> {
                 }
                 let active = choice.value == state.selection;
                 let disabled = state.running();
-                let mut model = menu_row(
-                    typography,
-                    p,
-                    format!("model:{}", choice.value),
-                    name,
-                    tag,
-                    active,
-                )
-                .disabled(disabled)
-                .checked(active)
-                .role("menuitemradio")
-                .label(choice.label.clone());
-                if !disabled {
-                    model = model
-                        .press(p.strong)
-                        .on_press_tx(move |state: &mut State, tx| {
-                            if !state.running() {
-                                state.select(choice.value.to_string(), tx);
-                            }
-                        });
-                }
-                rows = rows.child(model);
+                let el = menu_row(typography, p, format!("model:{}", choice.value), name, tag, active)
+                    .label(choice.label.clone())
+                    .press(p.strong);
+                let close: metldr_ui::menu::CloseOnSelect<State> = Some(std::rc::Rc::new(close_menu));
+                rows = rows.child(metldr_ui::menu::radio_item(el, disabled, active, close, move |state: &mut State, tx| {
+                    if !state.running() {
+                        state.select(choice.value.to_string(), tx);
+                    }
+                }));
             }
             if hidden > 0 {
                 let name = if shown == 0 { "Set up a model" } else { "Set up more" };
-                rows = rows.child(
-                    menu_row(typography, p, "model:setup".into(), name.into(), "", false)
-                        .role("menuitem")
-                        .label(name)
-                        .press(p.strong)
-                        .on_press_tx(|state: &mut State, tx| state.open_settings(tx)),
-                );
+                rows = rows.child(metldr_ui::menu::item(
+                    menu_row(typography, p, "model:setup".into(), name.into(), "", false).label(name).press(p.strong),
+                    false,
+                    |state: &mut State, tx| state.open_settings(tx),
+                    close_menu,
+                ));
             }
-            let mut menu = col()
+            let menu = col()
                 .key("rune-model-menu")
-                .role("menu")
-                .focus_group()
                 .min_w(176.0)
                 .max_w(416.0)
                 .max_h(384.0)
@@ -686,19 +660,8 @@ pub(super) fn menu(state: &State) -> Option<El> {
                 .child(rows)
                 .scroll(::rune::ScrollSpec {
                     stick_bottom: false,
-                })
-                .anchored_fit("rune-model-trigger", Side::Top, Align::Start, 8.0)
-                .transition(super::theme::pop_in())
-                .focus_return("rune-model-trigger")
-                .on_key(|state: &mut State, key, _| {
-                    if key.key == Key::Escape {
-                        state.menu = None;
-                        state.source_engaged = false;
-                        true
-                    } else {
-                        false
-                    }
                 });
+            let mut menu = metldr_ui::menu::popup(menu, "Models", "rune-model-trigger", Side::Top, super::theme::pop_in(), close_menu);
             if supports_plan(&state.selection) {
                 let modes = [
                     (Mode::Configured, "Codex configured mode"),
@@ -708,7 +671,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     col().key("rune-mode-rows").w_full(),
                     |rows, (mode, label)| {
                         let disabled = state.capture_disabled();
-                        let mut mode_row = row()
+                        let mode_row = row()
                             .key(label)
                             .w_full()
                             .h(30.0)
@@ -727,28 +690,18 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .child(if state.mode == mode {
                                 ::rune::el::icon(&CHECK, 13.0).color(p.ink)
                             } else {
-                                typography.text("").size(13.0, 13.0)
+                                ::rune::el().size(13.0, 13.0)
                             })
-                            .focusable(true)
-                            .disabled(disabled)
-                            .checked(state.mode == mode)
-                            .role("menuitemradio")
-                            .label(label);
-                        if !disabled {
-                            mode_row = mode_row.press(p.strong).on_press_tx(
-                                move |state: &mut State, _| {
-                                    if state.capture_disabled() || !supports_plan(&state.selection)
-                                    {
-                                        return;
-                                    }
-                                    state.mode = mode;
-                                    state.menu = None;
-                                    state.source_engaged = false;
-                                    state.draft.focused = true;
-                                },
-                            );
-                        }
-                        rows.child(mode_row)
+                            .label(label)
+                            .press(p.strong);
+                        let close: metldr_ui::menu::CloseOnSelect<State> = Some(std::rc::Rc::new(close_menu));
+                        rows.child(metldr_ui::menu::radio_item(mode_row, disabled, state.mode == mode, close, move |state: &mut State, _| {
+                            if state.capture_disabled() || !supports_plan(&state.selection) {
+                                return;
+                            }
+                            state.mode = mode;
+                            state.draft.focused = true;
+                        }))
                     },
                 );
                 menu = menu.child(mode_rows.role("group").label("Codex mode"));
@@ -824,7 +777,7 @@ mod tests {
             (Key::Escape, "rune-source-trigger"),
             (Key::Tab, "rune-composer-field"),
             (Key::Tab, "rune-model-trigger"),
-            (Key::Enter, "rune-model-trigger"),
+            (Key::Enter, "model:"),
             (Key::Escape, "rune-model-trigger"),
             (Key::Tab, "rune-source-trigger"),
         ] {
@@ -833,7 +786,11 @@ mod tests {
                 mods: Mods::default(),
             });
             rt.frame(0.0);
-            assert_eq!(focused(&rt).as_deref(), Some(target));
+            // The model menu opens with focus inside it: its first item, or the menu itself while
+            // it has none.
+            let at = focused(&rt).unwrap_or_default();
+            let inside = at.starts_with("model:") || at == "rune-model-menu";
+            assert!(at == target || (target == "model:" && inside), "{at} is not {target}");
             if key == Key::Enter {
                 assert!(rt.state.menu.is_some());
             } else if key == Key::Escape {

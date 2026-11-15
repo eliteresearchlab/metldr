@@ -325,6 +325,7 @@ export function syncA11y(h, json, revision) {
             setOptionalAttribute(el, 'aria-selected', item.sel === undefined ? undefined : String(item.sel));
             setOptionalAttribute(el, 'aria-disabled', item.d ? 'true' : undefined);
             setOptionalAttribute(el, 'aria-busy', item.b ? 'true' : undefined);
+            setOptionalAttribute(el, 'aria-haspopup', item.popup);
         }
         const sig = item.k === 'input' ? item.value ?? '' : item.u?.length ? JSON.stringify(item.u) : item.t ?? '';
         if (!group && el._sig !== sig) {
