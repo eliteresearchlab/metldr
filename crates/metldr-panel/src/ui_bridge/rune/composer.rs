@@ -427,7 +427,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .disabled(!can_send);
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
         if p.molded && can_send {
-            send = super::theme::key_down(send.shadow(2.0, 0.0, p.accent.mix(::rune::Color::BLACK, 0.45)).press_travel(2.0), true);
+            send = super::theme::on_lip(send, p.accent.mix(::rune::Color::BLACK, 0.45), true);
         }
         if can_send {
             send = send.press(p.press_solid);
@@ -616,7 +616,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .color(p.ink_3),
                     )
                     .anchored_fit("rune-composer", Side::Top, Align::Start, 8.0)
-                    .transition(super::theme::pop_in())
+                    .transition(super::theme::pop_in(p))
                     .focus_return("rune-source-trigger")
                     .on_key(|state: &mut State, key, _| {
                         if key.key == Key::Escape {
@@ -689,7 +689,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                 .scroll(::rune::ScrollSpec {
                     stick_bottom: false,
                 });
-            let mut menu = metldr_ui::menu::popup(menu, "Models", "rune-model-trigger", Side::Top, super::theme::pop_in(), close_menu);
+            let mut menu = metldr_ui::menu::popup(menu, "Models", "rune-model-trigger", Side::Top, super::theme::pop_in(p), close_menu);
             if supports_plan(&state.selection) {
                 let modes = [
                     (Mode::Configured, "Codex configured mode"),

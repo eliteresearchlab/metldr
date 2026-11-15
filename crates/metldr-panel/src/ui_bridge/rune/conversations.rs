@@ -436,7 +436,7 @@ impl Conversations {
             .radius(14.0)
             .border(1.0, p.line)
             .fill(p.page)
-            .transition(super::theme::sheet())
+            .transition(super::theme::sheet(p))
             .child(header)
             .child(list.shrink().min_h(0.0).scroll(ScrollSpec {
                 stick_bottom: false,

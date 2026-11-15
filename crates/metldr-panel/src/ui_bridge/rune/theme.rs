@@ -257,11 +257,27 @@ pub(super) fn reveal(el: El, shown: bool, delay: f32) -> El {
         .blur_motion(anim())
 }
 
+/// A molded control snapping to its next stop, slow off the mark and decisive into place.
+pub(super) const EASE_DETENT: Easing = Easing::cubic(0.45, 0.0, 0.15, 1.0);
+
+/// Moves `el`'s offset to its next stop as a molded detent does: 120 ms on [`EASE_DETENT`]. Under
+/// Reduce Motion the offset lands at once.
+pub(super) fn detent(el: El) -> El {
+    el.offset_motion(Anim::new(Curve::tween(0.12, EASE_DETENT)))
+}
+
+/// How long a surface takes to settle into place: a molded theme's parts are heavier, so its
+/// popups take 260 ms and its sheets 300 ms on a critically damped spring, fast off the mark
+/// and landing softly.
+fn settle(p: &Palette, flat: f32, molded: f32) -> Spring {
+    Spring::from_motion(if p.molded { molded } else { flat }, 0.0)
+}
+
 /// A menu that opens above its trigger grows from the trigger's
-/// corner, 0.95 to 1 with opacity, on a critically damped 160 ms spring; the exit is shorter.
-/// Under Reduce Motion Rune turns it into a short fade without the scale.
-pub(super) fn pop_in() -> Transition {
-    let enter = Spring::from_motion(0.16, 0.0);
+/// corner, 0.95 to 1 with opacity, on a critically damped 160 ms spring (260 ms molded); the
+/// exit is shorter. Under Reduce Motion Rune turns it into a short fade without the scale.
+pub(super) fn pop_in(p: &Palette) -> Transition {
+    let enter = settle(p, 0.16, 0.26);
     Transition::scale_anchor(0.95, Vec2 { x: 0.0, y: 1.0 })
         .springs(SpringPair::with_exit_ratio(enter, 0.75))
 }
@@ -280,10 +296,11 @@ fn rise_over(seconds: f32) -> Transition {
 }
 
 /// A sheet such as Saved chats opens from its centre, 0.96 to 1 with opacity, on a critically damped
-/// 250 ms spring; the exit is shorter. Under Reduce Motion Rune turns it into a short fade without the scale.
-pub(super) fn sheet() -> Transition {
+/// 250 ms spring (300 ms molded); the exit is shorter. Under Reduce Motion Rune turns it into a
+/// short fade without the scale.
+pub(super) fn sheet(p: &Palette) -> Transition {
     Transition::scale_anchor(0.96, Vec2 { x: 0.5, y: 0.5 })
-        .springs(SpringPair::with_exit_ratio(Spring::from_motion(0.25, 0.0), 0.75))
+        .springs(SpringPair::with_exit_ratio(settle(p, 0.25, 0.3), 0.75))
 }
 
 /// A reply card: surface, 10 px radius, hairline ring and a soft shadow, 12 px padding. It fades
@@ -305,13 +322,15 @@ pub(super) fn card(palette: &Palette) -> El {
 /// it keeps the outline and field fill of an outlined control.
 pub(super) fn keycap(el: El, p: &Palette) -> El {
     let el = el.radius(if p.molded { 6.0 } else { 8.0 }).fill(if p.molded { p.surface } else { p.field }).border(1.0, p.line);
-    if p.molded { key_down(el.shadow(2.0, 0.0, p.lip).press_travel(2.0), false) } else { el }
+    if p.molded { on_lip(el, p.lip, false) } else { el }
 }
 
-/// A molded key's down-stroke: it sounds as the pointer lands, and its activation the return.
-/// `primary` is the deeper primary key.
-pub(super) fn key_down(el: El, primary: bool) -> El {
-    el.on_press_down(move |state: &mut super::State, _| state.sound(crate::interaction_audio::Cue::KeyDown(primary)))
+/// A molded key standing on a hard 2 point `lip`: it sinks onto the lip while pressed and sounds
+/// its down-stroke as the pointer lands (deeper for the `primary` key), its activation the return.
+pub(super) fn on_lip(el: El, lip: Color, primary: bool) -> El {
+    el.shadow(2.0, 0.0, lip)
+        .press_travel(2.0)
+        .on_press_down(move |state: &mut super::State, _| state.sound(crate::interaction_audio::Cue::KeyDown(primary)))
 }
 
 /// A text field's caret on a molded theme.

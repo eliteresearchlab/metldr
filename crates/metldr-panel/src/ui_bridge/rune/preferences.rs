@@ -400,7 +400,7 @@ fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<Str
         .radius(8.0)
         .fill(typography.field);
     match typography.lip {
-        Some(lip) => super::theme::key_down(el.shadow(2.0, 0.0, lip).press_travel(2.0), false),
+        Some(lip) => super::theme::on_lip(el, lip, false),
         None => el,
     }
 }
@@ -467,13 +467,13 @@ fn segment(
     let press = Rc::clone(action);
     let mut el = ::rune::row().key(key).grow(1.0).min_h(28.0).items_center().justify_center().radius(8.0).label(label);
     if checked {
-        el = el.child(
-            metldr_ui::choice::indicator("preferences-text-size")
-                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-                .radius(8.0)
-                .fill(palette.surface)
-                .border(1.0, palette.line),
-        );
+        let indicator = metldr_ui::choice::indicator("preferences-text-size")
+            .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+            .radius(8.0)
+            .fill(palette.surface)
+            .border(1.0, palette.line);
+        // A molded indicator slides to its segment in 260 ms, as the theme's detents do.
+        el = el.child(if palette.molded { indicator.motion(::rune::Spring::from_motion(0.26, 0.0)) } else { indicator });
     }
     let el = el.child(typography.legend(label).color(if checked { palette.ink } else { palette.ink_2 }));
     let el = metldr_ui::choice::radio(el, !enabled, checked, move |state: &mut State, tx| press(state, value, tx));
@@ -490,15 +490,22 @@ fn sound_switch(
     action: &Rc<impl Fn(&mut State, Action, &mut Tx) + 'static>,
 ) -> El {
     let press = Rc::clone(action);
-    let thumb = ::rune::el().size(12.0, 12.0).radius(6.0).fill(if on { palette.surface } else { palette.ink_3 });
+    // The thumb slides by an offset, so a toggle repaints the switch without laying out its row.
+    // A molded switch is a slide switch: a key on its lip that snaps across on a detent.
+    let (track_w, thumb_w, thumb_h, travel) = if palette.molded { (44.0, 20.0, 16.0, 20.0) } else { (28.0, 12.0, 12.0, 12.0) };
+    let thumb = ::rune::el()
+        .size(thumb_w, thumb_h)
+        .radius(if palette.molded { 2.0 } else { 6.0 })
+        .fill(if on || palette.molded { palette.surface } else { palette.ink_3 })
+        .offset(if on { travel } else { 0.0 }, 0.0);
+    let thumb = if palette.molded { super::theme::detent(thumb.shadow(2.0, 0.0, palette.lip)) } else { thumb };
     let track = ::rune::row()
-        .size(28.0, 16.0)
+        .size(track_w, thumb_h + 4.0)
         .padding(2.0)
-        .radius(8.0)
+        .radius(if palette.molded { 3.0 } else { 8.0 })
         .fill(if on { palette.accent } else { palette.field })
         .border(1.0, if on { palette.accent } else { palette.line })
         .child(thumb);
-    let track = if on { track.justify_end() } else { track.justify_start() };
     let el = ::rune::row()
         .key("preferences-sound")
         .label("Interaction sounds")
