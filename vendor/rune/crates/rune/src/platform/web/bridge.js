@@ -293,34 +293,30 @@ export function syncA11y(h, json, revision) {
             : `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${bh}px;margin:0;padding:0;border:0;outline:none;background:transparent;color:transparent;font:${fs}px/1.25 sans-serif;overflow:hidden;white-space:pre-wrap;pointer-events:none;`;
         // Writing an unchanged style still invalidates it; most nodes keep their geometry between syncs.
         if (el._css !== css) { el._css = css; el.style.cssText = css; }
+        // Each write goes through setOptionalAttribute, which leaves an unchanged value alone: an
+        // attribute rewrite still mutates the node, and most nodes keep their state between syncs.
         if (group) {
-            el.setAttribute('role', item.k);
+            setOptionalAttribute(el, 'role', item.k);
             setOptionalAttribute(el, 'aria-label', item.t);
         }
-        if (item.k === 'status' || item.k === 'alert') {
-            el.setAttribute('role', item.k);
-            el.setAttribute('aria-live', item.k === 'alert' ? 'assertive' : 'polite');
-            el.setAttribute('aria-atomic', 'true');
-        } else if (tag === 'p') {
-            el.removeAttribute('role');
-            el.removeAttribute('aria-live');
-            el.removeAttribute('aria-atomic');
+        const live = item.k === 'status' || item.k === 'alert';
+        if (live || tag === 'p') {
+            setOptionalAttribute(el, 'role', live ? item.k : undefined);
+            setOptionalAttribute(el, 'aria-live', live ? (item.k === 'alert' ? 'assertive' : 'polite') : undefined);
+            setOptionalAttribute(el, 'aria-atomic', live ? 'true' : undefined);
         }
         if (item.k === 'input') {
             el._item = item;
-            el.setAttribute('aria-label', item.name);
+            setOptionalAttribute(el, 'aria-label', item.name);
             setOptionalAttribute(el, 'aria-description', item.description);
             setOptionalAttribute(el, 'aria-placeholder', item.placeholder);
-            el.setAttribute('aria-multiline', String(item.multiline));
-            el.setAttribute('aria-readonly', String(item.readOnly));
-            el.setAttribute('aria-disabled', String(item.disabled));
-            if (item.invalid) el.setAttribute('aria-invalid', 'true');
-            else el.removeAttribute('aria-invalid');
-
+            setOptionalAttribute(el, 'aria-multiline', String(item.multiline));
+            setOptionalAttribute(el, 'aria-readonly', String(item.readOnly));
+            setOptionalAttribute(el, 'aria-disabled', String(item.disabled));
+            setOptionalAttribute(el, 'aria-invalid', item.invalid ? 'true' : undefined);
         }
         if (tag === 'button') {
-            if (item.x === true || item.x === false) el.setAttribute('aria-expanded', String(item.x));
-            else el.removeAttribute('aria-expanded');
+            setOptionalAttribute(el, 'aria-expanded', item.x === true || item.x === false ? String(item.x) : undefined);
             // The control's own role and state: a toggle says pressed, a menu item radio checked,
             // a tab selected, and any of them unavailable or busy.
             setOptionalAttribute(el, 'role', item.role);
@@ -381,8 +377,8 @@ export function syncA11y(h, json, revision) {
 }
 
 function setOptionalAttribute(el, name, value) {
-    if (value) el.setAttribute(name, value);
-    else el.removeAttribute(name);
+    if (value) { if (el.getAttribute(name) !== value) el.setAttribute(name, value); }
+    else if (el.hasAttribute(name)) el.removeAttribute(name);
 }
 
 function setA11yInputHidden(el, hidden) {
