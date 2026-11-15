@@ -326,7 +326,8 @@ impl<S: 'static> Runtime<S> {
         for i in 0..self.nodes.len() {
             let n = &self.nodes[i];
             let press_scale = n.handlers.get().and_then(|h| h.press_scale);
-            if n.vis.hover.a <= 0.0 && !n.vis.hover_group && n.vis.press.a <= 0.0 && press_scale.is_none() { continue; }
+            let press_travel = n.handlers.get().and_then(|h| h.press_travel);
+            if n.vis.hover.a <= 0.0 && !n.vis.hover_group && n.vis.press.a <= 0.0 && press_scale.is_none() && press_travel.is_none() { continue; }
             if self.is_exiting(n.id) { continue; }
             match self.hover_flip(i, captured, alone) {
                 Some(f) if f.changed => flips.push(f),
@@ -341,7 +342,7 @@ impl<S: 'static> Runtime<S> {
                 Some(_) => {}
                 None => {}
             }
-            if n.vis.press.a <= 0.0 && press_scale.is_none() { continue; }
+            if n.vis.press.a <= 0.0 && press_scale.is_none() && press_travel.is_none() { continue; }
             let capture_inside = if self.secondary_capture.is_some() {
                 self.pointer.is_some_and(|(x, y)| self.node_contains(i, x, y))
             } else {
@@ -359,6 +360,13 @@ impl<S: 'static> Runtime<S> {
                 let down = down && !self.reduced_motion;
                 if paint_tracks::ready_from_rest(&mut self.scene, id, P_PRESS_SCALE, 1.0, if down { k } else { 1.0 }) {
                     self.scene.animate(id, P_PRESS_SCALE, if down { k } else { 1.0 }, if down { motion::INSTANT } else { motion::POP });
+                }
+            }
+            if let Some(dy) = press_travel {
+                // A key goes down with the finger and comes back up on its spring.
+                let down = down && !self.reduced_motion;
+                if paint_tracks::ready_from_rest(&mut self.scene, id, P_PRESS_TRAVEL, 0.0, if down { dy } else { 0.0 }) {
+                    self.scene.animate(id, P_PRESS_TRAVEL, if down { dy } else { 0.0 }, if down { motion::INSTANT } else { motion::SNAPPY });
                 }
             }
         }

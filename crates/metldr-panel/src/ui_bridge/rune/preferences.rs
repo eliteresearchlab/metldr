@@ -400,7 +400,7 @@ fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<Str
         .radius(8.0)
         .fill(typography.field);
     match typography.lip {
-        Some(lip) => el.shadow(2.0, 0.0, lip),
+        Some(lip) => el.shadow(2.0, 0.0, lip).press_travel(2.0),
         None => el,
     }
 }
@@ -427,10 +427,12 @@ fn button(
             press(state, value, tx)
         },
     );
-    if enabled {
-        el.press(typography.press).press_scale(super::theme::PRESS_SCALE)
-    } else {
+    if !enabled {
         el.opacity(0.5)
+    } else if typography.lip.is_some() {
+        el.press(typography.press)
+    } else {
+        el.press(typography.press).press_scale(super::theme::PRESS_SCALE)
     }
 }
 

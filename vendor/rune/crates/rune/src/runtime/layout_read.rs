@@ -527,7 +527,7 @@ impl<S: 'static> Runtime<S> {
             || std::iter::successors(Some(i), |&p| step_up(&self.nodes, p)).any(|p| {
                 let id = self.nodes[p].id;
                 store.is_animating(id, prop::FRAME) || store.is_animating(id, prop::TRAVEL) || store.is_animating(id, prop::PRESENCE)
-                    || store.is_animating(id, prop::OFFSET) || store.is_animating(id, prop::SCALE) || store.is_animating(id, P_PRESS_SCALE)
+                    || store.is_animating(id, prop::OFFSET) || store.is_animating(id, prop::SCALE) || store.is_animating(id, P_PRESS_SCALE) || store.is_animating(id, P_PRESS_TRAVEL)
                     || store.is_animating(id, P_SCALE) || store.is_animating(id, prop::ROTATION)
                     || self.grows.get(&id).is_some_and(|g| g.moving())
                     || self.stacks.get(&id).is_some_and(|s| s.moving)

@@ -249,6 +249,17 @@ impl El {
         }
         self
     }
+    /// Sink by `dy` points while a press on this element is held, as a key travels into its
+    /// hole, springing back on release. Its outer shadows stay where they were, so a hard lip
+    /// below the key disappears as the key comes down onto it. Layout and hit testing keep the
+    /// resting place, and Reduce Motion turns it off. `0.0` (or anything not finite) removes it.
+    pub fn press_travel(mut self, dy: f32) -> Self {
+        let t = (dy.is_finite() && dy != 0.0).then_some(dy);
+        if t.is_some() || !self.handlers.is_empty() {
+            self.handlers.press_travel = t;
+        }
+        self
+    }
     /// Draw this element and everything in it `k` times its size about its centre, like
     /// SwiftUI's `scaleEffect`: fills, borders, text, icons and images all scale, and text
     /// rasterizes at the scaled size once it rests. Layout keeps the unscaled size, so siblings

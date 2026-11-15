@@ -280,11 +280,12 @@ pub(super) fn card(palette: &Palette) -> El {
         .transition(rise_over(0.38))
 }
 
-/// A key: on a molded theme it stands on a hard 2 px lip, ringed by a hairline; on a flat theme
+/// A key: on a molded theme it stands on a hard 2 px lip, ringed by a hairline, and sinks onto
+/// it while pressed instead of shrinking; on a flat theme
 /// it keeps the outline and field fill of an outlined control.
 pub(super) fn keycap(el: El, p: &Palette) -> El {
     let el = el.radius(if p.molded { 6.0 } else { 8.0 }).fill(if p.molded { p.surface } else { p.field }).border(1.0, p.line);
-    if p.molded { el.shadow(2.0, 0.0, p.lip) } else { el }
+    if p.molded { el.shadow(2.0, 0.0, p.lip).press_travel(2.0) } else { el }
 }
 
 /// A module: on a molded theme it shades from a lighter top to its metal with a lit top edge;

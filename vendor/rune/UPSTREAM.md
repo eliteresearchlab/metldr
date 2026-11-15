@@ -22,6 +22,7 @@ Local changes:
 * `El::unavailable` marks a control that reads as disabled yet keeps focus and its place in the tab order (ARIA `aria-disabled`), in the web mirror and the native tree; the native tree also reports busy.
 * Focus groups take `El::focus_axis` and `El::focus_wrap` in place of their role's arrows and wrapping, and Tab returns to the item in a group that last had focus.
 * `El::has_popup` names the kind of popup a control opens (ARIA `aria-haspopup`), on the web mirror.
+* `El::press_travel` sinks a control while it is pressed and keeps its outer shadows in place, so a key comes down onto its lip.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.
