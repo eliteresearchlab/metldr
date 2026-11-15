@@ -11,7 +11,7 @@ mod composer;
 mod conversations;
 mod corrections;
 mod fonts;
-mod dots;
+mod ground;
 use theme::Root as _;
 mod glimm;
 mod messages;
@@ -1804,7 +1804,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         let line = typography
             .text(status)
             .font(typography.font(12.0, 400.0).lh(16.0 * typography.scale))
-            .color(if p.molded { p.print } else { p.ink_2 })
+            .color(if p.molded { p.print } else if p.neon { p.accent } else { p.ink_2 })
             .single_line()
             .truncate()
             .h(16.0 * typography.scale)
@@ -1839,7 +1839,14 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         toolbar = toolbar.child(control);
     }
     let readout = row().w_full().gap(6.0).items_center().child(theme::led(lamp, p)).child(line);
-    let readout = if p.molded { theme::lcd(readout.px(10.0).py(5.0), p) } else { readout };
+    let readout = if p.molded {
+        theme::lcd(readout.px(10.0).py(5.0), p)
+    } else if p.neon {
+        // A neon status reads as a HUD strip: the line in the accent over a dark glass edged in it.
+        readout.px(10.0).py(5.0).radius(2.0).fill(p.page).border(1.0, p.accent.alpha(0.35))
+    } else {
+        readout
+    };
     let toolbar = col().w_full().gap(6.0).child(toolbar).child(readout);
     let shown = cx.is_reduced_motion() || state.welcome_revealed;
     let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });

@@ -34,6 +34,9 @@ pub(super) struct Palette {
     /// Molded material: modules shade from a lighter top with a lit top edge, and keys stand on
     /// a hard lip they sink onto when pressed. Flat themes draw neither.
     pub(super) molded: bool,
+    /// Neon material: a dark HUD over scanlines, keys outlined by a lit hairline that glows,
+    /// sharp corners, uppercase monospaced legends and synth voices.
+    pub(super) neon: bool,
     /// A key's lip below it, and a module's lit top edge.
     pub(super) lip: Color,
     pub(super) highlight: Color,
@@ -242,6 +245,7 @@ impl Palette {
             selection: c(accent).alpha(0.3),
             light,
             molded,
+            neon: std::ptr::eq(ramp, &CYBERPUNK),
             lip: c(ramp.lip),
             highlight: c(ramp.highlight),
             on_accent: if accent.0 < 0.8 { oklch(0.98, 0.0, 0.0) } else { oklch(0.18, 0.0, 0.0) },
@@ -295,7 +299,8 @@ pub(super) fn detent(el: El) -> El {
 /// popups take 260 ms and its sheets 300 ms on a critically damped spring, fast off the mark
 /// and landing softly.
 fn settle(p: &Palette, flat: f32, molded: f32) -> Spring {
-    Spring::from_motion(if p.molded { molded } else { flat }, 0.0)
+    // A neon HUD snaps: its surfaces land in three quarters of a flat theme's time.
+    Spring::from_motion(if p.molded { molded } else if p.neon { flat * 0.75 } else { flat }, 0.0)
 }
 
 /// A menu that opens above its trigger grows from the trigger's
@@ -346,8 +351,21 @@ pub(super) fn card(palette: &Palette) -> El {
 /// it while pressed instead of shrinking; on a flat theme
 /// it keeps the outline and field fill of an outlined control.
 pub(super) fn keycap(el: El, p: &Palette) -> El {
+    if p.neon {
+        return neon_key(el.fill(p.surface), p.accent);
+    }
     let el = el.radius(if p.molded { 6.0 } else { 8.0 }).fill(if p.molded { p.surface } else { p.field }).border(1.0, p.line);
     if p.molded { on_lip(el, p.lip, false) } else { el }
+}
+
+/// A neon key: sharp 2 point corners, a lit hairline in `accent` with a soft glow around it, and
+/// the accent washing in while it is pressed. It sounds its down-stroke as the pointer lands.
+pub(super) fn neon_key(el: El, accent: Color) -> El {
+    el.radius(2.0)
+        .border(1.0, accent.alpha(0.55))
+        .shadow(0.0, 10.0, accent.alpha(0.22))
+        .press(accent.alpha(0.16))
+        .on_press_down(move |state: &mut super::State, _| state.sound(crate::interaction_audio::Cue::KeyDown(false)))
 }
 
 /// A molded key standing on a hard 2 point `lip`: it sinks onto the lip while pressed and sounds
@@ -367,31 +385,36 @@ pub(super) trait Root {
 
 impl Root for El {
     fn material(self, p: &Palette) -> Self {
+        let el = self.children(super::ground::ground(p));
         if p.molded {
-            self.child(super::dots::ground()).focus_ring_default(2.0, 3.0, p.accent)
+            el.focus_ring_default(2.0, 3.0, p.accent)
+        } else if p.neon {
+            el.focus_ring_default(1.5, 2.0, p.accent)
         } else {
-            self
+            el
         }
     }
 }
 
-/// A text field's caret on a molded theme.
-pub(super) trait MoldedCaret {
-    /// On a molded theme, a block caret in the key colour with the character under it in the
-    /// key's legend colour; a flat theme keeps the field's own caret.
-    fn molded_caret(self, p: &Palette) -> Self;
+/// A text field's caret on a theme with a material of its own.
+pub(super) trait ThemeCaret {
+    /// On a molded or neon theme, a block caret in the accent with the character under it in
+    /// the accent's legend colour; a flat theme keeps the field's own caret.
+    fn theme_caret(self, p: &Palette) -> Self;
 }
 
-impl MoldedCaret for El {
-    fn molded_caret(self, p: &Palette) -> Self {
-        if p.molded { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
+impl ThemeCaret for El {
+    fn theme_caret(self, p: &Palette) -> Self {
+        if p.molded || p.neon { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
     }
 }
 
 /// A module: on a molded theme it shades from a lighter top to its metal with a lit top edge;
 /// on a flat theme it is the plain page fill.
 pub(super) fn module(el: El, p: &Palette) -> El {
-    if p.molded {
+    if p.neon {
+        el.fill(p.page).border(1.0, p.accent.alpha(0.3)).shadow(0.0, 24.0, p.accent.alpha(0.1))
+    } else if p.molded {
         el.gradient(p.hover, p.page).border_gradient(1.0, p.highlight, p.line_strong)
     } else {
         el.fill(p.page).border(1.0, p.line)
@@ -411,5 +434,5 @@ pub(super) fn lcd(el: El, p: &Palette) -> El {
 /// A lamp: a small round light in `color`, glowing on a molded theme.
 pub(super) fn led(color: Color, p: &Palette) -> El {
     let lamp = ::rune::el().size(6.0, 6.0).radius(3.0).fill(color).a11y_hidden();
-    if p.molded { lamp.shadow(0.0, 6.0, color.alpha(0.6)) } else { lamp }
+    if p.molded || p.neon { lamp.shadow(0.0, 6.0, color.alpha(0.6)) } else { lamp }
 }

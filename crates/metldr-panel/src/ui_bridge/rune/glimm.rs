@@ -14,8 +14,8 @@ pub(super) struct Glimm {
     epoch: u32,
     elapsed: Option<f64>,
     gpu: Option<Gpu>,
-    /// The molded theme's dot ground, made on the first frame that has one.
-    dots: Option<(DeviceKey, super::dots::Dots)>,
+    /// A theme ground (dots or scanlines), made on the first frame that has one.
+    ground: Option<(DeviceKey, super::ground::Ground)>,
 }
 
 fn phase(elapsed: f64) -> Option<(f32, f32)> {
@@ -68,11 +68,16 @@ impl Compositor<State> for Glimm {
         let active = self
             .elapsed
             .and_then(|elapsed| phase(elapsed).map(|(progress, alpha)| (elapsed, progress, alpha)));
-        let has_dots = frame.rt.marks.contains(&super::dots::MARK);
-        if has_dots {
+        // Only a theme with a ground scans the frame's marks for it; a flat theme, the default,
+        // skips the scan over every instance.
+        let has_ground = {
+            let p = frame.rt.state.preferences.palette();
+            (p.molded || p.neon) && frame.rt.marks.contains(&super::ground::MARK)
+        };
+        if has_ground {
             let key = frame.device_key();
-            if self.dots.as_ref().is_none_or(|(k, _)| *k != key) {
-                self.dots = Some((key, super::dots::Dots::new(frame.device)));
+            if self.ground.as_ref().is_none_or(|(k, _)| *k != key) {
+                self.ground = Some((key, super::ground::Ground::new(frame.device)));
             }
         }
         let rect = slot.map(|index| frame.rt.instances[index].rect);
@@ -130,12 +135,12 @@ impl Compositor<State> for Glimm {
                 None
             }
         };
-        let dots = self
-            .dots
+        let ground = self
+            .ground
             .as_mut()
-            .filter(|_| has_dots)
-            .map(|(_, dots)| dots);
-        if sweep.is_none() && dots.is_none() {
+            .filter(|_| has_ground)
+            .map(|(_, ground)| ground);
+        if sweep.is_none() && ground.is_none() {
             frame.draw_ui();
             return;
         }
@@ -148,7 +153,7 @@ impl Compositor<State> for Glimm {
             &frame.rt.instances,
             frame.size,
         );
-        let (mut sweep, mut dots) = (sweep, dots);
+        let (mut sweep, mut ground) = (sweep, ground);
         frame.ui.draw_with(
             frame.encoder,
             frame.target,
@@ -159,9 +164,9 @@ impl Compositor<State> for Glimm {
                         gpu.draw(device, queue, pass, site);
                     }
                 }
-                super::dots::MARK => {
-                    if let Some(dots) = dots.as_mut() {
-                        dots.draw(device, queue, pass, site);
+                super::ground::MARK => {
+                    if let Some(ground) = ground.as_mut() {
+                        ground.draw(device, queue, pass, site);
                     }
                 }
                 _ => {}

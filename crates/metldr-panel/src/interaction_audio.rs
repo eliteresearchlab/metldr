@@ -268,8 +268,12 @@ pub(super) fn rune(
     let Some(snapshot) = snapshot.filter(|snapshot| snapshot.sounds_enabled()) else {
         return Ok(());
     };
-    if snapshot.theme_key() == "hardware" {
-        return AUDIO.with(|audio| play_molded(audio, cue));
+    if let Some(kit) = match snapshot.theme_key() {
+        "hardware" => Some(Kit::Molded),
+        "cyberpunk" => Some(Kit::Neon),
+        _ => None,
+    } {
+        return AUDIO.with(|audio| play_voice(audio, cue, kit));
     }
     let cue = match cue {
         Cue::Latch(_) => Cue::Tick,
@@ -353,9 +357,16 @@ fn play(audio: &RefCell<AudioState>, cue: Cue) -> Result<(), JsValue> {
     Ok(())
 }
 
-/// A molded theme's cue as a voice: a key sounds its down-stroke as the pointer lands and its
+/// A molded or neon theme's cue as a voice from its kit: a key sounds its down-stroke as the pointer lands and its
 /// return on activation (or the down-stroke, from the keyboard); text fields type.
-fn play_molded(audio: &RefCell<AudioState>, cue: Cue) -> Result<(), JsValue> {
+/// A theme's voice kit: a molded theme's switches and keyboard, or a neon theme's synth blips.
+#[derive(Clone, Copy)]
+enum Kit {
+    Molded,
+    Neon,
+}
+
+fn play_voice(audio: &RefCell<AudioState>, cue: Cue, kit: Kit) -> Result<(), JsValue> {
     let mut audio = audio.borrow_mut();
     let now = js_sys::Date::now();
     let voice = match cue {
@@ -382,7 +393,7 @@ fn play_molded(audio: &RefCell<AudioState>, cue: Cue) -> Result<(), JsValue> {
     audio.played_at = now;
     let (context, destination, noise) = ready(&mut audio)?;
     let at = context.current_time() + 0.002;
-    for part in voice.parts() {
+    for part in voice.parts(kit) {
         part.play(&context, &destination, &noise, at)?;
     }
     Ok(())
@@ -589,8 +600,50 @@ const OPEN: [Part; 2] = [
     Part::Tone { delay: 0.0, square: false, freq: 520.0, to: 820.0, level: 0.045, decay: 0.06, attack: 0.003 },
 ];
 
+const fn square(freq: f64, to: f64, level: f64, decay: f64) -> Part {
+    Part::Tone { delay: 0.0, square: true, freq, to, level, decay, attack: 0.001 }
+}
+
+/// A neon theme's synth: short square blips stepping through a scale, a bright noise tick on a
+/// key's down-stroke, a key's return a fifth above, and an arpeggio for a popup.
+const N_DOWN: [Part; 2] = [
+    square(1046.5, 784.0, 0.05, 0.035),
+    Part::Burst { delay: 0.0, highpass: true, freq: 5000.0, q: 0.7, level: 0.06, decay: 0.008 },
+];
+const N_DOWN_PRIMARY: [Part; 2] = [
+    square(784.0, 523.25, 0.06, 0.05),
+    Part::Burst { delay: 0.0, highpass: true, freq: 4200.0, q: 0.7, level: 0.07, decay: 0.01 },
+];
+const N_UP: [Part; 1] = [square(1568.0, 1568.0, 0.035, 0.02)];
+const N_LATCH_DOWN: [Part; 2] = [square(880.0, 880.0, 0.04, 0.035), later(square(1318.5, 1318.5, 0.04, 0.05), 0.04)];
+const N_LATCH_UP: [Part; 2] = [square(1318.5, 1318.5, 0.04, 0.035), later(square(880.0, 880.0, 0.04, 0.05), 0.04)];
+const N_TICK: [Part; 1] = [square(2093.0, 2093.0, 0.025, 0.012)];
+const N_TYPE: [Part; 1] = [square(1760.0, 1760.0, 0.022, 0.014)];
+const N_TYPE_SPACE: [Part; 1] = [square(1174.7, 1174.7, 0.028, 0.02)];
+const N_TYPE_BIG: [Part; 1] = [square(880.0, 659.25, 0.03, 0.03)];
+const N_OPEN: [Part; 3] = [
+    square(659.25, 659.25, 0.035, 0.05),
+    later(square(987.75, 987.75, 0.035, 0.05), 0.045),
+    later(square(1318.5, 1318.5, 0.035, 0.07), 0.09),
+];
+
 impl Voice {
-    fn parts(self) -> &'static [Part] {
+    fn parts(self, kit: Kit) -> &'static [Part] {
+        if let Kit::Neon = kit {
+            return match self {
+                Voice::Down => &N_DOWN,
+                Voice::DownPrimary => &N_DOWN_PRIMARY,
+                Voice::Up => &N_UP,
+                Voice::LatchDown => &N_LATCH_DOWN,
+                Voice::LatchUp => &N_LATCH_UP,
+                Voice::Tick => &N_TICK,
+                Voice::Type => &N_TYPE,
+                Voice::TypeSpace => &N_TYPE_SPACE,
+                Voice::TypeBig => &N_TYPE_BIG,
+                Voice::TypeUp => &[],
+                Voice::Open => &N_OPEN,
+            };
+        }
         match self {
             Voice::Down => &DOWN,
             Voice::DownPrimary => &DOWN_PRIMARY,

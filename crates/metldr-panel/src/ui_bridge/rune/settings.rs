@@ -1,4 +1,4 @@
-use super::theme::MoldedCaret;
+use super::theme::ThemeCaret;
 use super::*;
 use crate::model::{AgentKind, AgentProfile, ProviderProtocol};
 use std::{
@@ -572,7 +572,7 @@ fn provider_input(
     .border(1.0, palette.line)
     .color(ink)
     .caret(ink, palette.selection)
-    .molded_caret(palette)
+    .theme_caret(palette)
     .disabled(!enabled)
     .on_edit(move |state: &mut State| match field {
         ProviderField::Endpoint => &mut state.settings.providers[index].endpoint,
@@ -621,7 +621,7 @@ fn agent_input(
     .border(1.0, palette.line)
     .color(ink)
     .caret(ink, palette.selection)
-    .molded_caret(palette)
+    .theme_caret(palette)
     .disabled(!enabled)
     .on_edit(move |state: &mut State| match field {
         AgentField::Executable => &mut state.settings.agents[index].executable,

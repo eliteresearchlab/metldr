@@ -1,24 +1,35 @@
-//! The molded theme's ground: a grid of small dots, one every 16 points, painted by the GPU in
-//! one pass over its slot instead of as hundreds of elements.
+//! A theme's ground under its canvas, painted by the GPU in one pass over its slot instead of as
+//! hundreds of elements: a molded theme's grid of small dots, one every 16 points, or a neon
+//! theme's scanlines, one every 3 points.
 
 use ::rune::render::{CLIP_WGSL, EffectSite};
 use std::borrow::Cow;
 
-/// The `El::effect` mark of the dot ground.
+/// The `El::effect` mark of a ground.
 pub(super) const MARK: u32 = 0x444f5453;
-const PITCH: f32 = 16.0;
-const RADIUS: f32 = 1.0;
-const OPACITY: f32 = 0.14;
-const WORDS: usize = 20;
+const WORDS: usize = 24;
 
-/// The slot to put under a molded theme's canvas: it fills its parent and draws the dots.
-pub(super) fn ground() -> ::rune::El {
-    ::rune::effect(MARK)
-        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-        .a11y_hidden()
+/// The slot to put under a theme's canvas: it fills its parent and draws the theme's ground, or
+/// nothing on a flat theme. Its data carries the kind, the opacity and the colour.
+pub(super) fn ground(p: &super::theme::Palette) -> Option<::rune::El> {
+    let (kind, opacity, color) = if p.molded {
+        (0.0, 0.14, ::rune::Color::BLACK)
+    } else if p.neon {
+        (1.0, 0.07, p.accent)
+    } else {
+        return None;
+    };
+    let channel = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let packed = (channel(color.r) << 16 | channel(color.g) << 8 | channel(color.b)) as f32;
+    Some(
+        ::rune::effect(MARK)
+            .effect_data([kind, opacity, packed, 0.0])
+            .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+            .a11y_hidden(),
+    )
 }
 
-pub(super) struct Dots {
+pub(super) struct Ground {
     geometry: wgpu::Buffer,
     bind: wgpu::BindGroup,
     layout: wgpu::PipelineLayout,
@@ -26,10 +37,10 @@ pub(super) struct Dots {
     pipelines: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
 }
 
-impl Dots {
+impl Ground {
     pub(super) fn new(device: &wgpu::Device) -> Self {
         let geometry = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("dot ground"),
+            label: Some("ground"),
             size: (WORDS * 4) as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -52,10 +63,10 @@ impl Dots {
             immediate_size: 0,
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("dot ground"),
+            label: Some("ground"),
             source: wgpu::ShaderSource::Wgsl(Cow::Owned(format!(
                 "{CLIP_WGSL}\n{}",
-                include_str!("dots.wgsl")
+                include_str!("ground.wgsl")
             ))),
         });
         Self {
@@ -105,9 +116,13 @@ impl Dots {
             ]
             .map(f32::to_bits),
         );
-        words[16..20].copy_from_slice(
-            &[PITCH * site.scale, RADIUS * site.scale, OPACITY, 0.0].map(f32::to_bits),
-        );
+        // Dots: 16 point cells with a 1 point radius. Scanlines: a 1 point line every 3 points.
+        let [kind, opacity, packed, _] = site.data;
+        let (pitch, size) = if kind == 0.0 { (16.0, 1.0) } else { (3.0, 1.0) };
+        words[16..20].copy_from_slice(&[pitch * site.scale, size * site.scale, opacity, kind].map(f32::to_bits));
+        let packed = packed as u32;
+        let channel = |shift: u32| ((packed >> shift) & 0xff) as f32 / 255.0;
+        words[20..24].copy_from_slice(&[channel(16), channel(8), channel(0), 1.0].map(f32::to_bits));
         queue.write_buffer(
             &self.geometry,
             0,

@@ -20,7 +20,7 @@
  * SOFTWARE.
  */
 
-use super::theme::MoldedCaret;
+use super::theme::ThemeCaret;
 use super::theme::Palette;
 use super::{Menu, Mode, State};
 use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, row};
@@ -269,7 +269,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     };
     let mut field = ::rune::el::text_input(
         &state.draft,
-        if p.molded {
+        if p.molded || p.neon {
             TextStyle::new((16.0 * typography.scale).max(16.0), 400.0).mono()
         } else {
             TextStyle::new((16.0 * typography.scale).max(16.0), 400.0)
@@ -284,7 +284,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     .label("Prompt")
     .placeholder("Write a message…", p.ink_3)
     .caret(p.ink, p.accent.alpha(0.28))
-    .molded_caret(p)
+    .theme_caret(p)
     .on_edit(|state: &mut State| &mut state.draft)
     .on_input_change(|state: &mut State, _| {
         state.draft_changed();
@@ -417,8 +417,8 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         }
     } else {
         let can_send = state.can_send();
-        // A molded send is the primary key, in the key colour with its legend in `on_accent`.
-        let (ink, fill) = match (can_send, p.molded) {
+        // A molded or neon send is the primary key, in the accent with its legend in `on_accent`.
+        let (ink, fill) = match (can_send, p.molded || p.neon) {
             (true, true) => (p.on_accent, p.accent),
             (true, false) => (p.surface, p.ink),
             (false, _) => (p.ink_2, p.line_strong),
@@ -427,6 +427,11 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
         if p.molded && can_send {
             send = super::theme::on_lip(send, p.accent.mix(::rune::Color::BLACK, 0.45), true);
+        } else if p.neon && can_send {
+            // A neon primary key glows in its accent and sounds the deeper down-stroke.
+            send = send.radius(2.0).shadow(0.0, 14.0, p.accent.alpha(0.5)).on_press_down(|state: &mut State, _| {
+                state.sound(crate::interaction_audio::Cue::KeyDown(true))
+            });
         }
         if can_send {
             send = send.press(p.press_solid);
@@ -447,14 +452,16 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         .fill(p.surface)
         .border(
             BORDER,
-            if state.draft.focused {
-                p.line_strong
-            } else {
-                p.line
+            match (p.neon, state.draft.focused) {
+                (true, true) => p.accent.alpha(0.7),
+                (true, false) => p.accent.alpha(0.35),
+                (false, true) => p.line_strong,
+                (false, false) => p.line,
             },
         )
-        .radius(RADIUS)
-        .clip_rounded(RADIUS)
+        .shadow(0.0, if p.neon { 18.0 } else { 0.0 }, p.accent.alpha(if p.neon && state.draft.focused { 0.25 } else { 0.0 }))
+        .radius(if p.neon { 3.0 } else { RADIUS })
+        .clip_rounded(if p.neon { 3.0 } else { RADIUS })
         .child(
             ::rune::el::el()
                 .absolute(0.0, 0.0)
