@@ -345,6 +345,7 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
             rt.wall_start = Some(now);
             rt.open_urls_natively = true;
             rt.record_events = false;
+            rt.track_marks = compositor.is_some();
             let menus = crate::native_menu::Guard::attach(&shared, false);
             let shortcuts = crate::shortcuts::Guard::attach(&shared, wake.clone(), false, false);
             let mut clipboard = crate::clipboard::Client::default();

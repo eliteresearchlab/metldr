@@ -11,6 +11,7 @@ mod composer;
 mod conversations;
 mod corrections;
 mod fonts;
+mod dots;
 mod glimm;
 mod messages;
 mod pi_replies;
@@ -1909,6 +1910,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .fill(p.canvas)
         .color(ink)
         .padding(10.0)
+        .children(p.molded.then(dots::ground))
         .child(
             theme::module(col(), p)
                 .key("chat-card")
