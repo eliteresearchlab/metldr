@@ -105,34 +105,22 @@ pub(crate) struct A11yRun {
 impl A11yItem {
     fn to_json(&self) -> Value {
         let mut obj = serde_json::Map::new();
+        let plain = match &self.kind {
+            A11yKind::Table => Some("table"),
+            A11yKind::Row => Some("row"),
+            A11yKind::ColumnHeader => Some("columnheader"),
+            A11yKind::Cell => Some("cell"),
+            A11yKind::Group => Some("group"),
+            A11yKind::Article => Some("article"),
+            A11yKind::Text => Some("text"),
+            A11yKind::Status => Some("status"),
+            A11yKind::Alert => Some("alert"),
+            _ => None,
+        };
+        if let Some(kind) = plain {
+            obj.insert("k".into(), json!(kind));
+        }
         match &self.kind {
-            A11yKind::Table => {
-                obj.insert("k".into(), json!("table"));
-            }
-            A11yKind::Row => {
-                obj.insert("k".into(), json!("row"));
-            }
-            A11yKind::ColumnHeader => {
-                obj.insert("k".into(), json!("columnheader"));
-            }
-            A11yKind::Cell => {
-                obj.insert("k".into(), json!("cell"));
-            }
-            A11yKind::Group => {
-                obj.insert("k".into(), json!("group"));
-            }
-            A11yKind::Article => {
-                obj.insert("k".into(), json!("article"));
-            }
-            A11yKind::Text => {
-                obj.insert("k".into(), json!("text"));
-            }
-            A11yKind::Status => {
-                obj.insert("k".into(), json!("status"));
-            }
-            A11yKind::Alert => {
-                obj.insert("k".into(), json!("alert"));
-            }
             A11yKind::Heading(level) => {
                 obj.insert("k".into(), json!("heading"));
                 obj.insert("l".into(), json!(level));
@@ -181,6 +169,7 @@ impl A11yItem {
                     }
                 }
             }
+            _ => {}
         }
         obj.insert("p".into(), json!(self.path));
         if let Some(parent) = &self.parent {
