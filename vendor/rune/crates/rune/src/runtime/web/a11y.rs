@@ -356,18 +356,17 @@ impl<S: 'static> Runtime<S> {
         (relate.controls.is_some() || relate.active.is_some()).then(|| Box::new(relate))
     }
 
-    fn subtree_end(&self, root: usize) -> usize {
-        let mut j = root + 1;
-        while j < self.nodes.len() {
-            if std::iter::successors(self.nodes[j].parent, |&p| self.nodes[p].parent)
-                .any(|p| p == root)
-            {
-                j += 1;
-            } else {
-                break;
+    /// Every node's subtree end in one pass: nodes are in tree order, so walking back from the
+    /// last, each node's end is the furthest end among its children, without walking any
+    /// node's ancestors.
+    fn subtree_ends(&self) -> Vec<usize> {
+        let mut ends: Vec<usize> = (1..=self.nodes.len()).collect();
+        for j in (0..self.nodes.len()).rev() {
+            if let Some(p) = self.nodes[j].parent {
+                ends[p] = ends[p].max(ends[j]);
             }
         }
-        j
+        ends
     }
 
     fn descendant_label(&self, root: usize, end: usize) -> String {
@@ -412,10 +411,11 @@ impl<S: 'static> Runtime<S> {
         let mut out: Vec<A11yItem> = Vec::new();
         let mut last_flow_parent: Option<usize> = None;
         let mut groups: Vec<Option<usize>> = vec![None; self.nodes.len()];
+        let ends = self.subtree_ends();
         let mut i = 0;
         while i < self.nodes.len() {
             let n = &self.nodes[i];
-            let end = self.subtree_end(i);
+            let end = ends[i];
             let parent_group = n.parent.and_then(|parent| groups[parent]);
             groups[i] = parent_group;
             if self.subtree_exiting(i) || n.vis.opacity <= 0.01 || n.a11y.hidden {
