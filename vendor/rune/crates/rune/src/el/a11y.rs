@@ -49,6 +49,8 @@ pub(crate) struct A11yMore {
     pub read_only: bool,
     /// `El::sorted`: ascending or descending.
     pub sorted: Option<bool>,
+    /// `El::busy`: an action it started is still running.
+    pub busy: bool,
 }
 
 /// Accessibility state beyond role and label (`El::level`, `El::expanded`, `El::secure`, and
@@ -140,6 +142,12 @@ impl El {
     /// or `aria-pressed`). Leave it unset on controls that can't be.
     pub fn checked(mut self, on: bool) -> Self {
         self.a11y.checked = Some(if on { Checked::True } else { Checked::False });
+        self
+    }
+    /// An action this control started is still running (ARIA `aria-busy`): a button waiting on
+    /// its work. Presses should do nothing meanwhile, which the control's own handler decides.
+    pub fn busy(mut self, busy: bool) -> Self {
+        if busy || self.a11y.more.is_some() { self.a11y.more().busy = busy; }
         self
     }
     /// A checkbox that is partly on: some of what it controls is (ARIA `aria-checked="mixed"`).
