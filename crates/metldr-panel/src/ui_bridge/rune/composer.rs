@@ -238,7 +238,11 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     };
     let mut field = ::rune::el::text_input(
         &state.draft,
-        TextStyle::new((16.0 * typography.scale).max(16.0), 400.0),
+        if p.molded {
+            TextStyle::new((16.0 * typography.scale).max(16.0), 400.0).mono()
+        } else {
+            TextStyle::new((16.0 * typography.scale).max(16.0), 400.0)
+        },
     )
     .key("rune-composer-field")
     .w_full()
@@ -378,10 +382,16 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         )
         .fill(if can_send { p.ink } else { p.line_strong })
         .disabled(!can_send);
+        // A molded theme's send is its primary key: the key colour on a darker lip of its own.
+        if p.molded && can_send {
+            send = send.shadow(2.0, 0.0, p.accent.mix(::rune::Color::BLACK, 0.45)).press_travel(2.0);
+        }
         if can_send {
+            send = send.press(p.press_solid);
+            if !p.molded {
+                send = send.press_scale(super::theme::PRESS_SCALE);
+            }
             send = send
-                .press(p.press_solid)
-                .press_scale(super::theme::PRESS_SCALE)
                 .on_press_tx(|state: &mut State, tx| state.send(tx))
                 .on_key(|state: &mut State, key, tx| enter(state, key, tx, State::send));
         }
