@@ -152,7 +152,7 @@ impl Preferences {
         }
         self.snapshot = Some(snapshot);
         self.look = Look {
-            palette: Palette::with_key(snapshot.theme_key(), Some(snapshot.key_color().lch())),
+            palette: Palette::with_key(snapshot.theme_key(), Some(super::theme::in_srgb(snapshot.key_color().lch()))),
             scale: scale(snapshot.size_key()),
         };
         true
@@ -480,7 +480,7 @@ fn swatch(
     action: &Rc<impl Fn(&mut State, Action, &mut Tx) + 'static>,
 ) -> El {
     let press = Rc::clone(action);
-    let (l, c, h) = color.lch();
+    let (l, c, h) = super::theme::in_srgb(color.lch());
     let key = ::rune::el()
         .key(format!("preferences-key-{}", color.key()))
         .label(color.label())

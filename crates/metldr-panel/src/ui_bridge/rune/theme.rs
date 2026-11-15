@@ -47,6 +47,34 @@ pub(super) struct Palette {
 
 pub(super) type Lch = (f32, f32, f32);
 
+/// `lch` with its chroma lowered until it fits sRGB, keeping its lightness and hue: a key colour
+/// that reaches into P3 keeps its hue on an sRGB canvas instead of clipping toward another
+/// (an orange-red clipped channel by channel turns red).
+pub(super) fn in_srgb((l, c, h): Lch) -> Lch {
+    let fits = |c: f32| {
+        let (a, b) = (c * h.to_radians().cos(), c * h.to_radians().sin());
+        let l_ = (l + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+        let m_ = (l - 0.105_561_346 * a - 0.063_854_17 * b).powi(3);
+        let s_ = (l - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+        [
+            4.076_741_7 * l_ - 3.307_711_6 * m_ + 0.230_969_94 * s_,
+            -1.268_438 * l_ + 2.609_757_4 * m_ - 0.341_319_38 * s_,
+            -0.004_196_086_3 * l_ - 0.703_418_6 * m_ + 1.707_614_7 * s_,
+        ]
+        .iter()
+        .all(|v| (-1e-4..=1.0001).contains(v))
+    };
+    if fits(c) {
+        return (l, c, h);
+    }
+    let (mut lo, mut hi) = (0.0, c);
+    for _ in 0..20 {
+        let mid = (lo + hi) / 2.0;
+        if fits(mid) { lo = mid } else { hi = mid }
+    }
+    (l, lo, h)
+}
+
 /// One theme's roles as oklch triples, in the order of [`Palette`]'s first fifteen fields, then
 /// the lip and highlight of molded material.
 struct Ramp {
