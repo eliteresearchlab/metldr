@@ -54,6 +54,11 @@ fn sync_input_focus(input: &mut crate::el::InputSpec, states: crate::states::Sta
     changed
 }
 
+/// Whether `n` takes focus by itself: a focusable control, or a text field that can be edited.
+fn takes_focus(n: &Node) -> bool {
+    n.focus.enabled || n.input.as_ref().is_some_and(|input| input.access.is_some())
+}
+
 impl<S: 'static> Runtime<S> {
     pub(super) fn active_modal(&self) -> Option<usize> {
         self.modal_index
@@ -82,17 +87,14 @@ impl<S: 'static> Runtime<S> {
     }
     pub(super) fn can_focus(&self, i: usize) -> bool {
         let n = &self.nodes[i];
-        !n.a11y.disabled && (n.focus.enabled || n.input.as_ref().is_some_and(|s| s.access.is_some()) || self.scroll_stop_live(i))
+        !n.a11y.disabled && (takes_focus(n) || self.scroll_stop_live(i))
             && self.reachable(i)
     }
     /// Scroll view `i` is a Tab stop now: `El::scroll_stop`, overflowing, nothing focusable inside.
     pub(crate) fn scroll_stop_live(&self, i: usize) -> bool {
         if !self.nodes[i].focus.scroll_stop || !self.pageable(i) { return false; }
         let inside = |j: usize| std::iter::successors(self.nodes[j].parent, |&p| self.nodes[p].parent).any(|p| p == i);
-        !(i + 1..self.nodes.len()).take_while(|&j| inside(j)).any(|j| {
-            let n = &self.nodes[j];
-            n.focus.enabled || n.input.as_ref().is_some_and(|s| s.access.is_some())
-        })
+        !(i + 1..self.nodes.len()).take_while(|&j| inside(j)).any(|j| takes_focus(&self.nodes[j]))
     }
     /// Shown, sized, not exiting and not behind a modal.
     fn reachable(&self, i: usize) -> bool {
@@ -232,7 +234,7 @@ impl<S: 'static> Runtime<S> {
         };
         let explicit = explicit_key.and_then(|key| {
             nodes.iter().enumerate().find(|(j, n)| shown(*j)
-                && (n.focus.enabled || n.input.as_ref().is_some_and(|i| i.access.is_some()))
+                && takes_focus(n)
                 && crate::flight::selects(&key, &n.path, n.key.as_deref()))
                 .map(|(_, n)| n.path.clone())
         });
@@ -255,7 +257,7 @@ impl<S: 'static> Runtime<S> {
             if !within(focused, scope) { return None; }
             let anchor = nodes.iter().find(|n| n.key.as_deref() == Some(key))?;
             let candidates = (0..nodes.len()).filter(|&j| within(&nodes[j].path, &anchor.path) && shown(j)
-                && (nodes[j].focus.enabled || nodes[j].input.as_ref().is_some_and(|i| i.access.is_some())));
+                && takes_focus(&nodes[j]));
             candidates.clone().find(|&j| nodes[j].focus.selected)
                 .or_else(|| candidates.into_iter().next())
                 .map(|j| nodes[j].path.clone())
