@@ -37,6 +37,12 @@ pub(super) struct Palette {
     /// Neon material: a dark HUD over scanlines, keys outlined by a lit hairline that glows,
     /// sharp corners, uppercase monospaced legends and synth voices.
     pub(super) neon: bool,
+    /// Retro material: warm panels over film grain, keys stamped on a hard dark shadow they press
+    /// into, monospaced type, a terminal's block caret and wooden voices.
+    pub(super) retro: bool,
+    /// Any material of a theme's own (molded, neon or retro): a ground under the canvas, mono
+    /// type, a block caret, a primary send key and voices; flat themes have none of these.
+    pub(super) crafted: bool,
     /// A key's lip below it, and a module's lit top edge.
     pub(super) lip: Color,
     pub(super) highlight: Color,
@@ -159,7 +165,7 @@ const GRUVBOX: Ramp = Ramp {
     green: (0.72, 0.13, 125.0),
     orange: (0.72, 0.16, 55.0),
     red: (0.64, 0.19, 28.0),
-    lip: (0.44, 0.035, 75.0),
+    lip: (0.16, 0.02, 70.0),
     highlight: (0.3, 0.03, 75.0),
 };
 
@@ -246,6 +252,8 @@ impl Palette {
             light,
             molded,
             neon: std::ptr::eq(ramp, &CYBERPUNK),
+            retro: std::ptr::eq(ramp, &GRUVBOX),
+            crafted: molded || std::ptr::eq(ramp, &CYBERPUNK) || std::ptr::eq(ramp, &GRUVBOX),
             lip: c(ramp.lip),
             highlight: c(ramp.highlight),
             on_accent: if accent.0 < 0.8 { oklch(0.98, 0.0, 0.0) } else { oklch(0.18, 0.0, 0.0) },
@@ -299,8 +307,14 @@ pub(super) fn detent(el: El) -> El {
 /// popups take 260 ms and its sheets 300 ms on a critically damped spring, fast off the mark
 /// and landing softly.
 fn settle(p: &Palette, flat: f32, molded: f32) -> Spring {
-    // A neon HUD snaps: its surfaces land in three quarters of a flat theme's time.
-    Spring::from_motion(if p.molded { molded } else if p.neon { flat * 0.75 } else { flat }, 0.0)
+    // A neon HUD snaps: its surfaces land in three quarters of a flat theme's time. A retro
+    // theme grooves: its surfaces take a little longer and settle with a soft bounce.
+    match (p.molded, p.neon, p.retro) {
+        (true, _, _) => Spring::from_motion(molded, 0.0),
+        (_, true, _) => Spring::from_motion(flat * 0.75, 0.0),
+        (_, _, true) => Spring::from_motion(flat * 1.15, 0.12),
+        _ => Spring::from_motion(flat, 0.0),
+    }
 }
 
 /// A menu that opens above its trigger grows from the trigger's
@@ -354,6 +368,11 @@ pub(super) fn keycap(el: El, p: &Palette) -> El {
     if p.neon {
         return neon_key(el.fill(p.surface), p.accent);
     }
+    if p.retro {
+        // A retro key is stamped: a heavier hairline, softened corners, and a hard dark shadow
+        // it presses into.
+        return on_lip(el.radius(4.0).fill(p.surface).border(1.5, p.line_strong), p.lip, false);
+    }
     let el = el.radius(if p.molded { 6.0 } else { 8.0 }).fill(if p.molded { p.surface } else { p.field }).border(1.0, p.line);
     if p.molded { on_lip(el, p.lip, false) } else { el }
 }
@@ -390,6 +409,8 @@ impl Root for El {
             el.focus_ring_default(2.0, 3.0, p.accent)
         } else if p.neon {
             el.focus_ring_default(1.5, 2.0, p.accent)
+        } else if p.retro {
+            el.focus_ring_default(2.0, 2.0, p.accent)
         } else {
             el
         }
@@ -405,7 +426,7 @@ pub(super) trait ThemeCaret {
 
 impl ThemeCaret for El {
     fn theme_caret(self, p: &Palette) -> Self {
-        if p.molded || p.neon { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
+        if p.crafted { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
     }
 }
 
@@ -414,6 +435,8 @@ impl ThemeCaret for El {
 pub(super) fn module(el: El, p: &Palette) -> El {
     if p.neon {
         el.fill(p.page).border(1.0, p.accent.alpha(0.3)).shadow(0.0, 24.0, p.accent.alpha(0.1))
+    } else if p.retro {
+        el.fill(p.page).border(1.5, p.line_strong).shadow(4.0, 0.0, p.lip)
     } else if p.molded {
         el.gradient(p.hover, p.page).border_gradient(1.0, p.highlight, p.line_strong)
     } else {
@@ -434,5 +457,5 @@ pub(super) fn lcd(el: El, p: &Palette) -> El {
 /// A lamp: a small round light in `color`, glowing on a molded theme.
 pub(super) fn led(color: Color, p: &Palette) -> El {
     let lamp = ::rune::el().size(6.0, 6.0).radius(3.0).fill(color).a11y_hidden();
-    if p.molded || p.neon { lamp.shadow(0.0, 6.0, color.alpha(0.6)) } else { lamp }
+    if p.crafted { lamp.shadow(0.0, 6.0, color.alpha(0.6)) } else { lamp }
 }

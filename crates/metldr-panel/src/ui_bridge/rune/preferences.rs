@@ -583,9 +583,9 @@ impl Typography {
     pub(super) fn new(scale: f32, palette: &Palette) -> Self {
         Self {
             line: palette.line,
-            field: if palette.molded { palette.surface } else { palette.field },
-            lip: palette.molded.then_some(palette.lip),
-            mono: palette.molded || palette.neon,
+            field: if palette.molded || palette.retro { palette.surface } else { palette.field },
+            lip: (palette.molded || palette.retro).then_some(palette.lip),
+            mono: palette.crafted,
             neon: palette.neon.then_some(palette.accent),
             scale,
             ink: palette.ink,

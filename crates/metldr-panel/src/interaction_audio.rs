@@ -271,6 +271,7 @@ pub(super) fn rune(
     if let Some(kit) = match snapshot.theme_key() {
         "hardware" => Some(Kit::Molded),
         "cyberpunk" => Some(Kit::Neon),
+        "gruvbox" => Some(Kit::Retro),
         _ => None,
     } {
         return AUDIO.with(|audio| play_voice(audio, cue, kit));
@@ -359,11 +360,13 @@ fn play(audio: &RefCell<AudioState>, cue: Cue) -> Result<(), JsValue> {
 
 /// A molded or neon theme's cue as a voice from its kit: a key sounds its down-stroke as the pointer lands and its
 /// return on activation (or the down-stroke, from the keyboard); text fields type.
-/// A theme's voice kit: a molded theme's switches and keyboard, or a neon theme's synth blips.
+/// A theme's voice kit: a molded theme's switches and keyboard, a neon theme's synth blips, or a
+/// retro theme's wooden keys.
 #[derive(Clone, Copy)]
 enum Kit {
     Molded,
     Neon,
+    Retro,
 }
 
 fn play_voice(audio: &RefCell<AudioState>, cue: Cue, kit: Kit) -> Result<(), JsValue> {
@@ -627,8 +630,37 @@ const N_OPEN: [Part; 3] = [
     later(square(1318.5, 1318.5, 0.035, 0.07), 0.09),
 ];
 
+/// A retro theme's wooden keys: a dull, low knock under a soft, darker contact than a molded
+/// switch's, and a warm rising note for a popup.
+const R_DOWN: [Part; 2] = [burst(1400.0, 0.7, 0.24, 0.03), tone(150.0, 95.0, 0.45, 0.07)];
+const R_DOWN_PRIMARY: [Part; 2] = [burst(1100.0, 0.7, 0.26, 0.035), tone(120.0, 80.0, 0.55, 0.09)];
+const R_UP: [Part; 2] = [burst(2200.0, 1.0, 0.1, 0.015), tone(220.0, 180.0, 0.1, 0.025)];
+const R_LATCH_DOWN: [Part; 2] = [tone(180.0, 120.0, 0.3, 0.06), later(burst(900.0, 8.0, 0.04, 0.06), 0.005)];
+const R_LATCH_UP: [Part; 2] = [burst(1800.0, 1.0, 0.08, 0.015), later(tone(240.0, 200.0, 0.06, 0.04), 0.003)];
+const R_TICK: [Part; 2] = [burst(2600.0, 1.5, 0.12, 0.01), tone(1200.0, 1200.0, 0.02, 0.015)];
+const R_TYPE: [Part; 2] = [burst(1800.0, 1.0, 0.16, 0.018), tone(200.0, 150.0, 0.14, 0.035)];
+const R_TYPE_SPACE: [Part; 2] = [burst(1200.0, 0.8, 0.2, 0.03), tone(140.0, 100.0, 0.22, 0.06)];
+const R_TYPE_BIG: [Part; 2] = [burst(1500.0, 0.9, 0.2, 0.025), tone(160.0, 115.0, 0.24, 0.05)];
+const R_TYPE_UP: [Part; 1] = [burst(2800.0, 1.2, 0.05, 0.01)];
+const R_OPEN: [Part; 2] = [burst(1800.0, 1.0, 0.06, 0.015), tone(392.0, 523.25, 0.05, 0.08)];
+
 impl Voice {
     fn parts(self, kit: Kit) -> &'static [Part] {
+        if let Kit::Retro = kit {
+            return match self {
+                Voice::Down => &R_DOWN,
+                Voice::DownPrimary => &R_DOWN_PRIMARY,
+                Voice::Up => &R_UP,
+                Voice::LatchDown => &R_LATCH_DOWN,
+                Voice::LatchUp => &R_LATCH_UP,
+                Voice::Tick => &R_TICK,
+                Voice::Type => &R_TYPE,
+                Voice::TypeSpace => &R_TYPE_SPACE,
+                Voice::TypeBig => &R_TYPE_BIG,
+                Voice::TypeUp => &R_TYPE_UP,
+                Voice::Open => &R_OPEN,
+            };
+        }
         if let Kit::Neon = kit {
             return match self {
                 Voice::Down => &N_DOWN,
