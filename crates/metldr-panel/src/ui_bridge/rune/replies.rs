@@ -128,7 +128,7 @@ fn input(
     .color(ink)
     .single_line()
     .caret(ink, ink.alpha(0.25))
-    .molded_caret(palette, palette.field)
+    .molded_caret(palette)
 }
 
 fn activate(

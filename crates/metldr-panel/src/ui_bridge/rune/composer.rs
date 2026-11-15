@@ -284,7 +284,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     .label("Prompt")
     .placeholder("Write a message…", p.ink_3)
     .caret(p.ink, p.accent.alpha(0.28))
-    .molded_caret(p, p.surface)
+    .molded_caret(p)
     .on_edit(|state: &mut State| &mut state.draft)
     .on_input_change(|state: &mut State, _| {
         state.draft_changed();

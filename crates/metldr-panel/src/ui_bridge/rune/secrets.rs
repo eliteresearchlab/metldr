@@ -138,7 +138,7 @@ pub(super) fn card(
     .border(1.0, palette.line)
     .color(ink)
     .caret(ink, palette.selection)
-    .molded_caret(palette, palette.field)
+    .molded_caret(palette)
     .disabled(!row.approve)
     .on_edit(|state: &mut State| &mut state.secret.edit);
     let mut card = col()

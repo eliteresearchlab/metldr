@@ -345,13 +345,13 @@ pub(super) fn on_lip(el: El, lip: Color, primary: bool) -> El {
 
 /// A text field's caret on a molded theme.
 pub(super) trait MoldedCaret {
-    /// On a molded theme, a block caret in the key colour with the character under it in
-    /// `ground`, the fill behind the text; a flat theme keeps the field's own caret.
-    fn molded_caret(self, p: &Palette, ground: Color) -> Self;
+    /// On a molded theme, a block caret in the key colour with the character under it in the
+    /// key's legend colour; a flat theme keeps the field's own caret.
+    fn molded_caret(self, p: &Palette) -> Self;
 }
 
 impl MoldedCaret for El {
-    fn molded_caret(self, p: &Palette, ground: Color) -> Self {
+    fn molded_caret(self, p: &Palette) -> Self {
         if p.molded { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
     }
 }
