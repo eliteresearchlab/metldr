@@ -1718,6 +1718,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             .key("browser-receipts-toggle");
         thread = thread.child(collapsible::trigger(
             toggle,
+            Some("browser-receipts"),
             Default::default(),
             state.browser_receipts_open,
             |state: &mut State, open, _| state.browser_receipts_open = open,
@@ -2015,7 +2016,7 @@ fn settings_section(state: &State, section: &'static Section, body: Option<El>) 
         )
         .hover(palette.hover)
         .press(palette.press);
-    let header = collapsible::trigger(header, Default::default(), open, move |state: &mut State, open, _| {
+    let header = collapsible::trigger(header, Some(panel), Default::default(), open, move |state: &mut State, open, _| {
         if open {
             state.settings_sections.insert(key);
         } else {
