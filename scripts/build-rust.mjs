@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordReceipt, sourceDigest } from './answer-contract.mjs';
@@ -21,9 +21,17 @@ const isWindows = process.platform === 'win32';
 const panelAssetFields = ['name', 'url', 'sha256', 'bytes'];
 const rootTargetDir = process.env.CARGO_TARGET_DIR || 'target';
 const defaultBuildJobs = 2;
-// sccache is opt-in: contributors without it keep the plain compiler. Pass it on
-// explicitly so every cargo child below sees the same wrapper.
+// sccache is opt-in: contributors without it keep the plain compiler. When it is installed,
+// every build uses it, whatever started the build: cargo fingerprints the wrapper, so a build
+// with it and one without would each throw the other's work away.
 const cargoEnv = { ...process.env };
+if (!cargoEnv.RUSTC_WRAPPER && !isWindows) {
+  const found = spawnSync('sccache', ['--version'], { stdio: 'ignore' });
+  if (found.status === 0) cargoEnv.RUSTC_WRAPPER = 'sccache';
+}
+// `METLDR_PROFILE=fast` builds with the fast profile for edit and check loops; anything else
+// builds `release`, which packaged and measured builds use.
+const profile = process.env.METLDR_PROFILE === 'fast' ? 'fast' : 'release';
 
 function buildJobs() {
   const raw = process.env.METLDR_BUILD_JOBS;
@@ -157,12 +165,20 @@ try {
   } else {
     await runPool(crates.map(crate => async () => {
       const targetDir = wasmTargetDir(crate);
-      await runAsync('cargo', ['build', '--release', ...cargoBuildArgs(crate), '--target-dir', targetDir], `Cargo (${crate.name})`);
+      await runAsync('cargo', ['build', '--profile', profile, ...cargoBuildArgs(crate), '--target-dir', targetDir], `Cargo (${crate.name})`);
       if (failure) return;
+      const wasm = join(targetDir, 'wasm32-unknown-unknown', profile, `${crate.artifact ?? crate.module}.wasm`);
+      // An unchanged wasm already has its bindings: skip wasm-bindgen when the wasm's hash
+      // matches the one its last bindings were made from.
+      mkdirSync(crate.pkg, { recursive: true });
+      const stamp = join(crate.pkg, '.bindgen-source');
+      const hash = createHash('sha256').update(readFileSync(wasm)).digest('hex');
+      if (readFileSync(stamp, { encoding: 'utf8', flag: 'a+' }) === hash) return;
       await runAsync('wasm-bindgen', [
-        join(targetDir, 'wasm32-unknown-unknown', 'release', `${crate.artifact ?? crate.module}.wasm`),
-        '--target', 'web', '--typescript', '--out-dir', crate.pkg, '--out-name', crate.module,
+        wasm, '--target', 'web', '--typescript', '--out-dir', crate.pkg, '--out-name', crate.module,
       ], `wasm-bindgen (${crate.name})`);
+      if (failure) return;
+      writeFileSync(stamp, hash);
     }), buildJobs());
   }
   if (failure) throw failure;
@@ -179,7 +195,7 @@ try {
     if (statSync(snippets, { throwIfNoEntry: false })) cpSync(snippets, join(destination, 'snippets'), { recursive: true });
   }
   await runAsync('cargo', [
-    isCheck ? 'check' : 'build', '--locked', '--release',
+    isCheck ? 'check' : 'build', '--locked', '--profile', profile,
     '--manifest-path', 'crates/metldr-welcome/Cargo.toml', '--bin', 'welcome-guide',
     '--target-dir', rootTargetDir,
   ], 'welcome generator');

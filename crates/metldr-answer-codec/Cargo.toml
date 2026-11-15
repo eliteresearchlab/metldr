@@ -17,6 +17,15 @@ lto = true
 codegen-units = 1
 strip = true
 
+[profile.fast]
+# Edit and check builds (`METLDR_PROFILE=fast`): the release profile with thin LTO, parallel
+# codegen and incremental compilation. Packaged and measured builds keep `release`.
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+incremental = true
+
+
 [features]
 default = []
 guest = []
