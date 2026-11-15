@@ -445,30 +445,35 @@ impl Conversations {
     }
 
     /// Older and Latest messages, and a paging error, for the chat toolbar row.
-    pub(super) fn toolbar(&self, state: &State) -> Vec<El> {
+    /// `toolbar` with the paging controls added, as chips or (`rows`) as rows. They go straight
+    /// into it, without a list of their own each frame.
+    pub(super) fn toolbar(&self, state: &State, toolbar: El, rows: bool) -> El {
         let typography = state.preferences.typography();
         let p = state.preferences.palette();
         let available = !self.busy && !state.running();
-        let mut out = vec![button(
+        let mut toolbar = toolbar.child(entry(
             p,
             typography,
             "Older messages",
             "archive-older".into(),
+            &OLDER,
+            rows,
             available && self.older_cursor.is_some(),
             |state, _| action(state, Action::OlderArchive),
-        )];
+        ));
         if let Some(error) = &self.error {
-            out.push(typography.text(error).wrap().role("alert"));
+            toolbar = toolbar.child(typography.text(error).wrap().role("alert"));
         }
-        out.push(button(
+        toolbar.child(entry(
             p,
             typography,
             "Latest messages",
             "archive-latest".into(),
+            &LATEST,
+            rows,
             available,
             |state, _| action(state, Action::LatestArchive),
-        ));
-        out
+        ))
     }
 }
 
@@ -661,6 +666,67 @@ pub(super) fn button(
     );
     pressable(el, p, label, enabled, true, Rc::new(action))
 }
+
+/// A toolbar entry: a chip, or on an empty chat under a flat theme, a row with `icon` as the
+/// reference lists its suggestions: a muted 15 point icon, 14 point text, a hover fill.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn entry(
+    p: &super::preferences::Palette,
+    typography: super::preferences::Typography,
+    label: &str,
+    key: String,
+    icon: &'static Icon,
+    rows: bool,
+    enabled: bool,
+    action: impl Fn(&mut State, &mut Tx) + 'static,
+) -> El {
+    if !rows {
+        return button(p, typography, label, key, enabled, action);
+    }
+    let el = row()
+        .key(key)
+        .w_full()
+        .mx(-8.0)
+        .px(8.0)
+        .py(10.0)
+        .gap(12.0)
+        .items_center()
+        .radius(8.0)
+        .child(::rune::el::icon(icon, 15.0).color(p.ink_3))
+        .child(typography.legend(label).font(typography.font(14.0, 400.0).lh(21.0 * typography.scale)).color(p.ink).truncate())
+        .hover(p.hover)
+        .press(p.press)
+        .label(label);
+    let props = metldr_ui::button::Props { disabled: !enabled, ..Default::default() };
+    let el = metldr_ui::button::button(el, props, move |state: &mut State, tx| {
+        state.sound(crate::interaction_audio::Cue::Page);
+        action(state, tx)
+    });
+    if enabled { el } else { el.opacity(0.5) }
+}
+
+/// Saved chats: a clock face.
+pub(super) const HISTORY: Icon = Icon {
+    name: "metldr-history",
+    view: 24.0,
+    body: "<circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 7v5l3 2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+};
+/// Settings: three sliders.
+pub(super) const TUNE: Icon = Icon {
+    name: "metldr-tune",
+    view: 24.0,
+    body: "<path d=\"M4 6h10M18 6h2M4 12h2M10 12h10M4 18h14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"16\" cy=\"6\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"8\" cy=\"12\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"18\" cy=\"18\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+};
+const OLDER: Icon = Icon {
+    name: "metldr-older",
+    view: 24.0,
+    body: "<path d=\"M12 19V5M6 11l6-6 6 6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+};
+const LATEST: Icon = Icon {
+    name: "metldr-latest",
+    view: 24.0,
+    body: "<path d=\"M12 5v14M6 13l6 6 6-6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+};
 
 /// A Close or paging control on the Saved chats sheet: 44 points tall with body text.
 fn sheet_button(
