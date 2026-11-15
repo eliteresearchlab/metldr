@@ -40,9 +40,12 @@ pub(super) struct Palette {
     /// A screen's glass and its lit ink: the status line on a molded theme.
     pub(super) screen: Color,
     pub(super) screen_ink: Color,
+    /// A legend on a key in the accent: near-white on a key darker than 0.8 lightness, ink on a
+    /// lighter one (yellow), so it always reads.
+    pub(super) on_accent: Color,
 }
 
-type Lch = (f32, f32, f32);
+pub(super) type Lch = (f32, f32, f32);
 
 /// One theme's roles as oklch triples, in the order of [`Palette`]'s first fifteen fields, then
 /// the lip and highlight of molded material.
@@ -186,6 +189,11 @@ const CYBERPUNK: Ramp = Ramp {
 
 impl Palette {
     pub(super) fn for_theme(theme: &str) -> Self {
+        Self::with_key(theme, None)
+    }
+
+    /// The palette for `theme`; a molded theme's keys take `key` (OKLCH) in place of its own.
+    pub(super) fn with_key(theme: &str, key: Option<Lch>) -> Self {
         let ramp = match theme {
             "light" => &LIGHT,
             "gruvbox" => &GRUVBOX,
@@ -196,6 +204,7 @@ impl Palette {
         let c = |(l, c, h): Lch| oklch(l, c, h);
         let molded = std::ptr::eq(ramp, &HARDWARE);
         let light = std::ptr::eq(ramp, &LIGHT) || molded;
+        let accent = key.filter(|_| molded).unwrap_or(ramp.accent);
         Self {
             page: c(ramp.page),
             canvas: c(ramp.canvas),
@@ -208,20 +217,21 @@ impl Palette {
             ink_3: c(ramp.ink_3),
             line: c(ramp.line),
             line_strong: c(ramp.line_strong),
-            accent: c(ramp.accent),
+            accent: c(accent),
             green: c(ramp.green),
             orange: c(ramp.orange),
             red: c(ramp.red),
             // A neutral overlay that reads on both grounds; darker ink on light themes.
             press: c(ramp.ink).alpha(if light { 0.08 } else { 0.12 }),
             press_solid: c(ramp.surface).alpha(0.16),
-            selection: c(ramp.accent).alpha(0.3),
+            selection: c(accent).alpha(0.3),
             light,
             molded,
             lip: c(ramp.lip),
             highlight: c(ramp.highlight),
             screen: c(ramp.screen),
             screen_ink: c(ramp.screen_ink),
+            on_accent: if accent.0 < 0.8 { oklch(0.98, 0.0, 0.0) } else { oklch(0.18, 0.0, 0.0) },
         }
     }
 
@@ -342,7 +352,7 @@ pub(super) trait MoldedCaret {
 
 impl MoldedCaret for El {
     fn molded_caret(self, p: &Palette, ground: Color) -> Self {
-        if p.molded { self.caret(p.accent, p.selection).caret_block(ground) } else { self }
+        if p.molded { self.caret(p.accent, p.selection).caret_block(p.on_accent) } else { self }
     }
 }
 

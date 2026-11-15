@@ -417,14 +417,13 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         }
     } else {
         let can_send = state.can_send();
-        let mut send = button(
-            "rune-send",
-            "Send",
-            &SEND,
-            if can_send { p.surface } else { p.ink_2 },
-        )
-        .fill(if can_send { p.ink } else { p.line_strong })
-        .disabled(!can_send);
+        // A molded send is the primary key, in the key colour with its legend in `on_accent`.
+        let (ink, fill) = match (can_send, p.molded) {
+            (true, true) => (p.on_accent, p.accent),
+            (true, false) => (p.surface, p.ink),
+            (false, _) => (p.ink_2, p.line_strong),
+        };
+        let mut send = button("rune-send", "Send", &SEND, ink).fill(fill).disabled(!can_send);
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
         if p.molded && can_send {
             send = super::theme::on_lip(send, p.accent.mix(::rune::Color::BLACK, 0.45), true);

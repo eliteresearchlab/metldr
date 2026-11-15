@@ -56,6 +56,60 @@ impl TextSize {
     }
 }
 
+/// The colour of a molded theme's keys, as an OKLCH lightness, chroma and hue.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum KeyColor {
+    #[default]
+    Black,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    Violet,
+}
+
+impl KeyColor {
+    pub(crate) const ALL: [Self; 6] = [Self::Black, Self::Orange, Self::Yellow, Self::Green, Self::Blue, Self::Violet];
+
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Black => "black",
+            Self::Orange => "orange",
+            Self::Yellow => "yellow",
+            Self::Green => "green",
+            Self::Blue => "blue",
+            Self::Violet => "violet",
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Black => "Black",
+            Self::Orange => "Orange-red",
+            Self::Yellow => "Yellow",
+            Self::Green => "Green",
+            Self::Blue => "Blue",
+            Self::Violet => "Violet",
+        }
+    }
+
+    /// OKLCH lightness, chroma and hue.
+    pub(crate) fn lch(self) -> (f32, f32, f32) {
+        match self {
+            Self::Black => (0.24, 0.0, 0.0),
+            Self::Orange => (0.64, 0.31, 48.0),
+            Self::Yellow => (0.94, 0.23, 105.21),
+            Self::Green => (0.7, 0.29, 147.6),
+            Self::Blue => (0.56, 0.37, 260.0),
+            Self::Violet => (0.56, 0.3, 296.49),
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|color| color.key() == value)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Values {
     pub(super) theme: Theme,
