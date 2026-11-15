@@ -75,71 +75,69 @@ impl Compositor<State> for Glimm {
                 self.dots = Some((key, super::dots::Dots::new(frame.device)));
             }
         }
-        let Some((elapsed, progress, alpha)) = active else {
-            self.elapsed = None;
-            if let Some(gpu) = &mut self.gpu {
-                gpu.image = None;
-            }
-            match (has_dots, self.dots.as_mut()) {
-                (true, Some((_, dots))) => {
-                    let clear = frame.rt.clear_color();
-                    let (device, queue) = (frame.device, frame.queue);
-                    frame.ui.prepare(device, queue, &mut frame.rt.text.atlas, &frame.rt.instances, frame.size);
-                    frame.ui.draw_with(frame.encoder, frame.target, clear, &mut |pass, site| {
-                        if site.mark == super::dots::MARK {
-                            dots.draw(device, queue, pass, site);
-                        }
-                    });
+        let rect = slot.map(|index| frame.rt.instances[index].rect);
+        let active = active
+            .zip(rect)
+            .filter(|(_, rect)| rect[2] > 0.0 && rect[3] > 0.0);
+        let sweep = match active {
+            Some(((elapsed, progress, alpha), rect)) => {
+                let key = frame.device_key();
+                if self.gpu.as_ref().is_none_or(|gpu| gpu.key != key) {
+                    self.gpu = Some(Gpu::new(frame.device, key));
                 }
-                _ => frame.draw_ui(),
+                let gpu = self.gpu.as_mut().unwrap();
+                let size = extent(rect, frame.rt.env.scale);
+                gpu.image(frame.device, size);
+                let words = [
+                    elapsed as f32,
+                    progress,
+                    alpha,
+                    0.0,
+                    size[0] as f32,
+                    size[1] as f32,
+                    0.0,
+                    0.0,
+                ]
+                .map(f32::to_le_bytes);
+                frame.write_buffer(&gpu.sweep, 0, words.as_flattened());
+                let image = gpu.image.as_ref().unwrap();
+                let mut pass = frame
+                    .encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("composer sweep"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &image.view,
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        ..Default::default()
+                    });
+                pass.set_pipeline(&gpu.raw);
+                pass.set_bind_group(0, &gpu.raw_bind, &[]);
+                pass.draw(0..6, 0..1);
+                drop(pass);
+                Some(gpu)
             }
-            return;
+            None => {
+                self.elapsed = None;
+                if let Some(gpu) = &mut self.gpu {
+                    gpu.image = None;
+                }
+                None
+            }
         };
-        let rect = frame.rt.instances[slot.unwrap()].rect;
-        if rect[2] <= 0.0 || rect[3] <= 0.0 {
-            self.elapsed = None;
+        let dots = self
+            .dots
+            .as_mut()
+            .filter(|_| has_dots)
+            .map(|(_, dots)| dots);
+        if sweep.is_none() && dots.is_none() {
             frame.draw_ui();
             return;
-        }
-        let key = frame.device_key();
-        if self.gpu.as_ref().is_none_or(|gpu| gpu.key != key) {
-            self.gpu = Some(Gpu::new(frame.device, key));
-        }
-        let gpu = self.gpu.as_mut().unwrap();
-        let size = extent(rect, frame.rt.env.scale);
-        gpu.image(frame.device, size);
-        let sweep = [
-            elapsed as f32,
-            progress,
-            alpha,
-            0.0,
-            size[0] as f32,
-            size[1] as f32,
-            0.0,
-            0.0,
-        ]
-        .map(f32::to_le_bytes);
-        frame.write_buffer(&gpu.sweep, 0, sweep.as_flattened());
-        {
-            let image = gpu.image.as_ref().unwrap();
-            let mut pass = frame
-                .encoder
-                .begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("composer sweep"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &image.view,
-                        resolve_target: None,
-                        depth_slice: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    ..Default::default()
-                });
-            pass.set_pipeline(&gpu.raw);
-            pass.set_bind_group(0, &gpu.raw_bind, &[]);
-            pass.draw(0..6, 0..1);
         }
         let clear = frame.rt.clear_color();
         let (device, queue) = (frame.device, frame.queue);
@@ -150,16 +148,25 @@ impl Compositor<State> for Glimm {
             &frame.rt.instances,
             frame.size,
         );
-        let mut dots = self.dots.as_mut().filter(|_| has_dots);
-        frame
-            .ui
-            .draw_with(frame.encoder, frame.target, clear, &mut |pass, site| {
-                if site.mark == MARK {
-                    gpu.draw(device, queue, pass, site);
-                } else if site.mark == super::dots::MARK && let Some((_, dots)) = dots.as_mut() {
-                    dots.draw(device, queue, pass, site);
+        let (mut sweep, mut dots) = (sweep, dots);
+        frame.ui.draw_with(
+            frame.encoder,
+            frame.target,
+            clear,
+            &mut |pass, site| match site.mark {
+                MARK => {
+                    if let Some(gpu) = sweep.as_mut() {
+                        gpu.draw(device, queue, pass, site);
+                    }
                 }
-            });
+                super::dots::MARK => {
+                    if let Some(dots) = dots.as_mut() {
+                        dots.draw(device, queue, pass, site);
+                    }
+                }
+                _ => {}
+            },
+        );
     }
 
     fn animating(&self) -> bool {

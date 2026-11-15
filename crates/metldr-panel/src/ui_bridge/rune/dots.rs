@@ -13,7 +13,9 @@ const WORDS: usize = 20;
 
 /// The slot to put under a molded theme's canvas: it fills its parent and draws the dots.
 pub(super) fn ground() -> ::rune::El {
-    ::rune::effect(MARK).pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).a11y_hidden()
+    ::rune::effect(MARK)
+        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+        .a11y_hidden()
 }
 
 pub(super) struct Dots {
@@ -39,7 +41,10 @@ impl Dots {
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bind_layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: geometry.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: geometry.as_entire_binding(),
+            }],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
@@ -48,27 +53,66 @@ impl Dots {
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("dot ground"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Owned(format!("{CLIP_WGSL}\n{}", include_str!("dots.wgsl")))),
+            source: wgpu::ShaderSource::Wgsl(Cow::Owned(format!(
+                "{CLIP_WGSL}\n{}",
+                include_str!("dots.wgsl")
+            ))),
         });
-        Self { geometry, bind, layout, shader, pipelines: Vec::with_capacity(2) }
+        Self {
+            geometry,
+            bind,
+            layout,
+            shader,
+            pipelines: Vec::with_capacity(2),
+        }
     }
 
-    pub(super) fn draw(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, pass: &mut wgpu::RenderPass<'_>, site: &EffectSite<'_>) {
-        let index = self.pipelines.iter().position(|(format, _)| *format == site.format).unwrap_or_else(|| {
-            let pipeline = super::glimm::pipeline(device, &self.layout, &self.shader, site.format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING));
-            if self.pipelines.len() == 2 {
-                self.pipelines.remove(0);
-            }
-            self.pipelines.push((site.format, pipeline));
-            self.pipelines.len() - 1
-        });
+    pub(super) fn draw(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pass: &mut wgpu::RenderPass<'_>,
+        site: &EffectSite<'_>,
+    ) {
+        let index = self
+            .pipelines
+            .iter()
+            .position(|(format, _)| *format == site.format)
+            .unwrap_or_else(|| {
+                let pipeline = super::glimm::pipeline(
+                    device,
+                    &self.layout,
+                    &self.shader,
+                    site.format,
+                    Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                );
+                if self.pipelines.len() == 2 {
+                    self.pipelines.remove(0);
+                }
+                self.pipelines.push((site.format, pipeline));
+                self.pipelines.len() - 1
+            });
         let mut words = [0u32; WORDS];
         words[0..4].copy_from_slice(&site.instance.rect.map(f32::to_bits));
         words[4..8].copy_from_slice(&site.instance.clip.map(f32::to_bits));
         words[8..12].copy_from_slice(&site.instance.fade);
-        words[12..16].copy_from_slice(&[site.origin[0], site.origin[1], site.size[0] as f32, site.size[1] as f32].map(f32::to_bits));
-        words[16..20].copy_from_slice(&[PITCH * site.scale, RADIUS * site.scale, OPACITY, 0.0].map(f32::to_bits));
-        queue.write_buffer(&self.geometry, 0, words.map(u32::to_le_bytes).as_flattened());
+        words[12..16].copy_from_slice(
+            &[
+                site.origin[0],
+                site.origin[1],
+                site.size[0] as f32,
+                site.size[1] as f32,
+            ]
+            .map(f32::to_bits),
+        );
+        words[16..20].copy_from_slice(
+            &[PITCH * site.scale, RADIUS * site.scale, OPACITY, 0.0].map(f32::to_bits),
+        );
+        queue.write_buffer(
+            &self.geometry,
+            0,
+            words.map(u32::to_le_bytes).as_flattened(),
+        );
         pass.set_pipeline(&self.pipelines[index].1);
         pass.set_bind_group(0, &self.bind, &[]);
         pass.draw(0..6, 0..1);
