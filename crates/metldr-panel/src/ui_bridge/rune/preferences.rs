@@ -400,7 +400,7 @@ fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<Str
         .radius(8.0)
         .fill(typography.field);
     match typography.lip {
-        Some(lip) => super::theme::key_down(el.shadow(2.0, 0.0, lip).press_travel(2.0), false),
+        Some(lip) => super::theme::on_lip(el, lip, false),
         None => el,
     }
 }

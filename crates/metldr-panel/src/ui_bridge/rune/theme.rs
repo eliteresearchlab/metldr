@@ -322,13 +322,15 @@ pub(super) fn card(palette: &Palette) -> El {
 /// it keeps the outline and field fill of an outlined control.
 pub(super) fn keycap(el: El, p: &Palette) -> El {
     let el = el.radius(if p.molded { 6.0 } else { 8.0 }).fill(if p.molded { p.surface } else { p.field }).border(1.0, p.line);
-    if p.molded { key_down(el.shadow(2.0, 0.0, p.lip).press_travel(2.0), false) } else { el }
+    if p.molded { on_lip(el, p.lip, false) } else { el }
 }
 
-/// A molded key's down-stroke: it sounds as the pointer lands, and its activation the return.
-/// `primary` is the deeper primary key.
-pub(super) fn key_down(el: El, primary: bool) -> El {
-    el.on_press_down(move |state: &mut super::State, _| state.sound(crate::interaction_audio::Cue::KeyDown(primary)))
+/// A molded key standing on a hard 2 point `lip`: it sinks onto the lip while pressed and sounds
+/// its down-stroke as the pointer lands (deeper for the `primary` key), its activation the return.
+pub(super) fn on_lip(el: El, lip: Color, primary: bool) -> El {
+    el.shadow(2.0, 0.0, lip)
+        .press_travel(2.0)
+        .on_press_down(move |state: &mut super::State, _| state.sound(crate::interaction_audio::Cue::KeyDown(primary)))
 }
 
 /// A text field's caret on a molded theme.

@@ -427,7 +427,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .disabled(!can_send);
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
         if p.molded && can_send {
-            send = super::theme::key_down(send.shadow(2.0, 0.0, p.accent.mix(::rune::Color::BLACK, 0.45)).press_travel(2.0), true);
+            send = super::theme::on_lip(send, p.accent.mix(::rune::Color::BLACK, 0.45), true);
         }
         if can_send {
             send = send.press(p.press_solid);
