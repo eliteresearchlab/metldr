@@ -98,9 +98,15 @@ fn token(text: &str) -> Option<Token> {
 }
 
 fn page_matches(text: &str) -> bool {
-    token(text).is_none_or(|token| {
-        token.marker != '/' && "current page".contains(&text[token.start + 1..].to_lowercase())
-    })
+    token(text).is_none_or(|token| token.marker != '/' && names_page(&text[token.start + 1..]))
+}
+
+/// Whether a typed `query` finds the current page: "current page" holds it, in any case. The
+/// query is matched in place, without a lowercased copy each frame.
+fn names_page(query: &str) -> bool {
+    const PAGE: &[u8] = b"current page";
+    let query = query.as_bytes();
+    query.is_empty() || PAGE.windows(query.len()).any(|window| window.eq_ignore_ascii_case(query))
 }
 
 fn supports_plan(value: &str) -> bool {
@@ -109,8 +115,7 @@ fn supports_plan(value: &str) -> bool {
 
 fn close(state: &mut State, _: &mut Tx) {
     state.sound(crate::interaction_audio::Cue::Release);
-    state.menu = None;
-    state.source_engaged = false;
+    close_menu(state);
 }
 
 pub(super) fn enter<S>(
@@ -187,6 +192,27 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
 }
 
 /// One 30 px menu row: name, muted tag, then the check.
+/// The prompt while the sources menu is open, as a trigger menu's editor: it names the list it
+/// shows (ARIA `aria-controls`) and, once the arrows reach it, the highlighted source
+/// (`aria-activedescendant`), while keyboard focus stays in the prompt.
+trait SourceRelations {
+    fn with_sources(self, state: &State) -> Self;
+}
+
+impl SourceRelations for El {
+    fn with_sources(self, state: &State) -> Self {
+        if state.menu != Some(Menu::Sources) {
+            return self;
+        }
+        let el = self.controls("rune-source-menu");
+        if state.source_engaged && page_matches(&state.draft.text) {
+            el.active_descendant("rune-current-page")
+        } else {
+            el
+        }
+    }
+}
+
 /// The composer's corner radius on the theme's material.
 fn radius(p: &Palette) -> f32 {
     if p.neon() { 3.0 } else if p.retro() { 6.0 } else { RADIUS }
@@ -315,6 +341,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     .padding(8.0)
     .color(p.ink)
     .label("Prompt")
+    .with_sources(state)
     .placeholder("Write a message…", p.ink_3)
     .caret(p.ink, p.accent.alpha(0.28))
     .theme_caret(p)
@@ -513,12 +540,10 @@ pub(super) fn menu(state: &State) -> Option<El> {
     let typography = state.preferences.typography();
     match state.menu? {
         Menu::Sources => {
-            let marker = token(&state.draft.text).map(|t| t.marker);
-            let query = token(&state.draft.text)
-                .map(|t| &state.draft.text[t.start + 1..])
-                .unwrap_or("")
-                .to_lowercase();
-            let show_page = marker != Some('/') && "current page".contains(&query);
+            let typed = token(&state.draft.text);
+            let marker = typed.as_ref().map(|t| t.marker);
+            let query = typed.map_or("", |t| &state.draft.text[t.start + 1..]);
+            let show_page = marker != Some('/') && names_page(query);
             let mut rows = col().key("rune-source-rows").w_full();
             if show_page {
                 let disabled = state.capture_disabled();
@@ -560,7 +585,8 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     )
                     .focusable(true)
                     .disabled(disabled)
-                    .role("button")
+                    .role("option")
+                    .focus_selected(state.source_engaged)
                     .label("Current page, Use the page you are viewing");
                 if !disabled {
                     page = page
@@ -594,7 +620,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                                 .color(p.ink_3),
                         )
                         .disabled(true)
-                        .role("button")
+                        .role("option")
                         .label("Photos and files, unavailable"),
                 );
             }
@@ -616,7 +642,8 @@ pub(super) fn menu(state: &State) -> Option<El> {
             Some(
                 col()
                     .key("rune-source-menu")
-                    .role("menu")
+                    .role("listbox")
+                    .label("Sources")
                     .focus_group()
                     .w_full()
                     .gap(5.0)
@@ -643,13 +670,11 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     .transition(super::theme::pop_in(p))
                     .focus_return("rune-source-trigger")
                     .on_key(|state: &mut State, key, _| {
-                        if key.key == Key::Escape {
-                            state.menu = None;
-                            state.source_engaged = false;
-                            true
-                        } else {
-                            false
+                        let escape = key.key == Key::Escape;
+                        if escape {
+                            close_menu(state);
                         }
+                        escape
                     }),
             )
         }
@@ -766,6 +791,13 @@ pub(super) fn menu(state: &State) -> Option<El> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_typed_source_finds_the_page_in_any_case() {
+        for (text, found) in [("@", true), ("@Cur", true), ("ask @PAGE", true), ("@pager", false), ("/page", false), ("no trigger", true)] {
+            assert_eq!(page_matches(text), found, "{text}");
+        }
+    }
 
     #[test]
     fn replaced_and_restored_drafts_have_distinct_submission_versions() {
