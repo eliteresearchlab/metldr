@@ -1773,7 +1773,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                     error
                 } else if matches!(*core.owner.borrow(), Owner::Capturing) {
                     "Reading current page"
-                } else if !core.rune_native_requests().0.is_empty()
+                } else if core.rune_has_native_requests()
                     || core.rune_browser_action().is_some()
                 {
                     "Waiting for approval"
