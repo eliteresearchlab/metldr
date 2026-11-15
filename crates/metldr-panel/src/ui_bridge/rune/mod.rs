@@ -1,4 +1,5 @@
 use super::*;
+use metldr_ui::collapsible;
 use ::rune::{
     App, AppHandle, AppSpec, Cx, El, ScrollSpec, TextEdit, TextStyle, Tx, col, row,
 };
@@ -1274,10 +1275,6 @@ fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
-fn toggle_browser_receipts(state: &mut State, _: &mut Tx) {
-    state.browser_receipts_open = !state.browser_receipts_open;
-}
-
 fn plan_key(plan: &crate::model::TaskPlanView, approve: bool) -> String {
     format!(
         "plan:{}:{}:{}",
@@ -1662,14 +1659,9 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                         col()
                             .w_full()
                             .gap(10.0)
-                            .child(settings_section(
-                                state,
-                                "appearance",
-                                "Appearance and sound",
-                                state.preferences.view(State::preference),
-                            ))
-                            .child(settings_section(state, "providers", "AI providers", providers))
-                            .child(settings_section(state, "agents", "Installed agents", agents))
+                            .child(settings_section(state, &APPEARANCE, state.preferences.view(State::preference)))
+                            .child(settings_section(state, &PROVIDERS, providers))
+                            .child(settings_section(state, &AGENTS, agents))
                             .grow(1.0)
                             .min_h(0.0)
                             .scroll(ScrollSpec {
@@ -1721,29 +1713,27 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .filter(|action| action.display.receipt)
         .collect();
     if !receipts.is_empty() {
-        thread = thread.child(
-            typography
-                .text(format!("Browser action results ({})", receipts.len()))
-                .key("browser-receipts-toggle")
-                .role("button")
-                .focusable(true)
-                .expanded(state.browser_receipts_open)
-                .on_press_tx(toggle_browser_receipts)
-                .on_key(|state: &mut State, key, tx| {
-                    if key.key == ::rune::Key::Enter || key.key == ::rune::Key::Text(" ".into()) {
-                        if !tx.key_repeat() {
-                            toggle_browser_receipts(state, tx);
-                        }
-                        true
-                    } else {
-                        false
-                    }
-                }),
-        );
-        if state.browser_receipts_open {
-            for action in receipts {
-                thread = thread.child(browser_action_view(action, typography));
-            }
+        let toggle = typography
+            .text(format!("Browser action results ({})", receipts.len()))
+            .key("browser-receipts-toggle");
+        thread = thread.child(collapsible::trigger(
+            toggle,
+            Default::default(),
+            state.browser_receipts_open,
+            |state: &mut State, open, _| state.browser_receipts_open = open,
+        ));
+        let list = col()
+            .w_full()
+            .gap(16.0)
+            .children(receipts.into_iter().map(|action| browser_action_view(action, typography)));
+        if let Some(panel) = collapsible::panel(
+            list,
+            "browser-receipts",
+            "browser-receipts-toggle",
+            Default::default(),
+            state.browser_receipts_open,
+        ) {
+            thread = thread.child(panel);
         }
     }
     if !connection.connected() {
@@ -1943,12 +1933,40 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
 
 /// A collapsible settings card: a 44 px header with the title and a chevron, and the body below
 /// it while open.
-fn settings_section(state: &State, key: &'static str, title: &'static str, body: El) -> El {
+/// One collapsible card of the settings page, with its keys spelled out so a frame builds none.
+struct Section {
+    key: &'static str,
+    trigger: &'static str,
+    panel: &'static str,
+    title: &'static str,
+}
+
+const APPEARANCE: Section = Section {
+    key: "appearance",
+    trigger: "settings-section-appearance",
+    panel: "settings-panel-appearance",
+    title: "Appearance and sound",
+};
+const PROVIDERS: Section = Section {
+    key: "providers",
+    trigger: "settings-section-providers",
+    panel: "settings-panel-providers",
+    title: "AI providers",
+};
+const AGENTS: Section = Section {
+    key: "agents",
+    trigger: "settings-section-agents",
+    panel: "settings-panel-agents",
+    title: "Installed agents",
+};
+
+fn settings_section(state: &State, section: &'static Section, body: El) -> El {
+    let Section { key, trigger, panel, title } = *section;
     let palette = state.preferences.palette();
     let typography = state.preferences.typography();
     let open = state.settings_sections.contains(key);
     let header = row()
-        .key(format!("settings-section-{key}"))
+        .key(trigger)
         .w_full()
         .min_h(44.0)
         .px(14.0)
@@ -1965,34 +1983,30 @@ fn settings_section(state: &State, key: &'static str, title: &'static str, body:
                 .color(palette.ink_3)
                 .icon_rotation(if open { std::f32::consts::PI } else { 0.0 }),
         )
-        .role("button")
-        .label(title)
-        .expanded(open)
-        .focusable(true)
         .hover(palette.hover)
-        .press(palette.press)
-        .on_press_tx(move |state: &mut State, _| {
-            if !state.settings_sections.remove(key) {
-                state.settings_sections.insert(key);
-            }
-        })
-        .on_key(move |state: &mut State, key_event, tx| {
-            if key_event.key != ::rune::Key::Enter {
-                return false;
-            }
-            if !tx.key_repeat() && !state.settings_sections.remove(key) {
-                state.settings_sections.insert(key);
-            }
-            true
-        });
+        .press(palette.press);
+    let header = collapsible::trigger(header, Default::default(), open, move |state: &mut State, open, _| {
+        if open {
+            state.settings_sections.insert(key);
+        } else {
+            state.settings_sections.remove(key);
+        }
+    });
     let mut card = col()
         .w_full()
         .radius(10.0)
         .fill(palette.surface)
         .border(1.0, palette.line)
         .child(header);
-    if open {
-        card = card.child(col().w_full().px(14.0).pb(14.0).child(body));
+    let body = col().w_full().px(14.0).pb(14.0).child(body);
+    if let Some(panel) = collapsible::panel(
+        body,
+        panel,
+        trigger,
+        Default::default(),
+        open,
+    ) {
+        card = card.child(panel);
     }
     card
 }
