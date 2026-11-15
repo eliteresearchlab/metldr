@@ -54,6 +54,8 @@ pub(crate) enum A11yKind {
     Article,
     /// A named scroll region (`El::scroll_stop`); `true` while it is a Tab stop.
     Region(bool),
+    /// A list of options (`role("listbox")`), named by its label.
+    Listbox,
     /// A plain container another element names (`El::controls`, `El::active_descendant`), so the
     /// name has an element to point at.
     Box,
@@ -130,6 +132,7 @@ impl A11yItem {
             A11yKind::Article => Some("article"),
             A11yKind::Region(_) => Some("region"),
             A11yKind::Box => Some("box"),
+            A11yKind::Listbox => Some("listbox"),
             A11yKind::Text => Some("text"),
             A11yKind::Status => Some("status"),
             A11yKind::Alert => Some("alert"),
@@ -466,6 +469,7 @@ impl<S: 'static> Runtime<S> {
                         None | Some(A11yKind::Cell | A11yKind::Group | A11yKind::Article),
                     ) => Some(A11yKind::Article),
                     ("region", _) if labelled => Some(A11yKind::Region(self.scroll_stop_live(i))),
+                    ("listbox", _) => Some(A11yKind::Listbox),
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
                     ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
@@ -508,6 +512,7 @@ impl<S: 'static> Runtime<S> {
                             | A11yKind::Article
                             | A11yKind::Region(_)
                             | A11yKind::Box
+                            | A11yKind::Listbox
                     )
                 })
                 .map(|index| out[index].path.clone());
