@@ -248,7 +248,6 @@ fn menu_row(
         } else {
             ::rune::el().size(13.0, 13.0)
         })
-        .focusable(true)
 }
 
 pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
