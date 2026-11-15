@@ -51,6 +51,8 @@ pub(crate) struct A11yMore {
     pub sorted: Option<bool>,
     /// `El::busy`: an action it started is still running.
     pub busy: bool,
+    /// `El::unavailable`: reads as disabled but keeps focus.
+    pub unavailable: bool,
 }
 
 /// Accessibility state beyond role and label (`El::level`, `El::expanded`, `El::secure`, and
@@ -148,6 +150,13 @@ impl El {
     /// its work. Presses should do nothing meanwhile, which the control's own handler decides.
     pub fn busy(mut self, busy: bool) -> Self {
         if busy || self.a11y.more.is_some() { self.a11y.more().busy = busy; }
+        self
+    }
+    /// A control that reads as unavailable (ARIA `aria-disabled`) yet keeps its focus and its
+    /// place in the tab order, as a button whose work is still running, or one that hosts a
+    /// tooltip saying why it can't be used. Presses should do nothing, which its handler decides.
+    pub fn unavailable(mut self, unavailable: bool) -> Self {
+        if unavailable || self.a11y.more.is_some() { self.a11y.more().unavailable = unavailable; }
         self
     }
     /// A checkbox that is partly on: some of what it controls is (ARIA `aria-checked="mixed"`).

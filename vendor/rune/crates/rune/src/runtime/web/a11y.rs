@@ -518,7 +518,7 @@ impl<S: 'static> Runtime<S> {
                             checked: n.a11y.checked.or_else(|| matches!(n.role, "radio" | "segment")
                                 .then_some(if n.focus.selected { Checked::True } else { Checked::False })),
                             selected: matches!(n.role, "tab" | "option").then_some(n.focus.selected),
-                            disabled: n.a11y.disabled || n.inert,
+                            disabled: n.a11y.disabled || n.inert || n.a11y.more.as_deref().is_some_and(|m| m.unavailable),
                             busy: n.a11y.more.as_deref().is_some_and(|m| m.busy),
                         })),
                         path: n.path.clone(),

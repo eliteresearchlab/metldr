@@ -1,10 +1,10 @@
-.PHONY: rust check check-rust check-rune check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion dev-install
+.PHONY: rust check check-rust check-rune check-ui check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion dev-install
 
 # Every Cargo root in the repository, in the order the check-* targets use.
 RUST_CRATES := metldr-sse metldr-responses metldr-google-interactions metldr-messages \
   metldr-chat-completions metldr-native-credentials metldr-conversation \
   metldr-harness metldr-pi-session metldr-codex-session metldr-opencode-session metldr-claude-session \
-  metldr-browser-tools metldr-answer-codec metldr-panel metldr-companion \
+  metldr-browser-tools metldr-answer-codec metldr-ui metldr-panel metldr-companion \
   metldr-core metldr-history-pages metldr-welcome metldr-rune-host
 
 # Fast pre-gate: type-check every Cargo root without linking or running tests.
@@ -24,6 +24,10 @@ check-rust:
 
 check-rune:
 	cargo test --locked --manifest-path prototypes/rune-frontend/Cargo.toml --lib
+
+# The control behaviour layer: each primitive with its ported cases.
+check-ui:
+	cargo test --locked --manifest-path crates/metldr-ui/Cargo.toml
 
 check-codex:
 	cargo test --locked --manifest-path crates/metldr-codex-session/Cargo.toml

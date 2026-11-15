@@ -141,7 +141,6 @@ impl Conversations {
             let id = tab.id.clone();
             let close_id = id.clone();
             let key_id = id.clone();
-            let close_key_id = id.clone();
             let active = id == core.scope.conversation;
             let select = typography
                 .text(&tab.title)
@@ -174,15 +173,17 @@ impl Conversations {
                         }
                     })
                 });
-            let close = icon_button(&CLOSE, 11.0, 24.0, 5.0, p)
-                .key(format!("chat-close-{}", tab.id))
-                .label(format!("Close {}", tab.title))
-                .disabled(!enabled)
-                .native_activation()
-                .on_press_tx(move |state: &mut State, tx| close_tab(state, &close_id, tx))
-                .on_key(move |state: &mut State, key, tx| {
-                    activate(key, tx, |tx| close_tab(state, &close_key_id, tx))
-                });
+            let close = metldr_ui::button::button(
+                icon_button(&CLOSE, 11.0, 24.0, 5.0, p)
+                    .key(format!("chat-close-{}", tab.id))
+                    .label(format!("Close {}", tab.title))
+                    .native_activation(),
+                metldr_ui::button::Props {
+                    disabled: !enabled,
+                    ..Default::default()
+                },
+                move |state: &mut State, tx| close_tab(state, &close_id, tx),
+            );
             let tab = row()
                 .w(144.0)
                 .h(28.0)
@@ -201,16 +202,18 @@ impl Conversations {
             });
         }
         out.child(
-            icon_button(&super::composer::PLUS, 15.0, 28.0, 7.0, p)
-                .key("chat-new")
-                .label("New chat")
-                .ml(2.0)
-                .disabled(!enabled)
-                .native_activation()
-                .on_press_tx(|state: &mut State, _| action(state, Action::New))
-                .on_key(|state: &mut State, key, tx| {
-                    activate(key, tx, |_| action(state, Action::New))
-                }),
+            metldr_ui::button::button(
+                icon_button(&super::composer::PLUS, 15.0, 28.0, 7.0, p)
+                    .key("chat-new")
+                    .label("New chat")
+                    .ml(2.0)
+                    .native_activation(),
+                metldr_ui::button::Props {
+                    disabled: !enabled,
+                    ..Default::default()
+                },
+                |state: &mut State, _| action(state, Action::New),
+            ),
         )
         .w_full()
         .scroll_x()
@@ -703,37 +706,22 @@ fn pressable(
     scale: bool,
     action: Rc<dyn Fn(&mut State, &mut Tx)>,
 ) -> El {
-    let el = el
-        .radius(8.0)
-        .border(1.0, p.line)
-        .fill(p.field)
-        .role("button")
-        .label(label)
-        .focusable(true)
-        .disabled(!enabled);
+    let el = el.radius(8.0).border(1.0, p.line).fill(p.field).label(label);
+    let props = metldr_ui::button::Props {
+        disabled: !enabled,
+        ..Default::default()
+    };
+    let el = metldr_ui::button::button(el, props, move |state: &mut State, tx| {
+        state.sound(crate::interaction_audio::Cue::Page);
+        action(state, tx)
+    });
     if !enabled {
         return el.opacity(0.5);
     }
-    let press = Rc::clone(&action);
     let el = if scale {
         el.press_scale(super::theme::PRESS_SCALE)
     } else {
         el
     };
-    el.hover(p.hover)
-        .press(p.hover_2)
-        .on_press_tx(move |state: &mut State, tx| {
-            state.sound(crate::interaction_audio::Cue::Page);
-            press(state, tx)
-        })
-        .on_key(move |state: &mut State, key, tx| {
-            if key.key != ::rune::Key::Enter {
-                return false;
-            }
-            if !tx.key_repeat() {
-                state.sound(crate::interaction_audio::Cue::Page);
-                action(state, tx);
-            }
-            true
-        })
+    el.hover(p.hover).press(p.hover_2)
 }
