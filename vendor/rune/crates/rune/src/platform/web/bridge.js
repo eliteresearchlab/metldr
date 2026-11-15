@@ -37,7 +37,8 @@ const GATED_INPUT = ['pointerdown', 'pointerup', 'pointermove', 'pointercancel',
 const nativeButtons = new WeakSet();
 
 export function native_button(h, path) {
-    return h.disposed ? null : h.a11yNodes.get(`button:${path}`) ?? null;
+    // A scroll region that is a Tab stop takes focus through the same path as a button.
+    return h.disposed ? null : h.a11yNodes.get(`button:${path}`) ?? h.a11yNodes.get(`semantic:${path}`) ?? null;
 }
 
 export function set_native_button(_h, node, enabled) {
@@ -268,7 +269,7 @@ export function syncA11y(h, json, revision) {
     const focused = document.activeElement;
     let restoreNativeFocus = false;
     for (const item of items) {
-        const group = ['table', 'row', 'columnheader', 'cell', 'group', 'article'].includes(item.k);
+        const group = ['table', 'row', 'columnheader', 'cell', 'group', 'article', 'region'].includes(item.k);
         const tag = group || item.k === 'input' ? 'div' : item.k === 'heading' ? `h${item.l || 2}` : item.k === 'button' ? 'button' : 'p';
         const key = group ? `semantic:${item.p}` : item.k === 'input' ? `input:${item.p}` : `${tag}:${item.p}`;
         seen.add(key);
@@ -308,6 +309,8 @@ export function syncA11y(h, json, revision) {
         if (group) {
             setOptionalAttribute(el, 'role', item.k);
             setOptionalAttribute(el, 'aria-label', item.t);
+            // A region the keyboard can reach scrolls; focus reaches it through the runtime's Tab.
+            setOptionalAttribute(el, 'tabindex', item.focus ? '-1' : undefined);
         }
         const live = item.k === 'status' || item.k === 'alert';
         if (live || tag === 'p') {

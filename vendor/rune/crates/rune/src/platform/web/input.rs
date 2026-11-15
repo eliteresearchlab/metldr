@@ -147,6 +147,9 @@ pub(super) struct Bridge<S: 'static> {
     a11y: crate::runtime::web_a11y::A11yMirror,
     // Counts each mirror pushed to the page. A press names the revision it was rendered from.
     a11y_revision: u64,
+    /// The mirror revision the native controls were last reconciled against: the mirror's nodes
+    /// only change with a new revision, so an unchanged one skips the rebuild.
+    native_revision: Option<u64>,
     copy_cache: String,
     fit_height: bool,
 }
@@ -224,6 +227,7 @@ impl<S: 'static> Bridge<S> {
             mirror: Default::default(),
             a11y: Default::default(),
             a11y_revision: 0,
+            native_revision: None,
             copy_cache: String::new(),
             fit_height,
         }
@@ -268,6 +272,14 @@ impl<S: 'static> Running<S> {
     }
 
     pub(super) fn reconcile_native(&mut self, window: &Arc<Window>) {
+        // Only a new mirror changes which nodes back the native controls; until then each frame
+        // just keeps focus where the runtime has it. A press still checks the control is live.
+        if self.input.native_revision == Some(self.input.a11y_revision) {
+            self.focus_native(false);
+            self.reconcile_submit();
+            return;
+        }
+        self.input.native_revision = Some(self.input.a11y_revision);
         let desired = self.rt.native_controls();
         let old = std::mem::take(&mut self.input.native);
         for registration in old {

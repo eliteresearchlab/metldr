@@ -82,7 +82,17 @@ impl<S: 'static> Runtime<S> {
     }
     pub(super) fn can_focus(&self, i: usize) -> bool {
         let n = &self.nodes[i];
-        !n.a11y.disabled && (n.focus.enabled || n.input.as_ref().is_some_and(|s| s.access.is_some())) && self.reachable(i)
+        !n.a11y.disabled && (n.focus.enabled || n.input.as_ref().is_some_and(|s| s.access.is_some()) || self.scroll_stop_live(i))
+            && self.reachable(i)
+    }
+    /// Scroll view `i` is a Tab stop now: `El::scroll_stop`, overflowing, nothing focusable inside.
+    pub(crate) fn scroll_stop_live(&self, i: usize) -> bool {
+        if !self.nodes[i].focus.scroll_stop || !self.pageable(i) { return false; }
+        let inside = |j: usize| std::iter::successors(self.nodes[j].parent, |&p| self.nodes[p].parent).any(|p| p == i);
+        !(i + 1..self.nodes.len()).take_while(|&j| inside(j)).any(|j| {
+            let n = &self.nodes[j];
+            n.focus.enabled || n.input.as_ref().is_some_and(|s| s.access.is_some())
+        })
     }
     /// Shown, sized, not exiting and not behind a modal.
     fn reachable(&self, i: usize) -> bool {
@@ -277,7 +287,7 @@ impl<S: 'static> Runtime<S> {
             .map(|(p, _)| p.to_owned()))
             .or(restore)
             .or_else(|| self.focused.clone().filter(|p| (0..nodes.len()).any(|j| &nodes[j].path == p && shown(j)
-                && (nodes[j].focus.enabled || nodes[j].input.as_ref().is_some_and(|i| i.edit.focused)))
+                && (nodes[j].focus.enabled || nodes[j].focus.scroll_stop || nodes[j].input.as_ref().is_some_and(|i| i.edit.focused)))
                 || self.virtual_inputs.get(p).is_some_and(|i| i.edit.focused)))
             .or_else(|| requested.into_iter().next().or_else(|| virtual_req().min_by_key(|&(p, _)| p)).map(|(p, _)| p.to_owned()));
         // State may have deleted a row. Only the new view's accessors are valid now.

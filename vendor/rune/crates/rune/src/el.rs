@@ -1107,6 +1107,15 @@ impl El {
         self.focus.ring_default = Some(Outline { width, offset, color });
         self
     }
+    /// Makes this scroll view a keyboard Tab stop while its content overflows and nothing inside
+    /// it can take focus, so a keyboard reaches it and scrolls it: the arrow keys by a line, Page
+    /// Up and Page Down by most of a page, Home and End to its ends. It reads as a region named
+    /// `label`. A view that fits, or one with a focusable control inside, is skipped.
+    pub fn scroll_stop(self, label: impl Into<String>) -> Self {
+        let mut el = self.role("region").label(label);
+        el.focus.scroll_stop = true;
+        el
+    }
     /// No focus ring: not the default one, and not one set with [`El::focus_ring`]. A control
     /// that shows focus its own way (a fill, an outline it animates) sets it on itself or on
     /// the child that would draw the ring.
