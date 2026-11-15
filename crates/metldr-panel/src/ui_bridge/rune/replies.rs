@@ -277,25 +277,25 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                             panel = panel.child(typography.text(&option.description).wrap());
                         }
                     }
-                    if question.other {
-                        if let Some(edit) = state.replies.edits.get(&key) {
-                            panel = panel.child(typography.text("Other").wrap());
-                            let entry = key.clone();
-                            panel = panel.child(
-                                input(edit, typography, palette)
-                                    .key(format!("other:{key}"))
-                                    .w_full()
-                                    .label(format!("Other answer for {question_label}"))
-                                    .disabled(!enabled)
-                                    .on_edit(::rune::edit_access(move |state: &mut State| {
-                                        state
-                                            .replies
-                                            .edits
-                                            .get_mut(&entry)
-                                            .expect("synced reply field")
-                                    })),
-                            );
-                        }
+                    if question.other
+                        && let Some(edit) = state.replies.edits.get(&key)
+                    {
+                        panel = panel.child(typography.text("Other").wrap());
+                        let entry = key.clone();
+                        panel = panel.child(
+                            input(edit, typography, palette)
+                                .key(format!("other:{key}"))
+                                .w_full()
+                                .label(format!("Other answer for {question_label}"))
+                                .disabled(!enabled)
+                                .on_edit(::rune::edit_access(move |state: &mut State| {
+                                    state
+                                        .replies
+                                        .edits
+                                        .get_mut(&entry)
+                                        .expect("synced reply field")
+                                })),
+                        );
                     }
                 }
                 let ready = enabled

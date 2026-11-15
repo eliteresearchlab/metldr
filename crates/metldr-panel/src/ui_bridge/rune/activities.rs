@@ -559,10 +559,9 @@ impl Activities {
                 state.sound(crate::interaction_audio::Cue::Press);
                 if let Some(cache) = cache.upgrade()
                     && let Some(entry) = cache.borrow_mut().entries.get_mut(&id)
+                    && !entry.open.remove(&key)
                 {
-                    if !entry.open.remove(&key) {
-                        entry.open.insert(key.clone());
-                    }
+                    entry.open.insert(key.clone());
                 }
                 if let Some(updates) = updates.upgrade() {
                     updates.changed();
@@ -774,42 +773,43 @@ impl Activities {
                     }
                 }
                 .await;
-                if result.is_ok() && copy {
-                    if let Some(cache) = cache.upgrade() {
-                        let token = {
-                            let mut cache = cache.borrow_mut();
-                            cache.next_token = cache.next_token.wrapping_add(1).max(1);
-                            let token = cache.next_token;
-                            if let Some(entry) = cache.entries.get_mut(&id) {
-                                if entry.activity == Activity::Chart(reference) {
-                                    entry.copied = token;
-                                }
-                            }
-                            token
-                        };
-                        if let Some(updates) = updates.upgrade() {
-                            updates.changed();
+                if result.is_ok()
+                    && copy
+                    && let Some(cache) = cache.upgrade()
+                {
+                    let token = {
+                        let mut cache = cache.borrow_mut();
+                        cache.next_token = cache.next_token.wrapping_add(1).max(1);
+                        let token = cache.next_token;
+                        if let Some(entry) = cache.entries.get_mut(&id)
+                            && entry.activity == Activity::Chart(reference)
+                        {
+                            entry.copied = token;
                         }
-                        let cache = Rc::downgrade(&cache);
-                        let timer_updates = updates.clone();
-                        let clear = Closure::once_into_js(move || {
-                            if let Some(cache) = cache.upgrade() {
-                                if let Some(entry) = cache.borrow_mut().entries.get_mut(&id) {
-                                    if entry.copied == token {
-                                        entry.copied = 0;
-                                    }
-                                }
-                                if let Some(updates) = timer_updates.upgrade() {
-                                    updates.changed();
-                                }
+                        token
+                    };
+                    if let Some(updates) = updates.upgrade() {
+                        updates.changed();
+                    }
+                    let cache = Rc::downgrade(&cache);
+                    let timer_updates = updates.clone();
+                    let clear = Closure::once_into_js(move || {
+                        if let Some(cache) = cache.upgrade() {
+                            if let Some(entry) = cache.borrow_mut().entries.get_mut(&id)
+                                && entry.copied == token
+                            {
+                                entry.copied = 0;
                             }
-                        });
-                        if let Some(window) = web_sys::window() {
-                            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                clear.unchecked_ref(),
-                                1800,
-                            );
+                            if let Some(updates) = timer_updates.upgrade() {
+                                updates.changed();
+                            }
                         }
+                    });
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                            clear.unchecked_ref(),
+                            1800,
+                        );
                     }
                 }
                 if result.is_err()

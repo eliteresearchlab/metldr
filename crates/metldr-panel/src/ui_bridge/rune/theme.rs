@@ -92,6 +92,8 @@ const LIGHT: Ramp = Ramp {
     screen_ink: (0.506, 0.01, 264.477),
 };
 
+// 0.318 is a lightness, not an approximation of 1/π.
+#[allow(clippy::approx_constant)]
 const DARK: Ramp = Ramp {
     page: (0.209, 0.004, 264.477),
     canvas: (0.231, 0.004, 264.487),
