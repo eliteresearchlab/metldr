@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+use super::theme::Palette;
 use super::{Menu, Mode, State};
 use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, row};
 
@@ -70,34 +71,8 @@ const GLOBE: Icon = Icon {
     body: "<circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"/><path d=\"M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"/>",
 };
 
-#[derive(Clone, Copy)]
-struct Palette {
-    surface: ::rune::Color,
-    hover: ::rune::Color,
-    ink: ::rune::Color,
-    secondary: ::rune::Color,
-    muted: ::rune::Color,
-    line: ::rune::Color,
-    strong: ::rune::Color,
-    accent: ::rune::Color,
-    press: ::rune::Color,
-    press_solid: ::rune::Color,
-}
-
-fn palette(state: &State) -> Palette {
-    let p = state.preferences.palette();
-    Palette {
-        surface: p.surface,
-        hover: p.hover,
-        ink: p.ink,
-        secondary: p.ink_2,
-        muted: p.ink_3,
-        line: p.line,
-        strong: p.line_strong,
-        accent: p.accent,
-        press: p.press,
-        press_solid: p.press_solid,
-    }
+fn palette(state: &State) -> &Palette {
+    state.preferences.palette()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -213,7 +188,7 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
 /// One 30 px menu row: name, muted tag, then the check.
 fn menu_row(
     typography: super::preferences::Typography,
-    p: Palette,
+    p: &Palette,
     key: String,
     name: String,
     tag: &'static str,
@@ -241,7 +216,7 @@ fn menu_row(
             typography
                 .text(tag)
                 .font(typography.font(11.0, 400.0))
-                .color(p.muted),
+                .color(p.ink_3),
         )
         .child(if active {
             ::rune::el::icon(&CHECK, 13.0).color(p.ink)
@@ -271,7 +246,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     .max_h(100.0)
     .padding(8.0)
     .label("Prompt")
-    .placeholder("Write a message…", p.muted)
+    .placeholder("Write a message…", p.ink_3)
     .caret(p.ink, p.accent.alpha(0.28))
     .on_edit(|state: &mut State| &mut state.draft)
     .on_input_change(|state: &mut State, _| {
@@ -327,7 +302,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         "rune-source-trigger",
         "Add attachments and sources",
         &PLUS,
-        p.secondary,
+        p.ink_2,
     )
     .hover(p.hover)
     .press(p.press)
@@ -359,12 +334,12 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
             typography
                 .text(model_label)
                 .font(typography.font(12.0, 500.0))
-                .color(p.secondary)
+                .color(p.ink_2)
                 .truncate(),
         )
-        .child(::rune::el::icon(&CHEVRON, 11.0).color(p.muted))
+        .child(::rune::el::icon(&CHEVRON, 11.0).color(p.ink_3))
         .hover(p.hover)
-        .press(p.strong)
+        .press(p.line_strong)
         .press_scale(super::theme::PRESS_SCALE)
         .label("Choose model");
     let model = metldr_ui::menu::trigger(
@@ -378,7 +353,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         },
     );
     let running = state.running();
-    let dictate = button("rune-dictate", "Dictation unavailable", &MIC, p.muted)
+    let dictate = button("rune-dictate", "Dictation unavailable", &MIC, p.ink_3)
         .opacity(0.48)
         .disabled(true);
     let action = if running {
@@ -399,9 +374,9 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
             "rune-send",
             "Send",
             &SEND,
-            if can_send { p.surface } else { p.secondary },
+            if can_send { p.surface } else { p.ink_2 },
         )
-        .fill(if can_send { p.ink } else { p.strong })
+        .fill(if can_send { p.ink } else { p.line_strong })
         .disabled(!can_send);
         if can_send {
             send = send
@@ -421,7 +396,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .border(
             BORDER,
             if state.draft.focused {
-                p.strong
+                p.line_strong
             } else {
                 p.line
             },
@@ -489,7 +464,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                         row()
                             .size(22.0, 22.0)
                             .center()
-                            .child(::rune::el::icon(&GLOBE, 15.0).color(p.secondary)),
+                            .child(::rune::el::icon(&GLOBE, 15.0).color(p.ink_2)),
                     )
                     .child(
                         typography
@@ -503,7 +478,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .text("Use the page you are viewing")
                             .grow(1.0)
                             .font(typography.font(12.0, 400.0))
-                            .color(p.muted)
+                            .color(p.ink_3)
                             .truncate(),
                     )
                     .focusable(true)
@@ -512,7 +487,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     .label("Current page, Use the page you are viewing");
                 if !disabled {
                     page = page
-                        .press(p.strong)
+                        .press(p.line_strong)
                         .on_press_tx(|state: &mut State, tx| capture(state, tx));
                 }
                 rows = rows.child(page);
@@ -527,7 +502,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                         .px(8.0)
                         .center_y()
                         .radius(6.0)
-                        .child(::rune::el::icon(&PAPERCLIP, 16.0).color(p.muted))
+                        .child(::rune::el::icon(&PAPERCLIP, 16.0).color(p.ink_3))
                         .child(
                             typography
                                 .text("Photos and files")
@@ -539,7 +514,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             typography
                                 .text("Unavailable")
                                 .font(typography.font(12.0, 400.0))
-                                .color(p.muted),
+                                .color(p.ink_3),
                         )
                         .disabled(true)
                         .role("button")
@@ -557,7 +532,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                         .w_full()
                         .padding(8.0)
                         .font(typography.font(12.0, 400.0))
-                        .color(p.muted)
+                        .color(p.ink_3)
                         .wrap(),
                 );
             }
@@ -585,7 +560,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .w_full()
                             .padding(7.0)
                             .font(typography.font(11.0, 400.0))
-                            .color(p.muted),
+                            .color(p.ink_3),
                     )
                     .anchored_fit("rune-composer", Side::Top, Align::Start, 8.0)
                     .transition(super::theme::pop_in())
@@ -619,7 +594,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                         typography
                             .text(heading.heading())
                             .font(typography.font(11.0, 500.0))
-                            .color(p.muted)
+                            .color(p.ink_3)
                             .px(8.0)
                             .pt(6.0)
                             .pb(2.0)
@@ -630,7 +605,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                 let disabled = state.running();
                 let el = menu_row(typography, p, format!("model:{}", choice.value), name, tag, active)
                     .label(choice.label.clone())
-                    .press(p.strong);
+                    .press(p.line_strong);
                 let close: metldr_ui::menu::CloseOnSelect<State> = Some(std::rc::Rc::new(close_menu));
                 rows = rows.child(metldr_ui::menu::radio_item(el, disabled, active, close, move |state: &mut State, tx| {
                     if !state.running() {
@@ -641,7 +616,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
             if hidden > 0 {
                 let name = if shown == 0 { "Set up a model" } else { "Set up more" };
                 rows = rows.child(metldr_ui::menu::item(
-                    menu_row(typography, p, "model:setup".into(), name.into(), "", false).label(name).press(p.strong),
+                    menu_row(typography, p, "model:setup".into(), name.into(), "", false).label(name).press(p.line_strong),
                     false,
                     |state: &mut State, tx| state.open_settings(tx),
                     close_menu,
@@ -693,7 +668,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                                 ::rune::el().size(13.0, 13.0)
                             })
                             .label(label)
-                            .press(p.strong);
+                            .press(p.line_strong);
                         let close: metldr_ui::menu::CloseOnSelect<State> = Some(std::rc::Rc::new(close_menu));
                         rows.child(metldr_ui::menu::radio_item(mode_row, disabled, state.mode == mode, close, move |state: &mut State, _| {
                             if state.capture_disabled() || !supports_plan(&state.selection) {
