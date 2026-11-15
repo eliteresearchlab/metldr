@@ -16,6 +16,7 @@ Local changes:
 * Focus and semantic mirror regressions cover these changes.
 * A composition whose end event is refused as untrusted is finished by the next trusted input or key that is no longer composing, so the field never stays in a preedit. Mirror nodes rewrite their style only when it changes.
 * `El::my_auto` sets auto top and bottom margins, so a centred column in a scroll viewport keeps its top reachable when it overflows.
+* On the web every keyed control with a press handler takes the native mirror button path for focus and keyboard or assistive activation, not only controls marked `native_activation`; pointer presses on the canvas are unchanged. A focused mirror button forwards Tab, Escape, the arrows, Home, End, Page Up and Page Down to the runtime, and a held Enter or Space does not repeat the press.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.

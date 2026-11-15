@@ -252,26 +252,47 @@ impl<S: 'static> Runtime<S> {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn native_controls(&self) -> Vec<(String, String)> {
         self.nodes.iter().enumerate().filter_map(|(i, n)| {
-            (n.a11y.native_activation && !n.a11y.disabled && !n.inert
-                && self.allowed(i) && !self.subtree_exiting(i)
-                && n.handlers.on_press.is_some()).then_some(())?;
+            (self.native_live(i) && n.handlers.on_press.is_some()).then_some(())?;
             Some((n.path.clone(), n.key.clone()?))
         }).collect()
+    }
+
+    /// Whether `path` is still a native control under `key`: [`Self::native_controls`] for one
+    /// control, without building the list.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_control(&self, path: &str, key: &str) -> bool {
+        self.nodes.iter().enumerate().any(|(i, n)| {
+            n.path == path && n.key.as_deref() == Some(key) && n.handlers.on_press.is_some() && self.native_live(i)
+        })
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn native_focused_path(&self) -> Option<&str> {
         let i = self.focused_index()?;
-        let node = &self.nodes[i];
-        (node.a11y.native_activation && !node.a11y.disabled && !node.inert
-            && self.allowed(i) && !self.subtree_exiting(i)).then_some(node.path.as_str())
+        self.native_live(i).then_some(self.nodes[i].path.as_str())
+    }
+
+    /// An eligible native control that is enabled, live and allowed to take input now.
+    #[cfg(target_arch = "wasm32")]
+    fn native_live(&self, i: usize) -> bool {
+        let n = &self.nodes[i];
+        self.native_eligible(i) && !n.a11y.disabled && !n.inert && self.allowed(i) && !self.subtree_exiting(i)
+    }
+
+    /// A control the web host activates and focuses through its mirror button: one marked with
+    /// `El::native_activation`, or any keyed control with a press handler, so keyboard focus and
+    /// screen readers land on a real button instead of the canvas.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn native_eligible(&self, i: usize) -> bool {
+        let n = &self.nodes[i];
+        n.a11y.native_activation || (n.key.is_some() && n.handlers.on_press.is_some())
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn native_focus(&mut self, path: &str, key: &str) -> bool {
         let Some(i) = self.live_index(path) else { return false };
         let n = &self.nodes[i];
-        if !n.a11y.native_activation || n.a11y.disabled || n.inert
+        if !self.native_eligible(i) || n.a11y.disabled || n.inert
             || n.key.as_deref() != Some(key) || !self.can_focus(i) { return false; }
         self.set_focus(Some(path.to_owned()), true);
         self.dirty = true;
@@ -282,7 +303,7 @@ impl<S: 'static> Runtime<S> {
     pub(crate) fn native_press(&mut self, path: &str, key: &str) -> bool {
         let Some(i) = self.live_index(path) else { return false };
         let node = &self.nodes[i];
-        if !node.a11y.native_activation || node.a11y.disabled || node.inert
+        if !self.native_eligible(i) || node.a11y.disabled || node.inert
             || node.key.as_deref() != Some(key) || !self.allowed(i) { return false; }
         let Some(handler) = node.handlers.on_press.clone() else { return false };
         let mut tx = self.transaction();

@@ -43,7 +43,7 @@ extern "C" {
 struct NativeGetters {
     trusted: Function, kind: Function, phase: Function, current: Function, target: Function,
     pointer_id: Function, primary: Function, button: Function, x: Function, y: Function,
-    key: Function, shift: Function, ctrl: Function, alt: Function, meta: Function,
+    key: Function, shift: Function, ctrl: Function, alt: Function, meta: Function, repeat: Function,
     owner_document: Function, connected: Function,
 }
 
@@ -82,7 +82,7 @@ impl NativeGetters {
             y: getter(&mouse_proto, "clientY")?, key: getter(&keyboard_proto, "key")?,
             shift: getter(&keyboard_proto, "shiftKey")?,
             ctrl: getter(&keyboard_proto, "ctrlKey")?, alt: getter(&keyboard_proto, "altKey")?,
-            meta: getter(&keyboard_proto, "metaKey")?,
+            meta: getter(&keyboard_proto, "metaKey")?, repeat: getter(&keyboard_proto, "repeat")?,
             owner_document: inherited_getter(node.as_ref(), "ownerDocument")?,
             connected: inherited_getter(node.as_ref(), "isConnected")?,
         })
@@ -305,16 +305,36 @@ impl<S: 'static> Running<S> {
             });
             let weak = self.input.running.clone();
             let b = binding.clone(); let g = getters.clone(); let w = window.clone();
+            // Tab and the navigation keys reach the runtime as they would from the canvas, so a
+            // focused mirror button keeps menu arrows and Escape. Enter and Space stay with the
+            // button's own click; a held key does not repeat the press.
             let tab = Closure::<dyn FnMut(web_sys::Event)>::new(move |event| {
                 if !b.live.get() || !g.connected(&b.node) || !g.valid(&event, "keydown", b.node.as_ref(), b.node.as_ref())
-                    || g.value(&g.key, &event).and_then(|v| v.as_string()).as_deref() != Some("Tab")
                     || [&g.ctrl, &g.alt, &g.meta].iter().any(|get| g.value(get, &event).and_then(|v| v.as_bool()) != Some(false)) { return; }
+                let name = g.value(&g.key, &event).and_then(|v| v.as_string()).unwrap_or_default();
+                let key = match name.as_str() {
+                    "Tab" => crate::Key::Tab,
+                    "Escape" => crate::Key::Escape,
+                    "ArrowUp" => crate::Key::Up,
+                    "ArrowDown" => crate::Key::Down,
+                    "ArrowLeft" => crate::Key::Left,
+                    "ArrowRight" => crate::Key::Right,
+                    "Home" => crate::Key::Home,
+                    "End" => crate::Key::End,
+                    "PageUp" => crate::Key::PageUp,
+                    "PageDown" => crate::Key::PageDown,
+                    "Enter" | " " if g.value(&g.repeat, &event).and_then(|v| v.as_bool()) == Some(true) => {
+                        event.prevent_default();
+                        return;
+                    }
+                    _ => return,
+                };
                 let Some(shared) = weak.upgrade() else { return }; let Ok(mut shared) = shared.try_borrow_mut() else { return };
                 let Some(r) = shared.as_mut() else { return };
-                if !r.native_registered(&b) || !r.rt.native_controls().iter().any(|(p,k)| p == &b.path && k == &b.key) { return; }
+                if !r.native_registered(&b) || !r.rt.native_control(&b.path, &b.key) { return; }
                 event.prevent_default(); event.stop_propagation();
                 let shift = g.value(&g.shift, &event).and_then(|v| v.as_bool()) == Some(true);
-                r.rt.key(crate::KeyEvent { key: crate::Key::Tab, mods: crate::Mods { shift, ..Default::default() } });
+                r.rt.key(crate::KeyEvent { key, mods: crate::Mods { shift, ..Default::default() } });
                 r.rt.frame(0.0); r.apply_frame_requests(&w); r.sync_input(true); w.request_redraw();
             });
             set_native_button(&self.input.handle, &node, true);
@@ -344,7 +364,7 @@ impl<S: 'static> Running<S> {
         }
         if let Some(path) = self.rt.native_focused_path()
             && let Some(reg) = self.input.native.iter().find(|r| r.binding.path == path && self.native_registered(&r.binding)) {
-            if self.rt.native_controls().iter().any(|(p, k)| p == path && k == &reg.binding.key) {
+            if self.rt.native_control(path, &reg.binding.key) {
                 focus_native_button(&self.input.handle, &reg.binding.node, requested);
             }
         }
