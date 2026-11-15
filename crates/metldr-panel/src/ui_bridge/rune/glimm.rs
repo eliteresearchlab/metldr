@@ -68,7 +68,12 @@ impl Compositor<State> for Glimm {
         let active = self
             .elapsed
             .and_then(|elapsed| phase(elapsed).map(|(progress, alpha)| (elapsed, progress, alpha)));
-        let has_ground = frame.rt.marks.contains(&super::ground::MARK);
+        // Only a theme with a ground scans the frame's marks for it; a flat theme, the default,
+        // skips the scan over every instance.
+        let has_ground = {
+            let p = frame.rt.state.preferences.palette();
+            (p.molded || p.neon) && frame.rt.marks.contains(&super::ground::MARK)
+        };
         if has_ground {
             let key = frame.device_key();
             if self.ground.as_ref().is_none_or(|(k, _)| *k != key) {
