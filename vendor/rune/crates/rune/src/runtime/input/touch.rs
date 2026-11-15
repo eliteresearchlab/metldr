@@ -38,6 +38,9 @@ struct Finger {
     /// The vertical viewport under the finger, held until the pan picks its axis.
     scroll: Option<NodeId>,
     horizontal: bool,
+    /// The focus change the press asked for, held until the finger lifts: a browser focuses only
+    /// on a tap, so a touch that pans never blurs the field or moves focus.
+    focus: Vec<Action>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -69,7 +72,12 @@ impl<S: 'static> Runtime<S> {
         let scroll = self.touch_scroll_start(x, y);
         self.pointer_move(x, y);
         self.pointer_down(x, y);
-        self.touch.finger = Some(Finger { id, origin: (x, y), last: 0.0, at: time, velocity: 0.0, mode: Mode::Pending, scroll, horizontal: false });
+        let mut focus = Vec::new();
+        let focusing = |a: &Action| matches!(a, Action::FocusControl(_) | Action::Focus(..) | Action::Blur);
+        while let Some(i) = { let at = self.queue.iter().position(focusing); at } {
+            focus.push(self.queue.remove(i));
+        }
+        self.touch.finger = Some(Finger { id, origin: (x, y), last: 0.0, at: time, velocity: 0.0, mode: Mode::Pending, scroll, horizontal: false, focus });
     }
 
     fn touch_move(&mut self, id: u64, x: f32, y: f32, time: f64) {
@@ -104,6 +112,7 @@ impl<S: 'static> Runtime<S> {
         }
         // A pan cancelled the press, so its release clicks nothing.
         let (x, y) = if pan { f.origin } else { (x, y) };
+        if !pan { self.queue.extend(f.focus); }
         if f.mode == Mode::Drag { self.pointer_move(x, y); }
         self.pointer_up(x, y);
         // No hover is left under a lifted finger.
@@ -195,6 +204,38 @@ mod tests {
         rt.frame(1.0 / 60.0);
         assert_eq!(rt.state.drags.last(), Some(&40.0));
         assert_eq!(offset(&rt), 0.0);
+    }
+
+    #[test]
+    fn a_pan_that_starts_on_a_control_leaves_focus_where_it_was() {
+        fn view(_: &S, _: &mut Cx<S>) -> El {
+            col().size(200.0, 300.0).child(col().key("list").w_full().h(200.0).scroll(ScrollSpec { stick_bottom: false })
+                .children((0..30).map(|i| el().key(format!("row{i}")).w_full().h(40.0).focusable(true).on_press(move |s: &mut S| s.taps.push(i)))))
+        }
+        let mut rt = Runtime::new(S::default(), view, (200.0, 300.0), Env::default());
+        rt.frame(0.0);
+        rt.touch(1, TouchPhase::Started, 100.0, 60.0, 0.0);
+        rt.frame(1.0 / 60.0);
+        for i in 1..=5 {
+            rt.touch(1, TouchPhase::Moved, 100.0, 60.0 - 20.0 * i as f32, i as f64 * 0.01);
+            rt.frame(1.0 / 60.0);
+        }
+        rt.touch(1, TouchPhase::Ended, 100.0, -40.0, 0.06);
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.taps.is_empty());
+        assert_eq!(rt.focused, None, "the pan never moved focus");
+        rt.touch(1, TouchPhase::Started, 100.0, 60.0, 1.0);
+        rt.touch(1, TouchPhase::Ended, 100.0, 60.0, 1.05);
+        rt.frame(1.0 / 60.0);
+        let tapped = rt.focused.clone();
+        assert!(tapped.is_some(), "a tap still focuses");
+        rt.touch(1, TouchPhase::Started, 100.0, 140.0, 2.0);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.focused, tapped, "a finger landing on another row does not move focus yet");
+        rt.touch(1, TouchPhase::Moved, 100.0, 60.0, 2.01);
+        rt.touch(1, TouchPhase::Ended, 100.0, 60.0, 2.02);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.focused, tapped, "and a pan from there keeps the focused control");
     }
 
     #[test]
