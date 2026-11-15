@@ -256,3 +256,19 @@ fn the_cursor_and_tooltip_stay_with_the_held_row() {
     assert!(tips.iter().flatten().all(|t| t == "row 5" || t == "row 0"), "no tooltip for a passing row: {tips:?}");
     assert_eq!((rt.cursor(), rt.help_tooltip().map(|t| t.0.to_owned())), (CURSORS[0], Some("row 0".to_owned())));
 }
+
+#[test]
+fn a_key_travels_down_while_pressed_and_springs_back() {
+    fn view(_: &(), _: &mut Cx<()>) -> El {
+        crate::col().child(crate::el().key("key").size(80.0, 40.0).shadow(2.0, 0.0, crate::Color::BLACK).press_travel(2.0).on_press(|_: &mut ()| {}))
+    }
+    let mut rt = Runtime::new((), view, (200.0, 200.0), Env::default());
+    rt.frame(0.0);
+    let id = rt.nodes.iter().find(|n| n.key.as_deref() == Some("key")).unwrap().id;
+    rt.pointer_down(40.0, 20.0);
+    rt.frame(DT);
+    assert_eq!(rt.scene.store().target(id, P_PRESS_TRAVEL), Some(2.0), "down with the finger");
+    rt.pointer_up(40.0, 20.0);
+    rt.frame(DT);
+    assert_eq!(rt.scene.store().target(id, P_PRESS_TRAVEL), Some(0.0), "back up on release");
+}

@@ -283,6 +283,13 @@ impl Core {
         (rows, notice)
     }
 
+    /// Whether a native permission request waits, without building its rows: the status line
+    /// asks every frame.
+    #[cfg(feature = "rune-ui")]
+    pub(super) fn rune_has_native_requests(&self) -> bool {
+        !self.page.view.borrow().native_permissions.is_empty()
+    }
+
     #[cfg(feature = "rune-ui")]
     pub(super) fn rune_native_reply(
         self: &Rc<Self>,

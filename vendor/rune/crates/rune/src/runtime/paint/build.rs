@@ -139,6 +139,8 @@ impl<S: 'static> Runtime<S> {
             let Some(p) = self.scene.presented(n.id) else { continue };
             let mut pinh = n.parent.map_or(Inh::default(), |pr| self.inh_scratch[pr]);
             pinh.dy += self.row_dy[i];
+            let travel = if n.handlers.get().is_some_and(|h| h.press_travel.is_some()) { self.scene.get(n.id, P_PRESS_TRAVEL).unwrap_or(0.0) } else { 0.0 };
+            pinh.dy += travel;
             pinh.snap.rigid[1] += self.row_dy[i];
             if let Some(a) = &n.above
                 && let Some(j) = anchor_index(&self.nodes, i, a)
@@ -297,6 +299,7 @@ impl<S: 'static> Runtime<S> {
             } else { false };
             let store = self.scene.store();
             let scale_animating = store.is_animating(n.id, prop::SCALE) || store.is_animating(n.id, prop::PRESENCE)
+                || (travel != 0.0 && store.is_animating(n.id, P_PRESS_TRAVEL))
                 || (has_press_scale && store.is_animating(n.id, P_PRESS_SCALE))
                 || (n.scale_track && store.is_animating(n.id, P_SCALE))
                 || sequence.is_some_and(|l| !self.reduced_motion && l.active(lnow));
@@ -829,8 +832,10 @@ impl<S: 'static> Runtime<S> {
                     if c.a <= 0.0 || sh.inset {
                         continue;
                     }
-                    let sh = &if k < n.vis.shadows.len() { self.shadow_at(n.id, k, sh) } else { *sh };
-                    shadow_paint::push_shadow(&mut self.instances, sh, c, &cast);
+                    let mut sh = if k < n.vis.shadows.len() { self.shadow_at(n.id, k, sh) } else { *sh };
+                    // A sinking key leaves its lip where it was.
+                    sh.y = (sh.y - travel).max(0.0);
+                    shadow_paint::push_shadow(&mut self.instances, &sh, c, &cast);
                 }
                 // Shadows keep circular corners; the element's own shapes take the sign, and
                 // negative radii draw continuous corners (shader.wgsl `sd_rounded`).

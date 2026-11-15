@@ -19,6 +19,8 @@ pub(super) const P_OUTLINE: Prop<Color> = Prop::custom(77, PropClass::Color);
 pub(super) const P_BORDER_BOTTOM: Prop<Color> = Prop::custom(78, PropClass::Color);
 /// `El::press_scale`'s presented factor, multiplied into the element's own scale.
 pub(super) const P_PRESS_SCALE: Prop<f32> = Prop::custom(79, PropClass::Scale);
+/// `El::press_travel`'s presented distance, added to the element's offset.
+pub(super) const P_PRESS_TRAVEL: Prop<f32> = Prop::custom(96, PropClass::Spatial);
 pub(super) const P_RADIAL: [Prop<Color>; 8] = [
     Prop::custom(80, PropClass::Color),
     Prop::custom(81, PropClass::Color),
@@ -52,6 +54,7 @@ pub(super) fn prop_name(id: u16) -> &'static str {
         90..=93 => "shadow",
         94 => "group-rest",
         95 => "trim",
+        96 => "press-travel",
         _ => "custom",
     }
 }
