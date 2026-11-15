@@ -1,4 +1,5 @@
 use super::*;
+use metldr_ui::collapsible;
 use ::rune::{
     App, AppHandle, AppSpec, Cx, El, ScrollSpec, TextEdit, TextStyle, Tx, col, row,
 };
@@ -1274,10 +1275,6 @@ fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
-fn toggle_browser_receipts(state: &mut State, _: &mut Tx) {
-    state.browser_receipts_open = !state.browser_receipts_open;
-}
-
 fn plan_key(plan: &crate::model::TaskPlanView, approve: bool) -> String {
     format!(
         "plan:{}:{}:{}",
@@ -1721,29 +1718,27 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .filter(|action| action.display.receipt)
         .collect();
     if !receipts.is_empty() {
-        thread = thread.child(
-            typography
-                .text(format!("Browser action results ({})", receipts.len()))
-                .key("browser-receipts-toggle")
-                .role("button")
-                .focusable(true)
-                .expanded(state.browser_receipts_open)
-                .on_press_tx(toggle_browser_receipts)
-                .on_key(|state: &mut State, key, tx| {
-                    if key.key == ::rune::Key::Enter || key.key == ::rune::Key::Text(" ".into()) {
-                        if !tx.key_repeat() {
-                            toggle_browser_receipts(state, tx);
-                        }
-                        true
-                    } else {
-                        false
-                    }
-                }),
-        );
-        if state.browser_receipts_open {
-            for action in receipts {
-                thread = thread.child(browser_action_view(action, typography));
-            }
+        let toggle = typography
+            .text(format!("Browser action results ({})", receipts.len()))
+            .key("browser-receipts-toggle");
+        thread = thread.child(collapsible::trigger(
+            toggle,
+            Default::default(),
+            state.browser_receipts_open,
+            |state: &mut State, open, _| state.browser_receipts_open = open,
+        ));
+        let list = col()
+            .w_full()
+            .gap(16.0)
+            .children(receipts.into_iter().map(|action| browser_action_view(action, typography)));
+        if let Some(panel) = collapsible::panel(
+            list,
+            "browser-receipts",
+            "browser-receipts-toggle",
+            Default::default(),
+            state.browser_receipts_open,
+        ) {
+            thread = thread.child(panel);
         }
     }
     if !connection.connected() {
@@ -1965,34 +1960,31 @@ fn settings_section(state: &State, key: &'static str, title: &'static str, body:
                 .color(palette.ink_3)
                 .icon_rotation(if open { std::f32::consts::PI } else { 0.0 }),
         )
-        .role("button")
         .label(title)
-        .expanded(open)
-        .focusable(true)
         .hover(palette.hover)
-        .press(palette.press)
-        .on_press_tx(move |state: &mut State, _| {
-            if !state.settings_sections.remove(key) {
-                state.settings_sections.insert(key);
-            }
-        })
-        .on_key(move |state: &mut State, key_event, tx| {
-            if key_event.key != ::rune::Key::Enter {
-                return false;
-            }
-            if !tx.key_repeat() && !state.settings_sections.remove(key) {
-                state.settings_sections.insert(key);
-            }
-            true
-        });
+        .press(palette.press);
+    let header = collapsible::trigger(header, Default::default(), open, move |state: &mut State, open, _| {
+        if open {
+            state.settings_sections.insert(key);
+        } else {
+            state.settings_sections.remove(key);
+        }
+    });
     let mut card = col()
         .w_full()
         .radius(10.0)
         .fill(palette.surface)
         .border(1.0, palette.line)
         .child(header);
-    if open {
-        card = card.child(col().w_full().px(14.0).pb(14.0).child(body));
+    let body = col().w_full().px(14.0).pb(14.0).child(body);
+    if let Some(panel) = collapsible::panel(
+        body,
+        &format!("settings-panel-{key}"),
+        &format!("settings-section-{key}"),
+        Default::default(),
+        open,
+    ) {
+        card = card.child(panel);
     }
     card
 }

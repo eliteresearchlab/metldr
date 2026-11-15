@@ -74,7 +74,7 @@ impl Sources {
         }
     }
 
-    fn toggle(state: &mut State, _: &mut Tx) {
+    fn toggle(state: &mut State) {
         state.sound(crate::interaction_audio::Cue::Tick);
         let source = &mut state.sources;
         source.expanded = !source.expanded;
@@ -123,7 +123,7 @@ impl Sources {
         };
         // The whole row is the disclosure, as a summary element: label, status, then the chevron at
         // the far end. Rows highlight but never scale.
-        let mut result = col().key("saved-source").w_full().gap(8.0).child(
+        let mut result = col().key("saved-source").w_full().gap(8.0).child(metldr_ui::collapsible::trigger(
             row()
                 .key("saved-source-toggle")
                 .w_full()
@@ -151,19 +151,21 @@ impl Sources {
                         .color(p.ink)
                         .icon_rotation(if self.expanded { std::f32::consts::PI } else { 0.0 }),
                 )
-                .role("button")
                 .label(if self.expanded {
                     "Hide saved page"
                 } else {
                     "Show saved page"
                 })
-                .focusable(true)
-                .expanded(self.expanded)
                 .hover(p.hover)
-                .press(p.hover_2)
-                .on_press_tx(Self::toggle)
-                .on_key(|state: &mut State, key, tx| composer::enter(state, key, tx, Self::toggle)),
-        );
+                .press(p.hover_2),
+            Default::default(),
+            self.expanded,
+            |state: &mut State, open, _| {
+                if open != state.sources.expanded {
+                    Self::toggle(state);
+                }
+            },
+        ));
         if !self.expanded {
             return result;
         }

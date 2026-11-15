@@ -4,3 +4,4 @@
 
 pub mod announcer;
 pub mod button;
+pub mod collapsible;
