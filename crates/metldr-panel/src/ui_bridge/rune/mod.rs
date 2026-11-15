@@ -1813,31 +1813,33 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             .role("status");
         (line, lamp)
     };
-    let mut toolbar = row()
-        .w_full()
-        .flex_wrap()
-        .gap(8.0)
-        .items_center()
-        .child(conversations::button(
+    // An empty chat under a flat theme lists its entries as the reference lists suggestions;
+    // otherwise they are chips in one wrapping row.
+    let rows = empty && !p.crafted();
+    let toolbar = if rows { col().w_full() } else { row().w_full().flex_wrap().gap(8.0).items_center() };
+    let toolbar = toolbar
+        .child(conversations::entry(
             p,
             typography,
             "Saved chats",
             "saved-chats-open".into(),
+            &conversations::HISTORY,
+            rows,
             true,
             |state: &mut State, tx| state.open_conversations(tx),
         )
         .has_popup("dialog"))
-        .child(conversations::button(
+        .child(conversations::entry(
             p,
             typography,
             "Settings",
             "settings-open".into(),
+            &conversations::TUNE,
+            rows,
             true,
             |state: &mut State, tx| state.open_settings(tx),
         ));
-    for control in state.conversations.toolbar(state) {
-        toolbar = toolbar.child(control);
-    }
+    let toolbar = state.conversations.toolbar(state, toolbar, rows);
     let readout = row().w_full().gap(6.0).items_center().child(theme::led(lamp, p)).child(line);
     let readout = if p.molded() {
         theme::lcd(readout.px(10.0).py(5.0), p)
@@ -1852,7 +1854,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     };
     let toolbar = col().w_full().gap(6.0).child(toolbar).child(readout);
     let shown = cx.is_reduced_motion() || state.welcome_revealed;
-    let mut head = col().w_full().gap(if empty { 28.0 } else { 16.0 });
+    let mut head = col().w_full().gap(if empty { 24.0 } else { 16.0 });
     if empty {
         // Two lines with tight leading and negative tracking, as the reference's 26 px heading.
         let hero = |line: &str| {
@@ -1886,23 +1888,20 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         };
         head = head.child(lines);
     }
-    // An empty chat shows the toolbar under the welcome; a chat with messages pins it under the
-    // tabs, so Settings and paging stay reachable while the thread scrolls.
-    let pinned = if empty {
-        head = head.child(toolbar);
-        None
+    // An empty chat follows the reference: the composer 28 points under the welcome, then the
+    // entries 24 points under it, the status and the saved page. A chat with messages pins the
+    // toolbar under the tabs, so Settings and paging stay reachable while the thread scrolls,
+    // and docks the composer under the thread.
+    let (pinned, composer) = if empty {
+        head = head.child(composer.pt(4.0)).child(toolbar);
+        (None, None)
     } else {
-        Some(col().w_full().px(16.0).py(8.0).items_center().child(toolbar.max_w(720.0)))
+        (
+            Some(col().w_full().px(16.0).py(8.0).items_center().child(toolbar.max_w(720.0))),
+            Some(col().w_full().px(16.0).pb(24.0).center_y().child(composer)),
+        )
     };
     head = head.child(state.sources.view(typography, p));
-    // An empty chat keeps the composer in the centred group, 56 px under the welcome as the
-    // reference spaces it; a chat with messages docks it under the thread.
-    let composer = if empty {
-        head = head.child(composer.pt(28.0));
-        None
-    } else {
-        Some(col().w_full().px(16.0).pb(24.0).center_y().child(composer))
-    };
     let body = col()
         .w_full()
         .max_w(720.0)
