@@ -14,6 +14,8 @@ pub(crate) struct Handlers {
     pub modal: Option<ModalSpec>,
     pub on_press: Option<PressFn>,
     pub on_double_press: Option<PressFn>,
+    /// `El::on_press_down`: a primary pointer press landing on the element.
+    pub on_press_down: Option<PressFn>,
     pub on_secondary_press: Option<PointerFn>,
     pub on_hover: Option<PressFn>,
     pub on_hover_change: Option<WindowFocusFn>,
@@ -96,6 +98,7 @@ impl Empty for Handlers {
         modal: None,
         on_press: None,
         on_double_press: None,
+        on_press_down: None,
         on_secondary_press: None,
         on_hover: None,
         on_hover_change: None,

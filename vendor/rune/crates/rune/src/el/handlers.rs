@@ -18,6 +18,12 @@ impl El {
     /// and releases inside. `on_press` still runs for each press, the first one right away, so a
     /// row selects on the first click and opens on the second, as in AppKit. A third press starts
     /// a new pair. Pointer only: the keyboard runs `on_press` (Space, and Return on a row).
+    /// Runs as a primary pointer press lands on the element, before it is released or
+    /// activated: a key's down-stroke. Keyboard and assistive activation never run it.
+    pub fn on_press_down<S: 'static>(mut self, f: impl Fn(&mut S, &mut Tx) + 'static) -> Self {
+        self.handlers.on_press_down = Some(Rc::new(move |s, tx| f(downcast::<S>(s), tx)));
+        self
+    }
     pub fn on_double_press<S: 'static>(self, f: impl Fn(&mut S) + 'static) -> Self {
         self.on_double_press_tx(move |s: &mut S, _tx: &mut Tx| f(s))
     }

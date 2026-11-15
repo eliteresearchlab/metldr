@@ -19,6 +19,7 @@ impl<S: 'static> Runtime<S> {
         let (name, rank, path): (&'static str, u8, Option<&str>) = match action {
             Action::Press(p, _) => ("on_press", 3, Some(p)),
             Action::DoublePress(p) => ("on_double_press", 3, Some(p)),
+            Action::PressDown(p) => ("on_press_down", 3, Some(p)),
             Action::SecondaryPress(p, _) => ("on_secondary_press", 3, Some(p)),
             Action::Link(p, _) => ("on_link", 3, Some(p)),
             Action::LinkSecondary(p, ..) => ("on_link_secondary", 3, Some(p)),
