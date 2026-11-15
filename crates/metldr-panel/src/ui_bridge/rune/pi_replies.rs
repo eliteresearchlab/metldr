@@ -82,7 +82,7 @@ fn button(
     }
 }
 
-fn reply(state: &mut State, run: RunId, request: RunId, answer: Answer, tx: &mut Tx) {
+fn reply(state: &State, run: RunId, request: RunId, answer: Answer, tx: &mut Tx) {
     let Some(core) = state.core().cloned() else {
         return;
     };

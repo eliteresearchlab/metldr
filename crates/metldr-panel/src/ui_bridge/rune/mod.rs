@@ -400,7 +400,7 @@ impl State {
         }
     }
 
-    fn decide_browser_action(&mut self, decision: browser_actions::DecisionKey, tx: &mut Tx) {
+    fn decide_browser_action(&self, decision: browser_actions::DecisionKey, tx: &mut Tx) {
         let Some(core) = self.core().cloned() else {
             return;
         };
