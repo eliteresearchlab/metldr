@@ -157,16 +157,7 @@ pub fn separator(el: El) -> El {
 }
 
 fn with_activation<S: 'static>(el: El, run: Rc<dyn Fn(&mut S, &mut Tx)>) -> El {
-    let key_run = Rc::clone(&run);
-    el.on_press_tx(move |s: &mut S, tx| run(s, tx)).on_key(move |s: &mut S, key: &KeyEvent, tx: &mut Tx| {
-        if key.key != Key::Enter && key.key != Key::Text(" ".into()) {
-            return false;
-        }
-        if !tx.key_repeat() {
-            key_run(s, tx);
-        }
-        true
-    })
+    crate::press::activate(el, move |s: &mut S, tx: &mut Tx| run(s, tx))
 }
 
 #[cfg(test)]

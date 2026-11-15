@@ -8,7 +8,7 @@
 //! - A nested dialog closes on its own: Escape and its backdrop close only the top one.
 //! - An alert dialog keeps an outside press from closing it and names itself an alert.
 
-use rune::{El, Key, KeyEvent, Tx};
+use rune::{El, Tx};
 
 /// The options a dialog takes each render.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,17 +63,7 @@ pub fn backdrop(dialog: El, dim: rune::Color) -> El {
 
 /// A button inside the dialog that closes it with `on_close`; a press, Enter or Space runs it.
 pub fn close<S: 'static>(el: El, on_close: impl Fn(&mut S, &mut Tx) + 'static) -> El {
-    let on_close = std::rc::Rc::new(on_close);
-    let key_close = std::rc::Rc::clone(&on_close);
-    el.role("button").focusable(true).on_press_tx(move |s: &mut S, tx| on_close(s, tx)).on_key(move |s: &mut S, key: &KeyEvent, tx| {
-        if key.key != Key::Enter && key.key != Key::Text(" ".into()) {
-            return false;
-        }
-        if !tx.key_repeat() {
-            key_close(s, tx);
-        }
-        true
-    })
+    crate::press::activate(el.role("button").focusable(true), on_close)
 }
 
 #[cfg(test)]
@@ -83,7 +73,7 @@ mod tests {
     //! path), page scroll locking (Rune scrolls only what is under the pointer), forms with
     //! method dialog, and the confirm helper.
     use super::*;
-    use rune::{Cx, Env, Mods, Runtime, col, oklch, row, text};
+    use rune::{Cx, Env, Key, KeyEvent, Mods, Runtime, col, oklch, row, text};
     use serde_json::Value;
 
     #[derive(Default)]
