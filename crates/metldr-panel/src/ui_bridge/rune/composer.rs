@@ -250,6 +250,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     .min_h(68.0)
     .max_h(100.0)
     .padding(8.0)
+    .color(p.ink)
     .label("Prompt")
     .placeholder("Write a message…", p.ink_3)
     .caret(p.ink, p.accent.alpha(0.28))
