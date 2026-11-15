@@ -96,6 +96,7 @@ pub use el::Cursor;
 pub use el::CursorImage;
 pub use el::Cycle;
 pub use el::Drag;
+pub use el::FocusAxis;
 pub use el::El;
 pub use el::GrowthSpec;
 pub use el::LiveRegion;

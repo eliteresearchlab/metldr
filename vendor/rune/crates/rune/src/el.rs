@@ -134,6 +134,7 @@ pub(crate) use crate::el::a11y::{A11y, Checked};
 pub use crate::el::a11y::LiveRegion;
 
 pub(crate) use crate::el::focus::FocusSpec;
+pub use crate::el::focus::FocusAxis;
 pub(crate) use crate::el::handler_set::Handlers;
 pub use crate::el::visual::{Visual, VisualCold};
 
@@ -1007,6 +1008,18 @@ impl El {
     /// menus, popups and segments wrap.
     pub fn focus_group(mut self) -> Self {
         self.focus.group = true;
+        self
+    }
+    /// On a focus group: the arrows that move through it, in place of its role's (toolbars and
+    /// toggle groups that run one way, so the other arrows reach the app).
+    pub fn focus_axis(mut self, axis: FocusAxis) -> Self {
+        self.focus.axis = Some(axis);
+        self
+    }
+    /// On a focus group: whether arrows wrap from the last item to the first, in place of its
+    /// role's.
+    pub fn focus_wrap(mut self, wrap: bool) -> Self {
+        self.focus.wrap = Some(wrap);
         self
     }
     pub fn focus_selected(mut self, selected: bool) -> Self {

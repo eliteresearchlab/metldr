@@ -222,9 +222,6 @@ impl Preferences {
         &self.look.palette
     }
 
-    pub(super) fn text_scale(&self) -> f32 {
-        self.look.scale
-    }
 
     pub(super) fn typography(&self) -> Typography {
         Typography::new(self.look.scale, &self.look.palette)
@@ -290,59 +287,32 @@ impl Preferences {
         let appearance = snapshot.appearance_status();
         let enabled = !busy(appearance);
         result = result.child(typography.text("Theme").role("heading"));
-        let mut themes = col().key("preferences-theme").w_full().gap(6.0);
-        for (key, label) in [
+        let vertical = metldr_ui::toggle::GroupProps {
+            axis: ::rune::FocusAxis::Vertical,
+            deselectable: false,
+            disabled: !enabled,
+            ..Default::default()
+        };
+        let themes = [
             ("catppuccin", "Catppuccin"),
             ("gruvbox", "Gruvbox"),
             ("cyberpunk", "Cyberpunk"),
             ("light", "Light"),
-        ] {
-            let label = format!(
-                "{}{}",
-                label,
-                if snapshot.theme() == key {
-                    " (selected)"
-                } else {
-                    ""
-                }
-            );
-            themes = themes.child(
-                button(
-                    typography,
-                    label,
-                    format!("preferences-theme-{key}"),
-                    enabled,
-                    Action::Theme(key),
-                    &action,
-                )
-                .focus_selected(snapshot.theme() == key),
-            );
-        }
-        result = result.child(themes);
+        ]
+        .into_iter()
+        .map(|(key, label)| {
+            choice(typography, label, format!("preferences-theme-{key}"), snapshot.theme() == key, enabled, Action::Theme(key), &action)
+        });
+        result = result.child(
+            metldr_ui::toggle::group(col().key("preferences-theme").w_full().gap(6.0), "Theme", vertical).children(themes),
+        );
         result = result.child(typography.text("Text size").role("heading"));
-        let mut sizes = col().key("preferences-text-size").w_full().gap(6.0);
-        for (key, label) in [("small", "Small"), ("medium", "Medium"), ("large", "Large")] {
-            let label = format!(
-                "{}{}",
-                label,
-                if snapshot.font_size() == key {
-                    " (selected)"
-                } else {
-                    ""
-                }
-            );
-            sizes = sizes.child(
-                button(
-                    typography,
-                    label,
-                    format!("preferences-size-{key}"),
-                    enabled,
-                    Action::Size(key),
-                    &action,
-                )
-                .focus_selected(snapshot.font_size() == key),
-            );
-        }
+        let sizes = [("small", "Small"), ("medium", "Medium"), ("large", "Large")]
+            .into_iter()
+            .map(|(key, label)| {
+                choice(typography, label, format!("preferences-size-{key}"), snapshot.font_size() == key, enabled, Action::Size(key), &action)
+            });
+        let sizes = metldr_ui::toggle::group(col().key("preferences-text-size").w_full().gap(6.0), "Text size", vertical).children(sizes);
         result = result.child(sizes).child(self.notice(
             Control::Theme,
             appearance,
@@ -360,14 +330,11 @@ impl Preferences {
         }
         let sound = snapshot.sound_status();
         result = result
-            .child(button(
+            .child(choice(
                 typography,
-                if snapshot.sounds_enabled() {
-                    "Interaction sounds: on"
-                } else {
-                    "Interaction sounds: off"
-                },
+                "Interaction sounds",
                 "preferences-sound",
+                snapshot.sounds_enabled(),
                 !busy(sound),
                 Action::Sound(!snapshot.sounds_enabled()),
                 &action,
@@ -413,6 +380,18 @@ fn status(domain: &str, status: UiPreferenceStatus) -> String {
     }
 }
 
+fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<String>) -> El {
+    let label = label.into();
+    typography
+        .text(label.clone())
+        .label(label)
+        .key(key.into())
+        .px(10.0)
+        .py(6.0)
+        .radius(8.0)
+        .fill(typography.field)
+}
+
 fn button(
     typography: Typography,
     label: impl Into<String>,
@@ -421,45 +400,54 @@ fn button(
     value: Action,
     action: &Rc<impl Fn(&mut State, Action, &mut Tx) + 'static>,
 ) -> El {
-    let label = label.into();
-    let element = typography
-        .text(label.clone())
-        .label(label)
-        .key(key.into())
-        .role("button")
-        .focusable(true)
-        .disabled(!enabled)
-        .px(10.0)
-        .py(6.0)
-        .radius(8.0)
-        .border(1.0, typography.line)
-        .fill(typography.field);
-    if !enabled {
-        return element.opacity(0.5);
-    }
     let press = Rc::clone(action);
-    let key_action = Rc::clone(action);
-    element
-        .press(typography.press)
-        .press_scale(super::theme::PRESS_SCALE)
-        .on_press_tx(move |state: &mut State, tx| {
+    let el = metldr_ui::button::button(
+        outlined(typography, label, key).border(1.0, typography.line),
+        metldr_ui::button::Props {
+            disabled: !enabled,
+            ..Default::default()
+        },
+        move |state: &mut State, tx| {
             if matches!(value, Action::RetrySetup) {
                 state.sound(crate::interaction_audio::Cue::Press);
             }
             press(state, value, tx)
-        })
-        .on_key(move |state: &mut State, key, tx| {
-            if key.key != ::rune::Key::Enter {
-                return false;
+        },
+    );
+    if enabled {
+        el.press(typography.press).press_scale(super::theme::PRESS_SCALE)
+    } else {
+        el.opacity(0.5)
+    }
+}
+
+/// One choice of a setting: a toggle that is pressed while it is the setting's value. Pressing
+/// the pressed one changes nothing.
+fn choice(
+    typography: Typography,
+    label: impl Into<String>,
+    key: impl Into<String>,
+    pressed: bool,
+    enabled: bool,
+    value: Action,
+    action: &Rc<impl Fn(&mut State, Action, &mut Tx) + 'static>,
+) -> El {
+    let press = Rc::clone(action);
+    let el = metldr_ui::toggle::toggle(
+        outlined(typography, label, key).border(if pressed { 1.5 } else { 1.0 }, if pressed { typography.ink } else { typography.line }),
+        metldr_ui::toggle::Props { disabled: !enabled },
+        pressed,
+        move |state: &mut State, on, tx| {
+            if on || matches!(value, Action::Sound(_)) {
+                press(state, value, tx)
             }
-            if !tx.key_repeat() {
-                if matches!(value, Action::RetrySetup) {
-                    state.sound(crate::interaction_audio::Cue::Press);
-                }
-                key_action(state, value, tx);
-            }
-            true
-        })
+        },
+    );
+    if enabled {
+        el.press(typography.press).press_scale(super::theme::PRESS_SCALE)
+    } else {
+        el.opacity(0.5)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -468,8 +456,6 @@ pub(super) struct Typography {
     pub(super) ink: Color,
     /// The overlay a pressed control shows.
     pub(super) press: Color,
-    /// Text caret and selection in fields.
-    pub(super) selection: Color,
     /// Hairline and fill of an outlined control.
     pub(super) line: Color,
     pub(super) field: Color,
@@ -483,7 +469,6 @@ impl Typography {
             scale,
             ink: palette.ink,
             press: palette.press,
-            selection: palette.selection,
         }
     }
 

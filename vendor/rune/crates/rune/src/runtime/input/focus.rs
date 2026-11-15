@@ -187,8 +187,11 @@ impl<S: 'static> Runtime<S> {
             changed |= sync_input_focus(input, states!(self), path.as_deref() == Some(p.as_str()));
         }
         self.focused = path;
-        if self.focused.is_some() {
-            self.last_focused = self.focused.clone();
+        if let Some(p) = self.focused.clone() {
+            if let Some(g) = self.focused_index().and_then(|i| self.group(i)) {
+                self.group_last.insert(self.nodes[g].path.clone(), p.clone());
+            }
+            self.last_focused = Some(p);
         }
         self.keyboard_focus = keyboard;
         self.sync_side_focus();
@@ -299,8 +302,10 @@ impl<S: 'static> Runtime<S> {
         let all: Vec<_> = (0..self.nodes.len()).filter(|&i| self.can_focus(i) && self.nodes[i].focus.order >= 0).collect();
         let mut order: Vec<_> = all.iter().copied().filter(|&i| {
             let Some(g) = self.group(i) else { return true; };
+            let last = self.group_last.get(&self.nodes[g].path);
             let chosen = all.iter().copied().filter(|&j| self.group(j) == Some(g))
                 .find(|&j| self.focused.as_deref() == Some(&self.nodes[j].path))
+                .or_else(|| all.iter().copied().find(|&j| self.group(j) == Some(g) && last == Some(&self.nodes[j].path)))
                 .or_else(|| all.iter().copied().find(|&j| self.group(j) == Some(g) && self.nodes[j].focus.selected))
                 .or_else(|| all.iter().copied().find(|&j| self.group(j) == Some(g)));
             chosen == Some(i)
@@ -379,9 +384,14 @@ impl<S: 'static> Runtime<S> {
         }
         // A focused field inside a list row (an inline rename) keeps its letters and arrows.
         if self.nodes[i].input.is_none() && let Some(g) = self.group(i) {
-            let vertical = VERTICAL_ROLES.contains(&self.nodes[g].role);
-            let backward = matches!(ev.key, Key::Up) || (!vertical && ev.key == Key::Left);
-            let forward = matches!(ev.key, Key::Down) || (!vertical && ev.key == Key::Right);
+            let axis = self.nodes[g].focus.axis.unwrap_or(if VERTICAL_ROLES.contains(&self.nodes[g].role) {
+                crate::FocusAxis::Vertical
+            } else {
+                crate::FocusAxis::Both
+            });
+            let (across, down) = (axis != crate::FocusAxis::Vertical, axis != crate::FocusAxis::Horizontal);
+            let backward = (down && ev.key == Key::Up) || (across && ev.key == Key::Left);
+            let forward = (down && ev.key == Key::Down) || (across && ev.key == Key::Right);
             let items: Vec<_> = (0..self.nodes.len()).filter(|&j| self.can_focus(j) && self.group(j) == Some(g)).collect();
             let pos = items.iter().position(|&j| j == i).unwrap();
             let page = matches!(ev.key, Key::PageUp | Key::PageDown) && PAGED_ROLES.contains(&self.nodes[g].role);
@@ -394,7 +404,7 @@ impl<S: 'static> Runtime<S> {
                     // item, else the first) before arrows move it; Up from nothing is the last.
                     _ if self.nodes[i].focus.highlight.is_some() && !shown =>
                         if backward && !self.nodes[i].focus.selected { items.len() - 1 } else { pos },
-                    _ if CLAMPED_ROLES.contains(&self.nodes[g].role) =>
+                    _ if !self.nodes[g].focus.wrap.unwrap_or(!CLAMPED_ROLES.contains(&self.nodes[g].role)) =>
                         if backward { pos.saturating_sub(1) } else { (pos + 1).min(items.len() - 1) },
                     _ if backward => (pos + items.len() - 1) % items.len(),
                     _ => (pos + 1) % items.len(),

@@ -511,6 +511,8 @@ pub struct Runtime<S: 'static> {
     keys_held: u32,
     ime_keys_down: u32,
     ime_eat_key_up: bool,
+    /// Each focus group's item that last had focus, by the group's path: Tab returns to it.
+    group_last: std::collections::HashMap<String, String>,
     /// Pictures whose image changed shape since the last commit, which lays them out at once.
     aspect_snap: Vec<NodeId>,
     /// Drawn rect per node (points, root space), for tools and hit tests.
@@ -900,6 +902,7 @@ impl<S: 'static> Runtime<S> {
             keys_held: 0,
             ime_keys_down: 0,
             ime_eat_key_up: false,
+            group_last: Default::default(),
             aspect_snap: Vec::new(),
             drawn: Vec::new(),
             drawn_scale: Vec::new(),

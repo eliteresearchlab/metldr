@@ -3,6 +3,17 @@ use crate::el::{InputKeyFn, StepFn, StepLimitFn};
 use crate::color::Color;
 use crate::el::Outline;
 
+/// Which arrow keys move through a focus group ([`crate::El::focus_axis`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusAxis {
+    /// Left and Right; Up and Down go on to the app.
+    Horizontal,
+    /// Up and Down; Left and Right go on to the app.
+    Vertical,
+    /// All four arrows.
+    Both,
+}
+
 #[derive(Clone)]
 pub(crate) struct FocusSpec {
     pub physical: Option<crate::input::physical_input::Handler>,
@@ -19,6 +30,10 @@ pub(crate) struct FocusSpec {
     pub default: bool,
     pub highlight: Option<Color>,
     pub follows: bool,
+    /// `focus_axis`: the group's arrows, in place of its role's.
+    pub axis: Option<FocusAxis>,
+    /// `focus_wrap`: whether the group wraps at its ends, in place of its role's.
+    pub wrap: Option<bool>,
     pub return_to: Option<String>,
     /// `on_step`: a slider's arrow and page keys.
     pub step: Option<StepFn>,
@@ -44,6 +59,8 @@ impl crate::cold::Empty for FocusSpec {
         default: false,
         highlight: None,
         follows: false,
+        axis: None,
+        wrap: None,
         return_to: None,
         step: None,
         step_limit: None,
