@@ -429,6 +429,8 @@ impl<S: 'static> Runtime<S> {
     /// cancels its content's touches: the row lets go and the release doesn't press. A drag
     /// keeps its capture.
     pub(super) fn scroll_cancels_press(&mut self, id: NodeId) {
+        // A cancelled press stays cancelled until the next press, so later scroll steps skip the search.
+        if self.press_cancelled { return; }
         let Some((path, _)) = &self.capture else { return };
         let Some(i) = self.nodes.iter().position(|n| &n.path == path) else { return };
         let inside = std::iter::successors(self.nodes[i].parent, |&p| self.nodes[p].parent).any(|p| self.nodes[p].id == id);

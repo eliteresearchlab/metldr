@@ -286,9 +286,11 @@ export function syncA11y(h, json, revision) {
         }
         const [x, y, w, bh] = item.r;
         const fs = item.s || 14;
+        // The mirror is an invisible proxy: Rune draws the keyboard focus ring on the canvas, so the
+        // browser's own outline on a focused mirror control would be a second, misplaced ring.
         const css = group
             ? 'position:static;margin:0;padding:0;border:0;pointer-events:none;'
-            : `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${bh}px;margin:0;padding:0;border:0;background:transparent;color:transparent;font:${fs}px/1.25 sans-serif;overflow:hidden;white-space:pre-wrap;pointer-events:none;`;
+            : `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${bh}px;margin:0;padding:0;border:0;outline:none;background:transparent;color:transparent;font:${fs}px/1.25 sans-serif;overflow:hidden;white-space:pre-wrap;pointer-events:none;`;
         // Writing an unchanged style still invalidates it; most nodes keep their geometry between syncs.
         if (el._css !== css) { el._css = css; el.style.cssText = css; }
         if (group) {
@@ -329,7 +331,7 @@ export function syncA11y(h, json, revision) {
                     if (run.h) {
                         const a = document.createElement('a');
                         a.textContent = run.t;
-                        a.style.cssText = 'color:transparent;text-decoration:none;pointer-events:none;';
+                        a.style.cssText = 'color:transparent;text-decoration:none;outline:none;pointer-events:none;';
                         if (webLink(run.h)) {
                             a.href = run.h;
                             a.target = '_blank';
