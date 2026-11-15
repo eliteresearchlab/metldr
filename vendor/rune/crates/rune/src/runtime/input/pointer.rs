@@ -246,6 +246,9 @@ impl<S: 'static> Runtime<S> {
             cancelled: false,
         };
         let path = n.path.clone();
+        if n.handlers.on_press_down.is_some() && !n.a11y.disabled && !n.a11y.more.as_ref().is_some_and(|m| m.unavailable) {
+            self.queue.push(Action::PressDown(path.clone()));
+        }
         self.drag_out_armed = self.drags_out(n);
         self.drag_out_threshold = n.handlers.drag_threshold.unwrap_or(crate::drag_out::DRAG_THRESHOLD);
         if n.handlers.on_drag.is_some() && !self.drag_out_armed {

@@ -124,6 +124,10 @@ export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
     }
     const key = (name, event = {}) => send({ kind: 'key', key: name, code: event.code ?? '', shift: !!event.shiftKey,
         ctrl: !!event.ctrlKey, alt: !!event.altKey, meta: !!event.metaKey, repeat: !!event.repeat });
+    // A key the text field types or releases, for the focused element's physical input; its
+    // text still arrives as an edit. The password field reports none of its keys.
+    const physical = (event, pressed) => event.code && send({ kind: 'physical', code: event.code, pressed,
+        shift: !!event.shiftKey, ctrl: !!event.ctrlKey, alt: !!event.altKey, meta: !!event.metaKey, repeat: !!event.repeat });
     // Commits the composition: the final text replaces the preedit and the mirror resyncs.
     const finishComposition = () => {
         changed();
@@ -183,12 +187,18 @@ export function mount(canvas, callback, raw, fieldReady, embedded, fitHeight) {
             if (field.disabled || (field.readOnly && (chord || ['Enter', 'Backspace', 'Delete'].includes(event.key)))) return;
             const editing = ['Enter', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
             if (field === password) editing.push('Backspace', 'Delete');
-            if (!chord && !editing.includes(event.key)) return;
+            if (!chord && !editing.includes(event.key)) {
+                if (field === textarea) physical(event, true);
+                return;
+            }
             if (chord && event.key.toLowerCase() === 'v') return;
             event.preventDefault();
             key(event.key, event);
         });
-        listen(field, 'keyup', event => { h.shift = event.shiftKey; });
+        listen(field, 'keyup', event => {
+            h.shift = event.shiftKey;
+            if (field === textarea && !event.isComposing && !h.composing) physical(event, false);
+        });
         listen(field, 'blur', () => { h.shift = false; });
     }
     listen(textarea, 'select', () => {

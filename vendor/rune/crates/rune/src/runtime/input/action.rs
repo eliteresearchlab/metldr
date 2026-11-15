@@ -24,6 +24,8 @@ pub(super) enum Action {
     DrawnLayout(String, [f32; 4], bool),
     Press(String, crate::PointerButton),
     DoublePress(String),
+    /// `El::on_press_down`.
+    PressDown(String),
     Link(String, usize),
     /// `El::on_link_secondary`: the text, its link and the press.
     LinkSecondary(String, usize, PointerEvent),
@@ -119,6 +121,7 @@ pub(super) fn live_only_handler(action: &Action) -> Option<&'static str> {
         Action::SelectionChange(..) => "on_selection_change",
         Action::Press(..) => "on_press",
         Action::DoublePress(_) => "on_double_press",
+        Action::PressDown(_) => "on_press_down",
         Action::Link(..) => "on_link",
         Action::LinkSecondary(..) => "on_link_secondary",
         Action::SecondaryPress(..) => "on_secondary_press",
@@ -138,7 +141,7 @@ pub(super) fn live_only_handler(action: &Action) -> Option<&'static str> {
 #[cfg(debug_assertions)]
 pub(super) fn action_path(action: &Action) -> Option<&str> {
     match action {
-        Action::PointerMove(path, _) | Action::DrawnLayout(path, ..) | Action::Layout(path, _) | Action::Hover(path) | Action::HoverChange(path, _) | Action::SelectionChange(path, _) | Action::Press(path, _) | Action::DoublePress(path)
+        Action::PointerMove(path, _) | Action::DrawnLayout(path, ..) | Action::Layout(path, _) | Action::Hover(path) | Action::HoverChange(path, _) | Action::SelectionChange(path, _) | Action::Press(path, _) | Action::DoublePress(path) | Action::PressDown(path)
         | Action::Link(path, _) | Action::LinkSecondary(path, ..) | Action::SecondaryPress(path, _) | Action::Drag(path, ..) | Action::DragRepeat(path, ..) | Action::DragStart(path)
         | Action::DragEnd(path, _) => Some(path),
         Action::Wheel(_, chain, _) | Action::Gesture(chain, _) => chain.first().map(String::as_str),
@@ -489,6 +492,12 @@ impl<S: 'static> Runtime<S> {
             Action::DoublePress(path) => {
                 let Some(f) = self.node(&path).and_then(|n| n.handlers.on_double_press.clone()) else { return false };
                 log_event!(self, "double press {path}");
+                f(states!(self), &mut one);
+                true
+            }
+            Action::PressDown(path) => {
+                let Some(f) = self.node(&path).and_then(|n| n.handlers.on_press_down.clone()) else { return false };
+                log_event!(self, "press down {path}");
                 f(states!(self), &mut one);
                 true
             }

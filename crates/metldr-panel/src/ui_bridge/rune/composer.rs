@@ -187,6 +187,36 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
 }
 
 /// One 30 px menu row: name, muted tag, then the check.
+/// The sound a key makes in the composer: a switch going down (deeper for the space bar,
+/// heavier for Enter, Backspace, Delete and Tab), a lighter one coming up, and a held key's
+/// repeats only ticking. Shortcuts with a modifier and keys that type nothing stay silent.
+fn typed(input: &::rune::PhysicalInput) -> Option<crate::interaction_audio::Cue> {
+    use crate::interaction_audio::{Cue, Typed};
+    use ::rune::PhysicalKeyCode as Code;
+    let ::rune::PhysicalInput::Key { key, mods, pressed, repeat } = *input else { return None };
+    if mods.cmd || mods.ctrl || mods.alt || mods.logo {
+        return None;
+    }
+    let kind = match key {
+        Code::Space => Typed::Space,
+        Code::Enter | Code::NumpadEnter | Code::Backspace | Code::Delete | Code::Tab => Typed::Big,
+        Code::KeyA | Code::KeyB | Code::KeyC | Code::KeyD | Code::KeyE | Code::KeyF | Code::KeyG
+        | Code::KeyH | Code::KeyI | Code::KeyJ | Code::KeyK | Code::KeyL | Code::KeyM | Code::KeyN
+        | Code::KeyO | Code::KeyP | Code::KeyQ | Code::KeyR | Code::KeyS | Code::KeyT | Code::KeyU
+        | Code::KeyV | Code::KeyW | Code::KeyX | Code::KeyY | Code::KeyZ | Code::Digit0 | Code::Digit1
+        | Code::Digit2 | Code::Digit3 | Code::Digit4 | Code::Digit5 | Code::Digit6 | Code::Digit7
+        | Code::Digit8 | Code::Digit9 | Code::Minus | Code::Equal | Code::BracketLeft
+        | Code::BracketRight | Code::Backslash | Code::Semicolon | Code::Quote | Code::Backquote
+        | Code::Comma | Code::Period | Code::Slash | Code::IntlBackslash => Typed::Key,
+        _ => return None,
+    };
+    Some(match (pressed, repeat) {
+        (false, _) => Cue::Type(None),
+        (true, true) => Cue::Type(Some(Typed::Repeat)),
+        (true, false) => Cue::Type(Some(kind)),
+    })
+}
+
 fn menu_row(
     typography: super::preferences::Typography,
     p: &Palette,
@@ -258,8 +288,18 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
     .on_edit(|state: &mut State| &mut state.draft)
     .on_input_change(|state: &mut State, _| {
         state.draft_changed();
-        state.menu = token(&state.draft.text).map(|_| Menu::Sources);
+        let menu = token(&state.draft.text).map(|_| Menu::Sources);
+        if menu.is_some() && state.menu.is_none() {
+            state.sound(crate::interaction_audio::Cue::Open);
+        }
+        state.menu = menu;
         state.source_engaged = false;
+    })
+    .on_physical_input(|state: &mut State, input, _| {
+        if let Some(cue) = typed(input) {
+            state.sound(cue);
+        }
+        false
     })
     .on_input_key(|state: &mut State, key, tx| match &key.key {
         Key::Enter if !key.mods.shift && tx.key_repeat() => true,
@@ -387,7 +427,7 @@ pub(super) fn view(state: &State, cx: &mut Cx<State>) -> El {
         .disabled(!can_send);
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
         if p.molded && can_send {
-            send = send.shadow(2.0, 0.0, p.accent.mix(::rune::Color::BLACK, 0.45)).press_travel(2.0);
+            send = super::theme::key_down(send.shadow(2.0, 0.0, p.accent.mix(::rune::Color::BLACK, 0.45)).press_travel(2.0), true);
         }
         if can_send {
             send = send.press(p.press_solid);

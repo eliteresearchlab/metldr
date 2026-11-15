@@ -228,6 +228,29 @@ mod tests {
     }
 
     #[test]
+    fn web_physical_reaches_the_focused_field_down_and_up() {
+        struct S { edit: crate::TextEdit, seen: Vec<(crate::PhysicalKeyCode, bool, bool)> }
+        fn view(s: &S, _: &mut Cx<S>) -> El {
+            crate::text_input(&s.edit, crate::TextStyle::new(14.0, 400.0)).key("field").w(100.0)
+                .on_edit(|s: &mut S| &mut s.edit)
+                .on_physical_input(|s: &mut S, input, _| {
+                    if let crate::PhysicalInput::Key { key, pressed, repeat, .. } = *input { s.seen.push((key, pressed, repeat)); }
+                    false
+                })
+        }
+        let mut edit = crate::TextEdit::new("");
+        edit.focused = true;
+        let mut rt = Runtime::new(S { edit, seen: Vec::new() }, view, (100.0, 100.0), Env::default());
+        rt.frame(0.0);
+        for (code, pressed, repeat) in [("KeyA", true, false), ("KeyA", true, true), ("KeyA", false, false), ("Space", true, false)] {
+            rt.web_physical(&json!({"kind":"physical", "code":code, "pressed":pressed, "repeat":repeat}));
+            rt.frame(0.0);
+        }
+        use crate::PhysicalKeyCode::*;
+        assert_eq!(rt.state.seen, [(KeyA, true, false), (KeyA, true, true), (KeyA, false, false), (Space, true, false)]);
+    }
+
+    #[test]
     fn web_key_forwards_dom_code_for_digits_letters_and_punctuation() {
         type Seen = Vec<(crate::Key, Option<crate::PhysicalKeyCode>, bool)>;
         fn view(_: &Seen, _: &mut Cx<Seen>) -> El { crate::el() }
@@ -320,6 +343,18 @@ impl<S: 'static> Runtime<S> {
             self.key(event_key);
         }
         activate
+    }
+
+    /// A key the hidden text field typed or released, as a native host reports it to the focused
+    /// element's `on_physical_input`; the typed text itself arrives as an edit.
+    pub(crate) fn web_physical(&mut self, event: &serde_json::Value) {
+        let flag = |key: &str| event[key].as_bool().unwrap_or(false);
+        let (shift, ctrl, alt, logo) = (flag("shift"), flag("ctrl"), flag("alt"), flag("meta"));
+        let mods = crate::Mods { shift, alt, ctrl, logo, cmd: logo || ctrl };
+        let Some(key) = event["code"].as_str().filter(|c| !c.is_empty() && !c.contains('+'))
+            .and_then(|c| c.parse::<crate::Shortcut>().ok())
+            .map(|s| s.physical_key()) else { return };
+        self.physical_input(crate::PhysicalInput::Key { key, mods, pressed: flag("pressed"), repeat: flag("repeat") });
     }
 
     pub(crate) fn web_secure(&mut self, key: &str, text: String) {
