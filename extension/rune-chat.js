@@ -1,15 +1,30 @@
 import { capturePage } from "./page-capture.js";
 
-// The fonts ship beside the wasm, not inside it; they load while the wasm compiles.
+// The fonts ship beside the wasm, not inside it. The interface fonts load while the graphics check
+// runs; the fallbacks for other scripts and emoji (about 33 MB) wait until the chat has drawn.
 async function load(url) {
   const response = await fetch(new URL(url, location.href));
   if (!response.ok) throw new Error(`${url} could not load (${response.status})`);
   return response;
 }
 
-async function loadFonts() {
-  const { fonts } = await (await load("/chat/fonts/manifest.json")).json();
-  return Promise.all(fonts.map(async name => new Uint8Array(await (await load(`/chat/fonts/${name}`)).arrayBuffer())));
+const loadFiles = names => Promise.all(names.map(async name => new Uint8Array(await (await load(`/chat/fonts/${name}`)).arrayBuffer())));
+const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+const idle = () => new Promise(resolve => requestIdleCallback(resolve, { timeout: 1000 }));
+
+// Two frames in, the chat has drawn; the fallbacks are fetched then, and parsed once the page is
+// idle, so the copy into the renderer never delays the chat's first interactive frame. Without
+// them the chat still works, so a failure is only logged.
+async function addFallbacks(add) {
+  try {
+    await nextFrame();
+    await nextFrame();
+    const files = await loadFiles((await manifest).fallbacks);
+    await idle();
+    add(files);
+  } catch (error) {
+    console.error("metldr chat could not load its fallback fonts", error);
+  }
 }
 
 // The chat draws with WebGPU, or with WebGL2 where WebGPU has no adapter. Without either, say
@@ -42,20 +57,22 @@ function explain(detail) {
   if (detail) console.error("metldr chat could not start", detail);
 }
 
-// The renderer's glue and the fonts load while the graphics check runs, instead of after it:
-// the check waits on the GPU process, and the chat needs both anyway. A failed load reports
-// itself only once the check has passed.
+// The renderer's glue and the interface fonts load while the graphics check runs, instead of
+// after it: the check waits on the GPU process, and the chat needs both anyway. A failed load
+// reports itself only once the check has passed.
 const glue = import(/* @vite-ignore */ new URL("/chat/rune/metldr_panel.js", location.href).href);
-const fonts = loadFonts();
+const manifest = load("/chat/fonts/manifest.json").then(response => response.json());
+const fonts = manifest.then(({ fonts }) => loadFiles(fonts));
 glue.catch(() => {});
 fonts.catch(() => {});
 if (!(await canDraw())) {
   explain();
 } else try {
-  const { default: init, start_rune_chat, stop_rune_chat } = await glue;
+  const { default: init, start_rune_chat, stop_rune_chat, add_rune_chat_fonts } = await glue;
   const [files] = await Promise.all([fonts, init()]);
   start_rune_chat(capturePage, files);
   window.addEventListener("pagehide", stop_rune_chat, { once: true });
+  addFallbacks(add_rune_chat_fonts);
 } catch (error) {
   explain(error);
 }

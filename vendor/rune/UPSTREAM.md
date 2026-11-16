@@ -39,6 +39,8 @@ Local changes:
 * The web mirror shows `role("tablist")` and a named `role("tabpanel")` as containers. `El::focus_manual` on a focus group lets the arrows move over its radio and tab items without pressing them, for tabs with manual activation.
 * The web mirror shows `role("toolbar")` as a named container, and `role("progressbar")` and `role("meter")` as one element each with `aria-valuenow`, `aria-valuemin`, `aria-valuemax` and `aria-valuetext` (a progress bar with no value is indeterminate). The mirror's JSON is written straight into one buffer instead of through a `serde_json::Value` tree.
 * The items an arrow key moves between come from the group's own subtree, with the membership test before the reachability one, instead of every node on the page.
+* On start the web host corrects the canvas height as well as its width when Chromium's emulated device scale reports CSS pixels, so the chat no longer lays out at half height and scrolls its content under the tab bar.
+* `text::add_fonts` registers fallback fonts on a running app: every text system on the thread (windows, overlays, the measurer) registers them as script and CJK fallbacks on its next frame and lays out again, and `font_epoch` moves.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 * The `examples` directory and its `[[example]]` entries are not vendored; metldr builds none of them.
 

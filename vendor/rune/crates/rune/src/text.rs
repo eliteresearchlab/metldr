@@ -25,6 +25,8 @@ use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use crate::color::Color;
 use crate::tok::{Family, OpticalSize, TextStyle};
 
+mod added;
+pub use added::add_fonts;
 mod atlas;
 mod case;
 mod cursor;
@@ -185,6 +187,8 @@ pub struct TextSystem {
     pub(crate) glyph_cache: glyph_cache::GlyphCache,
     /// Device px `[x, y]` the next glyphs glide from their resting pixel ([`Self::set_glide`]).
     glide: [f32; 2],
+    /// How many of the fonts added while the app runs (`add_fonts`) are registered here.
+    added: usize,
 }
 
 impl Default for TextSystem {
@@ -271,7 +275,7 @@ impl TextSystem {
         #[cfg(target_arch = "wasm32")]
         let families = if fonts.is_empty() { ("Inter", "IBM Plex Mono") } else { families };
         let (sans, mono) = families::slots(families.0, families.1);
-        TextSystem {
+        let mut text = TextSystem {
             font_cx: FontContext { collection, source_cache: SourceCache::default() },
             layout_cx: LayoutContext::new(),
             scale_cx: ScaleContext::new(),
@@ -308,7 +312,10 @@ impl TextSystem {
             apple: Default::default(),
             glyph_cache: Default::default(),
             glide: [0.0; 2],
-        }
+            added: 0,
+        };
+        text.follow_added();
+        text
     }
 
     /// The `trak` table of the font text in `family` at `weight` shapes with first.
