@@ -305,8 +305,8 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
             let (spec, state, shared) = app.into_parts(None);
             let scale = window.scale_factor() as f32;
             let mut size = window.inner_size();
-            if size.width > 0 && let Some(c) = window.canvas() {
-                size.width = canvas_physical(&c, size, scale).width;
+            if let Some(c) = window.canvas() {
+                size = canvas_physical(&c, size, scale);
             }
             if size.width == 0 {
                 if let Some(c) = window.canvas() {
