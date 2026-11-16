@@ -161,6 +161,7 @@ pub enum HostMessage {
     },
 }
 
+#[cfg(feature = "guest")]
 impl HostMessage {
     pub(crate) fn request_id(&self) -> NonZeroU32 {
         match self {

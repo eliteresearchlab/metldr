@@ -1,5 +1,6 @@
 pub mod guide;
 pub mod setup_guide;
+#[cfg(target_arch = "wasm32")]
 mod state;
 
 #[cfg(target_arch = "wasm32")]
