@@ -376,6 +376,40 @@ pub struct Gpu {
 /// parallel GPU tests on lavapipe), so Rune creates them one at a time.
 static GPU_INIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// GPU tests take turns: run side by side they load one driver at once, and its completion
+/// callbacks and pixel readbacks then race (frames released a poll late, mips read mid-write).
+/// A test thread takes the turn with its first headless GPU and gives it back when it ends.
+#[cfg(test)]
+mod gpu_turn {
+    use std::sync::{Condvar, Mutex};
+
+    static BUSY: Mutex<bool> = Mutex::new(false);
+    static FREED: Condvar = Condvar::new();
+
+    struct Turn;
+
+    impl Drop for Turn {
+        fn drop(&mut self) {
+            *BUSY.lock().unwrap_or_else(|e| e.into_inner()) = false;
+            FREED.notify_one();
+        }
+    }
+
+    thread_local! {
+        static HELD: std::cell::RefCell<Option<Turn>> = const { std::cell::RefCell::new(None) };
+    }
+
+    pub(super) fn take() {
+        HELD.with_borrow_mut(|held| {
+            if held.is_some() { return; }
+            let mut busy = BUSY.lock().unwrap_or_else(|e| e.into_inner());
+            while *busy { busy = FREED.wait(busy).unwrap_or_else(|e| e.into_inner()); }
+            *busy = true;
+            *held = Some(Turn);
+        });
+    }
+}
+
 impl Gpu {
     /// Panics without a usable adapter or device; windows use `try_new`.
     pub fn new(instance: wgpu::Instance, surface: Option<&wgpu::Surface<'_>>) -> Gpu {
@@ -489,12 +523,15 @@ impl Gpu {
     fn try_for(i: wgpu::Instance, s: Option<&wgpu::Surface<'_>>, w: wgpu::Features, _: bool) -> Result<Gpu, String> { Self::try_with_features(i, s, w) }
 
     pub fn headless() -> Gpu {
+        #[cfg(test)]
+        gpu_turn::take();
         Self::new(Self::instance(), None)
     }
 
     /// A headless GPU on wgpu's backends, for tests of what needs wgpu-hal.
     #[cfg(test)]
     pub(crate) fn headless_wgpu() -> Gpu {
+        gpu_turn::take();
         Self::new(Self::wgpu_instance(), None)
     }
 
