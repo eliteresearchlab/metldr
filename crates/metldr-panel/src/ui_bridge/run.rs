@@ -80,6 +80,7 @@ impl Core {
                 destination,
                 request.text,
                 &request.mode,
+                request.summary,
             )
             .await;
             let native = match started {

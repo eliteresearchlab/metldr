@@ -43,7 +43,6 @@ pub(crate) fn session_grant(run: &RunId, revision: u32, grant: bool) -> Value {
 }
 
 pub(crate) enum PageTextPrompt {
-    #[allow(dead_code)] // The Rune chat's summary action (roadmap P5) sends it; the old panel did.
     Summary,
     Answer(UserText),
 }

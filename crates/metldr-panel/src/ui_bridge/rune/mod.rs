@@ -379,8 +379,13 @@ impl State {
     }
 
     fn can_send(&self) -> bool {
-        !self.draft.text.trim().is_empty()
-            && !self.running()
+        !self.draft.text.trim().is_empty() && self.can_start()
+    }
+
+    /// A run can start now: the chat is connected, ready and idle, and the selected route can
+    /// take one.
+    fn can_start(&self) -> bool {
+        !self.running()
             && self.core().is_some_and(|core| {
                 core.page.controls_ready()
                     && !core.page.settings_blocked()
@@ -531,9 +536,19 @@ impl State {
     }
 
     fn send(&mut self, _: &mut Tx) {
-        if !self.can_send() {
-            return;
+        if self.can_send() {
+            self.start_run(self.draft.text.clone(), false);
         }
+    }
+
+    /// Summarizes the saved page through the selected route, leaving the draft as it is.
+    fn summarize(&mut self, _: &mut Tx) {
+        if self.can_start() {
+            self.start_run(SUMMARY_REQUEST.into(), true);
+        }
+    }
+
+    fn start_run(&mut self, text: String, summary: bool) {
         let Some(core) = self.core().cloned() else {
             return;
         };
@@ -546,18 +561,19 @@ impl State {
                 id: identity()?,
                 message: identity()?,
                 destination: self.selection.clone(),
-                text: UserText::try_from(self.draft.text.as_str())?,
+                text: UserText::try_from(text.as_str())?,
                 mode: match self.mode {
                     Mode::Configured => "configured",
                     Mode::Plan => "plan",
                 }
                 .into(),
+                summary,
             };
-            let sent_text = self.draft.text.clone();
             let events = Rc::clone(&updates);
             core.run(request, move |event| {
-                if matches!(event, Event::RunStarted { .. }) {
-                    events.presentation.borrow_mut().accepted_draft = Some(sent_text.clone());
+                // A sent draft leaves the composer once its run starts; a summary never took it.
+                if !summary && matches!(event, Event::RunStarted { .. }) {
+                    events.presentation.borrow_mut().accepted_draft = Some(text.clone());
                 }
                 events.event(event)
             })
@@ -1845,6 +1861,16 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             rows,
             true,
             |state: &mut State, tx| state.open_settings(tx),
+        ))
+        .child(conversations::entry(
+            p,
+            typography,
+            "Summarize page",
+            "summarize-page".into(),
+            &conversations::SUMMARY,
+            rows,
+            state.can_start(),
+            |state: &mut State, tx| state.summarize(tx),
         ));
     let toolbar = metldr_ui::toolbar::toolbar(
         state.conversations.toolbar(state, toolbar, rows),
@@ -2053,6 +2079,9 @@ fn settings_section(state: &State, section: &'static Section, body: Option<El>) 
     }
     card
 }
+
+/// What a summary shows as the user's message in the thread.
+const SUMMARY_REQUEST: &str = "Summarize this page.";
 
 thread_local! {
     static HOST: RefCell<Option<AppHandle<State>>> = const { RefCell::new(None) };
