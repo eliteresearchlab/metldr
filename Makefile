@@ -1,11 +1,11 @@
-.PHONY: rust check check-rust check-rune check-ui check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel rune-host check-rune-app check-companion companion dev-install
+.PHONY: rust check check-rust check-rune check-ui check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel check-companion companion dev-install
 
 # Every Cargo root in the repository, in the order the check-* targets use.
 RUST_CRATES := metldr-sse metldr-responses metldr-google-interactions metldr-messages \
   metldr-chat-completions metldr-native-credentials metldr-conversation \
   metldr-harness metldr-pi-session metldr-codex-session metldr-opencode-session metldr-claude-session \
   metldr-browser-tools metldr-answer-codec metldr-ui metldr-panel metldr-companion \
-  metldr-core metldr-history-pages metldr-welcome metldr-rune-host
+  metldr-core metldr-history-pages metldr-welcome
 
 # Fast pre-gate: type-check every Cargo root without linking or running tests.
 # Run it before the check-* targets when a change touches a shared crate.
@@ -70,27 +70,7 @@ check-conversation:
 
 check-panel:
 	cargo test --locked --manifest-path crates/metldr-answer-codec/Cargo.toml
-	cargo test --locked --manifest-path crates/metldr-panel/Cargo.toml
-
-WASM_BINDGEN ?= wasm-bindgen
-RUNE_HOST_TARGET_DIR ?= target/wasm/metldr-rune-host
-RUNE_HOST_OUT ?= crates/metldr-rune-host/pkg
-
-# Internal Rune host route: native lifecycle and font tests (no renderer), then the decoded fonts.
-check-rune-app:
-	cargo test --locked --manifest-path crates/metldr-rune-host/Cargo.toml
-	node scripts/check-rune-fonts.mjs
-
-# Rune host as its own wasm module, copied with its fonts into public/rune for the internal route
-# only. Shipping builds never run this target, so their packages gain nothing.
-rune-host:
-	cargo build --locked --release --features renderer --manifest-path crates/metldr-rune-host/Cargo.toml --target wasm32-unknown-unknown --target-dir "$(RUNE_HOST_TARGET_DIR)"
-	mkdir -p "$(RUNE_HOST_OUT)" public/rune
-	$(WASM_BINDGEN) --target web --out-name metldr_panel --out-dir "$(RUNE_HOST_OUT)" "$(RUNE_HOST_TARGET_DIR)/wasm32-unknown-unknown/release/metldr_rune_host.wasm"
-	cp "$(RUNE_HOST_OUT)/metldr_panel.js" "$(RUNE_HOST_OUT)/metldr_panel_bg.wasm" public/rune/
-	rm -rf public/rune/snippets && cp -R "$(RUNE_HOST_OUT)/snippets" public/rune/
-	mkdir -p public/rune/fonts && cp crates/metldr-rune-host/assets/fonts/* public/rune/fonts/
-	node scripts/check-rune-fonts.mjs
+	cargo test --locked --manifest-path crates/metldr-panel/Cargo.toml --features rune-ui
 
 check-companion:
 	cargo test --locked --manifest-path crates/metldr-companion/Cargo.toml

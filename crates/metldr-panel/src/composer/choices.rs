@@ -6,49 +6,41 @@ pub(crate) struct Choice {
     pub(crate) value: std::borrow::Cow<'static, str>,
     pub(crate) label: std::borrow::Cow<'static, str>,
     pub(crate) enabled: bool,
-    /// The legacy panel's option element for this choice.
-    pub(super) element: &'static str,
 }
 
-/// The fixed rows of the model menu: value, legacy option element and label.
-const ROWS: [(&str, &str, &str); 13] = [
-    ("model", "execution-model", "Test model"),
-    ("browser", "execution-browser", "Browser task, Messages"),
-    ("chat", "execution-chat", "Browser task, Chat Completions"),
+/// The fixed rows of the model menu: value and label.
+const ROWS: [(&str, &str); 13] = [
+    ("model", "Test model"),
+    ("browser", "Browser task, Messages"),
+    ("chat", "Browser task, Chat Completions"),
     (
         "responses",
-        "execution-responses",
         "Browser task, OpenAI Responses",
     ),
     (
         "google",
-        "execution-google",
         "Browser task, Google Interactions",
     ),
     (
         "page:messages",
-        "execution-page-messages",
         "Page questions, Messages",
     ),
     (
         "page:responses",
-        "execution-page-responses",
         "Page questions, OpenAI Responses",
     ),
     (
         "page:google_interactions",
-        "execution-page-google",
         "Page questions, Google Interactions",
     ),
     (
         "page:chat_completions",
-        "execution-page-chat",
         "Page questions, Chat Completions",
     ),
-    ("pi", "execution-pi", "Pi"),
-    ("codex", "execution-codex", "Codex"),
-    ("opencode", "execution-opencode", "OpenCode"),
-    ("claude", "execution-claude", "Claude Code"),
+    ("pi", "Pi"),
+    ("codex", "Codex"),
+    ("opencode", "OpenCode"),
+    ("claude", "Claude Code"),
 ];
 
 /// Where a menu row belongs, in menu order.
@@ -109,13 +101,12 @@ pub(crate) fn selected(view: Option<&PageView>, value: &str) -> Option<Choice> {
 
 fn build(
     view: Option<&PageView>,
-    (value, element, label): (&'static str, &'static str, &'static str),
+    (value, label): (&'static str, &'static str),
 ) -> Choice {
     let mut choice = Choice {
         value: value.into(),
         label: label.into(),
         enabled: view.is_some_and(|view| resolve(view, value).is_ok()),
-        element,
     };
     let Some(view) = view else { return choice };
     let route = match &*choice.value {
@@ -197,7 +188,6 @@ mod checks {
             value: value.into(),
             label: label.to_owned().into(),
             enabled: true,
-            element: "",
         };
         let set = choice("chat", "Browser task, Chat Completions, gpt-5, https://api.openai.com/v1");
         assert_eq!(set.short(), (Section::Browser, "gpt-5", "Chat"));

@@ -129,11 +129,11 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
     }
     let Some(ui) = ui else { return result };
     if let Some(title) = &ui.title {
-        result.push(typography.text(crate::pi_ui::display_plain(title)).wrap());
+        result.push(typography.text(crate::display::plain(title)).wrap());
     }
     for status in &ui.statuses {
         if let Some(value) = &status.text {
-            result.push(typography.text(crate::pi_ui::display_plain(value)).wrap());
+            result.push(typography.text(crate::display::plain(value)).wrap());
         }
     }
     for widget in ui
@@ -143,7 +143,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
     {
         if let Some(lines) = &widget.lines {
             for line in lines {
-                result.push(typography.text(crate::pi_ui::display_plain(line)).wrap());
+                result.push(typography.text(crate::display::plain(line)).wrap());
             }
         }
     }
@@ -152,8 +152,8 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
             typography
                 .text(format!(
                     "{}: {}",
-                    crate::pi_ui::display_plain(&notice.level),
-                    crate::pi_ui::display_plain(&notice.message)
+                    crate::display::plain(&notice.level),
+                    crate::display::plain(&notice.message)
                 ))
                 .wrap(),
         );
@@ -171,7 +171,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
             PiUiDialog::Select { title, .. }
             | PiUiDialog::Confirm { title, .. }
             | PiUiDialog::Input { title, .. }
-            | PiUiDialog::Editor { title, .. } => crate::pi_ui::display_plain(title),
+            | PiUiDialog::Editor { title, .. } => crate::display::plain(title),
         };
         let title = if title.trim().is_empty() {
             "Pi request".to_owned()
@@ -189,7 +189,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                     if !seen.insert(option) {
                         continue;
                     }
-                    let label = crate::pi_ui::display_plain(option);
+                    let label = crate::display::plain(option);
                     let choice = if label.trim().is_empty() {
                         format!("Option {}", index + 1)
                     } else {
@@ -247,7 +247,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
             PiUiDialog::Confirm { message, .. } => {
                 panel = panel
                     .child(typography.text(title.clone()).wrap())
-                    .child(typography.text(crate::pi_ui::display_plain(message)).wrap());
+                    .child(typography.text(crate::display::plain(message)).wrap());
                 panel = panel
                     .child(
                         action(
@@ -309,7 +309,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                     if matches!(&pending.dialog, PiUiDialog::Input { .. }) {
                         if let Some(placeholder) = placeholder {
                             field =
-                                field.placeholder(crate::pi_ui::display_plain(placeholder), ink);
+                                field.placeholder(crate::display::plain(placeholder), ink);
                         }
                     } else {
                         field = field.min_h(80.0);
@@ -364,7 +364,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
     {
         if let Some(lines) = &widget.lines {
             for line in lines {
-                result.push(typography.text(crate::pi_ui::display_plain(line)).wrap());
+                result.push(typography.text(crate::display::plain(line)).wrap());
             }
         }
     }
@@ -389,7 +389,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
             if state.pi_replies.suggestion_open {
                 result.push(
                     typography
-                        .text(crate::pi_ui::display_plain(&editor.text))
+                        .text(crate::display::plain(&editor.text))
                         .wrap(),
                 );
             }

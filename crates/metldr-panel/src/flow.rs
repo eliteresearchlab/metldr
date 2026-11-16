@@ -22,6 +22,7 @@ use crate::{
 mod capture;
 mod history;
 mod protocol;
+#[cfg(feature = "rune-ui")]
 pub(crate) use history::ConversationRequest;
 pub(crate) use protocol::StopReceipt;
 use protocol::{Protocol, Reply, ReplyCell, ReplyKind, WatchCell};
@@ -42,6 +43,7 @@ pub(crate) fn session_grant(run: &RunId, revision: u32, grant: bool) -> Value {
 }
 
 pub(crate) enum PageTextPrompt {
+    #[allow(dead_code)] // The Rune chat's summary action (roadmap P5) sends it; the old panel did.
     Summary,
     Answer(UserText),
 }
@@ -162,9 +164,7 @@ impl FlowClient {
                         if let Some(document) =
                             web_sys::window().and_then(|window| window.document())
                         {
-                            if document.get_element_by_id("status").is_some() {
-                                crate::view::status(&document, &text);
-                            } else if let Some(body) = document.body() {
+                            if let Some(body) = document.body() {
                                 let notice = document.get_element_by_id("metldr-stop-notice").or_else(|| {
                                     let element = document.create_element("div").ok()?;
                                     element.set_id("metldr-stop-notice");
@@ -361,6 +361,7 @@ impl FlowClient {
     }
 
     // Start the permission request synchronously while the button still has user activation.
+    #[allow(dead_code)] // The Rune chat's summary action (roadmap P5) calls it; the old panel did.
     pub(crate) fn summarize_selected(
         &self,
         view: &PageView,

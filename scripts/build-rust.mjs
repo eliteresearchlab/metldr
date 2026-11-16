@@ -8,8 +8,7 @@ import { recordReceipt, sourceDigest } from './answer-contract.mjs';
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 // Ordered longest first so the parallel pool below finishes as early as it can.
 const crates = [
-  // The service worker, panel.html and the React chat load the plain panel; only rune-chat.html
-  // loads the Rune renderer, so it builds separately.
+  // The service worker loads the plain module; the chat page loads the Rune variant.
   { name: 'metldr-panel', module: 'metldr_panel', pkg: 'crates/metldr-panel/pkg' },
   { name: 'metldr-panel', variant: 'rune', module: 'metldr_panel', pkg: 'target/wasm/metldr-panel-rune/pkg', features: 'rune-ui' },
   { name: 'metldr-welcome', module: 'welcome_runtime', pkg: 'public/welcome/pkg' },

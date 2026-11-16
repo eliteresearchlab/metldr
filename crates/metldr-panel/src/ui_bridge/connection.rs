@@ -2,7 +2,6 @@ use super::*;
 
 mod observe;
 pub(super) use observe::Observer;
-pub use observe::UiConnectionSubscription;
 
 #[derive(Default)]
 pub(super) struct Slot(Option<Rc<()>>);

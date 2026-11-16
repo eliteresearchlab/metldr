@@ -1,6 +1,5 @@
 use super::*;
 use crate::model::{PiUiDialog, PiUiView, RunRoute, RunStatus};
-use crate::pi_ui::display_plain;
 
 mod display;
 mod observe;
@@ -432,7 +431,7 @@ mod tests {
             options: vec![raw.into()],
         };
         assert!(Answer::Select(raw.into()).offered(&dialog));
-        assert!(!Answer::Select(display_plain(raw)).offered(&dialog));
+        assert!(!Answer::Select(crate::display::plain(raw)).offered(&dialog));
         assert!(!Answer::Text(raw.into()).offered(&dialog));
         let input = PiUiDialog::Input {
             title: "Name".into(),

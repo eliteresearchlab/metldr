@@ -1,6 +1,4 @@
-use super::{
-    FlowError, MAX_FRAME, MAX_PAGE_TEXT, SourceId, SourceView, WireSource, parse_identity,
-};
+use super::{FlowError, MAX_PAGE_TEXT, SourceView, WireSource, parse_identity};
 
 impl WireSource {
     pub(super) fn into_view(self, store: &str) -> Result<SourceView, FlowError> {
@@ -28,16 +26,4 @@ impl WireSource {
 }
 
 impl SourceView {
-    pub(crate) fn decode_record(bytes: &[u8], expected: &SourceId) -> Result<Self, FlowError> {
-        if bytes.len() > MAX_FRAME {
-            return Err(FlowError::Protocol("source exceeds 65536 bytes".into()));
-        }
-        let source: WireSource = serde_json::from_slice(bytes)
-            .map_err(|error| FlowError::Protocol(error.to_string()))?;
-        if source.id != *expected {
-            return Err(FlowError::Protocol("saved source identity changed".into()));
-        }
-        let (store, _) = parse_identity(expected.as_str()).map_err(FlowError::Protocol)?;
-        source.into_view(store)
-    }
 }

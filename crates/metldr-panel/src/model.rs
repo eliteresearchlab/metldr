@@ -9,7 +9,9 @@ mod control;
 mod run;
 #[path = "model/source.rs"]
 mod source;
-pub(crate) use control::{Control, ControlReceipt, RadioMember};
+pub(crate) use control::{Control, ControlReceipt};
+#[cfg(feature = "rune-ui")]
+pub(crate) use control::RadioMember;
 
 const MAX_FRAME: usize = 65_536;
 const MAX_RUNS: usize = 16;
@@ -1081,16 +1083,6 @@ pub(crate) enum RunRoute {
 }
 
 impl RunRoute {
-    /// The installed agent harness behind this route, if any.
-    pub(crate) fn harness(&self) -> Option<metldr_harness::HarnessId> {
-        match self {
-            Self::Pi { .. } => Some(metldr_harness::HarnessId::Pi),
-            Self::Codex { .. } => Some(metldr_harness::HarnessId::Codex),
-            Self::OpenCode { .. } => Some(metldr_harness::HarnessId::OpenCode),
-            Self::Harness { harness, .. } => metldr_harness::HarnessId::from_key(harness),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
