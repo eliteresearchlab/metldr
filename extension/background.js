@@ -19,7 +19,7 @@ chrome.commands.onCommand.addListener((command, tab) => {
     initialized.then(stop_all_runs).catch(console.error);
     return;
   }
-  const path = command === "open-browser-agent" ? "panel.html"
+  const path = command === "open-browser-agent" ? "chat.html"
     : command === "open-page-tools" ? "index.html" : undefined;
   if (!path || !Number.isInteger(tab?.id) || tab.id < 0 || tab.id > 2147483647) return;
   chrome.sidePanel.setOptions({ tabId: tab.id, path, enabled: true }, () => {
