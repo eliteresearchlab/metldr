@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordReceipt, sourceDigest } from './answer-contract.mjs';
@@ -183,17 +183,6 @@ try {
   }
   if (failure) throw failure;
   if (answerSourceHash) recordReceipt(answerSourceHash);
-  if (!isCheck) {
-    const destination = join(repoRoot, 'public/chat/wasm');
-    mkdirSync(destination, { recursive: true });
-    for (const name of ['metldr_panel.js', 'metldr_panel_bg.wasm']) {
-      copyFileSync(join(repoRoot, 'crates/metldr-panel/pkg', name), join(destination, name));
-    }
-    rmSync(join(destination, 'snippets'), { recursive: true, force: true });
-    // The plain panel has no inline JS snippets; only the Rune renderer brings them.
-    const snippets = join(repoRoot, 'crates/metldr-panel/pkg/snippets');
-    if (statSync(snippets, { throwIfNoEntry: false })) cpSync(snippets, join(destination, 'snippets'), { recursive: true });
-  }
   await runAsync('cargo', [
     isCheck ? 'check' : 'build', '--locked', '--profile', profile,
     '--manifest-path', 'crates/metldr-welcome/Cargo.toml', '--bin', 'welcome-guide',
