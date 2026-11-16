@@ -54,6 +54,8 @@ pub(crate) enum A11yKind {
     Article,
     /// A named scroll region (`El::scroll_stop`); `true` while it is a Tab stop.
     Region(bool),
+    /// A list of options (`role("listbox")`), named by its label.
+    Listbox,
     /// A plain container another element names (`El::controls`, `El::active_descendant`), so the
     /// name has an element to point at.
     Box,
@@ -130,6 +132,7 @@ impl A11yItem {
             A11yKind::Article => Some("article"),
             A11yKind::Region(_) => Some("region"),
             A11yKind::Box => Some("box"),
+            A11yKind::Listbox => Some("listbox"),
             A11yKind::Text => Some("text"),
             A11yKind::Status => Some("status"),
             A11yKind::Alert => Some("alert"),
@@ -466,6 +469,7 @@ impl<S: 'static> Runtime<S> {
                         None | Some(A11yKind::Cell | A11yKind::Group | A11yKind::Article),
                     ) => Some(A11yKind::Article),
                     ("region", _) if labelled => Some(A11yKind::Region(self.scroll_stop_live(i))),
+                    ("listbox", _) => Some(A11yKind::Listbox),
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
                     ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
@@ -508,6 +512,7 @@ impl<S: 'static> Runtime<S> {
                             | A11yKind::Article
                             | A11yKind::Region(_)
                             | A11yKind::Box
+                            | A11yKind::Listbox
                     )
                 })
                 .map(|index| out[index].path.clone());
@@ -552,8 +557,12 @@ impl<S: 'static> Runtime<S> {
                 last_flow_parent = None;
                 continue;
             }
-            let button_like =
-                (n.role == "button" || n.handlers.on_press.is_some()) && !n.window_drag;
+            // A control role counts without a press handler too: a disabled option or tab still
+            // reads as one.
+            let button_like = (n.role == "button"
+                || control_role(n.role).is_some()
+                || n.handlers.on_press.is_some())
+                && !n.window_drag;
             // Only collapse a pressable container into one button when it doesn't wrap an entire
             // multi-block section with independent buttons inside.
             let nested_press = (i + 1..end).any(|j| {
@@ -915,6 +924,7 @@ mod tests {
                 .child(control("dark", "segment").focus_selected(false))
                 .child(crate::row().key("older").role("button").label("older").size(80.0, 20.0).disabled(true))
                 .child(control("publish", "button").busy(true))
+                .child(crate::row().key("files").role("option").label("files").size(80.0, 20.0).disabled(true))
         }
         let mut rt = Runtime::new((), view, (200.0, 200.0), Env::default());
         rt.frame(0.0);
@@ -926,6 +936,7 @@ mod tests {
         assert_eq!((item("chat")["role"].as_str(), item("chat")["sel"].as_bool()), (Some("tab"), Some(true)));
         assert_eq!((item("dark")["role"].as_str(), item("dark")["c"].as_str()), (Some("radio"), Some("false")));
         assert_eq!(item("older")["d"].as_bool(), Some(true), "a disabled button says so");
+        assert_eq!((item("files")["role"].as_str(), item("files")["d"].as_bool()), (Some("option"), Some(true)), "a disabled option without a press handler stays an option");
         assert_eq!(item("publish")["b"].as_bool(), Some(true), "a busy button says so");
         assert!(item("publish").get("d").is_none());
     }
