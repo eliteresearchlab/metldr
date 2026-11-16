@@ -639,8 +639,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                         .wrap(),
                 );
             }
-            Some(
-                col()
+            let list = col()
                     .key("rune-source-menu")
                     .role("listbox")
                     .label("Sources")
@@ -667,15 +666,19 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .color(p.ink_3),
                     )
                     .anchored_fit("rune-composer", Side::Top, Align::Start, 8.0)
-                    .transition(super::theme::pop_in(p))
-                    .focus_return("rune-source-trigger")
-                    .on_key(|state: &mut State, key, _| {
-                        let escape = key.key == Key::Escape;
-                        if escape {
-                            close_menu(state);
-                        }
-                        escape
-                    }),
+                    .transition(super::theme::pop_in(p));
+            // The prompt keeps focus while the list is open, as a combobox's input does; opened
+            // from its trigger, focus sits in the list and returns to the trigger.
+            Some(
+                metldr_ui::popup::layer(
+                    list,
+                    metldr_ui::popup::Kind::Combobox,
+                    "rune-source-trigger",
+                    true,
+                    |state: &mut State, _, _| close_menu(state),
+                    |_: &mut State, _| {},
+                )
+                .focus_return("rune-source-trigger"),
             )
         }
         Menu::Models => {
