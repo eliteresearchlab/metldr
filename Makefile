@@ -1,4 +1,4 @@
-.PHONY: rust check check-rust check-rune check-ui check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel panel-wasm rune-host check-rune-app check-companion companion dev-install
+.PHONY: rust check check-rust check-rune check-ui check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel rune-host check-rune-app check-companion companion dev-install
 
 # Every Cargo root in the repository, in the order the check-* targets use.
 RUST_CRATES := metldr-sse metldr-responses metldr-google-interactions metldr-messages \
@@ -68,19 +68,11 @@ check-credentials:
 check-conversation:
 	cargo test --locked --manifest-path crates/metldr-conversation/Cargo.toml
 
-WASM_BINDGEN ?= wasm-bindgen
-# The directory scripts/build-rust.mjs builds the panel wasm into.
-PANEL_TARGET_DIR ?= target/wasm/metldr-panel
-
 check-panel:
 	cargo test --locked --manifest-path crates/metldr-answer-codec/Cargo.toml
 	cargo test --locked --manifest-path crates/metldr-panel/Cargo.toml
 
-panel-wasm:
-	cargo build --locked --release --manifest-path crates/metldr-panel/Cargo.toml --target wasm32-unknown-unknown --target-dir "$(PANEL_TARGET_DIR)"
-	mkdir -p crates/metldr-panel/pkg
-	$(WASM_BINDGEN) --target web --out-dir crates/metldr-panel/pkg "$(PANEL_TARGET_DIR)/wasm32-unknown-unknown/release/metldr_panel.wasm"
-
+WASM_BINDGEN ?= wasm-bindgen
 RUNE_HOST_TARGET_DIR ?= target/wasm/metldr-rune-host
 RUNE_HOST_OUT ?= crates/metldr-rune-host/pkg
 
@@ -109,5 +101,5 @@ companion:
 # Builds the extension and the companion, then registers the companion with every installed
 # Chromium browser for the unpacked extension in dist. Load dist in chrome://extensions once.
 dev-install: companion
-	npm run build:rust && npm run build:chat && npm run build
+	npm run build
 	"$${CARGO_TARGET_DIR:-target}/release/metldr-companion" install dist

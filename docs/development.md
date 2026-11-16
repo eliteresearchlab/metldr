@@ -31,16 +31,11 @@ Open Help on the welcome page for Chrome AI and Ollama setup. Its Ollama guide i
 
 Cargo uses one target directory for the whole repository, set in `.cargo/config.toml`. Every crate under `crates/` and `prototypes/` is a separate Cargo root, so without that file the shared dependency stack is compiled again for each crate.
 
-`scripts/build-rust.mjs` builds the four wasm crates through a pool, two at a time by default. Set `METLDR_BUILD_JOBS` to change the limit. Each build gets its own directory under `target/wasm`, so cargo does not serialise them on one target lock.
+`scripts/build-rust.mjs` builds the five wasm modules through a pool, two at a time by default. Set `METLDR_BUILD_JOBS` to change the limit. Each build gets its own directory under `target/wasm`, so cargo does not serialise them on one target lock.
 
-`sccache` is optional. The repository does not configure it, because a contributor without it would fail the build. Enable it in your shell when you want it:
+`sccache` is optional. When it is installed, `scripts/build-rust.mjs` uses it for every build, so builds started from npm, make or a shell share one compiler cache. Cargo records the compiler wrapper, so mixing builds with and without it would rebuild every crate.
 
-```sh
-export RUSTC_WRAPPER=sccache
-export CARGO_INCREMENTAL=0
-```
-
-`sccache` shares its compile cache across builds. It does not cache incremental compilation units, so set `CARGO_INCREMENTAL=0` when using it.
+Run `npm run build:fast` while editing and checking. It builds the wasm crates with the `fast` profile: thin LTO, 16 codegen units and incremental compilation. After a one line Rust change it rebuilds in about 22 s instead of about 125 s. `npm run build` keeps the `release` profile, which packaged and measured builds use. A wasm module whose bytes did not change keeps its bindings, so the binding generator runs only for changed modules.
 
 `make check` type-checks the Cargo roots under `crates/` and the Rune frontend prototype with `cargo check`, without linking or running tests. Run it before the `check-*` targets when a change touches a shared crate.
 

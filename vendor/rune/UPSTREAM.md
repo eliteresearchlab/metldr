@@ -30,7 +30,8 @@ Local changes:
 * `El::focus_ring_default` sets the default keyboard focus ring for every control inside an element that sets none of its own, so a theme draws its ring once at its root (`tests/focus_ring_default.rs`). Painting checks an element's own ring before walking up to the focus, so elements without one skip the walk.
 * `El::scroll_stop` makes a scroll view a Tab stop while its content overflows and nothing inside it can take focus; focused, the arrow keys scroll it a 40 point line and the page keys a page, and the web mirror shows it as a named region that takes native focus. The web host reconciles its native controls only when the mirror changes, not on every frame.
 * Web mirror elements carry stable ids hashed from their runtime paths, and `El::controls` and `El::active_descendant` reach the mirror as `aria-controls` and `aria-activedescendant` by those ids.
-* The web mirror shows a `role("listbox")` element as a listbox container around its options.
+* The web mirror shows a `role("listbox")` element as a listbox container around its options, and an element with a control role (option, tab, radio and the like) stays that control without a press handler, so a disabled option still reads as one.
+* The workspace's dev and test profiles keep line tables only, not full debug info: a test build of the Rune crate links faster and its target takes 13 GiB instead of 37 GiB.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.

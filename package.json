@@ -9,6 +9,7 @@
     "predev": "npm run build:rust",
     "build": "npm run build:main && npm run build:content && npm run build:sandbox && npm run build:offscreen && npm run build:models",
     "build:rust": "node scripts/build-rust.mjs",
+    "build:fast": "cross-env METLDR_PROFILE=fast npm run build",
     "prebuild:main": "npm run build:rust && npm run build:chat",
     "build:main": "vite build",
     "build:content": "cross-env BUILD_TARGET=content vite build",
