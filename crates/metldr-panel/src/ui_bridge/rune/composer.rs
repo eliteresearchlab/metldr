@@ -191,7 +191,6 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
         .label(label)
 }
 
-/// One 30 px menu row: name, muted tag, then the check.
 /// The prompt while the sources menu is open, as a trigger menu's editor: it names the list it
 /// shows (ARIA `aria-controls`) and, once the arrows reach it, the highlighted source
 /// (`aria-activedescendant`), while keyboard focus stays in the prompt.
@@ -276,6 +275,7 @@ fn typed(input: &::rune::PhysicalInput) -> Option<crate::interaction_audio::Cue>
     })
 }
 
+/// One 30 px menu row: name, muted tag, then the check.
 fn menu_row(
     typography: super::preferences::Typography,
     p: &Palette,
