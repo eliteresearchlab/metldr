@@ -64,6 +64,9 @@ pub struct UiRunRequest {
     destination: String,
     text: UserText,
     mode: String,
+    /// A summary of the saved page: a page text route gets its summary prompt, every other
+    /// route the request text.
+    summary: bool,
 }
 
 #[wasm_bindgen]
@@ -92,6 +95,7 @@ impl UiRunRequest {
             destination,
             text: UserText::try_from(text.as_str()).map_err(js_error)?,
             mode,
+            summary: false,
         })
     }
 }

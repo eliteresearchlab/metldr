@@ -755,6 +755,12 @@ pub(super) const TUNE: Icon = Icon {
     view: 24.0,
     body: "<path d=\"M4 6h10M18 6h2M4 12h2M10 12h10M4 18h14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"16\" cy=\"6\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"8\" cy=\"12\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"18\" cy=\"18\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
 };
+/// Summarize page: lines of text (Lucide text).
+pub(super) const SUMMARY: Icon = Icon {
+    name: "metldr-summary",
+    view: 24.0,
+    body: "<path d=\"M21 6H3M15 12H3M17 18H3\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+};
 const OLDER: Icon = Icon {
     name: "metldr-older",
     view: 24.0,

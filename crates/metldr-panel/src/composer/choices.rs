@@ -99,6 +99,11 @@ pub(crate) fn selected(view: Option<&PageView>, value: &str) -> Option<Choice> {
         .map(|row| build(view, *row))
 }
 
+/// Whether the route `value` names can take a run now, without building its label.
+pub(crate) fn selected_enabled(view: Option<&PageView>, value: &str) -> bool {
+    ROWS.iter().any(|row| row.0 == value) && view.is_some_and(|view| resolve(view, value).is_ok())
+}
+
 fn build(
     view: Option<&PageView>,
     (value, label): (&'static str, &'static str),

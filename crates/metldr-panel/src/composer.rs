@@ -269,6 +269,7 @@ pub(crate) async fn dispatch(
     destination: Destination,
     text: UserText,
     codex_mode: &str,
+    summary: bool,
 ) -> Result<RunId, FlowError> {
     match destination {
         Destination::Model => flow.ask(scope, source, text).await,
@@ -291,7 +292,7 @@ pub(crate) async fn dispatch(
                 source,
                 protocol,
                 fingerprint,
-                crate::flow::PageTextPrompt::Answer(text),
+                if summary { crate::flow::PageTextPrompt::Summary } else { crate::flow::PageTextPrompt::Answer(text) },
             )
             .await
         }

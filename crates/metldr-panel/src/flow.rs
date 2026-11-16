@@ -43,7 +43,6 @@ pub(crate) fn session_grant(run: &RunId, revision: u32, grant: bool) -> Value {
 }
 
 pub(crate) enum PageTextPrompt {
-    #[allow(dead_code)] // The Rune chat's summary action (roadmap P5) sends it; the old panel did.
     Summary,
     Answer(UserText),
 }
@@ -361,21 +360,6 @@ impl FlowClient {
     }
 
     // Start the permission request synchronously while the button still has user activation.
-    #[allow(dead_code)] // The Rune chat's summary action (roadmap P5) calls it; the old panel did.
-    pub(crate) fn summarize_selected(
-        &self,
-        view: &PageView,
-    ) -> impl Future<Output = Result<RunId>> + use<> {
-        let scope = view.selection.clone();
-        let page = capture::selected(self);
-        let flow = self.clone();
-        async move {
-            let page = page.await?;
-            flow.start(scope, json!({"op":"summarize","page":page}))
-                .await
-        }
-    }
-
     pub(crate) fn capture_selected(
         &self,
         view: &PageView,
