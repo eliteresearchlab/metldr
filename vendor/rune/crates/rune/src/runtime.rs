@@ -244,6 +244,9 @@ mod drop_tests;
 #[path = "runtime/on_key_tests.rs"]
 mod on_key_tests;
 #[cfg(test)]
+#[path = "runtime/dismiss_layer_tests.rs"]
+mod dismiss_layer_tests;
+#[cfg(test)]
 #[path = "live_only_tests.rs"]
 mod live_only_tests;
 #[cfg(test)]

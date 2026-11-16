@@ -78,8 +78,9 @@ pub fn popup<S: 'static>(
         .transition(motion)
         .focus_return(trigger)
         .modal(true, move |s: &mut S| outside(s))
+        // Escape is the modal's: it closes the menu and focus returns to the trigger.
         .on_key(move |s: &mut S, key: &KeyEvent, tx: &mut Tx| {
-            if !matches!(key.key, Key::Escape | Key::Tab) {
+            if key.key != Key::Tab {
                 return false;
             }
             on_close(s);

@@ -144,6 +144,21 @@ pub(crate) struct ModalSpec {
     pub outside: bool,
 }
 
+/// Why a [`El::layer`] heard a request to close.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dismiss {
+    /// Escape, while the layer is the topmost.
+    Escape,
+    /// A primary press outside the layer and its anchor.
+    OutsidePress,
+    /// Focus moved to an element outside the layer and its anchor.
+    FocusOut,
+    /// The window lost focus.
+    WindowBlur,
+}
+
+pub(crate) type LayerFn = Rc<dyn Fn(crate::states::States<'_>, Dismiss, &mut Tx)>;
+
 /// A vertical scroll viewport.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScrollSpec {
@@ -1135,6 +1150,14 @@ impl El {
     pub fn modal<S: 'static>(mut self, click_outside: bool, dismiss: impl Fn(&mut S) + 'static) -> Self {
         self.handlers.modal = Some(ModalSpec { outside: click_outside,
             dismiss: Rc::new(move |s, _| dismiss(downcast::<S>(s))) });
+        self
+    }
+    /// A non-modal layer, such as a popover, tooltip or list popup: the page behind stays usable
+    /// and focus is not trapped. The topmost layer, above any modal, hears each request to close
+    /// with its reason, and the app decides. Its anchor (`anchored`) counts as inside it, so a
+    /// press on the trigger reaches the trigger's own handler instead.
+    pub fn layer<S: 'static>(mut self, on_dismiss: impl Fn(&mut S, Dismiss, &mut Tx) + 'static) -> Self {
+        self.handlers.layer = Some(Rc::new(move |s, reason, tx| on_dismiss(downcast::<S>(s), reason, tx)));
         self
     }
     pub fn modal_click_outside(mut self, enabled: bool) -> Self {

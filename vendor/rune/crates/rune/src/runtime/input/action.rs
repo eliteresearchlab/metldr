@@ -10,6 +10,8 @@ pub(super) enum Action {
     /// The pointer entered a `focus_highlight` row (`Some`) or left every such row.
     HoverFocus(Option<String>),
     Dismiss(String),
+    /// `El::layer`: the topmost layer heard a request to close.
+    LayerDismiss(String, crate::el::Dismiss),
     PointerMove(String, PointerEvent),
     Hover(String),
     HoverChange(String, bool),
@@ -156,6 +158,7 @@ fn handler_name(action: &Action) -> &'static str {
         Action::Physical(..) => "on_key",
         Action::FocusControl(_) | Action::HoverFocus(_) | Action::Focus(..) | Action::Blur => "a focus change",
         Action::Dismiss(_) => "a modal's dismiss",
+        Action::LayerDismiss(..) => "a layer's dismiss",
         Action::AtBottom(..) => "on_at_bottom",
         Action::FarFromBottom(..) => "on_far_from_bottom",
         Action::VisibleRows(..) => "on_visible_rows",
@@ -172,7 +175,7 @@ fn handler_name(action: &Action) -> &'static str {
 #[cfg(debug_assertions)]
 fn stall_path(action: &Action) -> Option<&str> {
     match action {
-        Action::Dismiss(path) | Action::AtBottom(path, _) | Action::FarFromBottom(path, _) | Action::VisibleRows(path, _)
+        Action::Dismiss(path) | Action::LayerDismiss(path, _) | Action::AtBottom(path, _) | Action::FarFromBottom(path, _) | Action::VisibleRows(path, _)
         | Action::Layout(path, _) | Action::ScreenLayout(path, _) | Action::Focus(path, ..) | Action::FocusControl(path) => Some(path),
         _ => action_path(action),
     }
@@ -398,7 +401,10 @@ impl<S: 'static> Runtime<S> {
         let ran = match action {
             Action::WindowFocus(focused) => {
                 if !focused { self.held = None; }
-                let Some(f) = self.nodes.get(self.app_root()).and_then(|n| n.handlers.on_window_focus.clone()) else { return false };
+                let blurred = (!focused).then(|| self.top_layer()).flatten()
+                    .and_then(|l| self.nodes[l].handlers.layer.clone());
+                if let Some(f) = &blurred { f(states!(self), crate::el::Dismiss::WindowBlur, &mut one); }
+                let Some(f) = self.nodes.get(self.app_root()).and_then(|n| n.handlers.on_window_focus.clone()) else { return blurred.is_some() };
                 f(states!(self), focused, &mut one);
                 true
             }
@@ -422,6 +428,11 @@ impl<S: 'static> Runtime<S> {
                 }
                 None => std::mem::take(&mut self.hover_focus),
             },
+            Action::LayerDismiss(path, reason) => {
+                let Some(f) = self.node(&path).and_then(|n| n.handlers.layer.clone()) else { return false };
+                f(states!(self), reason, &mut one);
+                true
+            }
             Action::Dismiss(path) => {
                 let Some(f) = self.node(&path).and_then(|n| n.handlers.modal.as_ref().map(|m| m.dismiss.clone())) else { return false };
                 self.set_focus(None, self.keyboard_focus);
