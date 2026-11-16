@@ -276,13 +276,28 @@ export function syncA11y(h, json, revision) {
     const cursors = new Map();
     const focused = document.activeElement;
     let restoreNativeFocus = false;
-    for (const item of items) {
+    const keys = [];
+    for (let item of items) {
+        // An unchanged item comes as its place in the last sync (`same`): its element already
+        // says everything.
+        const kept = item.same !== undefined;
+        let el;
+        if (kept) {
+            el = h.a11yNodes.get(h.a11yKeys?.[item.same]);
+            if (!el) { h.a11yKeys = []; h.send({ kind: 'a11y_resync' }); return; }
+            item = el._data;
+        }
         // The runtime marks every container kind (`A11yKind::group`), so a new one needs no list here.
         const group = item.g === true;
         const tag = group || item.k === 'input' || item.k === 'range' ? 'div' : item.k === 'heading' ? `h${item.l || 2}` : item.k === 'button' ? 'button' : 'p';
         const key = group ? `semantic:${item.p}` : item.k === 'input' ? `input:${item.p}` : `${tag}:${item.p}`;
         seen.add(key);
-        let el = h.a11yNodes.get(key);
+        keys.push(key);
+        el ??= h.a11yNodes.get(key);
+        if (kept) {
+            place(h, item, el, cursors, focused) && (restoreNativeFocus = true);
+            continue;
+        }
         if (!el) {
             el = document.createElement(tag);
             if (item.k === 'input') {
@@ -304,6 +319,7 @@ export function syncA11y(h, json, revision) {
             }
             h.a11yNodes.set(key, el);
         }
+        el._data = item;
         const [x, y, w, bh] = item.r;
         const fs = item.s || 14;
         // The mirror is an invisible proxy: Rune draws the keyboard focus ring on the canvas, so the
@@ -391,15 +407,9 @@ export function syncA11y(h, json, revision) {
                 el.textContent = item.k === 'input' ? item.value ?? '' : item.t ?? '';
             }
         }
-        const parent = item.parent ? h.a11yNodes.get(`semantic:${item.parent}`) ?? h.a11y : h.a11y;
-        const previous = cursors.get(parent);
-        const cursor = previous ? previous.nextElementSibling : parent.firstElementChild;
-        if (cursor !== el) {
-            if (nativeButtons.has(focused) && (focused === el || el.contains(focused))) restoreNativeFocus = true;
-            parent.insertBefore(el, cursor);
-        }
-        cursors.set(parent, el);
+        place(h, item, el, cursors, focused) && (restoreNativeFocus = true);
     }
+    h.a11yKeys = keys;
     for (const [key, el] of h.a11yNodes) {
         if (!seen.has(key)) {
             if (document.activeElement === el) h.canvas.focus({ preventScroll: true });
@@ -409,6 +419,19 @@ export function syncA11y(h, json, revision) {
     }
     if (restoreNativeFocus && focused.isConnected && document.activeElement !== focused)
         focused.focus({ preventScroll: true });
+}
+
+// Puts `el` after the last element placed in its parent this sync. True when that moved a native
+// button holding focus, which the caller then gives back.
+function place(h, item, el, cursors, focused) {
+    const parent = item.parent ? h.a11yNodes.get(`semantic:${item.parent}`) ?? h.a11y : h.a11y;
+    const previous = cursors.get(parent);
+    const cursor = previous ? previous.nextElementSibling : parent.firstElementChild;
+    cursors.set(parent, el);
+    if (cursor === el) return false;
+    const moved = nativeButtons.has(focused) && (focused === el || el.contains(focused));
+    parent.insertBefore(el, cursor);
+    return moved;
 }
 
 function setOptionalAttribute(el, name, value) {
