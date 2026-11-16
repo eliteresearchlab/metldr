@@ -1075,6 +1075,12 @@ impl El {
         self.focus.follows = true;
         self
     }
+    /// On a focus group: arrow keys only move focus over its radio and tab items, and Enter or
+    /// Space presses one, as tabs with manual activation ask when switching costs something.
+    pub fn focus_manual(mut self) -> Self {
+        self.focus.manual = true;
+        self
+    }
     /// A menu or list row's highlight: painted while focused from the keyboard or pointer,
     /// and moving the pointer over the row focuses it, so keys and mouse share one
     /// highlight (NSMenu). Use instead of `hover` and `focus_ring`.

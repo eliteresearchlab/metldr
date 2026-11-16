@@ -185,6 +185,14 @@ impl<S: 'static> Runtime<S> {
         f(states!(self), tx);
         true
     }
+    /// The items an arrow key moves between in group `g`, in tree order.
+    pub(super) fn group_items(&self, g: usize) -> Vec<usize> {
+        // Nodes are in tree order, so a group's items follow it until its subtree ends; the
+        // cheap membership test runs before the reachability one.
+        let inside = |j: usize| std::iter::successors(self.nodes[j].parent, |&p| self.nodes[p].parent).any(|p| p == g);
+        (g + 1..self.nodes.len()).take_while(|&j| inside(j))
+            .filter(|&j| self.group(j) == Some(g) && self.can_focus(j)).collect()
+    }
     fn group(&self, i: usize) -> Option<usize> {
         let mut p = self.nodes[i].parent;
         while let Some(i) = p {
@@ -478,7 +486,7 @@ impl<S: 'static> Runtime<S> {
             let (across, down) = (axis != crate::FocusAxis::Vertical, axis != crate::FocusAxis::Horizontal);
             let backward = (down && ev.key == Key::Up) || (across && ev.key == Key::Left);
             let forward = (down && ev.key == Key::Down) || (across && ev.key == Key::Right);
-            let items: Vec<_> = (0..self.nodes.len()).filter(|&j| self.can_focus(j) && self.group(j) == Some(g)).collect();
+            let items = self.group_items(g);
             let pos = items.iter().position(|&j| j == i).unwrap();
             let page = matches!(ev.key, Key::PageUp | Key::PageDown) && PAGED_ROLES.contains(&self.nodes[g].role);
             let next = if backward || forward || page || matches!(ev.key, Key::Home | Key::End) {
@@ -500,7 +508,7 @@ impl<S: 'static> Runtime<S> {
             } else { None };
             if let Some(next) = next {
                 let n = &self.nodes[items[next]];
-                let follows = n.role == "radio" || n.role == "tab" || self.nodes[g].focus.follows;
+                let follows = ((n.role == "radio" || n.role == "tab") && !self.nodes[g].focus.manual) || self.nodes[g].focus.follows;
                 let action = follows.then(|| n.handlers.on_press.clone()).flatten();
                 let path = n.path.clone();
                 self.set_focus(Some(path.clone()), true);
@@ -592,6 +600,31 @@ impl<S: 'static> Runtime<S> {
 mod tests {
     use super::*;
     use crate::{col, el, row, Mods};
+
+    /// Run with `--ignored`: the items an arrow key moves between in a tablist on a long page.
+    #[test]
+    #[ignore]
+    fn group_items_cost() {
+        struct Big;
+        fn view(_: &Big, _: &mut Cx<Big>) -> El {
+            col().key("root").w_full().h_full()
+                .child(row().key("tabs").focus_group().role("tablist")
+                    .children((0..8).map(|i| button(&format!("tab{i}")).role("tab"))))
+                .children((0..2000).map(|i| row().key(format!("row{i}")).size(10.0, 2.0)))
+        }
+        let mut rt = Runtime::new(Big, view, (400.0, 400.0), Env::new(true, 1.0));
+        rt.frame(0.0);
+        let g = rt.nodes.iter().position(|n| n.key.as_deref() == Some("tabs")).unwrap();
+        assert_eq!(rt.group_items(g).len(), 8);
+        let runs = 500;
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            for _ in 0..runs { std::hint::black_box(rt.group_items(std::hint::black_box(g))); }
+            best = best.min(t.elapsed().as_secs_f64() / runs as f64);
+        }
+        eprintln!("group items: {:.2} us over {} nodes", best * 1e6, rt.nodes.len());
+    }
 
     /// Run with `--ignored`: finding a node by its path, as every press, hover, dismissal and
     /// focus change does before it runs its handler.

@@ -56,6 +56,10 @@ pub(crate) enum A11yKind {
     Region(bool),
     /// A list of options (`role("listbox")`), named by its label.
     Listbox,
+    /// A row of tabs (`role("tablist")`), named by its label.
+    Tablist,
+    /// The content a selected tab shows (`role("tabpanel")`), named by its label.
+    Tabpanel,
     /// A plain container another element names (`El::controls`, `El::active_descendant`), so the
     /// name has an element to point at.
     Box,
@@ -133,6 +137,8 @@ impl A11yItem {
             A11yKind::Region(_) => Some("region"),
             A11yKind::Box => Some("box"),
             A11yKind::Listbox => Some("listbox"),
+            A11yKind::Tablist => Some("tablist"),
+            A11yKind::Tabpanel => Some("tabpanel"),
             A11yKind::Text => Some("text"),
             A11yKind::Status => Some("status"),
             A11yKind::Alert => Some("alert"),
@@ -470,6 +476,8 @@ impl<S: 'static> Runtime<S> {
                     ) => Some(A11yKind::Article),
                     ("region", _) if labelled => Some(A11yKind::Region(self.scroll_stop_live(i))),
                     ("listbox", _) => Some(A11yKind::Listbox),
+                    ("tablist", _) => Some(A11yKind::Tablist),
+                    ("tabpanel", _) if labelled => Some(A11yKind::Tabpanel),
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
                     ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
@@ -513,6 +521,8 @@ impl<S: 'static> Runtime<S> {
                             | A11yKind::Region(_)
                             | A11yKind::Box
                             | A11yKind::Listbox
+                            | A11yKind::Tablist
+                            | A11yKind::Tabpanel
                     )
                 })
                 .map(|index| out[index].path.clone());

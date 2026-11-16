@@ -12,5 +12,6 @@ pub mod menu;
 pub mod popup;
 pub mod press;
 pub mod scroll_area;
+pub mod tabs;
 pub mod toggle;
 pub mod tooltip;
