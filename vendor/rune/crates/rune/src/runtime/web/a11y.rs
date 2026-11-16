@@ -1029,28 +1029,31 @@ mod tests {
         assert!(items.iter().filter(|i| i["k"] == "text").all(|i| i.get("g").is_none()), "leaves are not groups");
     }
 
-    /// Run with `--ignored`: the mirror's JSON for a long chat, as each sync builds it.
+    /// Run with `--ignored`: one sync of a long chat's mirror while its last message streams.
     #[test]
     #[ignore]
-    fn mirror_json_cost() {
-        struct Big;
-        fn view(_: &Big, _: &mut Cx<Big>) -> El {
+    fn mirror_sync_cost() {
+        struct Big(u32);
+        fn view(s: &Big, _: &mut Cx<Big>) -> El {
             crate::col().key("root").w_full()
-                .children((0..2000).map(|i| crate::text(format!("Message {i} with a few words in it")).key(format!("m{i}")).size(300.0, 12.3)))
+                .children((0..2000).map(|i| crate::text(if i == 1999 { format!("Streaming {}", "word ".repeat(s.0 as usize % 50)) } else { format!("Message {i} with a few words in it") }).key(format!("m{i}")).size(300.0, 12.3)))
                 .children((0..200).map(|i| crate::row().key(format!("b{i}")).role("button").label(format!("Action {i}")).size(40.0, 20.5).on_press(|_: &mut Big| {})))
         }
-        let mut rt = Runtime::new(Big, view, (400.0, 30000.0), Env::default());
+        let mut rt = Runtime::new(Big(0), view, (400.0, 30000.0), Env::default());
+        let mut mirror = A11yMirror::default();
         rt.frame(0.0);
-        let json = rt.a11y_json();
-        let items: Vec<Value> = serde_json::from_str(&json).unwrap();
-        assert!(items.len() >= 2200, "{}", items.len());
-        let mut best = f64::MAX;
-        for _ in 0..5 {
+        let _ = rt.web_a11y(&mut mirror);
+        let mut times = Vec::new();
+        for k in 1..61 {
+            rt.state.0 = k;
+            rt.invalidate();
+            rt.frame(0.0);
             let t = std::time::Instant::now();
-            for _ in 0..20 { std::hint::black_box(rt.a11y_json()); }
-            best = best.min(t.elapsed().as_secs_f64() / 20.0);
+            let bytes = std::hint::black_box(rt.web_a11y(&mut mirror).map_or(0, str::len));
+            times.push((t.elapsed().as_secs_f64(), bytes));
         }
-        eprintln!("mirror json: {:.2} ms, {} bytes, {} items", best * 1e3, json.len(), items.len());
+        times.sort_by(|a, b| a.0.total_cmp(&b.0));
+        eprintln!("mirror sync: {:.3} ms, {} bytes", times[30].0 * 1e3, times[30].1);
     }
     use serde_json::json;
 
