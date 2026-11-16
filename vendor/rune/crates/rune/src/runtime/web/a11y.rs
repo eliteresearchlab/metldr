@@ -4,7 +4,7 @@
 use crate::el::Checked;
 use std::hash::{Hash, Hasher};
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::*;
 
@@ -140,8 +140,11 @@ pub(crate) struct A11yRun {
 }
 
 impl A11yItem {
-    fn to_json(&self) -> Value {
-        let mut obj = serde_json::Map::new();
+    /// Writes the item as one JSON object onto `out`. Keys are literals, and strings and
+    /// numbers go through serde_json's writer, so the escaping is its own; nothing is built
+    /// in between.
+    fn write_json(&self, out: &mut Vec<u8>) {
+        let mut o = Obj::open(out);
         let plain = match &self.kind {
             A11yKind::Table => Some("table"),
             A11yKind::Row => Some("row"),
@@ -161,119 +164,160 @@ impl A11yItem {
             _ => None,
         };
         if let Some(kind) = plain {
-            obj.insert("k".into(), json!(kind));
+            o.field("k", kind);
         }
         if let Some(relate) = &self.relate {
             if let Some(path) = &relate.controls {
-                obj.insert("ctl".into(), json!(path));
+                o.field("ctl", path);
             }
             if let Some(path) = &relate.active {
-                obj.insert("ad".into(), json!(path));
+                o.field("ad", path);
             }
         }
         match &self.kind {
-            A11yKind::Region(true) => {
-                obj.insert("focus".into(), json!(true));
-            }
+            A11yKind::Region(true) => o.field("focus", &true),
             A11yKind::Heading(level) => {
-                obj.insert("k".into(), json!("heading"));
-                obj.insert("l".into(), json!(level));
+                o.field("k", "heading");
+                o.field("l", level);
             }
             A11yKind::Button(control) => {
-                obj.insert("k".into(), json!("button"));
+                o.field("k", "button");
                 if let Some(role) = control.role {
-                    obj.insert("role".into(), json!(role));
+                    o.field("role", role);
                 }
                 if let Some(expanded) = control.expanded {
-                    obj.insert("x".into(), json!(expanded));
+                    o.field("x", &expanded);
                 }
                 if let Some(checked) = control.checked {
-                    obj.insert("c".into(), json!(match checked {
+                    o.field("c", match checked {
                         Checked::True => "true",
                         Checked::False => "false",
                         Checked::Mixed => "mixed",
-                    }));
+                    });
                 }
                 if let Some(selected) = control.selected {
-                    obj.insert("sel".into(), json!(selected));
+                    o.field("sel", &selected);
                 }
                 if control.disabled {
-                    obj.insert("d".into(), json!(true));
+                    o.field("d", &true);
                 }
                 if control.busy {
-                    obj.insert("b".into(), json!(true));
+                    o.field("b", &true);
                 }
                 if let Some(popup) = control.popup {
-                    obj.insert("popup".into(), json!(popup));
+                    o.field("popup", popup);
                 }
             }
             A11yKind::Range(range) => {
-                obj.insert("k".into(), json!("range"));
-                obj.insert("role".into(), json!(range.role));
-                obj.insert("vmin".into(), json!(range.min));
-                obj.insert("vmax".into(), json!(range.max));
+                o.field("k", "range");
+                o.field("role", range.role);
+                o.field("vmin", &range.min);
+                o.field("vmax", &range.max);
                 if let Some(now) = range.now {
-                    obj.insert("vn".into(), json!(now));
+                    o.field("vn", &now);
                 }
                 if let Some(text) = &range.text {
-                    obj.insert("vt".into(), json!(text));
+                    o.field("vt", text);
                 }
             }
             A11yKind::Input(input) => {
-                obj.insert("k".into(), json!("input"));
-                obj.insert("name".into(), json!(input.name));
-                obj.insert("placeholder".into(), json!(input.placeholder));
-                obj.insert("description".into(), json!(input.description));
-                obj.insert("multiline".into(), json!(input.multiline));
-                obj.insert("readOnly".into(), json!(input.read_only));
-                obj.insert("disabled".into(), json!(input.disabled));
-                obj.insert("invalid".into(), json!(input.invalid));
+                o.field("k", "input");
+                o.field("name", &input.name);
+                o.field("placeholder", &input.placeholder);
+                o.field("description", &input.description);
+                o.field("multiline", &input.multiline);
+                o.field("readOnly", &input.read_only);
+                o.field("disabled", &input.disabled);
+                o.field("invalid", &input.invalid);
                 match &input.value {
                     InputValue::Plain(value) => {
-                        obj.insert("secure".into(), json!(false));
-                        obj.insert("value".into(), json!(value));
+                        o.field("secure", &false);
+                        o.field("value", value);
                     }
-                    InputValue::Secure => {
-                        obj.insert("secure".into(), json!(true));
-                    }
+                    InputValue::Secure => o.field("secure", &true),
                 }
             }
             _ => {}
         }
-        obj.insert("p".into(), json!(self.path));
+        o.field("p", &self.path);
         if let Some(parent) = &self.parent {
-            obj.insert("parent".into(), json!(parent));
+            o.field("parent", parent);
         }
-        obj.insert("r".into(), json!(self.rect));
+        o.field("r", &self.rect);
         if self.font_size != 0.0 {
-            obj.insert("s".into(), json!(self.font_size));
+            o.field("s", &self.font_size);
         }
         if !self.text.is_empty() {
-            obj.insert("t".into(), json!(self.text));
+            o.field("t", &self.text);
         }
         if !self.runs.is_empty() {
-            let runs: Vec<Value> = self
-                .runs
-                .iter()
-                .map(|r| {
-                    let mut ro = serde_json::Map::new();
-                    ro.insert("t".into(), json!(r.text));
-                    if let Some(h) = &r.href {
-                        ro.insert("h".into(), json!(h));
-                    }
-                    if let Some(p) = &r.path {
-                        ro.insert("p".into(), json!(p));
-                    }
-                    if let Some(i) = r.link {
-                        ro.insert("i".into(), json!(i));
-                    }
-                    Value::Object(ro)
-                })
-                .collect();
-            obj.insert("u".into(), Value::Array(runs));
+            o.key("u");
+            o.out.push(b'[');
+            for (i, r) in self.runs.iter().enumerate() {
+                if i > 0 {
+                    o.out.push(b',');
+                }
+                let mut ro = Obj::open(o.out);
+                ro.field("t", &r.text);
+                if let Some(h) = &r.href {
+                    ro.field("h", h);
+                }
+                if let Some(p) = &r.path {
+                    ro.field("p", p);
+                }
+                if let Some(i) = r.link {
+                    ro.field("i", &i);
+                }
+                ro.close();
+            }
+            o.out.push(b']');
         }
-        Value::Object(obj)
+        o.close();
     }
+}
+
+/// One JSON object being written: `field` adds `"key":value`, `close` ends it.
+struct Obj<'a> {
+    out: &'a mut Vec<u8>,
+    first: bool,
+}
+
+impl<'a> Obj<'a> {
+    fn open(out: &'a mut Vec<u8>) -> Self {
+        out.push(b'{');
+        Obj { out, first: true }
+    }
+    fn key(&mut self, key: &str) {
+        if !std::mem::take(&mut self.first) {
+            self.out.push(b',');
+        }
+        self.out.push(b'"');
+        self.out.extend_from_slice(key.as_bytes());
+        self.out.extend_from_slice(b"\":");
+    }
+    fn field<T: serde::Serialize + ?Sized>(&mut self, key: &str, value: &T) {
+        self.key(key);
+        // Writing into a Vec cannot fail, and every value here serializes.
+        let _ = serde_json::to_writer(&mut *self.out, value);
+    }
+    fn close(self) {
+        self.out.push(b'}');
+    }
+}
+
+/// The mirror's items as one JSON array.
+fn items_json(items: &[A11yItem]) -> String {
+    let mut out = Vec::with_capacity(items.len() * 128);
+    out.push(b'[');
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            out.push(b',');
+        }
+        item.write_json(&mut out);
+    }
+    out.push(b']');
+    // serde_json writes UTF-8 and every literal here is ASCII.
+    String::from_utf8(out).unwrap_or_else(|_| "[]".into())
 }
 
 fn round1(v: f32) -> f32 {
@@ -440,12 +484,7 @@ impl<S: 'static> Runtime<S> {
 
     /// Collect semantic DOM items for the current laid-out scene.
     pub fn a11y_json(&self) -> String {
-        let values: Vec<Value> = self
-            .web_a11y_items()
-            .iter()
-            .map(A11yItem::to_json)
-            .collect();
-        serde_json::to_string(&values).unwrap_or_else(|_| "[]".into())
+        items_json(&self.web_a11y_items())
     }
 
     pub(crate) fn web_a11y_items(&self) -> Vec<A11yItem> {
@@ -794,12 +833,7 @@ impl<S: 'static> Runtime<S> {
         mirror.commits = self.commits;
         mirror.viewport = vp;
         mirror.scroll_digest = sd;
-        let values: Vec<Value> = self
-            .web_a11y_items()
-            .iter()
-            .map(A11yItem::to_json)
-            .collect();
-        let next = serde_json::to_string(&values).unwrap_or_else(|_| "[]".into());
+        let next = items_json(&self.web_a11y_items());
         if mirror.json == next {
             return None;
         }
@@ -874,6 +908,29 @@ impl<S: 'static> Runtime<S> {
 mod tests {
     use super::*;
 
+    /// Run with `--ignored`: the mirror's JSON for a long chat, as each sync builds it.
+    #[test]
+    #[ignore]
+    fn mirror_json_cost() {
+        struct Big;
+        fn view(_: &Big, _: &mut Cx<Big>) -> El {
+            crate::col().key("root").w_full()
+                .children((0..2000).map(|i| crate::text(format!("Message {i} with a few words in it")).key(format!("m{i}")).size(300.0, 12.3)))
+                .children((0..200).map(|i| crate::row().key(format!("b{i}")).role("button").label(format!("Action {i}")).size(40.0, 20.5).on_press(|_: &mut Big| {})))
+        }
+        let mut rt = Runtime::new(Big, view, (400.0, 30000.0), Env::default());
+        rt.frame(0.0);
+        let json = rt.a11y_json();
+        let items: Vec<Value> = serde_json::from_str(&json).unwrap();
+        assert!(items.len() >= 2200, "{}", items.len());
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            for _ in 0..20 { std::hint::black_box(rt.a11y_json()); }
+            best = best.min(t.elapsed().as_secs_f64() / 20.0);
+        }
+        eprintln!("mirror json: {:.2} ms, {} bytes, {} items", best * 1e3, json.len(), items.len());
+    }
     use serde_json::json;
 
     #[test]

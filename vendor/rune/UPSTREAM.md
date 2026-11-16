@@ -37,7 +37,7 @@ Local changes:
 * `El::on_focus_change` tells an element it gained or lost focus and whether the keyboard moved it, so a tooltip opens on keyboard focus and not on a click.
 * Finding a node by its path, which each press, hover, dismissal and focus change does, uses the path index and falls back to a scan only for an exiting or unmounted node.
 * The web mirror shows `role("tablist")` and a named `role("tabpanel")` as containers. `El::focus_manual` on a focus group lets the arrows move over its radio and tab items without pressing them, for tabs with manual activation.
-* The web mirror shows `role("toolbar")` as a named container, and `role("progressbar")` and `role("meter")` as one element each with `aria-valuenow`, `aria-valuemin`, `aria-valuemax` and `aria-valuetext` (a progress bar with no value is indeterminate).
+* The web mirror shows `role("toolbar")` as a named container, and `role("progressbar")` and `role("meter")` as one element each with `aria-valuenow`, `aria-valuemin`, `aria-valuemax` and `aria-valuetext` (a progress bar with no value is indeterminate). The mirror's JSON is written straight into one buffer instead of through a `serde_json::Value` tree.
 * The items an arrow key moves between come from the group's own subtree, with the membership test before the reachability one, instead of every node on the page.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 
