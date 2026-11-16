@@ -66,20 +66,34 @@ impl<S: 'static> Runtime<S> {
     pub(super) fn refresh_modal_index(&mut self) {
         self.modal_index = self.nodes.iter().enumerate().rev()
             .find(|(i, n)| n.handlers.get().is_some_and(|h| h.modal.is_some()) && !self.subtree_exiting(*i) && !self.subtree_unmounted(*i)).map(|(i, _)| i);
-        self.modal_members = (0..self.nodes.len()).map(|i| self.modal_index.is_none_or(|m| i >= m)).collect();
-        // Portals are root siblings. Follow their anchor ownership, including chained
-        // popovers, rather than requiring their layout parent to be the modal.
-        loop {
-            let mut changed = false;
-            for (i, n) in self.nodes.iter().enumerate() {
-                if self.modal_members[i] || self.subtree_exiting(i) { continue; }
-                let parent_inside = n.parent.is_some_and(|p| self.modal_members[p]);
-                let anchor_inside = n.above.as_ref().is_some_and(|a| self.nodes.iter().enumerate()
-                    .any(|(j, anchor)| anchor.key.as_deref() == Some(&a.key) && self.modal_members[j]));
-                if parent_inside || anchor_inside { self.modal_members[i] = true; changed = true; }
+        // Every commit runs this: the buffer is reused, and with no modal everything is a member.
+        let mut members = std::mem::take(&mut self.modal_members);
+        members.clear();
+        members.resize(self.nodes.len(), self.modal_index.is_none());
+        if let Some(m) = self.modal_index {
+            members[m..].fill(true);
+            // Portals are root siblings. Follow their anchor ownership, including chained
+            // popovers, rather than requiring their layout parent to be the modal. Member keys
+            // answer each anchor in one lookup instead of a scan of the tree.
+            let mut keys: rustc_hash::FxHashSet<&str> =
+                self.nodes[m..].iter().filter_map(|n| n.key.as_deref()).collect();
+            loop {
+                let mut changed = false;
+                for (i, n) in self.nodes.iter().enumerate() {
+                    if members[i] { continue; }
+                    let parent_inside = n.parent.is_some_and(|p| members[p]);
+                    let anchor_inside = n.above.as_ref().is_some_and(|a| keys.contains(a.key.as_str()));
+                    // The exit walk climbs ancestors through the scene; only a joining node pays it.
+                    if (parent_inside || anchor_inside) && !self.subtree_exiting(i) {
+                        members[i] = true;
+                        if let Some(key) = n.key.as_deref() { keys.insert(key); }
+                        changed = true;
+                    }
+                }
+                if !changed { break; }
             }
-            if !changed { break; }
         }
+        self.modal_members = members;
     }
     /// The topmost mounted `El::layer` that input can reach (none behind a modal).
     pub(super) fn top_layer(&self) -> Option<usize> {
@@ -564,6 +578,36 @@ mod tests {
     use super::*;
     use crate::{col, el, row, Mods};
 
+    /// Run with `--release --ignored`: modal membership for a long page with a modal open and
+    /// a chain of popovers anchored into it, as each commit computes it.
+    #[test]
+    #[ignore]
+    fn modal_membership_cost() {
+        struct Big;
+        fn view(_: &Big, _: &mut Cx<Big>) -> El {
+            let mut root = col().key("root").w_full().h_full()
+                .children((0..2000).map(|i| row().key(format!("row{i}")).size(10.0, 2.0)))
+                .child(col().key("modal").absolute(0.0, 0.0).size(50.0, 50.0)
+                    .modal(true, |_: &mut Big| {}).child(el().key("p0").size(5.0, 5.0).focusable(true)));
+            for k in 1..100 {
+                root = root.child(el().key(format!("p{k}")).size(5.0, 5.0)
+                    .anchored(format!("p{}", k - 1), crate::Side::Bottom, crate::Align::Start, 1.0));
+            }
+            root
+        }
+        let mut rt = Runtime::new(Big, view, (400.0, 400.0), Env::new(true, 1.0));
+        rt.frame(0.0);
+        rt.refresh_modal_index();
+        assert!(rt.modal_members.iter().rev().take(99).all(|&m| m), "the chain joins the modal");
+        let runs = 200;
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            for _ in 0..runs { rt.refresh_modal_index(); }
+            best = best.min(t.elapsed().as_secs_f64() / runs as f64);
+        }
+        eprintln!("modal membership: {:.1} us per commit over {} nodes", best * 1e6, rt.nodes.len());
+    }
 
     #[derive(Default)]
     struct State { open: bool, nested: bool, picks: usize, selected: usize, secondary_picks: usize }
