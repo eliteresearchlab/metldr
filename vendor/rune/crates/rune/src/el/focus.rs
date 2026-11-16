@@ -34,6 +34,8 @@ pub(crate) struct FocusSpec {
     pub default: bool,
     pub highlight: Option<Color>,
     pub follows: bool,
+    /// `El::focus_manual`: arrows move focus over radio and tab items without pressing them.
+    pub manual: bool,
     /// `focus_axis`: the group's arrows, in place of its role's.
     pub axis: Option<FocusAxis>,
     /// `focus_wrap`: whether the group wraps at its ends, in place of its role's.
@@ -65,6 +67,7 @@ impl crate::cold::Empty for FocusSpec {
         default: false,
         highlight: None,
         follows: false,
+        manual: false,
         axis: None,
         wrap: None,
         return_to: None,

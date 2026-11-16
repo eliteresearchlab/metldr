@@ -500,7 +500,7 @@ impl<S: 'static> Runtime<S> {
             } else { None };
             if let Some(next) = next {
                 let n = &self.nodes[items[next]];
-                let follows = n.role == "radio" || n.role == "tab" || self.nodes[g].focus.follows;
+                let follows = ((n.role == "radio" || n.role == "tab") && !self.nodes[g].focus.manual) || self.nodes[g].focus.follows;
                 let action = follows.then(|| n.handlers.on_press.clone()).flatten();
                 let path = n.path.clone();
                 self.set_focus(Some(path.clone()), true);
