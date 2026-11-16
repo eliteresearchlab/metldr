@@ -13,7 +13,7 @@ npm run install:chat
 
 The chat interface has its own pinned dependencies. Run `npm run install:chat` again when its lock file changes. `npm run check:chat` uses its Go based TypeScript compiler. The current page tools keep their existing compiler during migration.
 
-Run `npm run dev` to build the Rust modules and start the named metldr preview through Portless. Open the URL printed by Portless. Add `/welcome.html`, `/chat.html`, `/panel.html`, or `/index.html` to view the welcome page, chat interface, earlier browser agent, or current page tools. A web preview does not have Chrome extension access.
+Run `npm run dev` to build the Rust modules and start the named metldr preview through Portless. Open the URL printed by Portless. Add `/welcome.html`, `/chat.html` or `/index.html` to view the welcome page, the chat or the current page tools. A web preview does not have Chrome extension access.
 
 Run `npm run build` to create the extension in `dist`. In Chrome, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `dist`. After another build, reload the extension from the same page.
 
