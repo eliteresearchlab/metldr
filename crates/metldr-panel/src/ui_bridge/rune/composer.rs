@@ -405,12 +405,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     }
     let field = ::rune::auto_grow(field, 1, 5);
 
-    let add = button(
-        "rune-source-trigger",
-        "Add attachments and sources",
-        &PLUS,
-        p.ink_2,
-    )
+    let add = super::theme::tip(button("rune-source-trigger", "Add attachments and sources", &PLUS, p.ink_2), "rune-source-trigger", "Add attachments and sources", state)
     .hover(p.hover)
     .press(p.press)
     .press_scale(super::theme::PRESS_SCALE)
@@ -461,11 +456,11 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         },
     );
     let running = state.running();
-    let dictate = button("rune-dictate", "Dictation unavailable", &MIC, p.ink_3)
+    let dictate = super::theme::tip(button("rune-dictate", "Dictation unavailable", &MIC, p.ink_3), "rune-dictate", "Dictation unavailable", state)
         .opacity(0.48)
         .disabled(true);
     let action = if running {
-        let stop = button("rune-stop", "Stop", &STOP, p.surface)
+        let stop = super::theme::tip(button("rune-stop", "Stop", &STOP, p.surface), "rune-stop", "Stop", state)
             .fill(p.ink)
             .press(p.press_solid)
             .press_scale(super::theme::PRESS_SCALE)
@@ -484,7 +479,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
             (true, false) => (p.surface, p.ink),
             (false, _) => (p.ink_2, p.line_strong),
         };
-        let mut send = button("rune-send", "Send", &SEND, ink).fill(fill).disabled(!can_send);
+        let mut send = super::theme::tip(button("rune-send", "Send", &SEND, ink), "rune-send", "Send", state).fill(fill).disabled(!can_send);
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
         if (p.molded() || p.retro()) && can_send {
             send = super::theme::on_lip(send, p.accent.mix(::rune::Color::BLACK, 0.45), true);
