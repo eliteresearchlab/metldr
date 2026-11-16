@@ -35,6 +35,7 @@ Local changes:
 * `El::layer` makes a non-modal layer (popover, tooltip, list popup): the topmost one, above any modal, hears Escape, a press outside it and its anchor, focus moving out and the window losing focus, each with a `Dismiss` reason, and the app decides (`runtime/dismiss_layer_tests.rs`). A press counts as inside by the point, so text and padding inside a layer are inside.
 * A press on a layer's anchor reaches the layer as `Dismiss::AnchorPress` beside the anchor's own handler, so a tooltip closes when its trigger is pressed.
 * `El::on_focus_change` tells an element it gained or lost focus and whether the keyboard moved it, so a tooltip opens on keyboard focus and not on a click.
+* Finding a node by its path, which each press, hover, dismissal and focus change does, uses the path index and falls back to a scan only for an exiting or unmounted node.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.

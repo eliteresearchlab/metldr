@@ -593,6 +593,29 @@ mod tests {
     use super::*;
     use crate::{col, el, row, Mods};
 
+    /// Run with `--ignored`: finding a node by its path, as every press, hover, dismissal and
+    /// focus change does before it runs its handler.
+    #[test]
+    #[ignore]
+    fn node_lookup_cost() {
+        struct Big;
+        fn view(_: &Big, _: &mut Cx<Big>) -> El {
+            col().key("root").w_full().h_full().children((0..2000).map(|i| row().key(format!("row{i}")).size(10.0, 2.0)))
+        }
+        let mut rt = Runtime::new(Big, view, (400.0, 400.0), Env::new(true, 1.0));
+        rt.frame(0.0);
+        let path = rt.nodes.last().unwrap().path.clone();
+        assert!(rt.node(&path).is_some());
+        let runs = 2000;
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            for _ in 0..runs { std::hint::black_box(rt.node(std::hint::black_box(&path))); }
+            best = best.min(t.elapsed().as_secs_f64() / runs as f64);
+        }
+        eprintln!("node lookup: {:.2} us over {} nodes", best * 1e6, rt.nodes.len());
+    }
+
     /// Run with `--release --ignored`: modal membership for a long page with a modal open and
     /// a chain of popovers anchored into it, as each commit computes it.
     #[test]
