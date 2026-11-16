@@ -556,6 +556,8 @@ impl<S: 'static> Running<S> {
             Some("a11y_press" | "a11y_link") => {
                 let _ = self.rt.web_a11y_action(event);
             }
+            // The bridge lost an element it was told to keep: send everything again.
+            Some("a11y_resync") => self.input.a11y.resync(),
             _ => {}
         }
         // Commit within the DOM event: clipboard, link and soft-keyboard APIs need activation.

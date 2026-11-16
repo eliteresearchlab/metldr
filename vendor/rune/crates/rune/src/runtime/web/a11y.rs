@@ -13,6 +13,16 @@ pub(crate) struct A11yMirror {
     viewport: (u32, u32),
     scroll_digest: u64,
     json: String,
+    /// Each item the bridge last received, in order: its key's hash and its JSON. An item that
+    /// comes out the same is sent as its index there, and the bridge keeps the element it has.
+    sent: Vec<(u64, Box<[u8]>)>,
+}
+
+impl A11yMirror {
+    /// Forgets what the bridge holds, so the next sync sends every item in full.
+    pub(crate) fn resync(&mut self) {
+        *self = Self::default();
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -173,6 +183,23 @@ impl A11yKind {
 }
 
 impl A11yItem {
+    /// The bridge's key for the item's element, hashed: its tag and path, so a path that is
+    /// both a box and a control keeps two elements.
+    fn key_hash(&self) -> u64 {
+        let tag = match &self.kind {
+            kind if kind.group().is_some() => 0,
+            A11yKind::Input(_) => 1,
+            A11yKind::Range(_) => 2,
+            A11yKind::Button(_) => 3,
+            A11yKind::Heading(level) => 4 + (*level).max(1),
+            _ => u32::MAX,
+        };
+        let mut h = rustc_hash::FxHasher::default();
+        tag.hash(&mut h);
+        self.path.hash(&mut h);
+        h.finish()
+    }
+
     /// Writes the item as one JSON object onto `out`. Keys are literals, and strings and
     /// numbers go through serde_json's writer, so the escaping is its own; nothing is built
     /// in between.
@@ -343,6 +370,21 @@ fn items_json(items: &[A11yItem]) -> String {
     out.push(b']');
     // serde_json writes UTF-8 and every literal here is ASCII.
     String::from_utf8(out).unwrap_or_else(|_| "[]".into())
+}
+
+/// Writes `n` in decimal.
+fn push_decimal(out: &mut Vec<u8>, mut n: usize) {
+    let mut digits = [0u8; 20];
+    let mut at = digits.len();
+    loop {
+        at -= 1;
+        digits[at] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    out.extend_from_slice(&digits[at..]);
 }
 
 fn round1(v: f32) -> f32 {
@@ -844,11 +886,53 @@ impl<S: 'static> Runtime<S> {
         mirror.commits = self.commits;
         mirror.viewport = vp;
         mirror.scroll_digest = sd;
-        let next = items_json(&self.web_a11y_items());
-        if mirror.json == next {
+        let items = self.web_a11y_items();
+        let mut prev = std::mem::take(&mut mirror.sent);
+        // Where each previous key sat, built only once the order no longer lines up.
+        let mut index: Option<HashMap<u64, usize>> = None;
+        let mut sent = Vec::with_capacity(items.len());
+        let mut changed = items.len() != prev.len();
+        let mut out = Vec::with_capacity(items.len() * 24);
+        let mut item_json = Vec::new();
+        out.push(b'[');
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 {
+                out.push(b',');
+            }
+            let key = item.key_hash();
+            item_json.clear();
+            item.write_json(&mut item_json);
+            let at = if prev.get(i).is_some_and(|p| p.0 == key) {
+                Some(i)
+            } else {
+                changed = true;
+                index
+                    .get_or_insert_with(|| prev.iter().enumerate().map(|(j, p)| (p.0, j)).collect())
+                    .get(&key)
+                    .copied()
+            };
+            let json = match at {
+                Some(j) if *prev[j].1 == *item_json => {
+                    out.extend_from_slice(b"{\"same\":");
+                    push_decimal(&mut out, j);
+                    out.push(b'}');
+                    std::mem::take(&mut prev[j].1)
+                }
+                _ => {
+                    changed = true;
+                    out.extend_from_slice(&item_json);
+                    item_json.as_slice().into()
+                }
+            };
+            sent.push((key, json));
+        }
+        out.push(b']');
+        mirror.sent = sent;
+        if !changed && !mirror.json.is_empty() {
             return None;
         }
-        mirror.json = next;
+        // serde_json writes UTF-8 and every literal here is ASCII.
+        mirror.json = String::from_utf8(out).unwrap_or_else(|_| "[]".into());
         Some(&mirror.json)
     }
 
@@ -945,28 +1029,31 @@ mod tests {
         assert!(items.iter().filter(|i| i["k"] == "text").all(|i| i.get("g").is_none()), "leaves are not groups");
     }
 
-    /// Run with `--ignored`: the mirror's JSON for a long chat, as each sync builds it.
+    /// Run with `--ignored`: one sync of a long chat's mirror while its last message streams.
     #[test]
     #[ignore]
-    fn mirror_json_cost() {
-        struct Big;
-        fn view(_: &Big, _: &mut Cx<Big>) -> El {
+    fn mirror_sync_cost() {
+        struct Big(u32);
+        fn view(s: &Big, _: &mut Cx<Big>) -> El {
             crate::col().key("root").w_full()
-                .children((0..2000).map(|i| crate::text(format!("Message {i} with a few words in it")).key(format!("m{i}")).size(300.0, 12.3)))
+                .children((0..2000).map(|i| crate::text(if i == 1999 { format!("Streaming {}", "word ".repeat(s.0 as usize % 50)) } else { format!("Message {i} with a few words in it") }).key(format!("m{i}")).size(300.0, 12.3)))
                 .children((0..200).map(|i| crate::row().key(format!("b{i}")).role("button").label(format!("Action {i}")).size(40.0, 20.5).on_press(|_: &mut Big| {})))
         }
-        let mut rt = Runtime::new(Big, view, (400.0, 30000.0), Env::default());
+        let mut rt = Runtime::new(Big(0), view, (400.0, 30000.0), Env::default());
+        let mut mirror = A11yMirror::default();
         rt.frame(0.0);
-        let json = rt.a11y_json();
-        let items: Vec<Value> = serde_json::from_str(&json).unwrap();
-        assert!(items.len() >= 2200, "{}", items.len());
-        let mut best = f64::MAX;
-        for _ in 0..5 {
+        let _ = rt.web_a11y(&mut mirror);
+        let mut times = Vec::new();
+        for k in 1..61 {
+            rt.state.0 = k;
+            rt.invalidate();
+            rt.frame(0.0);
             let t = std::time::Instant::now();
-            for _ in 0..20 { std::hint::black_box(rt.a11y_json()); }
-            best = best.min(t.elapsed().as_secs_f64() / 20.0);
+            let bytes = std::hint::black_box(rt.web_a11y(&mut mirror).map_or(0, str::len));
+            times.push((t.elapsed().as_secs_f64(), bytes));
         }
-        eprintln!("mirror json: {:.2} ms, {} bytes, {} items", best * 1e3, json.len(), items.len());
+        times.sort_by(|a, b| a.0.total_cmp(&b.0));
+        eprintln!("mirror sync: {:.3} ms, {} bytes", times[30].0 * 1e3, times[30].1);
     }
     use serde_json::json;
 
@@ -1178,6 +1265,13 @@ mod tests {
             .expect("button flip updates expanded state");
         assert_ne!(first, updated);
         assert!(updated.contains("Hide details"));
+        // Only the button changed: the heading and the text come as their places last time.
+        let updated: Vec<Value> = serde_json::from_str(updated).unwrap();
+        assert_eq!((updated[0]["same"].as_u64(), updated[1]["same"].as_u64()), (Some(0), Some(1)));
+        assert_eq!((updated[2].get("same"), updated[2]["t"].as_str()), (None, Some("Hide details")));
+        mirror.resync();
+        let resent: Vec<Value> = serde_json::from_str(rt.web_a11y(&mut mirror).expect("a resync sends again")).unwrap();
+        assert!(resent.iter().all(|i| i.get("same").is_none()), "a resync sends every item in full");
 
         assert!(rt.web_a11y_action(&json!({"kind": "a11y_link", "path": link_path, "link": 0})));
         rt.frame(0.0);
