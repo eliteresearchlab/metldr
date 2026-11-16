@@ -42,11 +42,17 @@ function explain(detail) {
   if (detail) console.error("metldr chat could not start", detail);
 }
 
+// The renderer's glue and the fonts load while the graphics check runs, instead of after it:
+// the check waits on the GPU process, and the chat needs both anyway. A failed load reports
+// itself only once the check has passed.
+const glue = import(/* @vite-ignore */ new URL("/chat/rune/metldr_panel.js", location.href).href);
+const fonts = loadFonts();
+glue.catch(() => {});
+fonts.catch(() => {});
 if (!(await canDraw())) {
   explain();
 } else try {
-  const fonts = loadFonts();
-  const { default: init, start_rune_chat, stop_rune_chat } = await import(/* @vite-ignore */ new URL("/chat/rune/metldr_panel.js", location.href).href);
+  const { default: init, start_rune_chat, stop_rune_chat } = await glue;
   const [files] = await Promise.all([fonts, init()]);
   start_rune_chat(capturePage, files);
   window.addEventListener("pagehide", stop_rune_chat, { once: true });

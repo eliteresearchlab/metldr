@@ -57,8 +57,21 @@ impl<S: 'static> Runtime<S> {
     /// The line boxes of `ranges` laid out in a measure's `nodes`, found there by path.
     pub(super) fn selection_boxes_in(&self, nodes: &[Node], ranges: &[SelectedRange]) -> Vec<[f32; 4]> {
         let mut out = Vec::new();
+        // A few ranges (a drag inside one message) find their node by scanning; many (select all
+        // over a long chat) would scan the tree once each, so one pass finds them all.
+        if ranges.len() <= 4 {
+            for (path, a, b) in ranges {
+                if let Some(j) = nodes.iter().position(|n| n.path == *path) { self.text_boxes(nodes, j, *a, *b, &mut out); }
+            }
+            return out;
+        }
+        let mut found: rustc_hash::FxHashMap<&str, usize> = ranges.iter().map(|(path, _, _)| (path.as_str(), usize::MAX)).collect();
+        for (j, n) in nodes.iter().enumerate() {
+            if let Some(slot) = found.get_mut(n.path.as_str()) { *slot = (*slot).min(j); }
+        }
         for (path, a, b) in ranges {
-            if let Some(j) = nodes.iter().position(|n| n.path == *path) { self.text_boxes(nodes, j, *a, *b, &mut out); }
+            let j = found[path.as_str()];
+            if j != usize::MAX { self.text_boxes(nodes, j, *a, *b, &mut out); }
         }
         out
     }
@@ -85,5 +98,34 @@ impl<S: 'static> Runtime<S> {
     pub(super) fn selection_read_moved(&self) -> bool {
         let seen = &self.layout_seen.rects;
         seen.contains_key(SELECTION) && boxes_moved(&seen.selection, &self.selection_boxes())
+    }
+}
+
+#[cfg(test)]
+mod cost {
+    use super::*;
+    use crate::{Cx, El, Env, col, text};
+
+    /// Run with `--ignored`: a measure's selection boxes for select-all over a long chat.
+    #[test]
+    #[ignore]
+    fn selection_boxes_in_cost() {
+        struct Chat;
+        fn view(_: &Chat, _: &mut Cx<Chat>) -> El {
+            col().key("thread").w_full().children((0..2000).map(|i| text(format!("Message {i} says something")).key(format!("m{i}")).selectable(true)))
+        }
+        let mut rt = Runtime::new(Chat, view, (400.0, 40000.0), Env::default());
+        rt.frame(0.0);
+        let ranges: Vec<SelectedRange> = rt.nodes.iter().filter(|n| n.text.is_some()).map(|n| (n.path.clone(), 0, 8)).collect();
+        assert_eq!(ranges.len(), 2000);
+        let boxes = rt.selection_boxes_in(&rt.nodes, &ranges);
+        assert_eq!(boxes.len(), 2000);
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            for _ in 0..5 { std::hint::black_box(rt.selection_boxes_in(&rt.nodes, &ranges)); }
+            best = best.min(t.elapsed().as_secs_f64() / 5.0);
+        }
+        eprintln!("selection boxes: {:.3} ms for {} ranges", best * 1e3, ranges.len());
     }
 }
