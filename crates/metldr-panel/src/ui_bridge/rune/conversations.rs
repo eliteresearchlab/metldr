@@ -16,6 +16,11 @@ struct Tab {
 }
 
 impl Tabs {
+    /// The title of the open tab for `conversation`, which names the panel it shows.
+    pub(super) fn title(&self, conversation: &str) -> Option<&str> {
+        self.rows.iter().find(|tab| tab.id == conversation).map(|tab| tab.title.as_str())
+    }
+
     fn contains(&self, id: &str) -> bool {
         self.rows.iter().any(|tab| tab.id == id)
     }
@@ -135,17 +140,11 @@ impl Conversations {
         let p = state.preferences.palette();
         let enabled =
             !self.busy && !state.running() && !matches!(*core.owner.borrow(), Owner::Navigating(_));
-        let mut out = row()
-            .role("group")
-            .label("Chats")
-            .gap(4.0)
-            .h(44.0)
-            .px(8.0)
-            .items_center();
+        let mut list = row().gap(4.0).items_center();
         for tab in &state.tabs.rows {
             let id = tab.id.clone();
             let close_id = id.clone();
-            let key_id = id.clone();
+            let delete_id = id.clone();
             let active = id == core.scope.conversation;
             let select = typography
                 .text(&tab.title)
@@ -154,30 +153,13 @@ impl Conversations {
                 .truncate()
                 .grow(1.0)
                 .min_w(0.0)
-                .key(format!("chat-tab-{id}"))
-                .role("toggle")
-                .focusable(true)
-                .disabled(!enabled)
-                .checked(active)
-                .native_activation()
-                .on_press_tx(move |state: &mut State, _| {
-                    if state
-                        .core()
-                        .is_some_and(|core| core.scope.conversation != id)
-                    {
-                        action(state, Action::Select(id.clone()));
-                    }
-                })
-                .on_key(move |state: &mut State, key, tx| {
-                    activate(key, tx, |_| {
-                        if state
-                            .core()
-                            .is_some_and(|core| core.scope.conversation != key_id)
-                        {
-                            action(state, Action::Select(key_id.clone()));
-                        }
-                    })
-                });
+                .key(format!("chat-tab-{id}"));
+            // Switching loads a conversation, so the arrows only move focus (manual activation).
+            let select = metldr_ui::tabs::tab(select, active, !enabled, Some("chat-panel"), move |state: &mut State, _| {
+                if state.core().is_some_and(|core| core.scope.conversation != id) {
+                    action(state, Action::Select(id.clone()));
+                }
+            });
             let close = metldr_ui::button::button(
                 icon_button(&CLOSE, 11.0, 24.0, 5.0, p)
                     .key(format!("chat-close-{}", tab.id))
@@ -188,7 +170,9 @@ impl Conversations {
                     ..Default::default()
                 },
                 move |state: &mut State, tx| close_tab(state, &close_id, tx),
-            );
+            )
+            // Delete on the tab closes it, so the close button stays out of the arrows' path.
+            .focusable(false);
             let tab = row()
                 .w(144.0)
                 .h(28.0)
@@ -199,14 +183,26 @@ impl Conversations {
                 .items_center()
                 .opacity(if enabled { 1.0 } else { 0.48 })
                 .child(select)
-                .child(close);
-            out = out.child(if active {
+                .child(close)
+                .on_key(move |state: &mut State, key, tx| {
+                    let delete = matches!(key.key, ::rune::Key::Delete | ::rune::Key::Backspace);
+                    if delete && enabled && !tx.key_repeat() {
+                        close_tab(state, &delete_id, tx);
+                    }
+                    delete
+                });
+            list = list.child(if active {
                 tab.fill(p.hover_2)
             } else {
                 tab.hover(p.hover)
             });
         }
-        out.child(
+        let list = metldr_ui::tabs::list(
+            list,
+            "Chats",
+            metldr_ui::tabs::ListProps { activation: metldr_ui::tabs::Activation::Manual, ..Default::default() },
+        );
+        row().gap(4.0).h(44.0).px(8.0).items_center().child(list).child(
             metldr_ui::button::button(
                 super::theme::tip(icon_button(&super::composer::PLUS, 15.0, 28.0, 7.0, p).key("chat-new"), "chat-new", "New chat", state)
                     .ml(2.0)
@@ -497,16 +493,6 @@ fn icon_button(icon: &'static Icon, glyph: f32, size: f32, radius: f32, p: &supe
 
 fn chat_list() -> El {
     col().w_full().gap(1.0).padding(6.0).instant_changes()
-}
-
-fn activate(key: &::rune::KeyEvent, tx: &mut Tx, action: impl FnOnce(&mut Tx)) -> bool {
-    if key.key != ::rune::Key::Enter && key.key != ::rune::Key::Text(" ".into()) {
-        return false;
-    }
-    if !tx.key_repeat() {
-        action(tx);
-    }
-    true
 }
 
 enum Action {
@@ -806,4 +792,14 @@ fn pressable(
         el
     };
     el.hover(p.hover).press(p.hover_2)
+}
+
+fn activate(key: &::rune::KeyEvent, tx: &mut Tx, action: impl FnOnce(&mut Tx)) -> bool {
+    if key.key != ::rune::Key::Enter && key.key != ::rune::Key::Text(" ".into()) {
+        return false;
+    }
+    if !tx.key_repeat() {
+        action(tx);
+    }
+    true
 }

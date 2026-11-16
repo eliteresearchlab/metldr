@@ -1947,9 +1947,10 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .clip_rounded(14.0)
                 .child(state.conversations.tabs(state, core))
                 .child(col().w_full().h(1.0).fill(p.line))
-                .children(pinned)
-                .child(scroll)
-                .children(composer),
+                .child(metldr_ui::tabs::panel(
+                    col().key("chat-panel").w_full().grow(1.0).min_h(0.0).children(pinned).child(scroll).children(composer),
+                    state.tabs.title(&core.scope.conversation).unwrap_or("New chat"),
+                )),
         )
         .children(state.conversations.is_open().then(|| {
             let saved = metldr_ui::dialog::dialog(
