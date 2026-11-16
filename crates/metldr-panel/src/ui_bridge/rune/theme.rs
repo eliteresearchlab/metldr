@@ -3,7 +3,7 @@
 //! Components read roles from here and never write colour literals of their own.
 
 use ::rune::{
-    Anim, AnimExt, Color, Curve, El, Easing, Spring, SpringPair, Transition, Vec2, oklch,
+    Anim, AnimExt, Color, Curve, El, Easing, Spring, SpringPair, Transition, Vec2, oklch, row,
 };
 
 /// Semantic colour roles for one theme.
@@ -42,6 +42,9 @@ pub(super) struct Palette {
     /// A molded theme's gray LCD: its glass from top to bottom and the dark print on it.
     pub(super) glass: [Color; 3],
     pub(super) print: Color,
+    /// A tooltip's chip and its text.
+    pub(super) tooltip: Color,
+    pub(super) tooltip_ink: Color,
 }
 
 /// What a theme is made of.
@@ -128,6 +131,8 @@ struct Ramp {
     /// A key's lip and a module's lit top edge.
     lip: Lch,
     highlight: Lch,
+    tooltip: Lch,
+    tooltip_ink: Lch,
 }
 
 const LIGHT: Ramp = Ramp {
@@ -148,6 +153,8 @@ const LIGHT: Ramp = Ramp {
     red: (0.621, 0.192, 23.042),
     lip: (0.912, 0.005, 258.326),
     highlight: (1.0, 0.0, 0.0),
+    tooltip: (0.272, 0.008, 264.435),
+    tooltip_ink: (0.976, 0.002, 247.839),
 };
 
 // 0.318 is a lightness, not an approximation of 1/π.
@@ -170,6 +177,8 @@ const DARK: Ramp = Ramp {
     red: (0.666, 0.18, 21.433),
     lip: (0.356, 0.007, 264.474),
     highlight: (0.26, 0.006, 271.191),
+    tooltip: (0.182, 0.004, 264.459),
+    tooltip_ink: (0.964, 0.002, 247.839),
 };
 
 const GRUVBOX: Ramp = Ramp {
@@ -190,6 +199,8 @@ const GRUVBOX: Ramp = Ramp {
     red: (0.64, 0.19, 28.0),
     lip: (0.16, 0.02, 70.0),
     highlight: (0.3, 0.03, 75.0),
+    tooltip: (0.18, 0.02, 70.0),
+    tooltip_ink: (0.91, 0.04, 85.0),
 };
 
 /// Light molded panels: paper ground, metal modules, keys standing on their lips, and a black
@@ -212,6 +223,8 @@ const HARDWARE: Ramp = Ramp {
     red: (0.6, 0.22, 25.0),
     lip: (0.797, 0.008, 106.6),
     highlight: (1.0, 0.0, 0.0),
+    tooltip: (0.221, 0.004, 106.7),
+    tooltip_ink: (0.978, 0.004, 106.5),
 };
 
 const CYBERPUNK: Ramp = Ramp {
@@ -232,6 +245,8 @@ const CYBERPUNK: Ramp = Ramp {
     red: (0.66, 0.24, 15.0),
     lip: (0.37, 0.07, 290.0),
     highlight: (0.23, 0.06, 290.0),
+    tooltip: (0.12, 0.04, 290.0),
+    tooltip_ink: (0.94, 0.04, 195.0),
 };
 
 impl Palette {
@@ -287,6 +302,8 @@ impl Palette {
             on_accent: if accent.0 < 0.8 { oklch(0.98, 0.0, 0.0) } else { oklch(0.18, 0.0, 0.0) },
             glass: ["#b6b7b1", "#c8c9c3", "#c2c3bd"].map(|hex| ::rune::color::hex(hex).unwrap_or(Color::WHITE)),
             print: ::rune::color::hex("#141413").unwrap_or(Color::BLACK),
+            tooltip: c(ramp.tooltip),
+            tooltip_ink: c(ramp.tooltip_ink),
         }
     }
 
@@ -348,6 +365,42 @@ fn settle(p: &Palette, flat: f32, molded: f32) -> Spring {
 /// A menu that opens above its trigger grows from the trigger's
 /// corner, 0.95 to 1 with opacity, on a critically damped 160 ms spring (260 ms molded); the
 /// exit is shorter. Under Reduce Motion Rune turns it into a short fade without the scale.
+/// Gives an icon-only control keyed `key` the tooltip `text`, which also names it.
+pub(super) fn tip(el: El, key: &'static str, text: &'static str, state: &super::State) -> El {
+    metldr_ui::tooltip::trigger(
+        el,
+        text,
+        metldr_ui::tooltip::Type::Label,
+        state.tooltip.is_some_and(|(open, _)| open == key),
+        move |state: &mut super::State, open, _| {
+            if open {
+                state.tooltip = Some((key, text));
+            } else if state.tooltip.is_some_and(|(shown, _)| shown == key) {
+                state.tooltip = None;
+            }
+        },
+    )
+}
+
+/// The open tooltip: a small chip above its trigger in the theme's tooltip colours, growing from
+/// the trigger as popups do.
+pub(super) fn tooltip(state: &super::State) -> Option<El> {
+    let (key, text) = state.tooltip?;
+    let p = state.preferences.palette();
+    let typography = state.preferences.typography();
+    let chip = row()
+        .key("rune-tooltip")
+        .px(9.0)
+        .py(5.0)
+        .radius(if p.neon() { 2.0 } else { 8.0 })
+        .fill(p.tooltip)
+        .border(1.0, if p.neon() { p.accent.alpha(0.6) } else { p.line_strong })
+        .shadow(0.0, 8.0, oklch(0.0, 0.0, 0.0).alpha(0.18))
+        .child(typography.legend(text).font(typography.font(11.5, 500.0)).color(p.tooltip_ink))
+        .transition(Transition::scale_anchor(0.96, Vec2 { x: 0.5, y: 1.0 }).springs(SpringPair::with_exit_ratio(settle(p, 0.16, 0.22), 0.75)));
+    Some(metldr_ui::tooltip::tooltip(chip, key, ::rune::Side::Top, |state: &mut super::State, _| state.tooltip = None))
+}
+
 pub(super) fn pop_in(p: &Palette) -> Transition {
     let enter = settle(p, 0.16, 0.26);
     Transition::scale_anchor(0.95, Vec2 { x: 0.0, y: 1.0 })

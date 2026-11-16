@@ -231,7 +231,13 @@ impl<S: 'static> Runtime<S> {
     }
 
     pub(super) fn node(&self, path: &str) -> Option<&Node> {
-        self.nodes.iter().enumerate().find(|(i, n)| n.path == path && !self.subtree_exiting(*i) && !self.subtree_unmounted(*i)).map(|(_, n)| n)
+        let live = |i: usize| !self.subtree_exiting(i) && !self.subtree_unmounted(i);
+        // The path index answers almost every lookup; an exiting or unmounted node there falls
+        // back to the scan, which finds a live node with the same path if there is one.
+        if let Some(i) = self.index_of(path).filter(|&i| live(i)) {
+            return Some(&self.nodes[i]);
+        }
+        self.nodes.iter().enumerate().find(|(i, n)| n.path == path && live(*i)).map(|(_, n)| n)
     }
 
     /// `El::on_key` handlers on the focused element and its ancestors, innermost first. A

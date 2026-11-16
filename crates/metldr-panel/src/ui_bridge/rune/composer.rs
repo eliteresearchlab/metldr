@@ -179,16 +179,17 @@ fn capture(state: &mut State, tx: &mut Tx) {
     state.capture(tx);
 }
 
-fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::rune::Color) -> El {
-    row()
+/// An icon-only composer key keyed `key`, named and tipped `label`.
+fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::rune::Color, state: &State) -> El {
+    let key_el = row()
         .key(key)
         .size(CONTROL, CONTROL)
         .radius(8.0)
         .center()
         .child(::rune::el::icon(icon, 16.0).color(color))
         .role("button")
-        .focusable(true)
-        .label(label)
+        .focusable(true);
+    super::theme::tip(key_el, key, label, state)
 }
 
 /// The prompt while the sources menu is open, as a trigger menu's editor: it names the list it
@@ -405,12 +406,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     }
     let field = ::rune::auto_grow(field, 1, 5);
 
-    let add = button(
-        "rune-source-trigger",
-        "Add attachments and sources",
-        &PLUS,
-        p.ink_2,
-    )
+    let add = button("rune-source-trigger", "Add attachments and sources", &PLUS, p.ink_2, state)
     .hover(p.hover)
     .press(p.press)
     .press_scale(super::theme::PRESS_SCALE)
@@ -461,11 +457,11 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         },
     );
     let running = state.running();
-    let dictate = button("rune-dictate", "Dictation unavailable", &MIC, p.ink_3)
+    let dictate = button("rune-dictate", "Dictation unavailable", &MIC, p.ink_3, state)
         .opacity(0.48)
         .disabled(true);
     let action = if running {
-        let stop = button("rune-stop", "Stop", &STOP, p.surface)
+        let stop = button("rune-stop", "Stop", &STOP, p.surface, state)
             .fill(p.ink)
             .press(p.press_solid)
             .press_scale(super::theme::PRESS_SCALE)
@@ -484,7 +480,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
             (true, false) => (p.surface, p.ink),
             (false, _) => (p.ink_2, p.line_strong),
         };
-        let mut send = button("rune-send", "Send", &SEND, ink).fill(fill).disabled(!can_send);
+        let mut send = button("rune-send", "Send", &SEND, ink, state).fill(fill).disabled(!can_send);
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
         if (p.molded() || p.retro()) && can_send {
             send = super::theme::on_lip(send, p.accent.mix(::rune::Color::BLACK, 0.45), true);

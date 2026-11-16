@@ -123,6 +123,8 @@ struct State {
     draft_version: u64,
     corrections: corrections::Corrections,
     menu: Option<Menu>,
+    /// The open tooltip: its trigger's key and its text.
+    tooltip: Option<(&'static str, &'static str)>,
     source_engaged: bool,
     selection: String,
     mode: Mode,
@@ -158,6 +160,7 @@ impl Default for State {
             draft_version: 0,
             corrections: corrections::Corrections::default(),
             menu: None,
+            tooltip: None,
             source_engaged: false,
             selection: String::new(),
             mode: Mode::Configured,
@@ -1959,6 +1962,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             );
             metldr_ui::dialog::backdrop(saved, ::rune::oklch(0.0, 0.0, 0.0).alpha(0.35))
         }))
+        .children(theme::tooltip(state))
 }
 
 /// A collapsible settings card: a 44 px header with the title and a chevron, and the body below

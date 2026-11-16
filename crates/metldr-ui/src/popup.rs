@@ -11,6 +11,7 @@
 //! - A popup that is not `dismissible` (it holds unsaved work) refuses those closes. Escape and
 //!   an outside press are attempts, which `on_attempt` hears so the app can ask; focus or the
 //!   window leaving is refused without a word.
+//! - A press on the trigger closes a tooltip; other kinds leave that press to the trigger.
 //! - Only the topmost popup hears a close; a modal dialog above takes them all.
 //! - A popup that moves focus returns it to its trigger when Escape closes it.
 
@@ -42,6 +43,8 @@ pub struct Behavior {
     pub closes_on_focus_loss: bool,
     /// It moves focus in when it opens and back to its trigger when it closes.
     pub moves_focus: bool,
+    /// A press on its trigger closes it. Other kinds leave that press to the trigger.
+    pub closes_on_trigger_press: bool,
 }
 
 /// The kinds of popup.
@@ -59,7 +62,7 @@ pub enum Kind {
 
 impl Kind {
     pub const fn behavior(self) -> Behavior {
-        let plain = Behavior { tab: Tab::Close, closes_on_blur: true, closes_on_focus_loss: true, moves_focus: true };
+        let plain = Behavior { tab: Tab::Close, closes_on_blur: true, closes_on_focus_loss: true, moves_focus: true, closes_on_trigger_press: false };
         match self {
             Kind::Menu | Kind::Select => plain,
             // Focus stays in the input while its list is open.
@@ -67,9 +70,9 @@ impl Kind {
             // Part of the page's Tab order; switching windows keeps the work in it.
             Kind::Popover => Behavior { tab: Tab::Flow, closes_on_blur: false, ..plain },
             // Holds focus until the user answers, whatever else happens.
-            Kind::Dialog => Behavior { tab: Tab::Trap, closes_on_blur: false, closes_on_focus_loss: false, moves_focus: true },
-            // Never takes focus; focus stays on its trigger.
-            Kind::Tooltip => Behavior { tab: Tab::Native, moves_focus: false, ..plain },
+            Kind::Dialog => Behavior { tab: Tab::Trap, closes_on_blur: false, closes_on_focus_loss: false, ..plain },
+            // Never takes focus; focus stays on its trigger, and pressing the trigger closes it.
+            Kind::Tooltip => Behavior { tab: Tab::Native, moves_focus: false, closes_on_trigger_press: true, ..plain },
             Kind::HoverCard => Behavior { tab: Tab::Flow, ..plain },
             Kind::NavigationMenu => Behavior { tab: Tab::Flow, closes_on_blur: false, ..plain },
         }
@@ -81,6 +84,7 @@ impl Behavior {
     pub const fn closes(self, reason: Reason) -> bool {
         match reason {
             Reason::Escape | Reason::OutsidePress => true,
+            Reason::AnchorPress => self.closes_on_trigger_press,
             Reason::FocusOut => self.closes_on_focus_loss,
             Reason::WindowBlur => self.closes_on_blur,
         }
@@ -170,6 +174,7 @@ mod tests {
         assert_eq!(closes(Kind::Tooltip), [true, true, true, true]);
         assert_eq!(closes(Kind::NavigationMenu), [true, true, true, false]);
         assert!(!Kind::Tooltip.behavior().moves_focus && !Kind::Combobox.behavior().moves_focus);
+        assert!(Kind::Tooltip.behavior().closes(AnchorPress) && !Kind::Menu.behavior().closes(AnchorPress));
     }
 
     #[test]

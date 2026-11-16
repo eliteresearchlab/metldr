@@ -208,9 +208,7 @@ impl Conversations {
         }
         out.child(
             metldr_ui::button::button(
-                icon_button(&super::composer::PLUS, 15.0, 28.0, 7.0, p)
-                    .key("chat-new")
-                    .label("New chat")
+                super::theme::tip(icon_button(&super::composer::PLUS, 15.0, 28.0, 7.0, p).key("chat-new"), "chat-new", "New chat", state)
                     .ml(2.0)
                     .native_activation(),
                 metldr_ui::button::Props {

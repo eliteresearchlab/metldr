@@ -52,7 +52,7 @@ impl<S: 'static> Runtime<S> {
         Some(note)
     }
 
-    fn index_of(&self, path: &str) -> Option<usize> {
+    pub(super) fn index_of(&self, path: &str) -> Option<usize> {
         self.path_ids.get(path).and_then(|id| self.node_index.get(id)).copied().filter(|&i| self.nodes.get(i).is_some_and(|n| n.path == path))
     }
 

@@ -78,7 +78,8 @@ fn a_press_outside_dismisses_and_a_press_on_the_trigger_or_inside_does_not() {
     rt.frame(0.0);
     assert!(heard(&rt).is_empty(), "inside: {:?}", heard(&rt));
     press(&mut rt, "trigger");
-    assert!(heard(&rt).is_empty(), "the trigger handles its own press: {:?}", heard(&rt));
+    assert_eq!(heard(&rt), [("pop", Dismiss::AnchorPress)], "a press on the trigger says so");
+    rt.update(|s, _| s.heard.clear());
     assert!(!rt.state.open, "the trigger toggled it closed");
     rt.update(|s, _| s.open = true);
     rt.frame(0.0);

@@ -121,6 +121,14 @@ impl<S: 'static> Runtime<S> {
         }
         false
     }
+    /// A press at the point (on `target`) lands on layer `l`'s anchor and not on the layer.
+    pub(super) fn on_anchor(&self, l: usize, target: Option<usize>, x: f32, y: f32) -> bool {
+        let Some(a) = self.nodes[l].above.as_ref().and_then(|a| self.nodes.iter().position(|n| n.key.as_deref() == Some(&a.key))) else { return false };
+        let within = |j: usize| { let [x0, y0, x1, y1] = self.nodes[j].target; x >= x0 && x < x1 && y >= y0 && y < y1 };
+        let under = |root: usize, j: usize| j == root
+            || std::iter::successors(self.nodes[j].parent, |&p| self.nodes[p].parent).any(|p| p == root);
+        !within(l) && (target.is_some_and(|t| under(a, t)) || within(a))
+    }
     /// The point lies on layer `l`, a popup chained into it or its anchor, interactive or not.
     pub(super) fn point_in_layer(&self, l: usize, x: f32, y: f32) -> bool {
         (0..self.nodes.len()).any(|j| {
@@ -238,6 +246,13 @@ impl<S: 'static> Runtime<S> {
             && (keyboard || self.node(p).is_some_and(|n| n.input.is_some()) || self.virtual_inputs.contains_key(p))
         {
             self.clear_text_selection();
+        }
+        if self.focused != path {
+            for (p, gained) in [(self.focused.as_deref(), false), (path.as_deref(), true)] {
+                if let Some(p) = p && self.node(p).is_some_and(|n| n.handlers.get().is_some_and(|h| h.on_focus_change.is_some())) {
+                    self.queue.push(Action::FocusChange(p.to_owned(), gained, keyboard));
+                }
+            }
         }
         let mut changed = self.focused != path && self.physical_focus_lost();
         for n in &mut self.nodes {
@@ -577,6 +592,29 @@ impl<S: 'static> Runtime<S> {
 mod tests {
     use super::*;
     use crate::{col, el, row, Mods};
+
+    /// Run with `--ignored`: finding a node by its path, as every press, hover, dismissal and
+    /// focus change does before it runs its handler.
+    #[test]
+    #[ignore]
+    fn node_lookup_cost() {
+        struct Big;
+        fn view(_: &Big, _: &mut Cx<Big>) -> El {
+            col().key("root").w_full().h_full().children((0..2000).map(|i| row().key(format!("row{i}")).size(10.0, 2.0)))
+        }
+        let mut rt = Runtime::new(Big, view, (400.0, 400.0), Env::new(true, 1.0));
+        rt.frame(0.0);
+        let path = rt.nodes.last().unwrap().path.clone();
+        assert!(rt.node(&path).is_some());
+        let runs = 2000;
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            for _ in 0..runs { std::hint::black_box(rt.node(std::hint::black_box(&path))); }
+            best = best.min(t.elapsed().as_secs_f64() / runs as f64);
+        }
+        eprintln!("node lookup: {:.2} us over {} nodes", best * 1e6, rt.nodes.len());
+    }
 
     /// Run with `--release --ignored`: modal membership for a long page with a modal open and
     /// a chain of popovers anchored into it, as each commit computes it.

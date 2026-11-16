@@ -279,6 +279,7 @@ fn same_handlers(
     let crate::el::Handlers {
         on_paste,
         on_window_focus,
+        on_focus_change,
         modal,
         layer,
         on_press,
@@ -322,6 +323,7 @@ fn same_handlers(
             _ => false,
         }
         && opt_rc_eq(&a.on_window_focus, on_window_focus)
+        && opt_rc_eq(&a.on_focus_change, on_focus_change)
         && opt_rc_eq(&a.on_press, on_press)
         && opt_rc_eq(&a.on_double_press, on_double_press)
         && opt_rc_eq(&a.on_press_down, on_press_down)
