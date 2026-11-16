@@ -224,8 +224,11 @@ fn hidden_multiline_pristine_replace_and_delete() {
         k(Key::Delete),
         KeyEvent { key: Key::Backspace, mods: Mods { cmd: true, ..Mods::default() } },
         KeyEvent { key: Key::Backspace, mods: Mods { alt: true, ..Mods::default() } },
-        KeyEvent { key: Key::Text("k".into()), mods: Mods { ctrl: true, ..Mods::default() } },
-    ] {
+    ]
+    .into_iter()
+    // Ctrl-K kills to the end of the line only where it is bound, on macOS.
+    .chain(cfg!(target_os = "macos").then(|| KeyEvent { key: Key::Text("k".into()), mods: Mods { ctrl: true, ..Mods::default() } }))
+    {
         let mut e = TextEdit::new("existing-fictional-key\nline-two").secure();
         e.set_single_line(false);
         e.set_caret(4);
