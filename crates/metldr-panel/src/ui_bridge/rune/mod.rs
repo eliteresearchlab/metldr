@@ -1637,6 +1637,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         let open = |section: &Section| state.settings_sections.contains(section.key);
         let (providers, agents) = state.settings.view(core, cx, typography, palette, (open(&PROVIDERS), open(&AGENTS)));
         let appearance = open(&APPEARANCE).then(|| state.preferences.view(State::preference));
+        let presets = open(&PROVIDERS).then(|| state.settings.preset_list(typography, palette)).flatten();
         let title = row()
             .w_full()
             .items_center()
@@ -1690,7 +1691,8 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                                 stick_bottom: false,
                             }),
                     ),
-            );
+            )
+            .children(presets);
     }
     if let Some(followup) = &state.proposed_followup {
         thread = thread.child(

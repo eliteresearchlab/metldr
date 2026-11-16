@@ -410,14 +410,12 @@ fn status(appearance: bool, status: UiPreferenceStatus) -> &'static str {
 
 pub(super) fn outlined(typography: Typography, label: impl Into<String>, key: impl Into<String>) -> El {
     let label = label.into();
-    let el = typography
-        .legend(&label)
-        .label(label)
-        .key(key.into())
-        .px(10.0)
-        .py(6.0)
-        .radius(8.0)
-        .fill(typography.field);
+    keyed(typography, typography.legend(&label).label(label).key(key.into()))
+}
+
+/// `el` as an outlined control on the theme's material: a key on its lip, a neon key, or a field.
+pub(super) fn keyed(typography: Typography, el: El) -> El {
+    let el = el.px(10.0).py(6.0).radius(8.0).fill(typography.field);
     match (typography.lip, typography.neon) {
         (Some(lip), _) => super::theme::on_lip(el, lip, false),
         (None, Some(accent)) => super::theme::neon_key(el, accent),

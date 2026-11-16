@@ -23,7 +23,7 @@
 use super::theme::ThemeCaret;
 use super::theme::Palette;
 use super::{Menu, Mode, State};
-use ::rune::{Align, Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, row};
+use ::rune::{Cx, El, Icon, Key, KeyEvent, Side, TextStyle, Tx, col, row};
 
 const CONTROL: f32 = 28.0;
 const BORDER: f32 = 1.0;
@@ -192,25 +192,11 @@ fn button(key: &'static str, label: &'static str, icon: &'static Icon, color: ::
     super::theme::tip(key_el, key, label, state)
 }
 
-/// The prompt while the sources menu is open, as a trigger menu's editor: it names the list it
-/// shows (ARIA `aria-controls`) and, once the arrows reach it, the highlighted source
-/// (`aria-activedescendant`), while keyboard focus stays in the prompt.
-trait SourceRelations {
-    fn with_sources(self, state: &State) -> Self;
-}
-
-impl SourceRelations for El {
-    fn with_sources(self, state: &State) -> Self {
-        if state.menu != Some(Menu::Sources) {
-            return self;
-        }
-        let el = self.controls("rune-source-menu");
-        if state.source_engaged && page_matches(&state.draft.text) {
-            el.active_descendant("rune-current-page")
-        } else {
-            el
-        }
-    }
+/// The prompt is the sources list's combobox: while the list is open it names it and, once the
+/// arrows reach it, the highlighted source, while keyboard focus stays in the prompt.
+fn prompt(el: El, state: &State) -> El {
+    let active = (state.source_engaged && page_matches(&state.draft.text)).then_some("rune-current-page");
+    metldr_ui::combobox::input(el, "rune-source-menu", state.menu == Some(Menu::Sources), active)
 }
 
 /// The composer's corner radius on the theme's material.
@@ -277,7 +263,7 @@ fn typed(input: &::rune::PhysicalInput) -> Option<crate::interaction_audio::Cue>
 }
 
 /// One 30 px menu row: name, muted tag, then the check.
-fn menu_row(
+pub(super) fn menu_row(
     typography: super::preferences::Typography,
     p: &Palette,
     key: String,
@@ -342,7 +328,6 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     .padding(8.0)
     .color(p.ink)
     .label("Prompt")
-    .with_sources(state)
     .placeholder("Write a message…", p.ink_3)
     .caret(p.ink, p.accent.alpha(0.28))
     .theme_caret(p)
@@ -377,9 +362,9 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
             capture(state, tx);
             true
         }
-        Key::Down | Key::Up
-            if state.menu == Some(Menu::Sources)
-                && token(&state.draft.text).is_some_and(|t| t.marker == '@') =>
+        _ if matches!(metldr_ui::combobox::action(key, state.menu == Some(Menu::Sources)), Some(metldr_ui::combobox::Action::Move(_)))
+            && state.menu == Some(Menu::Sources)
+            && token(&state.draft.text).is_some_and(|t| t.marker == '@') =>
         {
             state.source_engaged = true;
             true
@@ -404,7 +389,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     if state.menu == Some(Menu::Sources) {
         field = field.preserve_focus_on_press(true);
     }
-    let field = ::rune::auto_grow(field, 1, 5);
+    let field = ::rune::auto_grow(prompt(field, state), 1, 5);
 
     let add = button("rune-source-trigger", "Add attachments and sources", &PLUS, p.ink_2, state)
     .hover(p.hover)
@@ -423,7 +408,9 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
             enter(state, key, tx, sources)
         }
     })
+    .has_popup("listbox")
     .expanded(state.menu == Some(Menu::Sources));
+    let add = if state.menu == Some(Menu::Sources) { add.controls("rune-source-menu") } else { add };
     let model = row()
         .key("rune-model-trigger")
         .h(CONTROL)
@@ -579,21 +566,14 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .color(p.ink_3)
                             .truncate(),
                     )
-                    .focusable(true)
-                    .disabled(disabled)
-                    .role("option")
-                    .focus_selected(state.source_engaged)
                     .label("Current page, Use the page you are viewing");
                 if !disabled {
-                    page = page
-                        .press(p.line_strong)
-                        .on_press_tx(|state: &mut State, tx| capture(state, tx));
+                    page = page.press(p.line_strong);
                 }
-                rows = rows.child(page);
+                rows = rows.child(metldr_ui::combobox::option(page, disabled, state.source_engaged, capture));
             }
             if marker != Some('/') && query.is_empty() {
-                rows = rows.child(
-                    row()
+                let files = row()
                         .key("rune-files-unavailable")
                         .w_full()
                         .h(36.0)
@@ -615,10 +595,8 @@ pub(super) fn menu(state: &State) -> Option<El> {
                                 .font(typography.font(12.0, 400.0))
                                 .color(p.ink_3),
                         )
-                        .disabled(true)
-                        .role("option")
-                        .label("Photos and files, unavailable"),
-                );
+                        .label("Photos and files, unavailable");
+                rows = rows.child(metldr_ui::combobox::option(files, true, false, |_: &mut State, _: &mut Tx| {}));
             }
             if marker == Some('/') || !show_page {
                 rows = rows.child(
@@ -637,9 +615,6 @@ pub(super) fn menu(state: &State) -> Option<El> {
             }
             let list = col()
                     .key("rune-source-menu")
-                    .role("listbox")
-                    .label("Sources")
-                    .focus_group()
                     .w_full()
                     .gap(5.0)
                     .padding(4.0)
@@ -660,22 +635,11 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .padding(7.0)
                             .font(typography.font(11.0, 400.0))
                             .color(p.ink_3),
-                    )
-                    .anchored_fit("rune-composer", Side::Top, Align::Start, 8.0)
-                    .transition(super::theme::pop_in(p));
-            // The prompt keeps focus while the list is open, as a combobox's input does; opened
-            // from its trigger, focus sits in the list and returns to the trigger.
-            Some(
-                metldr_ui::popup::layer(
-                    list,
-                    metldr_ui::popup::Kind::Combobox,
-                    "rune-source-trigger",
-                    true,
-                    |state: &mut State, _, _| close_menu(state),
-                    |_: &mut State, _| {},
-                )
-                .focus_return("rune-source-trigger"),
-            )
+                    );
+            // The prompt keeps focus while the list is open; opened from its trigger, focus sits
+            // in the list and returns to the trigger.
+            let list = metldr_ui::combobox::list(list, "Sources", "rune-composer", Side::Top, "rune-source-trigger", super::theme::pop_in(p), |state: &mut State, _| close_menu(state));
+            Some(list.focus_return("rune-source-trigger"))
         }
         Menu::Models => {
             // Configured routes by section with short names; routes still to set up fold into one
