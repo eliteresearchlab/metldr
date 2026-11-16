@@ -391,7 +391,9 @@ impl State {
                     && !core.page.settings_blocked()
                     && core.page.flow.borrow().is_connected()
             })
-            && self.selected_choice().is_some_and(|choice| choice.enabled)
+            && self.core().is_some_and(|core| {
+                crate::composer::choices::selected_enabled(Some(&core.page.view.borrow()), &self.selection)
+            })
     }
 
     fn capture_disabled(&self) -> bool {
