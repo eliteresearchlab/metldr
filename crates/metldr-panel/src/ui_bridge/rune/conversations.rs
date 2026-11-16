@@ -594,6 +594,33 @@ fn close_tab(state: &mut State, id: &str, tx: &mut Tx) {
 mod tests {
     use super::*;
 
+    /// An unavailable entry stays on the arrows' path in a toolbar, in both layouts: the chips
+    /// once dropped it while the rows kept it, as a listbox once dropped a disabled option.
+    #[test]
+    fn an_unavailable_toolbar_entry_stays_on_the_arrows_path_in_both_layouts() {
+        fn view<const ROWS: bool>(state: &State, _: &mut Cx<State>) -> El {
+            let p = state.preferences.palette();
+            let typography = state.preferences.typography();
+            let entries = [("Saved chats", true), ("Older messages", false), ("Latest messages", true)]
+                .map(|(label, enabled)| entry(p, typography, label, label.to_lowercase().replace(' ', "-"), &HISTORY, ROWS, enabled, |_, _| {}));
+            let bar = if ROWS { ::rune::col().w_full() } else { ::rune::row().w_full().gap(8.0) };
+            let axis = if ROWS { ::rune::FocusAxis::Vertical } else { ::rune::FocusAxis::Horizontal };
+            metldr_ui::toolbar::toolbar(bar.children(entries), "Chat actions", metldr_ui::toolbar::Props { axis, wrap: true })
+        }
+        fn reaches(view: fn(&State, &mut Cx<State>) -> El, key: ::rune::Key) -> Option<String> {
+            let mut rt = ::rune::Runtime::new(State::default(), view, (420.0, 300.0), ::rune::Env::default());
+            rt.frame(0.0);
+            rt.update(|_, tx| tx.focus("saved-chats"));
+            rt.frame(0.0);
+            rt.key(::rune::KeyEvent { key, mods: ::rune::Mods::default() });
+            rt.frame(0.0);
+            rt.frame(0.0);
+            rt.elements().into_iter().find(|e| e.focused).and_then(|e| e.key)
+        }
+        assert_eq!(reaches(view::<true>, ::rune::Key::Down).as_deref(), Some("older-messages"), "rows");
+        assert_eq!(reaches(view::<false>, ::rune::Key::Right).as_deref(), Some("older-messages"), "chips");
+    }
+
     #[test]
     fn saved_chat_rows_do_not_move_after_the_list_updates() {
         fn view(loading: &bool, _: &mut Cx<bool>) -> El {
