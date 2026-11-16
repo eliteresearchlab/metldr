@@ -47,6 +47,19 @@ thread_local! {
     static RETAINED_FALLBACKS: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
 }
 
+/// Copies the page's font buffers into the module and checks them against `names`.
+pub(super) fn read(
+    fonts: &js_sys::Array,
+    names: &[&str],
+) -> Result<Vec<Vec<u8>>, wasm_bindgen::JsValue> {
+    let fonts: Vec<Vec<u8>> = fonts
+        .iter()
+        .map(|font| js_sys::Uint8Array::new(&font).to_vec())
+        .collect();
+    validate(&fonts, names).map_err(|error| crate::err(&error))?;
+    Ok(fonts)
+}
+
 /// Refuses a font set before the renderer sees it: the count, each size and the signature.
 pub(super) fn validate(fonts: &[Vec<u8>], names: &[&str]) -> Result<(), String> {
     if fonts.len() != names.len() {

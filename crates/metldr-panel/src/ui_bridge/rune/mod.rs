@@ -2067,11 +2067,7 @@ pub fn start_rune_chat(capture: Function, fonts: js_sys::Array) -> Result<(), Js
                 "Rune already owns this document. Reload to reopen it.",
             ));
         }
-        let fonts: Vec<Vec<u8>> = fonts
-            .iter()
-            .map(|font| js_sys::Uint8Array::new(&font).to_vec())
-            .collect();
-        fonts::validate(&fonts, &fonts::NAMES).map_err(|error| crate::err(&error))?;
+        let fonts = fonts::read(&fonts, &fonts::NAMES)?;
         crate::flow::install_capture(capture);
         let spec = AppSpec {
             fonts: fonts::retain(fonts),
@@ -2112,12 +2108,7 @@ pub fn start_rune_chat(capture: Function, fonts: js_sys::Array) -> Result<(), Js
 /// lays out again with them on the next frame. A second call in the same document does nothing.
 #[wasm_bindgen]
 pub fn add_rune_chat_fonts(fonts: js_sys::Array) -> Result<(), JsValue> {
-    let fonts: Vec<Vec<u8>> = fonts
-        .iter()
-        .map(|font| js_sys::Uint8Array::new(&font).to_vec())
-        .collect();
-    fonts::validate(&fonts, &fonts::FALLBACKS).map_err(|error| crate::err(&error))?;
-    if let Some(fonts) = fonts::retain_fallbacks(fonts) {
+    if let Some(fonts) = fonts::retain_fallbacks(fonts::read(&fonts, &fonts::FALLBACKS)?) {
         ::rune::text::add_fonts(fonts);
         HOST.with(|host| {
             if let Some(host) = host.borrow().as_ref() {
