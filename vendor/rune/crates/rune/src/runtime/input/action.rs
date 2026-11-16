@@ -12,6 +12,8 @@ pub(super) enum Action {
     Dismiss(String),
     /// `El::layer`: the topmost layer heard a request to close.
     LayerDismiss(String, crate::el::Dismiss),
+    /// `El::on_focus_change`: the element gained or lost focus, and whether by keyboard.
+    FocusChange(String, bool, bool),
     PointerMove(String, PointerEvent),
     Hover(String),
     HoverChange(String, bool),
@@ -428,6 +430,11 @@ impl<S: 'static> Runtime<S> {
                 }
                 None => std::mem::take(&mut self.hover_focus),
             },
+            Action::FocusChange(path, focused, keyboard) => {
+                let Some(f) = self.node(&path).and_then(|n| n.handlers.on_focus_change.clone()) else { return false };
+                f(states!(self), focused, keyboard, &mut one);
+                true
+            }
             Action::LayerDismiss(path, reason) => {
                 let Some(f) = self.node(&path).and_then(|n| n.handlers.layer.clone()) else { return false };
                 f(states!(self), reason, &mut one);

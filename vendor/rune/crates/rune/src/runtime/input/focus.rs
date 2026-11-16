@@ -121,6 +121,14 @@ impl<S: 'static> Runtime<S> {
         }
         false
     }
+    /// A press at the point (on `target`) lands on layer `l`'s anchor and not on the layer.
+    pub(super) fn on_anchor(&self, l: usize, target: Option<usize>, x: f32, y: f32) -> bool {
+        let Some(a) = self.nodes[l].above.as_ref().and_then(|a| self.nodes.iter().position(|n| n.key.as_deref() == Some(&a.key))) else { return false };
+        let within = |j: usize| { let [x0, y0, x1, y1] = self.nodes[j].target; x >= x0 && x < x1 && y >= y0 && y < y1 };
+        let under = |root: usize, j: usize| j == root
+            || std::iter::successors(self.nodes[j].parent, |&p| self.nodes[p].parent).any(|p| p == root);
+        !within(l) && (target.is_some_and(|t| under(a, t)) || within(a))
+    }
     /// The point lies on layer `l`, a popup chained into it or its anchor, interactive or not.
     pub(super) fn point_in_layer(&self, l: usize, x: f32, y: f32) -> bool {
         (0..self.nodes.len()).any(|j| {
@@ -238,6 +246,13 @@ impl<S: 'static> Runtime<S> {
             && (keyboard || self.node(p).is_some_and(|n| n.input.is_some()) || self.virtual_inputs.contains_key(p))
         {
             self.clear_text_selection();
+        }
+        if self.focused != path {
+            for (p, gained) in [(self.focused.as_deref(), false), (path.as_deref(), true)] {
+                if let Some(p) = p && self.node(p).is_some_and(|n| n.handlers.get().is_some_and(|h| h.on_focus_change.is_some())) {
+                    self.queue.push(Action::FocusChange(p.to_owned(), gained, keyboard));
+                }
+            }
         }
         let mut changed = self.focused != path && self.physical_focus_lost();
         for n in &mut self.nodes {

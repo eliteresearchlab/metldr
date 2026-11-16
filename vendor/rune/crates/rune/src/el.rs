@@ -151,12 +151,15 @@ pub enum Dismiss {
     Escape,
     /// A primary press outside the layer and its anchor.
     OutsidePress,
+    /// A primary press on the layer's anchor (its trigger). The trigger's own handler runs too.
+    AnchorPress,
     /// Focus moved to an element outside the layer and its anchor.
     FocusOut,
     /// The window lost focus.
     WindowBlur,
 }
 
+pub(crate) type FocusChangeFn = Rc<dyn Fn(crate::states::States<'_>, bool, bool, &mut Tx)>;
 pub(crate) type LayerFn = Rc<dyn Fn(crate::states::States<'_>, Dismiss, &mut Tx)>;
 
 /// A vertical scroll viewport.
@@ -748,6 +751,12 @@ pub fn auto_grow(field: El, min_lines: usize, max_lines: usize) -> El {
 impl El {
     /// On the root, receive native window activation/deactivation (not text-field focus).
     /// Also works on interactive overlays. Headless hosts may call Runtime::window_focus.
+    /// Runs when this element gains (`true`) or loses focus, with whether the keyboard moved it
+    /// (`keyboard`), so a tooltip opens on keyboard focus and not on a click.
+    pub fn on_focus_change<S: 'static>(mut self, f: impl Fn(&mut S, bool, bool, &mut Tx) + 'static) -> Self {
+        self.handlers.on_focus_change = Some(Rc::new(move |s, focused, keyboard, tx| f(downcast::<S>(s), focused, keyboard, tx)));
+        self
+    }
     pub fn on_window_focus<S: 'static>(mut self, f: impl Fn(&mut S, bool, &mut Tx) + 'static) -> Self {
         self.handlers.on_window_focus = Some(Rc::new(move |s, focused, tx| f(downcast::<S>(s), focused, tx)));
         self
