@@ -61,7 +61,9 @@ impl<S: 'static> Runtime<S> {
                 self.cancel_pointer();
                 self.held = None;
             }
-            if self.commits == 0 || self.dirty || self.nodes.get(self.app_root()).is_some_and(|n| n.handlers.on_window_focus.is_some()) {
+            if self.commits == 0 || self.dirty || self.nodes.get(self.app_root()).is_some_and(|n| n.handlers.on_window_focus.is_some())
+                || (!focused && self.top_layer().is_some())
+            {
                 self.queue.push(Action::WindowFocus(focused));
             }
             if !focused {

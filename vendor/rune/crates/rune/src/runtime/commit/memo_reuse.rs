@@ -280,6 +280,7 @@ fn same_handlers(
         on_paste,
         on_window_focus,
         modal,
+        layer,
         on_press,
         on_double_press,
         on_press_down,
@@ -313,6 +314,8 @@ fn same_handlers(
     } = &**b;
     a.modal.is_none()
         && modal.is_none()
+        && a.layer.is_none()
+        && layer.is_none()
         && match (&a.on_paste, on_paste) {
             (None, None) => true,
             (Some(pa), Some(pb)) => pa.rich == pb.rich && Rc::ptr_eq(&pa.call, &pb.call),

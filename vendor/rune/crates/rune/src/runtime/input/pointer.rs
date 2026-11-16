@@ -167,6 +167,9 @@ impl<S: 'static> Runtime<S> {
         if target.and_then(|t| self.textbox_input(t)).is_none() {
             self.input_click.clear();
         }
+        if let Some(l) = self.top_layer() && !target.is_some_and(|t| self.inside_layer(l, t)) && !self.point_in_layer(l, x, y) {
+            self.queue.push(Action::LayerDismiss(self.nodes[l].path.clone(), crate::el::Dismiss::OutsidePress));
+        }
         if let Some(i) = self.active_modal()
             && target.is_none_or(|t| !self.allowed(t))
         {

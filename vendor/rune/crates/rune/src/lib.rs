@@ -95,6 +95,7 @@ pub use el::Anchor;
 pub use el::Cursor;
 pub use el::CursorImage;
 pub use el::Cycle;
+pub use el::Dismiss;
 pub use el::Drag;
 pub use el::FocusAxis;
 pub use el::El;

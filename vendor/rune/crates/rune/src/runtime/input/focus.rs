@@ -81,6 +81,39 @@ impl<S: 'static> Runtime<S> {
             if !changed { break; }
         }
     }
+    /// The topmost mounted `El::layer` that input can reach (none behind a modal).
+    pub(super) fn top_layer(&self) -> Option<usize> {
+        self.nodes.iter().enumerate().rev()
+            .find(|(i, n)| n.handlers.get().is_some_and(|h| h.layer.is_some())
+                && !self.subtree_exiting(*i) && !self.subtree_unmounted(*i) && self.allowed(*i))
+            .map(|(i, _)| i)
+    }
+    /// Node `t` is inside layer `l`: in its subtree, in a portal anchored inside it, or in its
+    /// anchor's subtree (the trigger that opened it).
+    pub(super) fn inside_layer(&self, l: usize, t: usize) -> bool {
+        let keyed = |key: &str| self.nodes.iter().position(|n| n.key.as_deref() == Some(key));
+        let under = |root: usize, j: usize| j == root
+            || std::iter::successors(self.nodes[j].parent, |&p| self.nodes[p].parent).any(|p| p == root);
+        let anchor = self.nodes[l].above.as_ref().and_then(|a| keyed(&a.key));
+        let mut k = t;
+        // Each step leaves a portal for its anchor; a chain longer than the tree is a cycle.
+        for _ in 0..self.nodes.len() {
+            if under(l, k) || anchor.is_some_and(|a| under(a, k)) { return true; }
+            let root = std::iter::successors(Some(k), |&p| self.nodes[p].parent).last().unwrap_or(k);
+            match self.nodes[root].above.as_ref().and_then(|a| keyed(&a.key)) {
+                Some(next) if next != k => k = next,
+                _ => return false,
+            }
+        }
+        false
+    }
+    /// The point lies on layer `l`, a popup chained into it or its anchor, interactive or not.
+    pub(super) fn point_in_layer(&self, l: usize, x: f32, y: f32) -> bool {
+        (0..self.nodes.len()).any(|j| {
+            let [x0, y0, x1, y1] = self.nodes[j].target;
+            x >= x0 && x < x1 && y >= y0 && y < y1 && self.inside_layer(l, j)
+        })
+    }
     /// Input may reach node `i`: it's outside any `El::inert` subtree and not behind a modal.
     pub(super) fn allowed(&self, i: usize) -> bool {
         !self.nodes.get(i).is_some_and(|n| n.inert) && (self.active_modal().is_none() || self.modal_members.get(i).copied().unwrap_or(false))
@@ -210,6 +243,9 @@ impl<S: 'static> Runtime<S> {
         }
         self.keyboard_focus = keyboard;
         self.sync_side_focus();
+        if let Some(t) = self.focused_index() && let Some(l) = self.top_layer() && !self.inside_layer(l, t) {
+            self.queue.push(Action::LayerDismiss(self.nodes[l].path.clone(), crate::el::Dismiss::FocusOut));
+        }
         changed
     }
     pub(super) fn sync_requested_focus(&mut self, nodes: &mut Vec<Node>) -> bool {
@@ -349,6 +385,12 @@ impl<S: 'static> Runtime<S> {
         // Activations (dismiss, press, open) fire once per press. Their repeats are consumed so
         // they reach nothing else; navigation below keeps repeating.
         let repeat = tx.key_repeat;
+        if ev.key == Key::Escape && let Some(l) = self.top_layer() {
+            if repeat { return true; }
+            let f = self.nodes[l].handlers.layer.clone().unwrap();
+            f(states!(self), crate::el::Dismiss::Escape, tx);
+            return true;
+        }
         if ev.key == Key::Escape && let Some(i) = self.active_modal() {
             if repeat { return true; }
             let f = self.nodes[i].handlers.modal.as_ref().unwrap().dismiss.clone();
@@ -521,6 +563,7 @@ impl<S: 'static> Runtime<S> {
 mod tests {
     use super::*;
     use crate::{col, el, row, Mods};
+
 
     #[derive(Default)]
     struct State { open: bool, nested: bool, picks: usize, selected: usize, secondary_picks: usize }
