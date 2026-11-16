@@ -85,14 +85,17 @@ async function copyRune() {
   // The chat pages load the Rune renderer and its fonts; they ship beside it, not in the wasm.
   await cp(join(root, 'target/wasm/metldr-panel-rune/pkg'), join(output, 'rune'), { recursive: true });
   const source = await readFile(join(root, 'crates/metldr-panel/src/ui_bridge/rune/fonts.rs'), 'utf8');
-  const names = [...source.slice(source.indexOf('NAMES'), source.indexOf('];')).matchAll(/"([^"]+\.tt[fc])"/g)].map(match => match[1]);
+  const list = constant => {
+    const start = source.indexOf(`const ${constant}:`);
+    return [...source.slice(start, source.indexOf('];', start)).matchAll(/"([^"]+\.tt[fc])"/g)].map(match => match[1]);
+  };
+  const names = list('NAMES');
+  const fallbacks = list('FALLBACKS');
   const fonts = join(output, 'fonts');
   await mkdir(fonts, { recursive: true });
-  for (const name of names) {
-    const local = join(root, 'crates/metldr-panel/assets/fonts', name);
-    await copyFile(local, join(fonts, name)).catch(() => copyFile(join(root, 'crates/metldr-panel/assets/fonts/fallback', name), join(fonts, name)));
-  }
-  await writeFile(join(fonts, 'manifest.json'), JSON.stringify({ fonts: names }));
+  for (const name of names) await copyFile(join(root, 'crates/metldr-panel/assets/fonts', name), join(fonts, name));
+  for (const name of fallbacks) await copyFile(join(root, 'crates/metldr-panel/assets/fonts/fallback', name), join(fonts, name));
+  await writeFile(join(fonts, 'manifest.json'), JSON.stringify({ fonts: names, fallbacks }));
 }
 
 export async function buildChat() {

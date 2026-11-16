@@ -130,9 +130,7 @@ pub(super) fn register_fallbacks(collection: &mut Collection, loaded: &mut Loade
         }
     }
     // Browsers cannot discover system fonts; supplied fallbacks must cover these scripts too.
-    for fonts in fallback::SCRIPT_FONTS {
-        collection.append_fallbacks(FallbackKey::new(Script::from_bytes(*fonts.script), None), fallbacks.iter().copied());
-    }
+    append_scripts(collection, &fallbacks);
     // Memory-mapped, so a 20 MB CJK collection costs a mapping, not a read.
     for id in load_files(collection, loaded, system_font_files(&CJK_FONT_FILES).into_iter().take(16)) {
         if !primary.contains(&Some(id)) && !fallbacks.contains(&id) {
@@ -143,6 +141,22 @@ pub(super) fn register_fallbacks(collection: &mut Collection, loaded: &mut Loade
         return;
     }
     super::language::register(collection, &fallbacks);
+}
+
+/// Registers fonts supplied while the app runs (`rune::text::add_fonts`) as `register_fallbacks`
+/// registers the app's: for supported scripts and for CJK.
+pub(super) fn append_supplied(collection: &mut Collection, fallbacks: &[FamilyId]) {
+    if fallbacks.is_empty() {
+        return;
+    }
+    append_scripts(collection, fallbacks);
+    super::language::register(collection, fallbacks);
+}
+
+fn append_scripts(collection: &mut Collection, fallbacks: &[FamilyId]) {
+    for fonts in fallback::SCRIPT_FONTS {
+        collection.append_fallbacks(FallbackKey::new(Script::from_bytes(*fonts.script), None), fallbacks.iter().copied());
+    }
 }
 
 /// The families each system font file added to the collection, so a file is loaded once.

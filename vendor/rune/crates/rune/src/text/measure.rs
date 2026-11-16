@@ -79,6 +79,12 @@ pub(super) fn note_fonts(fonts: &[&'static [u8]], families: (&str, &str)) {
     with_state(|slot| apply_fonts(slot, fonts, families));
 }
 
+/// Called by [`add_fonts`](super::add_fonts): the epoch moves, so caches of measured sizes and
+/// the measurer follow.
+pub(super) fn note_added() {
+    with_state(|slot| if let Some(f) = slot.as_mut() { f.generation += 1 });
+}
+
 /// Called by [`TextSystem::set_families`]; the next measurement uses these families.
 pub(super) fn note_families(sans: &str, mono: &str) {
     with_state(|slot| {
@@ -216,6 +222,7 @@ pub(super) fn with_text<R>(f: impl FnOnce(&mut TextSystem) -> R) -> R {
             }
         }
         let m = m.as_mut().expect("set above");
+        m.text.follow_added();
         m.calls += 1;
         if m.calls % EVICT_EVERY == 0 {
             m.text.end_commit();

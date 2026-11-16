@@ -23,11 +23,12 @@ impl<S: 'static> Runtime<S> {
         tx.font_families.as_ref().is_some_and(|(sans, mono)| self.text.families() != (sans.as_str(), mono.as_str()))
     }
 
-    /// Takes up families chosen since this runtime last looked. On a change, everything sized
-    /// in the old families goes: memoized subtrees, and every measured leaf's layout result.
-    /// The text system has already dropped its layouts. True when the next frame must build.
+    /// Takes up families chosen and fonts added since this runtime last looked. On a change,
+    /// everything sized in the old fonts goes: memoized subtrees, and every measured leaf's
+    /// layout result. The text system has already dropped its layouts. True when the next frame
+    /// must build.
     pub(crate) fn follow_font_families(&mut self) -> bool {
-        if !self.text.follow_chosen() {
+        if !(self.text.follow_chosen() | self.text.follow_added()) {
             return false;
         }
         self.memo.clear();
