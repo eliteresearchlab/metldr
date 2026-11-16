@@ -667,7 +667,8 @@ fn keyed(
         (32.0, 8.0, legend.font(typography.font(12.0, 400.0)).color(p.ink_2))
     };
     let el = row().key(key).min_h(height).px(inset).items_center().child(legend);
-    pressable(el, p, label, enabled, true, action)
+    // A toolbar chip stays on the arrows' path while unavailable; a sheet key leaves the order.
+    pressable(el, p, label, enabled, true, !sheet, action)
 }
 
 /// A toolbar entry: a chip, or on an empty chat under a flat theme, a row with `icon` as the
@@ -700,7 +701,8 @@ pub(super) fn entry(
         .hover(p.hover)
         .press(p.press)
         .label(label);
-    let props = metldr_ui::button::Props { disabled: !enabled, ..Default::default() };
+    // A toolbar entry stays on the arrows' path while unavailable (Older messages at the start).
+    let props = metldr_ui::button::Props { disabled: !enabled, focusable_when_disabled: true };
     let el = metldr_ui::button::button(el, props, move |state: &mut State, tx| {
         state.sound(crate::interaction_audio::Cue::Page);
         action(state, tx)
@@ -760,7 +762,7 @@ fn chat_row(
         .py(8.0)
         .items_center()
         .child(typography.text(label).color(p.ink).wrap().grow(1.0));
-    pressable(el, p, label, enabled, false, Rc::new(action))
+    pressable(el, p, label, enabled, false, false, Rc::new(action))
 }
 
 /// The outlined field surface, button semantics and Enter or press handling shared by every
@@ -772,13 +774,11 @@ fn pressable(
     label: &str,
     enabled: bool,
     scale: bool,
+    focusable_when_disabled: bool,
     action: Press,
 ) -> El {
     let el = super::theme::keycap(el, p).label(label);
-    let props = metldr_ui::button::Props {
-        disabled: !enabled,
-        ..Default::default()
-    };
+    let props = metldr_ui::button::Props { disabled: !enabled, focusable_when_disabled };
     let el = metldr_ui::button::button(el, props, move |state: &mut State, tx| {
         state.sound(crate::interaction_audio::Cue::Page);
         action(state, tx)

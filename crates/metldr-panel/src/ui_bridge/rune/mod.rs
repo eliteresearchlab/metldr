@@ -1846,7 +1846,14 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             true,
             |state: &mut State, tx| state.open_settings(tx),
         ));
-    let toolbar = state.conversations.toolbar(state, toolbar, rows);
+    let toolbar = metldr_ui::toolbar::toolbar(
+        state.conversations.toolbar(state, toolbar, rows),
+        "Chat actions",
+        metldr_ui::toolbar::Props {
+            axis: if rows { ::rune::FocusAxis::Vertical } else { ::rune::FocusAxis::Horizontal },
+            wrap: true,
+        },
+    );
     let readout = row().w_full().gap(6.0).items_center().child(theme::led(lamp, p)).child(line);
     let readout = if p.molded() {
         theme::lcd(readout.px(10.0).py(5.0), p)
