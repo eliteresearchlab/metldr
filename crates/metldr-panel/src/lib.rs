@@ -541,3 +541,42 @@ mod panel_url_checks {
         }
     }
 }
+
+#[cfg(test)]
+mod leftovers {
+    //! Measurement markers and debug prints stay out of the sources: a `buildperf` marker once
+    //! reached a commit in theme.rs, and a `DBG` print nearly did in the Rune pointer code.
+    const MARKERS: [&str; 4] = ["buildperf ", "eprintln!(\"DBG", "dbg!(", "console.log('DBG"];
+    const ROOTS: [&str; 4] = ["crates", "vendor/rune/crates/rune/src", "scripts", "extension"];
+    const SKIP: [&str; 4] = ["target", "node_modules", "pkg", "dist"];
+
+    fn walk(dir: &std::path::Path, found: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for path in entries.flatten().map(|e| e.path()) {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if path.is_dir() {
+                if !SKIP.contains(&name) {
+                    walk(&path, found);
+                }
+            } else if matches!(path.extension().and_then(|e| e.to_str()), Some("rs" | "js" | "mjs" | "ts")) {
+                let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                for (n, line) in text.lines().enumerate() {
+                    // This check names the markers; it is the one place they may appear.
+                    if MARKERS.iter().any(|m| line.contains(m)) && !line.contains("MARKERS") && !path.ends_with("src/lib.rs") {
+                        found.push(format!("{}:{}: {}", path.display(), n + 1, line.trim()));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_measurement_markers_or_debug_prints_in_the_sources() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut found = Vec::new();
+        for root in ROOTS {
+            walk(&repo.join(root), &mut found);
+        }
+        assert!(found.is_empty(), "remove these measurement markers or debug prints before committing (measure in an ignored test instead):\n{}", found.join("\n"));
+    }
+}

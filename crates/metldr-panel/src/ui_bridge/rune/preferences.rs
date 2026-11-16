@@ -481,15 +481,15 @@ fn swatch(
     action: &Rc<impl Fn(&mut State, Action, &mut Tx) + 'static>,
 ) -> El {
     let press = Rc::clone(action);
-    let (l, c, h) = super::theme::in_srgb(color.lch());
+    let swatch = super::theme::swatch(color.lch());
     let key = ::rune::el()
         .key(format!("preferences-key-{}", color.key()))
         .label(color.label())
         .size(28.0, 28.0)
         .radius(6.0)
-        .fill(::rune::oklch(l, c, h))
+        .fill(swatch)
         .border(if checked { 2.0 } else { 1.0 }, if checked { palette.ink } else { palette.line });
-    let key = super::theme::on_lip(key, ::rune::oklch(l, c, h).mix(::rune::Color::BLACK, 0.45), false);
+    let key = super::theme::on_lip(key, super::theme::key_lip(swatch), false);
     let key = metldr_ui::choice::radio(key, !enabled, checked, move |state: &mut State, tx| press(state, Action::KeyColor(color), tx));
     if enabled { key } else { key.opacity(0.5) }
 }

@@ -483,7 +483,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         let mut send = button("rune-send", "Send", &SEND, ink, state).fill(fill).disabled(!can_send);
         // A molded theme's send is its primary key: the key colour on a darker lip of its own.
         if (p.molded() || p.retro()) && can_send {
-            send = super::theme::on_lip(send, p.accent.mix(::rune::Color::BLACK, 0.45), true);
+            send = super::theme::on_lip(send, super::theme::key_lip(p.accent), true);
         } else if p.neon() && can_send {
             // A neon primary key glows in its accent and sounds the deeper down-stroke.
             send = send.radius(2.0).shadow(0.0, 14.0, p.accent.alpha(0.5)).on_press_down(|state: &mut State, _| {

@@ -4,7 +4,6 @@
 use crate::el::Checked;
 use std::hash::{Hash, Hasher};
 
-use serde_json::Value;
 
 use super::*;
 
@@ -139,13 +138,12 @@ pub(crate) struct A11yRun {
     pub link: Option<usize>,
 }
 
-impl A11yItem {
-    /// Writes the item as one JSON object onto `out`. Keys are literals, and strings and
-    /// numbers go through serde_json's writer, so the escaping is its own; nothing is built
-    /// in between.
-    fn write_json(&self, out: &mut Vec<u8>) {
-        let mut o = Obj::open(out);
-        let plain = match &self.kind {
+impl A11yKind {
+    /// The mirror's name for a kind the bridge draws as a container holding its content, or
+    /// None for a leaf. The match is exhaustive, so a new kind has to say which it is, and the
+    /// bridge reads the answer (`g`) instead of keeping a list of its own.
+    fn group(&self) -> Option<&'static str> {
+        match self {
             A11yKind::Table => Some("table"),
             A11yKind::Row => Some("row"),
             A11yKind::ColumnHeader => Some("columnheader"),
@@ -158,13 +156,40 @@ impl A11yItem {
             A11yKind::Tablist => Some("tablist"),
             A11yKind::Toolbar => Some("toolbar"),
             A11yKind::Tabpanel => Some("tabpanel"),
+            A11yKind::Text
+            | A11yKind::Status
+            | A11yKind::Alert
+            | A11yKind::Heading(_)
+            | A11yKind::Button(_)
+            | A11yKind::Input(_)
+            | A11yKind::Range(_) => None,
+        }
+    }
+    /// Whether text and controls inside it name it as their parent; a table and its rows leave
+    /// that to their cells.
+    fn holds_content(&self) -> bool {
+        self.group().is_some() && !matches!(self, A11yKind::Table | A11yKind::Row)
+    }
+}
+
+impl A11yItem {
+    /// Writes the item as one JSON object onto `out`. Keys are literals, and strings and
+    /// numbers go through serde_json's writer, so the escaping is its own; nothing is built
+    /// in between.
+    fn write_json(&self, out: &mut Vec<u8>) {
+        let mut o = Obj::open(out);
+        let group = self.kind.group();
+        let plain = group.or(match &self.kind {
             A11yKind::Text => Some("text"),
             A11yKind::Status => Some("status"),
             A11yKind::Alert => Some("alert"),
             _ => None,
-        };
+        });
         if let Some(kind) = plain {
             o.field("k", kind);
+        }
+        if group.is_some() {
+            o.field("g", &true);
         }
         if let Some(relate) = &self.relate {
             if let Some(path) = &relate.controls {
@@ -579,21 +604,7 @@ impl<S: 'static> Runtime<S> {
                 last_flow_parent = None;
             }
             let content_parent = groups[i]
-                .filter(|&index| {
-                    matches!(
-                        out[index].kind,
-                        A11yKind::Cell
-                            | A11yKind::ColumnHeader
-                            | A11yKind::Group
-                            | A11yKind::Article
-                            | A11yKind::Region(_)
-                            | A11yKind::Box
-                            | A11yKind::Listbox
-                            | A11yKind::Tablist
-                            | A11yKind::Toolbar
-                            | A11yKind::Tabpanel
-                    )
-                })
+                .filter(|&index| out[index].kind.holds_content())
                 .map(|index| out[index].path.clone());
             if let Some(input) = n.input.as_deref() {
                 if rect[2] > 0.0 && rect[3] > 0.0 {
@@ -907,6 +918,32 @@ impl<S: 'static> Runtime<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
+
+    /// Every container the mirror draws reaches the bridge marked as one, so the bridge
+    /// needs no list that a new role could miss (a listbox and then a toolbar each reached the
+    /// page as plain text that way).
+    #[test]
+    fn every_container_reaches_the_bridge_as_a_group() {
+        struct V;
+        fn view(_: &V, _: &mut Cx<V>) -> El {
+            let named = |role: &'static str| crate::col().role(role).label(role).size(100.0, 20.0)
+                .child(crate::text("inside").size(60.0, 12.0));
+            crate::col().w_full()
+                .children(["group", "article", "region", "listbox", "tablist", "toolbar", "tabpanel"].map(named))
+                .child(crate::col().role("table").label("t").child(crate::row().role("row")
+                    .child(crate::text("h").role("columnheader").size(20.0, 12.0)))
+                    .child(crate::row().role("row").child(crate::text("c").role("cell").size(20.0, 12.0))))
+        }
+        let mut rt = Runtime::new(V, view, (400.0, 600.0), Env::default());
+        rt.frame(0.0);
+        let items: Vec<Value> = serde_json::from_str(&rt.a11y_json()).unwrap();
+        for role in ["group", "article", "region", "listbox", "tablist", "toolbar", "tabpanel", "table", "row"] {
+            let item = items.iter().find(|i| i["k"] == role).unwrap_or_else(|| panic!("no {role} in {items:?}"));
+            assert_eq!(item["g"], true, "{role} must reach the bridge as a group");
+        }
+        assert!(items.iter().filter(|i| i["k"] == "text").all(|i| i.get("g").is_none()), "leaves are not groups");
+    }
 
     /// Run with `--ignored`: the mirror's JSON for a long chat, as each sync builds it.
     #[test]
