@@ -385,6 +385,7 @@ impl Expected {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // `v`, `request` and `kind` are checked by `Header` before the frame decodes.
 struct CurrentFrame {
     v: u64,
     request: String,
@@ -394,6 +395,7 @@ struct CurrentFrame {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // `v`, `request` and `kind` are checked by `Header` before the frame decodes.
 struct RunsFrame {
     v: u64,
     request: String,
@@ -403,6 +405,7 @@ struct RunsFrame {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // `v`, `request` and `kind` are checked by `Header` before the frame decodes.
 struct ConversationsFrame {
     v: u64,
     request: String,
@@ -412,6 +415,7 @@ struct ConversationsFrame {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // `v`, `request` and `kind` are checked by `Header` before the frame decodes.
 struct ChangedFrame {
     v: u64,
     request: String,
@@ -423,6 +427,7 @@ struct ChangedFrame {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // `v`, `request` and `kind` are checked by `Header` before the frame decodes.
 struct PinnedFrame {
     v: u64,
     request: String,
@@ -431,6 +436,7 @@ struct PinnedFrame {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // `v`, `request` and `kind` are checked by `Header` before the frame decodes.
 struct BusyFrame {
     v: u64,
     request: String,
@@ -438,6 +444,7 @@ struct BusyFrame {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // `v`, `request` and `kind` are checked by `Header` before the frame decodes.
 struct UnavailableFrame {
     v: u64,
     request: String,
@@ -449,6 +456,7 @@ struct UnavailableFrame {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // `v`, `request` and `kind` are checked by `Header` before the frame decodes.
 struct ReleasedFrame {
     v: u64,
     request: String,
@@ -458,6 +466,7 @@ struct ReleasedFrame {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // `v`, `request` and `kind` are checked by `Header` before the frame decodes.
 struct StaleFrame {
     v: u64,
     request: String,

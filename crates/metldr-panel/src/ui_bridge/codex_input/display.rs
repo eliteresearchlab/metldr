@@ -123,7 +123,7 @@ impl UiCodexRequest {
     #[wasm_bindgen(getter)]
     pub fn item(&self) -> String {
         match &self.pending.prompt {
-            CodexInputPrompt::Questions { item, .. } => crate::pi_ui::display_plain(item),
+            CodexInputPrompt::Questions { item, .. } => crate::display::plain(item),
             _ => String::new(),
         }
     }
@@ -132,7 +132,7 @@ impl UiCodexRequest {
         match &self.pending.prompt {
             CodexInputPrompt::McpForm { server, .. }
             | CodexInputPrompt::McpToolApproval { server, .. } => {
-                crate::pi_ui::display_plain(server)
+                crate::display::plain(server)
             }
             _ => String::new(),
         }
@@ -142,7 +142,7 @@ impl UiCodexRequest {
         match &self.pending.prompt {
             CodexInputPrompt::McpForm { message, .. }
             | CodexInputPrompt::McpToolApproval { message, .. } => {
-                crate::pi_ui::display_plain(message)
+                crate::display::plain(message)
             }
             _ => String::new(),
         }
@@ -150,7 +150,7 @@ impl UiCodexRequest {
     #[wasm_bindgen(getter)]
     pub fn review(&self) -> String {
         match &self.pending.prompt {
-            CodexInputPrompt::McpToolApproval { review, .. } => crate::pi_ui::display_plain(review),
+            CodexInputPrompt::McpToolApproval { review, .. } => crate::display::plain(review),
             _ => String::new(),
         }
     }
@@ -198,11 +198,11 @@ impl UiCodexQuestion {
     }
     #[wasm_bindgen(getter)]
     pub fn header(&self) -> String {
-        crate::pi_ui::display_plain(&self.header)
+        crate::display::plain(&self.header)
     }
     #[wasm_bindgen(getter)]
     pub fn text(&self) -> String {
-        crate::pi_ui::display_plain(&self.text)
+        crate::display::plain(&self.text)
     }
     #[wasm_bindgen(getter)]
     pub fn other(&self) -> bool {
@@ -222,15 +222,15 @@ impl From<CodexQuestionOption> for UiCodexOption {
     fn from(v: CodexQuestionOption) -> Self {
         Self {
             value: v.label.clone(),
-            label: crate::pi_ui::display_plain(&v.label),
-            description: crate::pi_ui::display_plain(&v.description),
+            label: crate::display::plain(&v.label),
+            description: crate::display::plain(&v.description),
         }
     }
 }
 impl UiCodexOption {
     fn choice(value: String) -> Self {
         Self {
-            label: crate::pi_ui::display_plain(&value),
+            label: crate::display::plain(&value),
             value,
             description: String::new(),
         }
@@ -268,7 +268,7 @@ impl From<CodexFormField> for UiCodexField {
             title: v.title,
             description: v
                 .description
-                .map(|s| crate::pi_ui::display_plain(&s))
+                .map(|s| crate::display::plain(&s))
                 .unwrap_or_default(),
             min_chars: v.min_chars,
             max_chars: v.max_chars,
@@ -285,7 +285,7 @@ impl UiCodexField {
     }
     #[wasm_bindgen(getter)]
     pub fn title(&self) -> String {
-        crate::pi_ui::display_plain(&self.title)
+        crate::display::plain(&self.title)
     }
     #[wasm_bindgen(getter)]
     pub fn description(&self) -> String {

@@ -70,7 +70,7 @@ check-conversation:
 
 check-panel:
 	cargo test --locked --manifest-path crates/metldr-answer-codec/Cargo.toml
-	cargo test --locked --manifest-path crates/metldr-panel/Cargo.toml
+	cargo test --locked --manifest-path crates/metldr-panel/Cargo.toml --features rune-ui
 
 WASM_BINDGEN ?= wasm-bindgen
 RUNE_HOST_TARGET_DIR ?= target/wasm/metldr-rune-host

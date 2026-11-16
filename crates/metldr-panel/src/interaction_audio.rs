@@ -1,44 +1,20 @@
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use js_sys::{Math, RegExp};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 use web_sys::{
     AudioBuffer, AudioContext, AudioContextState, AudioNode, AudioScheduledSourceNode,
-    BiquadFilterNode, BiquadFilterType, Document, Element, Event, GainNode,
-    OscillatorType, PageTransitionEvent, Window,
+    BiquadFilterNode, BiquadFilterType, GainNode,
+    OscillatorType,
 };
 
-use crate::preferences::UiPreferences;
 
-const SELECTOR: &str = "button,a[href],input:not([type='hidden']),select,textarea,summary,[role='button'],[role='checkbox'],[role='menuitem'],[role='menuitemcheckbox'],[role='menuitemradio'],[role='option'],[role='radio'],[role='switch'],[role='tab']";
 const SILENCE: f64 = 0.0001;
 
 thread_local! {
-    static LISTENER: RefCell<Option<Listener>> = const { RefCell::new(None) };
     static AUDIO: RefCell<AudioState> = const { RefCell::new(AudioState { context: None, master: None, noise: None, down_at: f64::NEG_INFINITY, played_at: f64::NEG_INFINITY }) };
     static RELEASE_LABEL: RegExp = RegExp::new("close|dismiss|remove|delete|collapse|cancel|clear", "i");
     static PULSE_LABEL: RegExp = RegExp::new("send|save|submit|calculate|create|add|upgrade|replay", "i");
-}
-
-struct Listener {
-    document: Document,
-    window: Window,
-    click: Closure<dyn FnMut(Event)>,
-    pagehide: Closure<dyn FnMut(Event)>,
-}
-
-impl Drop for Listener {
-    fn drop(&mut self) {
-        let _ = self.document.remove_event_listener_with_callback_and_bool(
-            "click",
-            self.click.as_ref().unchecked_ref(),
-            true,
-        );
-        let _ = self.window.remove_event_listener_with_callback(
-            "pagehide",
-            self.pagehide.as_ref().unchecked_ref(),
-        );
-    }
 }
 
 struct AudioState {
@@ -178,88 +154,6 @@ const PULSE: [Layer; 1] = [Layer {
     gain: 0.5,
 }];
 
-pub(super) fn install(document: &Document, preferences: Rc<UiPreferences>) -> Result<(), JsValue> {
-    if LISTENER.with(|slot| slot.borrow().is_some()) {
-        return Ok(());
-    }
-    let window = document
-        .default_view()
-        .ok_or_else(|| JsValue::from_str("document has no default window"))?;
-    let click = Closure::wrap(Box::new(move |event: Event| {
-        if preferences
-            .snapshot()
-            .is_ok_and(|snapshot| snapshot.sounds_enabled())
-        {
-            let _ = on_click(event);
-        }
-    }) as Box<dyn FnMut(Event)>);
-    let mut cleanup_pending = false;
-    let cleanup_window = window.clone();
-    let pagehide = Closure::wrap(Box::new(move |event: Event| {
-        if event
-            .dyn_ref::<PageTransitionEvent>()
-            .is_some_and(PageTransitionEvent::persisted)
-        {
-            return;
-        }
-        if cleanup_pending {
-            return;
-        }
-        cleanup_pending = true;
-        let cleanup = Closure::once_into_js(|| {
-            LISTENER.with(|slot| drop(slot.borrow_mut().take()));
-        });
-        cleanup_window.queue_microtask(cleanup.unchecked_ref::<js_sys::Function>());
-    }) as Box<dyn FnMut(Event)>);
-    document.add_event_listener_with_callback_and_bool(
-        "click",
-        click.as_ref().unchecked_ref(),
-        true,
-    )?;
-    if let Err(error) =
-        window.add_event_listener_with_callback("pagehide", pagehide.as_ref().unchecked_ref())
-    {
-        let _ = document.remove_event_listener_with_callback_and_bool(
-            "click",
-            click.as_ref().unchecked_ref(),
-            true,
-        );
-        return Err(error);
-    }
-    LISTENER.with(|slot| {
-        *slot.borrow_mut() = Some(Listener {
-            document: document.clone(),
-            window,
-            click,
-            pagehide,
-        })
-    });
-    Ok(())
-}
-
-fn on_click(event: Event) -> Result<(), JsValue> {
-    let Some(target) = event
-        .target()
-        .and_then(|target| target.dyn_into::<Element>().ok())
-    else {
-        return Ok(());
-    };
-    #[cfg(feature = "rune-ui")]
-    if target.closest("[data-rune-a11y]")?.is_some() {
-        return Ok(());
-    }
-    let Some(control) = target.closest(SELECTOR)? else {
-        return Ok(());
-    };
-    if control.closest("[data-sound-silent]")?.is_some()
-        || control.matches(":disabled, [aria-disabled='true']")?
-    {
-        return Ok(());
-    }
-    let cue = cue_for(&control);
-    AUDIO.with(|audio| play(audio, cue))
-}
-
 #[cfg(feature = "rune-ui")]
 pub(super) fn rune(
     cue: Cue,
@@ -282,38 +176,6 @@ pub(super) fn rune(
         cue => cue,
     };
     AUDIO.with(|audio| play(audio, cue))
-}
-
-fn cue_for(element: &Element) -> Cue {
-    match element.get_attribute("data-sound").as_deref() {
-        Some("press") => return Cue::Press,
-        Some("tick") => return Cue::Tick,
-        Some("release") => return Cue::Release,
-        Some("page") => return Cue::Page,
-        Some("pulse") => return Cue::Pulse,
-        _ => {}
-    }
-    let label = format!(
-        "{} {}",
-        element.get_attribute("aria-label").unwrap_or_default(),
-        element.text_content().unwrap_or_default()
-    )
-    .trim()
-    .to_owned();
-    if RELEASE_LABEL.with(|pattern| pattern.test(&label)) {
-        return Cue::Release;
-    }
-    if element.matches("input[type='checkbox'], input[type='radio'], select, [role='checkbox'], [role='radio'], [role='switch'], [role='tab'], [aria-pressed]").unwrap_or(false) { return Cue::Tick; }
-    if element.matches("a[href]").unwrap_or(false) {
-        return Cue::Page;
-    }
-    if PULSE_LABEL.with(|pattern| pattern.test(&label)) {
-        return Cue::Pulse;
-    }
-    if element.matches("input, textarea").unwrap_or(false) {
-        return Cue::Tick;
-    }
-    Cue::Press
 }
 
 /// The context, the bus every sound plays into and this context's noise, made on first use.

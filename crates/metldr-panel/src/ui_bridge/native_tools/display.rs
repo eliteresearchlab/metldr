@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ag_ui::tools::ToolReport, model::ToolPreviewView, pi_ui::display_plain};
+use crate::{ag_ui::tools::ToolReport, model::ToolPreviewView};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -77,7 +77,7 @@ impl UiNativeTool {
         self.row
             .details
             .as_ref()
-            .map(|details| display_plain(&details.name))
+            .map(|details| crate::display::plain(&details.name))
     }
 
     #[wasm_bindgen(getter)]
@@ -186,7 +186,7 @@ impl From<ToolPreviewView> for UiToolPreview {
 impl UiToolPreview {
     #[wasm_bindgen(getter)]
     pub fn text(&self) -> String {
-        display_plain(&self.preview.text)
+        crate::display::plain(&self.preview.text)
     }
 
     #[wasm_bindgen(getter)]

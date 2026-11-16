@@ -41,7 +41,7 @@ pub async fn prepare_panel() -> Result<i32, JsValue> {
     }
     let options = object(&[
         ("tabId", id.into()),
-        ("path", "panel.html".into()),
+        ("path", "chat.html".into()),
         ("enabled", true.into()),
     ])?;
     await_call(&get(&chrome, "sidePanel")?, "setOptions", &[options]).await?;

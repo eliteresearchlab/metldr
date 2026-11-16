@@ -70,7 +70,7 @@ impl UiPiSnapshot {
             .ui
             .as_ref()
             .and_then(|ui| ui.title.as_deref())
-            .map(crate::pi_ui::display_plain)
+            .map(crate::display::plain)
     }
 
     #[wasm_bindgen(getter)]
@@ -88,7 +88,7 @@ impl UiPiSnapshot {
             .ui
             .as_ref()
             .and_then(|ui| ui.editor.as_ref())
-            .map(|editor| crate::pi_ui::display_plain(&editor.text))
+            .map(|editor| crate::display::plain(&editor.text))
     }
 
     #[wasm_bindgen(getter)]
@@ -142,7 +142,7 @@ impl UiPiSnapshot {
                     .filter_map(|status| {
                         status.text.as_deref().map(|text| UiPiStatus {
                             key: status.key.clone(),
-                            text: display_plain(text),
+                            text: crate::display::plain(text),
                         })
                     })
                     .collect()
@@ -219,13 +219,13 @@ impl UiPiRequest {
             | PiUiDialog::Input { title, .. }
             | PiUiDialog::Editor { title, .. } => title,
         };
-        crate::pi_ui::display_plain(title)
+        crate::display::plain(title)
     }
 
     #[wasm_bindgen(getter)]
     pub fn message(&self) -> String {
         match &self.pending.dialog {
-            PiUiDialog::Confirm { message, .. } => crate::pi_ui::display_plain(message),
+            PiUiDialog::Confirm { message, .. } => crate::display::plain(message),
             _ => String::new(),
         }
     }
@@ -235,7 +235,7 @@ impl UiPiRequest {
         match &self.pending.dialog {
             PiUiDialog::Input { placeholder, .. } => placeholder
                 .as_deref()
-                .map(crate::pi_ui::display_plain)
+                .map(crate::display::plain)
                 .unwrap_or_default(),
             _ => String::new(),
         }
@@ -260,7 +260,7 @@ impl UiPiRequest {
                 .iter()
                 .map(|value| UiPiOption {
                     value: value.clone(),
-                    label: crate::pi_ui::display_plain(value),
+                    label: crate::display::plain(value),
                 })
                 .collect(),
             _ => Vec::new(),
@@ -321,7 +321,7 @@ impl From<PiUiWidget> for UiPiWidget {
                 .lines
                 .unwrap_or_default()
                 .iter()
-                .map(|line| crate::pi_ui::display_plain(line))
+                .map(|line| crate::display::plain(line))
                 .collect(),
             above_editor: widget.placement == "aboveEditor",
         }
@@ -354,8 +354,8 @@ pub struct UiPiNotice {
 impl From<PiUiNotice> for UiPiNotice {
     fn from(notice: PiUiNotice) -> Self {
         Self {
-            level: crate::pi_ui::display_plain(&notice.level),
-            message: crate::pi_ui::display_plain(&notice.message),
+            level: crate::display::plain(&notice.level),
+            message: crate::display::plain(&notice.message),
         }
     }
 }
