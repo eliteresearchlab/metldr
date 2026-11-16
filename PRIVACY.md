@@ -1,6 +1,6 @@
 # Privacy
 
-Updated 13 November 2026.
+Updated 17 November 2026.
 
 ## Where content goes
 
@@ -11,7 +11,7 @@ Each route sends content only to the destination listed for it.
 | Chrome built-in AI and the bundled local models | Your computer |
 | Ollama | The Ollama server on your computer, at 127.0.0.1:11434. Ollama can also offer cloud models, so check the model you select. |
 | Provider connections (Messages, Responses, Google Interactions, Chat Completions) | The endpoint you configure. It receives task instructions, page content, browser observations and relevant prior answers. |
-| Installed agents (Codex, Pi, OpenCode) | The agent on your computer, which sends what it needs to the account and model you configured for it |
+| Installed agents (Codex, Claude Code, OpenCode, Pi) | The agent on your computer, which sends what it needs to the account and model you configured for it |
 | Dictionary lookups | The selected word goes to api.dictionaryapi.dev. Dictionary data files come from media.githubusercontent.com. |
 | Gmail features | The InboxSDK library runs on mail.google.com. It sends its own error reports and usage events to inboxsdk.com. |
 

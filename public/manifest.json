@@ -60,17 +60,10 @@
     {
       "resources": [
         "pageWorld.js",
-        "assets/*.js",
-        "assets/*.css",
-        "assets/*.wasm",
-        "assets/logo/*",
-        "welcome.html",
-        "sandbox.html",
-        "gpu-bridge.js",
-        "models/*"
+        "assets/logo/metldr-mark-small.svg"
       ],
       "matches": [
-        "<all_urls>"
+        "https://mail.google.com/*"
       ]
     }
   ],
