@@ -26,3 +26,11 @@ unwrap_used = "warn"
 undocumented_unsafe_blocks = "warn" # shared: deny; errors left
 let_underscore_must_use = "warn" # shared: deny; errors left
 disallowed_methods = "warn" # shared: deny; errors left
+
+[profile.dev]
+# Tests and debug builds keep line tables for backtraces; full debug info only slows codegen
+# and linking of this large crate.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
