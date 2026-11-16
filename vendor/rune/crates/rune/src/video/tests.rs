@@ -65,6 +65,7 @@ fn webm_video_fails_at_once() {
 }
 
 #[test]
+#[cfg_attr(not(target_os = "macos"), ignore = "no video backend here: opening fails at once and overwrites the state under test")]
 fn the_waker_hears_each_state_change_once() {
     let a = Player::audio("missing.m4a");
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -194,6 +195,7 @@ fn virtual_time_loops_rates_and_seeks() {
 }
 
 #[test]
+#[cfg_attr(not(target_os = "macos"), ignore = "no video backend here: opening fails at once and overwrites the state under test")]
 fn playing_after_the_end_restarts_from_zero() {
     let v = Video::file("missing.mp4");
     {

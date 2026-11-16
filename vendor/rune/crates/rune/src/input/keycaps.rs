@@ -326,8 +326,8 @@ mod tests {
         k.chord(0.8, &"cmd+space".parse().unwrap());
         k.key(0.9, &KeyEvent { key: Key::Escape, mods: Mods::default() });
         k.key(1.0, &KeyEvent { key: Key::Enter, mods: Mods::default() });
-        let cmd = if cfg!(target_os = "macos") { "⌘" } else { "⌃" };
-        assert_eq!(labels(&mut k, 1.0), [format!("{cmd}␣"), "⎋".into(), "↩".into()]);
+        // A shortcut's `cmd` is the Super key on every platform, drawn as ⌘.
+        assert_eq!(labels(&mut k, 1.0), ["⌘␣", "⎋", "↩"]);
     }
 
     #[test]

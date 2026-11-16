@@ -269,7 +269,9 @@ impl CompHost {
     fn timer_wake(&mut self) -> bool {
         let due = self.rt.wake_deadline().expect("a timer is armed");
         let now = self.rt.wall_start.unwrap().elapsed().as_secs_f64();
-        self.rt.wall_start = self.rt.wall_start.map(|t| t - Duration::from_secs_f64((due - now).max(0.0) + 1e-4));
+        // Well past the deadline: a poll that reads the previous frame's time must see it as due
+        // every run, not on a race of microseconds.
+        self.rt.wall_start = self.rt.wall_start.map(|t| t - Duration::from_secs_f64((due - now).max(0.0) + 1e-2));
         let rests = self.idle && !composing(self.comp.as_deref()) && self.presented.is_some();
         let frame = match rests.then(|| self.rt.resting_wake()).flatten() {
             Some(stale) => {
