@@ -4,7 +4,6 @@
 use crate::el::Checked;
 use std::hash::{Hash, Hasher};
 
-use serde_json::Value;
 
 use super::*;
 
@@ -919,6 +918,7 @@ impl<S: 'static> Runtime<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     /// Every container the mirror draws reaches the bridge marked as one, so the bridge
     /// needs no list that a new role could miss (a listbox and then a toolbar each reached the
