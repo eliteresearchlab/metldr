@@ -42,9 +42,9 @@ function explain(detail) {
   if (detail) console.error("metldr chat could not start", detail);
 }
 
-// The renderer's glue, its wasm and the fonts load while the graphics check runs, instead of
-// after it: the check waits on the GPU process, and the chat needs all three anyway. A failed
-// load reports itself only once the check has passed.
+// The renderer's glue and the fonts load while the graphics check runs, instead of after it:
+// the check waits on the GPU process, and the chat needs both anyway. A failed load reports
+// itself only once the check has passed.
 const glue = import(/* @vite-ignore */ new URL("/chat/rune/metldr_panel.js", location.href).href);
 const fonts = loadFonts();
 glue.catch(() => {});

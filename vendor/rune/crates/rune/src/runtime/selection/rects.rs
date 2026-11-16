@@ -65,15 +65,13 @@ impl<S: 'static> Runtime<S> {
             }
             return out;
         }
-        let wanted: rustc_hash::FxHashSet<&str> = ranges.iter().map(|(path, _, _)| path.as_str()).collect();
-        let mut found: rustc_hash::FxHashMap<&str, usize> = rustc_hash::FxHashMap::default();
+        let mut found: rustc_hash::FxHashMap<&str, usize> = ranges.iter().map(|(path, _, _)| (path.as_str(), usize::MAX)).collect();
         for (j, n) in nodes.iter().enumerate() {
-            if wanted.contains(n.path.as_str()) {
-                found.entry(n.path.as_str()).or_insert(j);
-            }
+            if let Some(slot) = found.get_mut(n.path.as_str()) { *slot = (*slot).min(j); }
         }
         for (path, a, b) in ranges {
-            if let Some(&j) = found.get(path.as_str()) { self.text_boxes(nodes, j, *a, *b, &mut out); }
+            let j = found[path.as_str()];
+            if j != usize::MAX { self.text_boxes(nodes, j, *a, *b, &mut out); }
         }
         out
     }
