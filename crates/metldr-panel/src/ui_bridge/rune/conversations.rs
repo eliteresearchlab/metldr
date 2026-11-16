@@ -793,13 +793,3 @@ fn pressable(
     };
     el.hover(p.hover).press(p.hover_2)
 }
-
-fn activate(key: &::rune::KeyEvent, tx: &mut Tx, action: impl FnOnce(&mut Tx)) -> bool {
-    if key.key != ::rune::Key::Enter && key.key != ::rune::Key::Text(" ".into()) {
-        return false;
-    }
-    if !tx.key_repeat() {
-        action(tx);
-    }
-    true
-}
