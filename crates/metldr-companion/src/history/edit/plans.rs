@@ -1,7 +1,7 @@
 use super::{Edit, Execution, record, storage};
 use crate::{
     Result,
-    history::schema::{PLAN_GRANTS, Record, TASK_PLANS, encode},
+    history::schema::{Record, TASK_PLANS, encode},
     model::valid_request_id,
 };
 use serde::{Deserialize, Serialize};
@@ -25,23 +25,6 @@ pub(crate) enum PlanState {
     Proposed,
     Approved,
     Declined,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) enum FutureProfile {}
-
-#[allow(dead_code)]
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct PlanGrant {
-    pub run: String,
-    pub browser_session: String,
-    pub target: String,
-    pub plan_revision: u32,
-    pub expiry: u64,
-    // B4.1 sets the profile and grants then require it.
-    pub profile: Option<FutureProfile>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -157,40 +140,6 @@ impl Edit<'_> {
             Some(PlanState::Approved) => Ok(()),
             None => Err("call propose_task_plan first".into()),
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn put_plan_grant(
-        &mut self,
-        execution: &Execution,
-        grant: &PlanGrant,
-    ) -> Result<()> {
-        let plan = self.task_plan(execution)?.ok_or(PlanError::Invalid)?;
-        if grant.run != execution.run()
-            || grant.plan_revision != plan.revision
-            || plan.state != PlanState::Approved
-            || grant.expiry == 0
-            || grant.browser_session.is_empty()
-            || grant.browser_session.len() > 128
-            || grant.target.is_empty()
-            || grant.target.len() > 128
-        {
-            return Err(PlanError::Invalid.into());
-        }
-        storage(|| {
-            self.write.open_table(PLAN_GRANTS)?.insert(
-                execution.run(),
-                encode(&Record {
-                    conversation: execution.conversation().to_owned(),
-                    revision: u64::from(grant.plan_revision),
-                    value: grant,
-                })?
-                .as_slice(),
-            )?;
-            Ok(())
-        })?;
-        self.changed = true;
-        Ok(())
     }
 
     fn save_plan(&mut self, execution: &Execution, plan: &TaskPlan) -> Result<()> {

@@ -4,7 +4,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, path::PathBuf};
+use std::path::PathBuf;
 
 pub(super) fn digest(value: &impl Serialize) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))
@@ -393,11 +393,3 @@ mod text_checks {
     }
 }
 
-pub(super) fn legacy_launches(state: &Store) -> BTreeMap<String, Launch> {
-    state
-        .view
-        .runs
-        .iter()
-        .map(|r| (r.id.clone(), Launch::LegacyUnspecified))
-        .collect()
-}

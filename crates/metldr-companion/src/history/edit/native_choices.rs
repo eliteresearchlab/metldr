@@ -378,26 +378,6 @@ pub(in crate::history) fn backfill(write: &WriteTransaction, profile: &Profile) 
     Ok(())
 }
 
-pub(in crate::history) fn validate_index(
-    write: &WriteTransaction,
-    profile: &Profile,
-) -> Result<()> {
-    let count = visit_index(write, profile, |key, head, id| {
-        if write
-            .open_table(NATIVE_CHOICES)?
-            .get((key, head))?
-            .is_none_or(|value| value.value() != id)
-        {
-            return Err("native choices upgrade index is absent or changed".into());
-        }
-        Ok(())
-    })?;
-    if write.open_table(NATIVE_CHOICES)?.len()? != count {
-        return Err("native choices upgrade index has unowned entries".into());
-    }
-    Ok(())
-}
-
 fn visit_index(
     write: &WriteTransaction,
     profile: &Profile,

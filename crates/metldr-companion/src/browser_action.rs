@@ -510,40 +510,6 @@ fn validate_outcome(outcome: &Outcome, proposal: &Proposal) -> Result<()> {
     }
 }
 
-pub(super) fn reject_button_actions(
-    actions: &std::collections::BTreeMap<String, Action>,
-) -> Result<()> {
-    if actions.values().any(|action| {
-        matches!(&action.proposal.intent, Intent::ActivateButton { .. })
-            || matches!(
-                &action.state,
-                Phase::Settled {
-                    outcome: Outcome::ButtonClickObserved
-                }
-            )
-    }) {
-        return Err("legacy browser store contains button action data".into());
-    }
-    Ok(())
-}
-
-pub(super) fn reject_selection_actions(
-    actions: &std::collections::BTreeMap<String, Action>,
-) -> Result<()> {
-    if actions.values().any(|action| {
-        matches!(&action.proposal.intent, Intent::SelectOption { .. })
-            || matches!(
-                &action.state,
-                Phase::Settled {
-                    outcome: Outcome::SelectionObserved { .. }
-                }
-            )
-    }) {
-        return Err("legacy browser store contains selection action data".into());
-    }
-    Ok(())
-}
-
 pub(super) fn reject_scroll_actions(
     actions: &std::collections::BTreeMap<String, Action>,
 ) -> Result<()> {
@@ -560,30 +526,6 @@ pub(super) fn reject_scroll_action(action: &Action) -> Result<()> {
         )
     {
         return Err("legacy browser store contains scroll action data".into());
-    }
-    Ok(())
-}
-
-pub(super) fn reject_control_actions(
-    actions: &std::collections::BTreeMap<String, Action>,
-) -> Result<()> {
-    actions.values().try_for_each(reject_control_action)
-}
-
-pub(super) fn reject_control_action(action: &Action) -> Result<()> {
-    if matches!(
-        &action.proposal.intent,
-        Intent::SetNativeControl { .. } | Intent::Secret { .. } | Intent::PressKey { .. }
-    ) || matches!(
-        &action.state,
-        Phase::Settled {
-            outcome: Outcome::ControlObserved { .. }
-                | Outcome::SecretEntered { .. }
-                | Outcome::KeyPressObserved
-        }
-    )
-    {
-        return Err("legacy browser store contains native control action data".into());
     }
     Ok(())
 }

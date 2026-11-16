@@ -4,7 +4,7 @@ use crate::{
     agent_model::Launch,
     model::{Run, Status},
 };
-use redb::{ReadableDatabase, ReadableTable, ReadableTableMetadata};
+use redb::{ReadableDatabase, ReadableTableMetadata};
 use std::{
     fs,
     path::PathBuf,
@@ -598,101 +598,6 @@ fn generated_artifacts_revise_complete_interrupt_and_reopen() -> Result<()> {
             completion: ArtifactCompletion::Interrupted,
         }
     );
-    Ok(())
-}
-
-#[test]
-fn format_sixteen_migrates_tables_and_refuses_generated_records() -> Result<()> {
-    use metldr_conversation::Table;
-    use serde::Serialize;
-
-    #[derive(Serialize)]
-    struct LegacyArtifact {
-        id: metldr_conversation::ArtifactId,
-        run: String,
-        call: String,
-        surface_id: String,
-        table: Table,
-    }
-
-    fn mark_format_sixteen(path: &std::path::Path) -> Result<()> {
-        let db = redb::Database::open(path)?;
-        let write = db.begin_write()?;
-        let mut meta = write.open_table(META)?;
-        let mut profile: Profile = decode(meta.get("profile")?.unwrap().value())?;
-        profile.format = 16;
-        meta.insert("profile", encode(&profile)?.as_slice())?;
-        drop(meta);
-        write.delete_table(super::summary::RUN_HEADERS)?;
-        write.delete_table(super::summary::SOURCE_HEADERS)?;
-        write.commit()?;
-        Ok(())
-    }
-
-    let directory = Directory::new();
-    let disk = crate::store::Disk::lock(directory.0.clone())?;
-    let path = directory.0.join("history.redb");
-    let mut history = History::import_new(&path, &empty_snapshot()?, disk.lease())?;
-    let scope = history.selection()?;
-    let run_id = response_run(&mut history, &scope, "migrate:table", 'd')?;
-    let table = Table::new(
-        "Saved".into(),
-        vec!["A".into()],
-        vec![vec!["B".into()]],
-        "source".into(),
-    )?;
-    let id = history.edit(|edit| {
-        edit.current_execution(&scope, &run_id)
-            .and_then(|execution| {
-                edit.accept_table(&execution, &run_id, "call:table", "surface", table.clone())
-            })
-    })?;
-    let saved = history.edit(|edit| edit.artifact_detail(&scope, id.as_str()))?;
-    drop(history);
-    {
-        let db = redb::Database::open(&path)?;
-        let write = db.begin_write()?;
-        write.open_table(ARTIFACTS)?.insert(
-            id.as_str(),
-            encode(&Record {
-                conversation: scope.conversation.clone(),
-                revision: 1,
-                value: LegacyArtifact {
-                    id: id.clone(),
-                    run: run_id.clone(),
-                    call: "call:table".into(),
-                    surface_id: "surface".into(),
-                    table,
-                },
-            })?
-            .as_slice(),
-        )?;
-        write.commit()?;
-    }
-    mark_format_sixteen(&path)?;
-    let mut history = History::open(&path, disk.lease())?;
-    let migrated = history.edit(|edit| edit.artifact_detail(&scope, id.as_str()))?;
-    assert_eq!(migrated.value, saved.value);
-    assert_eq!(migrated.revision, saved.revision);
-    assert_eq!(profile(&history)?.format, FORMAT);
-    drop(history);
-
-    let generated_path = directory.0.join("generated.redb");
-    let mut history = History::import_new(&generated_path, &empty_snapshot()?, disk.lease())?;
-    let scope = history.selection()?;
-    let run_id = response_run(&mut history, &scope, "migrate:generated", 'e')?;
-    let source = metldr_conversation::GeneratedAnswer::default().updated(
-        metldr_conversation::GeneratedUpdate::Html("<p>generated".into()),
-    )?;
-    history.edit(|edit| {
-        edit.current_execution(&scope, &run_id)
-            .and_then(|execution| {
-                edit.preview_generated(&execution, &run_id, "call:generated", "surface", source)
-            })
-    })?;
-    drop(history);
-    mark_format_sixteen(&generated_path)?;
-    assert!(History::open(&generated_path, disk.lease()).is_err());
     Ok(())
 }
 

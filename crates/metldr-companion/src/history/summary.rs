@@ -123,43 +123,6 @@ pub(super) fn source(write: &WriteTransaction, conversation: &str, id: &str) -> 
     Ok(known)
 }
 
-pub(super) fn backfill(write: &WriteTransaction, profile: &Profile) -> Result<()> {
-    if write.open_table(RUN_HEADERS)?.len()? != 0 || write.open_table(SOURCE_HEADERS)?.len()? != 0 {
-        return Err("history headers are not empty".into());
-    }
-    for row in write.open_table(RUNS)?.iter()? {
-        let (id, bytes) = row?;
-        let record: Record<Run> = decode(bytes.value())?;
-        valid_id(profile, id.value())?;
-        super::schema::conversation_number(profile, &record.conversation)?;
-        if record.value.id != id.value() || record.revision == 0 {
-            return Err("saved run identity or revision differs".into());
-        }
-        record
-            .value
-            .validate(|candidate| valid_id(profile, candidate).is_ok())?;
-        let fields = run_fields(&Record {
-            conversation: record.conversation,
-            revision: record.revision,
-            value: &record.value,
-        });
-        write
-            .open_table(RUN_HEADERS)?
-            .insert(id.value(), stored_run_fields(&fields))?;
-    }
-    for row in write.open_table(SOURCES)?.iter()? {
-        let (id, bytes) = row?;
-        let record: Record<Provenance> = decode(bytes.value())?;
-        valid_id(profile, id.value())?;
-        super::schema::conversation_number(profile, &record.conversation)?;
-        let fields = source_fields(id.value(), &record)?;
-        write
-            .open_table(SOURCE_HEADERS)?
-            .insert(id.value(), fields)?;
-    }
-    Ok(())
-}
-
 pub(super) fn audit_run(
     headers: &impl ReadableTable<&'static str, RunFields<'static>>,
     id: &str,

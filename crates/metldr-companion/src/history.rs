@@ -20,7 +20,6 @@ mod import;
 mod migrate;
 mod schema;
 mod summary;
-mod upgrade;
 
 #[cfg(test)]
 pub(crate) mod browser_checks;
@@ -30,8 +29,6 @@ mod browser_owner_checks;
 mod checks;
 #[cfg(test)]
 mod conversation_checks;
-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
-mod cutover_checks;
 #[cfg(test)]
 mod edit_checks;
 #[cfg(test)]
@@ -56,8 +53,6 @@ mod read_checks;
 mod recovery_checks;
 #[cfg(test)]
 mod settings_checks;
-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
-mod startup_checks;
 
 pub(crate) fn is_failure(error: &(dyn std::error::Error + Send + Sync + 'static)) -> bool {
     error.downcast_ref::<edit::Failure>().is_some()
@@ -96,11 +91,17 @@ impl History {
 
     fn open(path: &Path, lease: Arc<File>) -> Result<Self> {
         let history = Self::file(path, false, lease)?;
-        upgrade::run(&history.db)?;
         let read = history.db.begin_read()?;
         let meta = read.open_table(schema::META)?;
         let bytes = meta.get("profile")?.ok_or("history profile is absent")?;
         let profile: schema::Profile = schema::decode(bytes.value())?;
+        if profile.format != schema::FORMAT {
+            return Err(format!(
+                "history format {} is from an older companion; delete history.redb to start fresh",
+                profile.format
+            )
+            .into());
+        }
         profile.validate()?;
         schema::require_base_tables(&read)?;
         summary::require(&read)?;
