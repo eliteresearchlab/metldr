@@ -107,6 +107,7 @@ fn control_role(role: &str) -> Option<&'static str> {
         "tab" => "tab",
         "option" => "option",
         "treeitem" => "treeitem",
+        "combobox" => "combobox",
         _ => return None,
     })
 }
@@ -124,6 +125,9 @@ pub(crate) struct RangeSemantics {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct InputSemantics {
+    /// Set for an input that opens a list of suggestions (`role("combobox")`): whether it is open
+    /// and the kind of popup it opens.
+    combobox: Option<(bool, &'static str)>,
     name: String,
     placeholder: String,
     description: String,
@@ -274,6 +278,11 @@ impl A11yItem {
             }
             A11yKind::Input(input) => {
                 o.field("k", "input");
+                if let Some((expanded, popup)) = input.combobox {
+                    o.field("role", "combobox");
+                    o.field("x", &expanded);
+                    o.field("popup", popup);
+                }
                 o.field("name", &input.name);
                 o.field("placeholder", &input.placeholder);
                 o.field("description", &input.description);
@@ -616,7 +625,8 @@ impl RuntimeCore {
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
                     ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
-                    _ if n.key.as_deref().is_some_and(|key| named.contains(key)) => Some(A11yKind::Box),
+                    // A control another element names is already an element to point at.
+                    _ if n.key.as_deref().is_some_and(|key| named.contains(key)) && n.role != "button" && control_role(n.role).is_none() => Some(A11yKind::Box),
                     _ => None,
                 }
             } else {
@@ -659,6 +669,7 @@ impl RuntimeCore {
                         .filter(|h| name.is_none_or(|name| !h.trim().starts_with(name.trim())));
                     out.push(A11yItem {
                         kind: A11yKind::Input(Box::new(InputSemantics {
+                            combobox: (n.role == "combobox").then(|| (n.a11y.expanded.unwrap_or(false), n.a11y.has_popup.unwrap_or("listbox"))),
                             name: name.unwrap_or_default().to_owned(),
                             placeholder: input.placeholder.clone(),
                             description: more

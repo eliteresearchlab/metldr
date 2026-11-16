@@ -301,7 +301,6 @@ export function syncA11y(h, json, revision) {
         if (!el) {
             el = document.createElement(tag);
             if (item.k === 'input') {
-                el.setAttribute('role', 'textbox');
                 el.tabIndex = -1;
                 el.addEventListener('focus', event => activateA11yInput(h, el, event));
                 el.addEventListener('click', event => {
@@ -349,6 +348,7 @@ export function syncA11y(h, json, revision) {
         }
         if (item.k === 'input') {
             el._item = item;
+            setComboboxSemantics(el, item);
             setOptionalAttribute(el, 'aria-label', item.name);
             setOptionalAttribute(el, 'aria-description', item.description);
             setOptionalAttribute(el, 'aria-placeholder', item.placeholder);
@@ -439,6 +439,18 @@ function setOptionalAttribute(el, name, value) {
     else if (el.hasAttribute(name)) el.removeAttribute(name);
 }
 
+// A field is a textbox, or a combobox that says whether its list is open (aria-expanded) and,
+// through the relations every item carries, which list it controls and which option is active.
+// The focused field is the native one, so it carries the same words as its mirror element.
+function setComboboxSemantics(el, item) {
+    const combobox = item?.role === 'combobox';
+    setOptionalAttribute(el, 'role', combobox ? 'combobox' : 'textbox');
+    setOptionalAttribute(el, 'aria-expanded', combobox ? String(item.x === true) : undefined);
+    setOptionalAttribute(el, 'aria-haspopup', combobox ? item.popup : undefined);
+    setOptionalAttribute(el, 'aria-controls', item?.ctl ? mirrorId(item.ctl) : undefined);
+    setOptionalAttribute(el, 'aria-activedescendant', item?.ad ? mirrorId(item.ad) : undefined);
+}
+
 function setA11yInputHidden(el, hidden) {
     el.inert = hidden;
     if (hidden) el.setAttribute('aria-hidden', 'true');
@@ -463,6 +475,7 @@ function syncFieldSemantics(h, requestFocus) {
     h.restoreFocus = false;
     if (target) {
         target.setAttribute('aria-label', item.name);
+        setComboboxSemantics(target, item);
         setOptionalAttribute(target, 'aria-description', item.description);
         setOptionalAttribute(target, 'placeholder', item.placeholder);
         target.setAttribute('aria-multiline', String(item.multiline));
@@ -485,6 +498,7 @@ function syncFieldSemantics(h, requestFocus) {
         field.inert = true;
         field.setAttribute('aria-hidden', 'true');
         field.setAttribute('aria-label', field === h.password ? 'Password input' : 'Text input');
+        setComboboxSemantics(field, undefined);
         for (const name of ['aria-description', 'placeholder', 'aria-multiline', 'aria-invalid', 'aria-disabled']) field.removeAttribute(name);
         field.readOnly = false;
         field.disabled = false;
