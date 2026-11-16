@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! Runs the installed Claude Code CLI as a metldr agent over stream-json, with only the MCP servers
+//! metldr names and every permission prompt routed back to metldr.
 
 use serde::Deserialize;
 use serde_json::{Value, json};

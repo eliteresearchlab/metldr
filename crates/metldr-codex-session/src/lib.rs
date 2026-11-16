@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! Runs an installed Codex app server over stdio with the caller's own environment, configuration
+//! and authentication.
 
 mod approval;
 mod event;

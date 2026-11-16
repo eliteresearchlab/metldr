@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! A Chat Completions client: streams plain text and keeps private assistant history for browser
+//! function calls. The app owns credentials, permissions, approvals and tool execution.
 
 #[cfg(test)]
 mod checks;

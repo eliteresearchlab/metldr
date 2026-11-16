@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! Runs an installed OpenCode executable with `acp` over stdio; OpenCode owns its tools, model
+//! requests and sessions.
 
 mod mcp;
 mod permission;

@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! An OpenAI Responses client: streams text, browser tool calls, tables and generated answer
+//! source, keeping request history and finalized reasoning.
 
 #[cfg(test)]
 mod checks;

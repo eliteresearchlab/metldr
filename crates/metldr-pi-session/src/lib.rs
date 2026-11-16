@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! Runs an installed Pi executable in RPC mode over stdio; the caller picks workspace, provider,
+//! model and session directory through `PiProfile`.
 
 mod mcp;
 mod process;
