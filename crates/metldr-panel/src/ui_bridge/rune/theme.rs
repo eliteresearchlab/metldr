@@ -42,6 +42,8 @@ pub(super) struct Palette {
     /// A molded theme's gray LCD: its glass from top to bottom and the dark print on it.
     pub(super) glass: [Color; 3],
     pub(super) print: Color,
+    /// The dim laid over the page behind a modal sheet.
+    pub(super) scrim: Color,
     /// A tooltip's chip and its text.
     pub(super) tooltip: Color,
     pub(super) tooltip_ink: Color,
@@ -302,6 +304,7 @@ impl Palette {
             on_accent: if accent.0 < 0.8 { oklch(0.98, 0.0, 0.0) } else { oklch(0.18, 0.0, 0.0) },
             glass: ["#b6b7b1", "#c8c9c3", "#c2c3bd"].map(|hex| ::rune::color::hex(hex).unwrap_or(Color::WHITE)),
             print: ::rune::color::hex("#141413").unwrap_or(Color::BLACK),
+            scrim: oklch(0.0, 0.0, 0.0).alpha(0.35),
             tooltip: c(ramp.tooltip),
             tooltip_ink: c(ramp.tooltip_ink),
         }
@@ -485,6 +488,31 @@ pub(super) fn neon_key(el: El, accent: Color) -> El {
 
 /// A molded key standing on a hard 2 point `lip`: it sinks onto the lip while pressed and sounds
 /// its down-stroke as the pointer lands (deeper for the `primary` key), its activation the return.
+/// The lip under a key in `key`'s colour: the same colour, much darker.
+pub(super) fn key_lip(key: Color) -> Color {
+    key.mix(Color::BLACK, 0.45)
+}
+
+/// A key colour as its swatch draws it: the OKLCH colour brought into sRGB by chroma.
+pub(super) fn swatch(lch: Lch) -> Color {
+    let (l, c, h) = in_srgb(lch);
+    oklch(l, c, h)
+}
+
+/// The ground a theme draws under its canvas: its kind (dots, scanlines, grain), opacity and
+/// colour, or none on a flat theme.
+pub(super) fn ground_tone(p: &Palette) -> Option<(f32, f32, Color)> {
+    if p.molded() {
+        Some((0.0, 0.14, Color::BLACK))
+    } else if p.neon() {
+        Some((1.0, 0.07, p.accent))
+    } else if p.retro() {
+        Some((2.0, 0.06, p.ink))
+    } else {
+        None
+    }
+}
+
 pub(super) fn on_lip(el: El, lip: Color, primary: bool) -> El {
     el.shadow(2.0, 0.0, lip)
         .press_travel(2.0)
@@ -555,3 +583,44 @@ pub(super) fn led(color: Color, p: &Palette) -> El {
     if p.crafted() { lamp.shadow(0.0, 6.0, color.alpha(0.6)) } else { lamp }
 }
 
+
+#[cfg(test)]
+mod colour_source {
+    //! Colours come from this file. A component that writes a colour of its own drew Rune's
+    //! default white on a light theme before (the composer's text), so the check reads every
+    //! Rune UI source and fails on a colour written outside it.
+    const LITERALS: [&str; 7] =
+        ["oklch(", "Color::WHITE", "Color::BLACK", "color::hex(", "Color::rgb", "Color::from_rgb", "Color { r"];
+
+    fn sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                sources(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") && path.file_name().is_some_and(|n| n != "theme.rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn every_colour_comes_from_the_theme() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui_bridge/rune");
+        let mut files = Vec::new();
+        sources(&dir, &mut files);
+        let mut found = Vec::new();
+        for file in files {
+            for (n, line) in std::fs::read_to_string(&file).unwrap().lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                if LITERALS.iter().any(|literal| code.contains(literal)) {
+                    found.push(format!("{}:{}: {}", file.strip_prefix(&dir).unwrap().display(), n + 1, line.trim()));
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "a colour written outside ui_bridge/rune/theme.rs; add a Palette role or a theme.rs function and read it from there:\n{}",
+            found.join("\n")
+        );
+    }
+}

@@ -1968,7 +1968,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 Default::default(),
                 |state: &mut State| state.conversations.dismiss(),
             );
-            metldr_ui::dialog::backdrop(saved, ::rune::oklch(0.0, 0.0, 0.0).alpha(0.35))
+            metldr_ui::dialog::backdrop(saved, palette.scrim)
         }))
         .children(theme::tooltip(state))
 }
