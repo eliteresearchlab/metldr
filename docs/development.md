@@ -35,7 +35,7 @@ Cargo uses one target directory for the whole repository, set in `.cargo/config.
 
 `sccache` is optional. When it is installed, `scripts/build-rust.mjs` uses it for every build, so builds started from npm, make or a shell share one compiler cache. Cargo records the compiler wrapper, so mixing builds with and without it would rebuild every crate.
 
-Run `npm run build:fast` while editing and checking. It builds the wasm crates with the `fast` profile: thin LTO, 16 codegen units and incremental compilation. After a one line Rust change it rebuilds in about 22 s instead of about 125 s. `npm run build` keeps the `release` profile, which packaged and measured builds use. A wasm module whose bytes did not change keeps its bindings, so the binding generator runs only for changed modules.
+Run `npm run build:fast` while editing and checking. It builds the wasm crates with the `fast` profile: no LTO, 16 codegen units and incremental compilation. After a one line Rust change it rebuilds in about 11 s instead of about 125 s, so use it before browser checks too. `npm run build` keeps the `release` profile, which packaged and measured builds use. A wasm module whose bytes did not change keeps its bindings, so the binding generator runs only for changed modules.
 
 `make check` type-checks the Cargo roots under `crates/` and the Rune frontend prototype with `cargo check`, without linking or running tests. Run it before the `check-*` targets when a change touches a shared crate.
 

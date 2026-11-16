@@ -23,10 +23,10 @@ strip = true
 panic = "abort"
 
 [profile.fast]
-# Edit and check builds (`METLDR_PROFILE=fast`): the release profile with thin LTO, parallel
+# Edit and check builds (`METLDR_PROFILE=fast`): the release profile without LTO, with parallel
 # codegen and incremental compilation. Packaged and measured builds keep `release`.
 inherits = "release"
-lto = "thin"
+lto = false
 codegen-units = 16
 incremental = true
 
