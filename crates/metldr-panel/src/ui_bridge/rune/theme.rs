@@ -501,3 +501,4 @@ pub(super) fn led(color: Color, p: &Palette) -> El {
     let lamp = ::rune::el().size(6.0, 6.0).radius(3.0).fill(color).a11y_hidden();
     if p.crafted() { lamp.shadow(0.0, 6.0, color.alpha(0.6)) } else { lamp }
 }
+

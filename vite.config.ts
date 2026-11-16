@@ -12,7 +12,9 @@ const privateFiles = [
   '**/.tmp/**', '**/prototypes/**', '**/docs/**',
   '**/{AGENTS,CLAUDE,PRODUCT,DESIGN}.md', '**/crates/**/target/**', '**/target/**',
 ]
-const welcomeGenerator = resolve(process.env.CARGO_TARGET_DIR || 'target', 'release',
+// build-rust.mjs builds the generator with the same profile as the wasm (METLDR_PROFILE).
+const welcomeGenerator = resolve(process.env.CARGO_TARGET_DIR || 'target',
+  process.env.METLDR_PROFILE === 'fast' ? 'fast' : 'release',
   process.platform === 'win32' ? 'welcome-guide.exe' : 'welcome-guide')
 
 const rustWelcome = (): Plugin => ({
