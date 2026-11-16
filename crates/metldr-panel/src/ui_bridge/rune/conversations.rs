@@ -702,7 +702,13 @@ pub(super) fn entry(
         .press(p.press)
         .label(label);
     // A toolbar entry stays on the arrows' path while unavailable (Older messages at the start).
-    let props = metldr_ui::button::Props { disabled: !enabled, focusable_when_disabled: true };
+    page_button(el, enabled, true, action)
+}
+
+/// A button that turns a page of these screens: the page sound, then `action`; unavailable at
+/// half opacity, still focusable when `focusable_when_disabled`.
+fn page_button(el: El, enabled: bool, focusable_when_disabled: bool, action: impl Fn(&mut State, &mut Tx) + 'static) -> El {
+    let props = metldr_ui::button::Props { disabled: !enabled, focusable_when_disabled };
     let el = metldr_ui::button::button(el, props, move |state: &mut State, tx| {
         state.sound(crate::interaction_audio::Cue::Page);
         action(state, tx)
@@ -777,14 +783,9 @@ fn pressable(
     focusable_when_disabled: bool,
     action: Press,
 ) -> El {
-    let el = super::theme::keycap(el, p).label(label);
-    let props = metldr_ui::button::Props { disabled: !enabled, focusable_when_disabled };
-    let el = metldr_ui::button::button(el, props, move |state: &mut State, tx| {
-        state.sound(crate::interaction_audio::Cue::Page);
-        action(state, tx)
-    });
+    let el = page_button(super::theme::keycap(el, p).label(label), enabled, focusable_when_disabled, move |state: &mut State, tx: &mut Tx| action(state, tx));
     if !enabled {
-        return el.opacity(0.5);
+        return el;
     }
     let el = if scale && !p.molded() {
         el.press_scale(super::theme::PRESS_SCALE)
