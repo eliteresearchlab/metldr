@@ -277,8 +277,8 @@ export function syncA11y(h, json, revision) {
     const focused = document.activeElement;
     let restoreNativeFocus = false;
     for (const item of items) {
-        const group = ['table', 'row', 'columnheader', 'cell', 'group', 'article', 'region', 'box', 'listbox', 'tablist', 'tabpanel'].includes(item.k);
-        const tag = group || item.k === 'input' ? 'div' : item.k === 'heading' ? `h${item.l || 2}` : item.k === 'button' ? 'button' : 'p';
+        const group = ['table', 'row', 'columnheader', 'cell', 'group', 'article', 'region', 'box', 'listbox', 'tablist', 'toolbar', 'tabpanel'].includes(item.k);
+        const tag = group || item.k === 'input' || item.k === 'range' ? 'div' : item.k === 'heading' ? `h${item.l || 2}` : item.k === 'button' ? 'button' : 'p';
         const key = group ? `semantic:${item.p}` : item.k === 'input' ? `input:${item.p}` : `${tag}:${item.p}`;
         seen.add(key);
         let el = h.a11yNodes.get(key);
@@ -340,6 +340,14 @@ export function syncA11y(h, json, revision) {
             setOptionalAttribute(el, 'aria-disabled', String(item.disabled));
             setOptionalAttribute(el, 'aria-invalid', item.invalid ? 'true' : undefined);
         }
+        if (item.k === 'range') {
+            setOptionalAttribute(el, 'role', item.role);
+            setOptionalAttribute(el, 'aria-label', item.t);
+            setOptionalAttribute(el, 'aria-valuemin', String(item.vmin));
+            setOptionalAttribute(el, 'aria-valuemax', String(item.vmax));
+            setOptionalAttribute(el, 'aria-valuenow', item.vn === undefined ? undefined : String(item.vn));
+            setOptionalAttribute(el, 'aria-valuetext', item.vt);
+        }
         if (tag === 'button') {
             setOptionalAttribute(el, 'aria-expanded', item.x === true || item.x === false ? String(item.x) : undefined);
             // The control's own role and state: a toggle says pressed, a menu item radio checked,
@@ -352,7 +360,7 @@ export function syncA11y(h, json, revision) {
             setOptionalAttribute(el, 'aria-busy', item.b ? 'true' : undefined);
             setOptionalAttribute(el, 'aria-haspopup', item.popup);
         }
-        const sig = item.k === 'input' ? item.value ?? '' : item.u?.length ? JSON.stringify(item.u) : item.t ?? '';
+        const sig = item.k === 'input' || item.k === 'range' ? item.value ?? '' : item.u?.length ? JSON.stringify(item.u) : item.t ?? '';
         if (!group && el._sig !== sig) {
             el._sig = sig;
             el.replaceChildren();

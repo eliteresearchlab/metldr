@@ -58,6 +58,10 @@ pub(crate) enum A11yKind {
     Listbox,
     /// A row of tabs (`role("tablist")`), named by its label.
     Tablist,
+    /// A row of controls that is one Tab stop (`role("toolbar")`), named by its label.
+    Toolbar,
+    /// A progress bar or meter (`role("progressbar")`, `role("meter")`) and its number.
+    Range(Box<RangeSemantics>),
     /// The content a selected tab shows (`role("tabpanel")`), named by its label.
     Tabpanel,
     /// A plain container another element names (`El::controls`, `El::active_descendant`), so the
@@ -96,6 +100,17 @@ fn control_role(role: &str) -> Option<&'static str> {
         "treeitem" => "treeitem",
         _ => return None,
     })
+}
+
+/// A progress bar's or meter's role, number and range, and the words for the number.
+#[derive(Debug, PartialEq)]
+pub(crate) struct RangeSemantics {
+    role: &'static str,
+    /// None while a progress bar can't say how far along it is.
+    now: Option<f64>,
+    min: f64,
+    max: f64,
+    text: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -138,6 +153,7 @@ impl A11yItem {
             A11yKind::Box => Some("box"),
             A11yKind::Listbox => Some("listbox"),
             A11yKind::Tablist => Some("tablist"),
+            A11yKind::Toolbar => Some("toolbar"),
             A11yKind::Tabpanel => Some("tabpanel"),
             A11yKind::Text => Some("text"),
             A11yKind::Status => Some("status"),
@@ -189,6 +205,18 @@ impl A11yItem {
                 }
                 if let Some(popup) = control.popup {
                     obj.insert("popup".into(), json!(popup));
+                }
+            }
+            A11yKind::Range(range) => {
+                obj.insert("k".into(), json!("range"));
+                obj.insert("role".into(), json!(range.role));
+                obj.insert("vmin".into(), json!(range.min));
+                obj.insert("vmax".into(), json!(range.max));
+                if let Some(now) = range.now {
+                    obj.insert("vn".into(), json!(now));
+                }
+                if let Some(text) = &range.text {
+                    obj.insert("vt".into(), json!(text));
                 }
             }
             A11yKind::Input(input) => {
@@ -477,6 +505,7 @@ impl<S: 'static> Runtime<S> {
                     ("region", _) if labelled => Some(A11yKind::Region(self.scroll_stop_live(i))),
                     ("listbox", _) => Some(A11yKind::Listbox),
                     ("tablist", _) => Some(A11yKind::Tablist),
+                    ("toolbar", _) => Some(A11yKind::Toolbar),
                     ("tabpanel", _) if labelled => Some(A11yKind::Tabpanel),
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
@@ -522,6 +551,7 @@ impl<S: 'static> Runtime<S> {
                             | A11yKind::Box
                             | A11yKind::Listbox
                             | A11yKind::Tablist
+                            | A11yKind::Toolbar
                             | A11yKind::Tabpanel
                     )
                 })
@@ -563,6 +593,29 @@ impl<S: 'static> Runtime<S> {
                         relate: self.relations(i),
                     });
                 }
+                i = end;
+                last_flow_parent = None;
+                continue;
+            }
+            if matches!(n.role, "progressbar" | "meter") && rect[2] > 0.0 && rect[3] > 0.0 {
+                let more = n.a11y.more.as_deref();
+                let range = more.and_then(|m| m.range);
+                out.push(A11yItem {
+                    kind: A11yKind::Range(Box::new(RangeSemantics {
+                        role: if n.role == "meter" { "meter" } else { "progressbar" },
+                        now: range.map(|r| r.value),
+                        min: range.map_or(0.0, |r| r.min),
+                        max: range.map_or(100.0, |r| r.max),
+                        text: more.and_then(|m| m.value.clone()),
+                    })),
+                    path: n.path.clone(),
+                    parent: content_parent.clone(),
+                    rect,
+                    font_size: 0.0,
+                    text: n.label.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| self.descendant_label(i, end)),
+                    runs: Vec::new(),
+                    relate: self.relations(i),
+                });
                 i = end;
                 last_flow_parent = None;
                 continue;
@@ -820,6 +873,7 @@ impl<S: 'static> Runtime<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use serde_json::json;
 
     #[test]
