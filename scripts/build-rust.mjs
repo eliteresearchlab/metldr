@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordReceipt, sourceDigest } from './answer-contract.mjs';
 
@@ -17,7 +17,6 @@ const crates = [
 ];
 const isCheck = process.argv.includes('--check');
 const isWindows = process.platform === 'win32';
-const panelAssetFields = ['name', 'url', 'sha256', 'bytes'];
 const rootTargetDir = process.env.CARGO_TARGET_DIR || 'target';
 const defaultBuildJobs = 2;
 // sccache is opt-in: contributors without it keep the plain compiler. When it is installed,
@@ -41,20 +40,6 @@ function buildJobs() {
     process.exit(1);
   }
   return parsed;
-}
-
-for (const asset of JSON.parse(readFileSync(join(repoRoot, 'scripts/panel-assets.json'), 'utf8'))) {
-  if (Object.keys(asset).length !== panelAssetFields.length
-      || !panelAssetFields.every(field => Object.hasOwn(asset, field))
-      || typeof asset.url !== 'string') {
-    throw new Error('Panel asset entries must contain name, url, sha256 and bytes.');
-  }
-  const { name, bytes, sha256 } = asset;
-  const file = join(repoRoot, 'public/rust-panel/assets', name);
-  if (basename(name) !== name || bytes > 256 * 1024 || statSync(file).size !== bytes
-      || createHash('sha256').update(readFileSync(file)).digest('hex') !== sha256) {
-    throw new Error(`Panel asset verification failed: ${name}`);
-  }
 }
 
 const running = new Set();

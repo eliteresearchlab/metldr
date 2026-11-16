@@ -1,9 +1,14 @@
+#[cfg(any(feature = "guest", test))]
 use std::num::NonZeroU32;
 
-use metldr_conversation::{CompleteSource, GeneratedAnswer};
+#[cfg(any(feature = "guest", test))]
+use metldr_conversation::CompleteSource;
+use metldr_conversation::GeneratedAnswer;
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::{Binding, HostMessage, encode_host, encode_initialize};
+use crate::protocol::Binding;
+#[cfg(any(feature = "guest", test))]
+use crate::protocol::{HostMessage, encode_host, encode_initialize};
 
 const MAX_PROGRAM_BYTES: usize = 2 * crate::protocol::MAX_HOST_BYTES;
 
@@ -29,6 +34,7 @@ fn bounded(encoded: String) -> Result<String, String> {
     }
 }
 
+#[cfg(any(feature = "guest", test))]
 #[cfg_attr(feature = "guest", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct GuestProgram {
     binding: Binding,
@@ -36,6 +42,7 @@ pub struct GuestProgram {
     cursor: usize,
 }
 
+#[cfg(any(feature = "guest", test))]
 impl GuestProgram {
     fn parse(encoded: &str) -> Result<Self, String> {
         if encoded.len() > MAX_PROGRAM_BYTES {
@@ -86,6 +93,7 @@ impl GuestProgram {
     }
 }
 
+#[cfg(any(feature = "guest", test))]
 #[cfg_attr(feature = "guest", wasm_bindgen::prelude::wasm_bindgen)]
 impl GuestProgram {
     #[cfg_attr(feature = "guest", wasm_bindgen::prelude::wasm_bindgen(constructor))]

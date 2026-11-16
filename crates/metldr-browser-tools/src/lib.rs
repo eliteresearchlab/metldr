@@ -1,4 +1,6 @@
-#![doc = include_str!("../README.md")]
+//! The shared browser tools (observe a page, navigate, change text fields, press buttons, set
+//! checkboxes, radios and selects, scroll) and one argument decoder for providers and installed
+//! agents.
 
 pub mod tools;
 

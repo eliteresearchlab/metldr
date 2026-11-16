@@ -4,7 +4,7 @@
 <h1 align="center">metldr</h1>
 <p align="center">
   <a href="https://chromewebstore.google.com/detail/kbfdmfgmmibkdnbfdaeganjckfgbfjlh"><img src="https://img.shields.io/badge/Chrome-extension-ff8338?style=flat-square" alt="Chrome extension"></a>
-  <a href="docs/features.md"><img src="https://img.shields.io/badge/AI-your%20key%20or%20local-b4befe?style=flat-square" alt="Your API key or local AI"></a>
+  <a href="#planned-features"><img src="https://img.shields.io/badge/AI-your%20key%20or%20local-b4befe?style=flat-square" alt="Your API key or local AI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/App-free-75659a?style=flat-square" alt="Free app"></a>
 </p>
 
@@ -88,15 +88,31 @@ Some features are available today, and the full list is planned.
 * Use multilingual and accessible controls with themes, text size and sound preferences.
 * Use Chrome, Edge, Brave and Chromebooks with Linux, Windows and macOS companions, and every feature without an app subscription.
 
-See the [feature guide](docs/features.md) for current availability, planned details and compatibility limits.
-
 [Install from the Chrome Web Store](https://chromewebstore.google.com/detail/kbfdmfgmmibkdnbfdaeganjckfgbfjlh).
 The app is free. Your model provider may charge.
 
-The browser agent is in development. Its current build needs Linux and [companion setup](crates/metldr-companion/README.md).
+The browser agent is in development. Its current build needs Linux and the companion.
 
 metldr thanks [beautiful-ui](https://github.com/slev12397/beautiful-ui), [Rune](https://github.com/anomalyco/rune), [browse](https://github.com/anomalyco/browse), [t3code](https://github.com/pingdotgg/t3code), [Chart.js](https://www.chartjs.org), [LiteLLM](https://github.com/BerriAI/litellm), [glimm](https://glimm.dev), [audio](https://github.com/raphaelsalaja/audio), and the design skills of [Emil Kowalski](https://github.com/emilkowalski/skills), [Jakub Krehel](https://github.com/jakubkrehel/skills) and [Impeccable](https://github.com/pbakaus/impeccable).
 
 Free for noncommercial use under the [PolyForm Noncommercial License](LICENSE). Commercial use needs written permission from [Elite Research Lab LLC](https://elitelab.ai).
 
-[Build and setup](docs/development.md) | [Privacy](PRIVACY.md)
+## Build and setup
+
+Install Node.js and the pinned Rust toolchain, then build:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.128 --locked
+npm ci
+npm run install:chat
+npm run build
+```
+
+In Chrome, open `chrome://extensions`, turn on Developer mode, choose **Load unpacked** and select `dist`. Press Alt+Shift+M to open the chat.
+
+Provider and agent tasks need the native companion. Run `make dev-install` after each change: it builds the extension and the companion and registers the companion with Chrome, Chromium, Brave and Edge. If `chrome://extensions` shows a different extension ID, run `metldr-companion install <id>`. `metldr-companion uninstall` removes the registration and keeps saved history.
+
+Use `npm run build:fast` while editing; `npm run build` makes the release build. Run `make check` before the `check-*` targets when a change touches a shared crate.
+
+[Privacy](PRIVACY.md)

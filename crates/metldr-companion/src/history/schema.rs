@@ -1,7 +1,6 @@
 use crate::{Result, model::Source};
 use redb::TableDefinition;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sha2::{Digest, Sha256};
 use std::io::{self, Write};
 
 pub(super) const FORMAT: u8 = 22;
@@ -39,7 +38,6 @@ pub(super) const HARNESS: TableDefinition<&str, &[u8]> =
 pub(super) const NATIVE_WORKFLOWS: [TableDefinition<&str, &[u8]>; 4] = [PI, CODEX, OPENCODE, HARNESS];
 pub(super) const ACTIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("actions");
 pub(super) const TASK_PLANS: TableDefinition<&str, &[u8]> = TableDefinition::new("task_plans");
-pub(super) const PLAN_GRANTS: TableDefinition<&str, &[u8]> = TableDefinition::new("plan_grants");
 pub(super) const RUN_ORDER: TableDefinition<(&str, u64), &str> = TableDefinition::new("run_order");
 pub(super) const ACTION_ORDER: TableDefinition<(&str, u64, &str), &str> =
     TableDefinition::new("action_order");
@@ -108,24 +106,6 @@ impl Profile {
         self.providers.validate()?;
         self.agents.validate()
     }
-}
-
-pub(super) fn validate_origin(profile: &Profile, original: &[u8]) -> Result<()> {
-    if original.len() > crate::STORE_MAX {
-        return Err("history origin exceeds bound".into());
-    }
-    let legacy: crate::model::Store = serde_json::from_slice(original)?;
-    legacy.validate()?;
-    crate::browser_action::reject_scroll_actions(&legacy.browser_actions)?;
-    crate::browser_action::reject_control_actions(&legacy.browser_actions)?;
-    if profile.legacy_sha256 != format!("{:x}", Sha256::digest(original))
-        || profile.store != legacy.view.store
-        || profile.next <= legacy.next
-        || profile.sequence < legacy.view.sequence
-    {
-        return Err("history origin does not match profile".into());
-    }
-    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]

@@ -40,6 +40,7 @@ Local changes:
 * The web mirror shows `role("toolbar")` as a named container, and `role("progressbar")` and `role("meter")` as one element each with `aria-valuenow`, `aria-valuemin`, `aria-valuemax` and `aria-valuetext` (a progress bar with no value is indeterminate). The mirror's JSON is written straight into one buffer instead of through a `serde_json::Value` tree.
 * The items an arrow key moves between come from the group's own subtree, with the membership test before the reachability one, instead of every node on the page.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
+* The `examples` directory and its `[[example]]` entries are not vendored; metldr builds none of them.
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.
 

@@ -53,7 +53,6 @@
     "@vitejs/plugin-vue": "^6.0.1",
     "cross-env": "^10.1.0",
     "esbuild": "0.25.12",
-    "shadcn-vue": "^2.4.3",
     "typescript": "^5.9.3",
     "vite": "npm:rolldown-vite@7.1.14",
     "vue-tsc": "^3.1.8"

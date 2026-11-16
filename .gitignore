@@ -3,7 +3,6 @@
 
 ### Linux ###
 *~
-inboxsdkk.txt
 
 # temporary files which can be created if a process still has a handle open of a deleted file
 .fuse_hidden*
@@ -132,9 +131,6 @@ web_modules/
 .env.production.local
 .env.local
 
-# secrets config
-src/config/secrets.js
-!src/config/secrets.example.js
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -251,8 +247,6 @@ $RECYCLE.BIN/
 *.lnk
 
 AGENTS.md
-PROJECT.md
-templates/
 dictionary-data/
 public/models/
 
@@ -260,8 +254,3 @@ public/models/
 /target/
 
 # End of https://www.toptal.com/developers/gitignore/api/node,vue,macos,windows,linux,visualstudiocode
-
-# Internal Rune host route payload from `make rune-host` (wasm and fonts copied from crates/metldr-rune-host): never committed, so default builds package nothing new.
-/crates/metldr-rune-host/pkg/
-/crates/metldr-rune-host/target/
-/public/rune/

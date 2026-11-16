@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! A Google Interactions API client: streams plain text and browser tool calls; one browser
+//! conversation owns the request history and pending tool result.
 
 #[cfg(test)]
 mod checks;

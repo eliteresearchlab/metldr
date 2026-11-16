@@ -1,4 +1,4 @@
-#![doc = include_str!("../README.md")]
+//! Bounded server-sent event framing for the provider clients.
 
 type Result<T> = std::result::Result<T, String>;
 

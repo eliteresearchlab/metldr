@@ -184,34 +184,6 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com"
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 wgpu = { version = "~30.0.1", default-features = false, features = ["noop"] }
 
-[[example]]
-name = "metal_dispatch"
-required-features = ["metal-backend"]
-
-[[example]]
-name = "tree_swap"
-required-features = ["frame-profile"]
-
-[[example]]
-name = "cache_pan_zoom"
-required-features = ["frame-profile"]
-
-[[example]]
-name = "pinch_bench"
-required-features = ["frame-profile"]
-
-[[example]]
-name = "long_note"
-required-features = ["frame-profile"]
-
-[[example]]
-name = "taffy_adapter_bench"
-required-features = ["frame-profile"]
-
-[[example]]
-name = "scroll_commits"
-required-features = ["frame-profile"]
-
 [[test]]
 name = "macos_appearance_kvo"
 harness = false

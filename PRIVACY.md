@@ -25,7 +25,7 @@ The extension also saves usage records in your browser, including page addresses
 
 Provider keys are managed by the companion's credential store, outside page scripts. Installed agents keep their own authentication.
 
-Clearing the extension's cache or browser data does not remove companion records or agent files. Remove those separately using their storage locations and tools. See [companion setup](crates/metldr-companion/README.md) for its data location.
+Clearing the extension's cache or browser data does not remove companion records or agent files. Remove those separately using their storage locations and tools. The companion keeps its data in `~/.local/share/metldr`, or in `$XDG_DATA_HOME/metldr` when that is set.
 
 ## Browser access
 

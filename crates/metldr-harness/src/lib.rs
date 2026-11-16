@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! The one list of agent harnesses metldr drives (Pi, Codex, OpenCode, Claude Code): wire key,
+//! label, executable names and capabilities.
 
 pub mod detect;
 pub mod handoff;

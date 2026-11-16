@@ -1,4 +1,4 @@
-.PHONY: rust check check-rust check-rune check-ui check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel check-companion companion dev-install
+.PHONY: rust check check-rust check-ui check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel check-companion companion dev-install
 
 # Every Cargo root in the repository, in the order the check-* targets use.
 RUST_CRATES := metldr-sse metldr-responses metldr-google-interactions metldr-messages \
@@ -14,16 +14,12 @@ check:
 	  echo "check $$crate"; \
 	  cargo check --locked --manifest-path crates/$$crate/Cargo.toml; \
 	done
-	cargo check --locked --manifest-path prototypes/rune-frontend/Cargo.toml --lib
 
 rust:
 	npm run build:rust
 
 check-rust:
 	node scripts/build-rust.mjs --check
-
-check-rune:
-	cargo test --locked --manifest-path prototypes/rune-frontend/Cargo.toml --lib
 
 # The control behaviour layer: each primitive with its ported cases.
 check-ui:

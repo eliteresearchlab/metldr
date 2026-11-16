@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! An Anthropic Messages API client with metldr's browser tools: one browser conversation owns its
+//! request history and pending tool result.
 
 #[cfg(test)]
 mod checks;

@@ -1,4 +1,5 @@
-#![doc = include_str!("../README.md")]
+//! Assistant message text with observed tool positions: no browser, network, process or storage
+//! dependency, so native hosts and wasm share one validated form.
 
 mod chart;
 mod content;
