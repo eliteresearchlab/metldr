@@ -277,7 +277,8 @@ export function syncA11y(h, json, revision) {
     const focused = document.activeElement;
     let restoreNativeFocus = false;
     for (const item of items) {
-        const group = ['table', 'row', 'columnheader', 'cell', 'group', 'article', 'region', 'box', 'listbox', 'tablist', 'toolbar', 'tabpanel'].includes(item.k);
+        // The runtime marks every container kind (`A11yKind::group`), so a new one needs no list here.
+        const group = item.g === true;
         const tag = group || item.k === 'input' || item.k === 'range' ? 'div' : item.k === 'heading' ? `h${item.l || 2}` : item.k === 'button' ? 'button' : 'p';
         const key = group ? `semantic:${item.p}` : item.k === 'input' ? `input:${item.p}` : `${tag}:${item.p}`;
         seen.add(key);
