@@ -8,10 +8,8 @@ use stream::Turn;
 /// Cheap to clone: clones share one connection pool.
 #[derive(Clone)]
 pub struct Client {
-    client: reqwest::Client,
-    endpoint: String,
+    http: sse::http::Http,
     model: String,
-    authorization: Option<reqwest::header::HeaderValue>,
 }
 
 /// Response timeout when the connection does not set one.
@@ -55,42 +53,28 @@ impl Client {
                 {
                     return Err("invalid Chat credential");
                 }
-                let mut header = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
-                    .map_err(|_| "invalid Chat credential")?;
-                header.set_sensitive(true);
-                Ok(header)
+                Ok(format!("Bearer {token}"))
             })
             .transpose()?;
-        let mut client = reqwest::Client::builder()
-            .tls_backend_rustls()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .timeout(std::time::Duration::from_secs(timeout_secs.into()));
-        // A local name must not resolve off the machine.
-        if loopback && url.host_str() == Some("localhost") {
-            let port = url.port_or_known_default().ok_or("invalid Chat endpoint")?;
-            client = client.resolve(
-                "localhost",
-                std::net::SocketAddr::from(([127, 0, 0, 1], port)),
-            );
-        }
-        if let Some(pem) = trust_ca_pem {
-            if pem.len() > 16_384 {
-                return Err("Chat trust certificate exceeds bound".into());
-            }
-            let certificates = reqwest::Certificate::from_pem_bundle(pem)
-                .map_err(|_| "invalid Chat trust certificate")?;
-            if certificates.is_empty() {
-                return Err("empty Chat trust certificate".into());
-            }
-            client = client.tls_certs_only(certificates);
-        }
+        let localhost = loopback && url.host_str() == Some("localhost");
+        let http = sse::http::Http::new(sse::http::Options {
+            provider: "Chat",
+            url: url.as_str(),
+            timeout_secs,
+            localhost_port: if localhost {
+                url.port_or_known_default()
+            } else {
+                None
+            },
+            trust_ca_pem,
+            headers: &[],
+            secret: authorization
+                .as_deref()
+                .map(|value| ("authorization", value)),
+        })?;
         Ok(Self {
-            client: client.build().map_err(|_| "Chat client unavailable")?,
-            endpoint: url.to_string(),
+            http,
             model: model.into(),
-            authorization,
         })
     }
 
@@ -146,48 +130,21 @@ impl Client {
         if body.len() > 131_072 {
             return Err("Chat request exceeds bound".into());
         }
-        let mut sending = self.client.post(&self.endpoint);
-        if let Some(authorization) = &self.authorization {
-            sending = sending.header("authorization", authorization.clone());
-        }
-        let sending = sending
-            .header("content-type", "application/json")
-            .header("accept", "text/event-stream")
-            .body(body)
-            .send();
-        let mut response = tokio::select! {
-            biased;
-            _ = wait_for_stop(stop) => return Err("Chat request cancelled".into()),
-            response = sending => response.map_err(|_| "Chat transport failed")?,
-        };
-        if response.status() != reqwest::StatusCode::OK {
-            return Err("Chat endpoint returned an error".into());
-        }
-        if response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(';').next())
-            .is_none_or(|v| !v.trim().eq_ignore_ascii_case("text/event-stream"))
-        {
-            return Err("Chat endpoint did not return an event stream".into());
-        }
+        let mut events = self.http.events(body, stop).await?;
         let mut sse = sse::Sse::new("Chat");
         let mut state = stream::State::default();
         let mut bytes = 0usize;
         let mut rendered = String::new();
         loop {
-            let chunk = tokio::select! {
-                biased;
-                _ = wait_for_stop(stop) => return Err("Chat request cancelled".into()),
-                chunk = response.chunk() => chunk.map_err(|_| "Chat stream transport failed")?,
+            let Some(chunk) = events.chunk(stop).await? else {
+                break;
             };
-            let Some(chunk) = chunk else { break };
+            let chunk = chunk.as_ref();
             bytes = bytes.saturating_add(chunk.len());
             if bytes > 524_288 {
                 return Err("Chat stream exceeds bound".into());
             }
-            let mut rest = &chunk[..];
+            let mut rest = chunk;
             while let Some((event, data)) = sse.next(&mut rest)? {
                 cancelled(stop)?;
                 if let Some(event) = state.frame(&event, &data)? {
@@ -216,12 +173,6 @@ pub(super) fn cancelled(stop: &AtomicBool) -> Result<()> {
         Err("Chat request cancelled".into())
     } else {
         Ok(())
-    }
-}
-
-async fn wait_for_stop(stop: &AtomicBool) {
-    while !stop.load(Ordering::Acquire) {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 }
 

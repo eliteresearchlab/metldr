@@ -6,10 +6,8 @@ use metldr_browser_tools::{BROWSER_POLICY, definitions};
 use stream::Turn;
 
 pub struct Client {
-    client: reqwest::Client,
-    endpoint: String,
+    http: sse::http::Http,
     model: String,
-    key: reqwest::header::HeaderValue,
 }
 
 impl Client {
@@ -40,31 +38,18 @@ impl Client {
         {
             return Err("invalid Messages credential".into());
         }
-        let mut key = reqwest::header::HeaderValue::from_str(api_key)
-            .map_err(|_| "invalid Messages credential")?;
-        key.set_sensitive(true);
-        let mut client = reqwest::Client::builder()
-            .tls_backend_rustls()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .timeout(std::time::Duration::from_secs(45));
-        if let Some(pem) = trust_ca_pem {
-            if pem.len() > 16_384 {
-                return Err("Messages trust certificate exceeds bound".into());
-            }
-            let certificates = reqwest::Certificate::from_pem_bundle(pem)
-                .map_err(|_| "invalid Messages trust certificate")?;
-            if certificates.is_empty() {
-                return Err("empty Messages trust certificate".into());
-            }
-            client = client.tls_certs_only(certificates);
-        }
+        let http = sse::http::Http::new(sse::http::Options {
+            provider: "Messages",
+            url: url.as_str(),
+            timeout_secs: 45,
+            localhost_port: None,
+            trust_ca_pem,
+            headers: &[("anthropic-version", "2023-06-01")],
+            secret: Some(("x-api-key", api_key)),
+        })?;
         Ok(Self {
-            client: client.build().map_err(|_| "Messages client unavailable")?,
-            endpoint: url.to_string(),
+            http,
             model: model.into(),
-            key,
         })
     }
 
@@ -116,48 +101,21 @@ impl Client {
         if body.len() > 131_072 {
             return Err("Messages request exceeds bound".into());
         }
-        let sending = self
-            .client
-            .post(&self.endpoint)
-            .header("x-api-key", self.key.clone())
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .header("accept", "text/event-stream")
-            .body(body)
-            .send();
-        let mut response = tokio::select! {
-            biased;
-            _ = wait_for_stop(stop) => return Err("Messages request cancelled".into()),
-            response = sending => response.map_err(|_| "Messages transport failed")?,
-        };
-        if response.status() != reqwest::StatusCode::OK {
-            return Err("Messages endpoint returned an error".into());
-        }
-        if response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(';').next())
-            .is_none_or(|v| !v.trim().eq_ignore_ascii_case("text/event-stream"))
-        {
-            return Err("Messages endpoint did not return an event stream".into());
-        }
+        let mut events = self.http.events(body, stop).await?;
         let mut sse = sse::Sse::new("Messages");
         let mut state = stream::State::new(&self.model);
         let mut bytes = 0usize;
         let mut rendered = String::new();
         loop {
-            let chunk = tokio::select! {
-                biased;
-                _ = wait_for_stop(stop) => return Err("Messages request cancelled".into()),
-                chunk = response.chunk() => chunk.map_err(|_| "Messages stream transport failed")?,
+            let Some(chunk) = events.chunk(stop).await? else {
+                break;
             };
-            let Some(chunk) = chunk else { break };
+            let chunk = chunk.as_ref();
             bytes = bytes.saturating_add(chunk.len());
             if bytes > 524_288 {
                 return Err("Messages stream exceeds bound".into());
             }
-            let mut rest = &chunk[..];
+            let mut rest = chunk;
             while let Some((event, data)) = sse.next(&mut rest)? {
                 cancelled(stop)?;
                 if let Some(event) = state.frame(&event, &data)? {
@@ -186,11 +144,5 @@ fn cancelled(stop: &AtomicBool) -> Result<()> {
         Err("Messages request cancelled".into())
     } else {
         Ok(())
-    }
-}
-
-async fn wait_for_stop(stop: &AtomicBool) {
-    while !stop.load(Ordering::Acquire) {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 }

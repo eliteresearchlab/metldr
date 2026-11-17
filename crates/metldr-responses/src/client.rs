@@ -63,10 +63,8 @@ const PRESENTATION_BOUNDS: Bounds = Bounds {
 };
 
 pub struct Client {
-    client: reqwest::Client,
-    endpoint: String,
+    http: sse::http::Http,
     model: String,
-    authorization: reqwest::header::HeaderValue,
 }
 
 impl Client {
@@ -97,32 +95,19 @@ impl Client {
         {
             return Err("invalid Responses credential".into());
         }
-        let mut authorization =
-            reqwest::header::HeaderValue::from_str(&format!("Bearer {bearer_token}"))
-                .map_err(|_| "invalid Responses credential")?;
-        authorization.set_sensitive(true);
-        let mut client = reqwest::Client::builder()
-            .tls_backend_rustls()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .timeout(std::time::Duration::from_secs(45));
-        if let Some(pem) = trust_ca_pem {
-            if pem.len() > 16_384 {
-                return Err("Responses trust certificate exceeds bound".into());
-            }
-            let certificates = reqwest::Certificate::from_pem_bundle(pem)
-                .map_err(|_| "invalid Responses trust certificate")?;
-            if certificates.is_empty() {
-                return Err("empty Responses trust certificate".into());
-            }
-            client = client.tls_certs_only(certificates);
-        }
+        let authorization = format!("Bearer {bearer_token}");
+        let http = sse::http::Http::new(sse::http::Options {
+            provider: "Responses",
+            url: url.as_str(),
+            timeout_secs: 45,
+            localhost_port: None,
+            trust_ca_pem,
+            headers: &[],
+            secret: Some(("authorization", &authorization)),
+        })?;
         Ok(Self {
-            client: client.build().map_err(|_| "Responses client unavailable")?,
-            endpoint: url.to_string(),
+            http,
             model: model.into(),
-            authorization,
         })
     }
 
@@ -215,48 +200,22 @@ impl Client {
         if body.len() > bounds.request {
             return Err("Responses request exceeds bound".into());
         }
-        let sending = self
-            .client
-            .post(&self.endpoint)
-            .header("authorization", self.authorization.clone())
-            .header("content-type", "application/json")
-            .header("accept", "text/event-stream")
-            .body(body)
-            .send();
-        let mut response = tokio::select! {
-            biased;
-            _ = wait_for_stop(stop) => return Err("Responses request cancelled".into()),
-            response = sending => response.map_err(|_| "Responses transport failed")?,
-        };
-        if response.status() != reqwest::StatusCode::OK {
-            return Err("Responses endpoint returned an error".into());
-        }
-        if response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(';').next())
-            .is_none_or(|v| !v.trim().eq_ignore_ascii_case("text/event-stream"))
-        {
-            return Err("Responses endpoint did not return an event stream".into());
-        }
+        let mut events = self.http.events(body, stop).await?;
         let mut sse = sse::Sse::with_bound("Responses", bounds.sse);
         let mut state =
             stream::State::with_limits(bounds.argument, bounds.events, bounds.pause_at_call);
         let mut bytes = 0usize;
         let mut rendered = String::new();
         loop {
-            let chunk = tokio::select! {
-                biased;
-                _ = wait_for_stop(stop) => return Err("Responses request cancelled".into()),
-                chunk = response.chunk() => chunk.map_err(|_| "Responses stream transport failed")?,
+            let Some(chunk) = events.chunk(stop).await? else {
+                break;
             };
-            let Some(chunk) = chunk else { break };
+            let chunk = chunk.as_ref();
             bytes = bytes.saturating_add(chunk.len());
             if bytes > bounds.stream {
                 return Err("Responses stream exceeds bound".into());
             }
-            let mut rest = &chunk[..];
+            let mut rest = chunk;
             while let Some((event, data)) = sse.next(&mut rest)? {
                 cancelled(stop)?;
                 for text_event in state.frame(&event, &data)? {
@@ -495,11 +454,5 @@ fn cancelled(stop: &AtomicBool) -> Result<()> {
         Err("Responses request cancelled".into())
     } else {
         Ok(())
-    }
-}
-
-async fn wait_for_stop(stop: &AtomicBool) {
-    while !stop.load(Ordering::Acquire) {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 }
