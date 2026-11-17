@@ -258,10 +258,10 @@ impl Actor {
             network,
         }
     }
-    pub(super) async fn run(mut self) -> (Result<()>, Result<()>) {
-        let result = self.drive().await;
+    /// Requests own execution outcomes, so the drive result ends here with the transport.
+    pub(super) async fn run(mut self) {
+        let _ = self.drive().await;
         self.transport.close();
-        (result, Ok(()))
     }
     async fn drive(&mut self) -> Result<()> {
         self.initialize(None, true)?;

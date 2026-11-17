@@ -104,7 +104,7 @@ pub(super) struct Engine {
     requests: mpsc::Sender<Request>,
     stop: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
-    task: JoinHandle<(Result<()>, Result<()>)>,
+    task: JoinHandle<()>,
     client: Client,
     tab: i32,
 }
@@ -423,9 +423,8 @@ impl Engine {
     }
     pub(super) async fn detach(mut self) -> Result<()> {
         self.shutdown.store(true, Ordering::Release);
-        let task = match tokio::time::timeout(TIMEOUT, &mut self.task).await {
-            // Requests own execution outcomes; release still requires both cleanup checks.
-            Ok(Ok((_, cleanup))) => cleanup,
+        let task: Result<()> = match tokio::time::timeout(TIMEOUT, &mut self.task).await {
+            Ok(Ok(())) => Ok(()),
             Ok(Err(e)) if e.is_cancelled() => Ok(()),
             Ok(Err(e)) => Err(e.into()),
             Err(_) => {
