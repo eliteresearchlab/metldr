@@ -1,3 +1,4 @@
+use crate::MAX_FRAME;
 use std::{fmt, num::NonZeroU64};
 
 use metldr_conversation::{Display, ProjectedEntry};
@@ -8,7 +9,6 @@ mod run;
 #[path = "model/source.rs"]
 mod source;
 
-const MAX_FRAME: usize = 65_536;
 const MAX_RUNS: usize = 16;
 pub(crate) const MAX_ACTIVITY: usize = 64;
 const MAX_BROWSER_ACTIONS: usize = 16;

@@ -1,3 +1,4 @@
+use crate::MAX_FRAME;
 use std::collections::HashSet;
 
 use metldr_conversation::{
@@ -7,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{RunId, RunStatus, RunView};
 
-const MAX_FRAME: usize = 65_536;
 const MAX_TEXT: usize = 8_192;
 const MAX_ID: usize = 512;
 pub(crate) const MAX_HISTORY_MESSAGES: usize =

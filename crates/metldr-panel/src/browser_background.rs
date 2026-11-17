@@ -1,3 +1,4 @@
+use crate::MAX_FRAME;
 use crate::{await_call, call, chrome_api, err, flow::validate_url, get};
 use js_sys::Function;
 use serde::Deserialize;
@@ -14,7 +15,6 @@ mod bundled;
 mod navigation;
 mod release;
 
-const MAX_FRAME: usize = 65_536;
 const MAX_SESSIONS: usize = 64;
 const MAX_SAFE_CALL: u64 = 9_007_199_254_740_991;
 
