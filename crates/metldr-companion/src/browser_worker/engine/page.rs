@@ -9,11 +9,50 @@ use browse_core::{
     ToolContext,
 };
 use serde_json::{Value, json};
-use std::sync::Arc;
+use sha2::{Digest, Sha256};
+use std::sync::{Arc, OnceLock};
 use tokio::{
     sync::{broadcast, mpsc, oneshot},
     time::Instant,
 };
+
+/// Browse's page scripts, which the extension ships as browse/<name>.js: the InjectedScript
+/// (326 KB) and the filled helpers object (90 KB), each over the 64 KB message limit.
+const BUNDLED: [(&str, fn() -> &'static str); 2] = [
+    ("injected-script", browse_page::injected_source),
+    ("helpers", browse_page::helpers),
+];
+
+/// For each bundled script, the marker sent in its place: its name and SHA-256. The extension
+/// puts its own copy back after checking the hash, so both sides always run the same script.
+fn markers() -> &'static [String; 2] {
+    static MARKERS: OnceLock<[String; 2]> = OnceLock::new();
+    MARKERS.get_or_init(|| {
+        BUNDLED.map(|(name, script)| {
+            let digest = Sha256::digest(script().as_bytes());
+            let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+            format!("/*metldr-bundled-script:{name}:{hex}*/")
+        })
+    })
+}
+
+/// `params` with any bundled script in the evaluated source replaced by its marker.
+fn bundled(method: &str, mut params: Value) -> Value {
+    let field = match method {
+        "Runtime.callFunctionOn" => "functionDeclaration",
+        "Runtime.evaluate" => "expression",
+        _ => return params,
+    };
+    if let Some(Value::String(source)) = params.get_mut(field) {
+        for ((_, script), marker) in BUNDLED.iter().zip(markers()) {
+            let script = script();
+            if source.len() >= script.len() && source.contains(script) {
+                *source = source.replacen(script, marker, 1);
+            }
+        }
+    }
+    params
+}
 
 /// Setup the actor already did for the tab; Browse's own request for it is answered here.
 const DONE: [&str; 5] = [
@@ -86,7 +125,7 @@ impl Cdp for ActorCdp {
         let kind = Kind::Page {
             method: method.into(),
             session: session_id.map(Into::into),
-            params,
+            params: bundled(method, params),
         };
         self.requests
             .try_send(Request {
@@ -242,5 +281,28 @@ impl Page {
             return Err("the secret field did not take focus".into());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_scripts_cross_the_native_pipe_as_markers() {
+        for (name, script) in BUNDLED {
+            let script = script();
+            let declaration = format!("function () {{\n{script}\nreturn true;\n}}");
+            let params = bundled("Runtime.callFunctionOn", json!({ "functionDeclaration": declaration }));
+            let sent = params["functionDeclaration"].as_str().unwrap();
+            assert!(sent.len() < 200, "{name} still crosses in full");
+            assert!(sent.contains(&format!("/*metldr-bundled-script:{name}:")));
+            let evaluated = bundled("Runtime.evaluate", json!({ "expression": script }));
+            let marker = evaluated["expression"].as_str().unwrap();
+            assert!(marker.starts_with("/*metldr-bundled-script:") && marker.ends_with("*/"));
+            assert!(sent.contains(marker));
+        }
+        let other = json!({ "functionDeclaration": "function () { return 1; }" });
+        assert_eq!(bundled("Runtime.callFunctionOn", other.clone()), other);
     }
 }

@@ -10,6 +10,7 @@ use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 use wasm_bindgen_futures::spawn_local;
 
 mod act;
+mod bundled;
 mod navigation;
 mod release;
 
@@ -395,6 +396,7 @@ async fn command(
     {
         return Err("Unsupported or oversized debugger command.".into());
     }
+    let params = bundled::expand(method, params).await?;
     let epoch = reserve_call(connection, call_id, run, tab, session.as_deref())?;
     let pending = STATE.with(|state| {
         let mut state = state.borrow_mut();
