@@ -103,6 +103,41 @@ impl Events {
     }
 }
 
+impl Events {
+    /// Feeds each event of the stream to `each` until the stream ends, holding the body to
+    /// `bound` bytes and checking `stop` between events.
+    pub async fn frames<E: From<String>>(
+        mut self,
+        stop: &AtomicBool,
+        mut sse: crate::Sse,
+        bound: usize,
+        mut each: impl FnMut(&str, &str) -> std::result::Result<(), E>,
+    ) -> std::result::Result<(), E> {
+        let provider = self.provider;
+        let mut bytes = 0usize;
+        while let Some(chunk) = self.chunk(stop).await? {
+            let mut rest = chunk.as_ref();
+            bytes = bytes.saturating_add(rest.len());
+            if bytes > bound {
+                return Err(format!("{provider} stream exceeds bound").into());
+            }
+            while let Some((event, data)) = sse.next(&mut rest)? {
+                stopped(provider, stop)?;
+                each(&event, &data)?;
+            }
+        }
+        stopped(provider, stop)?;
+        Ok(sse.finish()?)
+    }
+}
+
+fn stopped(provider: &str, stop: &AtomicBool) -> Result<()> {
+    match stop.load(Ordering::Acquire) {
+        true => Err(format!("{provider} request cancelled")),
+        false => Ok(()),
+    }
+}
+
 /// Runs `work` until it finishes or `stop` is set, checking the flag first and then every 20 ms.
 async fn race<T>(stop: &AtomicBool, work: impl Future<Output = T>) -> Option<T> {
     let mut work = pin!(work);

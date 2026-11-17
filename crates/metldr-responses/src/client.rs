@@ -200,25 +200,14 @@ impl Client {
         if body.len() > bounds.request {
             return Err("Responses request exceeds bound".into());
         }
-        let mut events = self.http.events(body, stop).await?;
-        let mut sse = sse::Sse::with_bound("Responses", bounds.sse);
+        let events = self.http.events(body, stop).await?;
+        let sse = sse::Sse::with_bound("Responses", bounds.sse);
         let mut state =
             stream::State::with_limits(bounds.argument, bounds.events, bounds.pause_at_call);
-        let mut bytes = 0usize;
         let mut rendered = String::new();
-        loop {
-            let Some(chunk) = events.chunk(stop).await? else {
-                break;
-            };
-            let chunk = chunk.as_ref();
-            bytes = bytes.saturating_add(chunk.len());
-            if bytes > bounds.stream {
-                return Err("Responses stream exceeds bound".into());
-            }
-            let mut rest = chunk;
-            while let Some((event, data)) = sse.next(&mut rest)? {
-                cancelled(stop)?;
-                for text_event in state.frame(&event, &data)? {
+        events
+            .frames(stop, sse, bounds.stream, |event, data| -> Result<()> {
+                for text_event in state.frame(event, data)? {
                     if let TextEvent::Delta(text) = &text_event {
                         rendered.push_str(text);
                     }
@@ -228,10 +217,9 @@ impl Client {
                     cancelled(stop)?;
                     progress(update)?;
                 }
-            }
-        }
-        cancelled(stop)?;
-        sse.finish()?;
+                Ok(())
+            })
+            .await?;
         let turn = state.finish()?;
         for event in &turn.deferred {
             if let TextEvent::Delta(text) = event {

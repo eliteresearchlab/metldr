@@ -101,33 +101,21 @@ impl Client {
         if body.len() > 131_072 {
             return Err("Messages request exceeds bound".into());
         }
-        let mut events = self.http.events(body, stop).await?;
-        let mut sse = sse::Sse::new("Messages");
+        let events = self.http.events(body, stop).await?;
+        let sse = sse::Sse::new("Messages");
         let mut state = stream::State::new(&self.model);
-        let mut bytes = 0usize;
         let mut rendered = String::new();
-        loop {
-            let Some(chunk) = events.chunk(stop).await? else {
-                break;
-            };
-            let chunk = chunk.as_ref();
-            bytes = bytes.saturating_add(chunk.len());
-            if bytes > 524_288 {
-                return Err("Messages stream exceeds bound".into());
-            }
-            let mut rest = chunk;
-            while let Some((event, data)) = sse.next(&mut rest)? {
-                cancelled(stop)?;
-                if let Some(event) = state.frame(&event, &data)? {
+        events
+            .frames(stop, sse, 524_288, |event, data| -> Result<()> {
+                if let Some(event) = state.frame(event, data)? {
                     if let TextEvent::Delta(text) = &event {
                         rendered.push_str(text);
                     }
                     emit(event)?;
                 }
-            }
-        }
-        cancelled(stop)?;
-        sse.finish()?;
+                Ok(())
+            })
+            .await?;
         let turn = state.finish()?;
         if rendered != turn.text {
             return Err("Messages streamed text differs from completed output".into());
