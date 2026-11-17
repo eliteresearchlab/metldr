@@ -23,14 +23,3 @@ export async function sendToBackground<T = unknown>(
   }
   throw new Error('sendToBackground: max retries exceeded')
 }
-
-/**
- * Measure execution time of an async function
- */
-export async function withTiming<T>(
-  fn: () => Promise<T>
-): Promise<{ result: T; timing: number }> {
-  const start = performance.now()
-  const result = await fn()
-  return { result, timing: Math.round(performance.now() - start) }
-}

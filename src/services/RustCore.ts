@@ -1,4 +1,6 @@
-import initCore from '../../crates/metldr-core/pkg/metldr_core'
+import initCore, {
+  gateway_complete, gateway_detect_language, gateway_preferred, gateway_summarize
+} from '../../crates/metldr-core/pkg/metldr_core'
 import coreWasmUrl from '../../crates/metldr-core/pkg/metldr_core_bg.wasm?url'
 
 const LEADING_SLASH_PATTERN = /^\//
@@ -12,4 +14,36 @@ export function loadRustCore(): ReturnType<typeof initCore> {
     rustCoreReady = undefined
     throw error
   })
+}
+
+// The model gateway, for the page tools that run in this service worker. Each call throws a
+// short sentence a person can read when no route can answer.
+export interface ModelAnswer { text: string; route: string; model: string; ms: number }
+export interface ModelTurn { role: 'user' | 'assistant'; content: string }
+export interface CompleteRequest { system: string; messages: ModelTurn[]; schema?: object }
+export interface SummaryRequest {
+  content: string
+  kind?: 'key-points' | 'tldr' | 'teaser' | 'headline'
+  length?: 'short' | 'medium' | 'long'
+  context?: string
+}
+
+export async function complete(request: CompleteRequest): Promise<ModelAnswer> {
+  await loadRustCore()
+  return gateway_complete(request)
+}
+
+export async function summarize(request: SummaryRequest): Promise<ModelAnswer> {
+  await loadRustCore()
+  return gateway_summarize(request)
+}
+
+export async function detectLanguage(text: string): Promise<string> {
+  await loadRustCore()
+  return gateway_detect_language(text)
+}
+
+export async function preferredRoute(): Promise<{ route: string; model?: string } | null> {
+  await loadRustCore()
+  return gateway_preferred()
 }

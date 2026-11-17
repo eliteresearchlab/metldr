@@ -461,7 +461,8 @@ export class WordPopup {
       this.appendSynonyms(headerContainer, synonymsList)
     }
 
-    if (sourceType === 'ollama') {
+    // a definition a model wrote, on whichever route, rather than one from a dictionary
+    if (sourceType && !['api', 'local', 'cache'].includes(sourceType)) {
       this.appendAiBadge(headerContainer)
     }
 

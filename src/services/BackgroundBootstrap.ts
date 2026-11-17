@@ -1,4 +1,3 @@
-import { OllamaService } from './OllamaService'
 import { cacheService } from './CacheService'
 import { dictionaryService } from './DictionaryService'
 import { WordService } from './WordService'
@@ -6,7 +5,6 @@ import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
 import { SummaryPrefs } from '../utils/summaryPrefs'
-import { aiGateway } from './ai'
 import { logger } from './LoggerService'
 import { ragService } from './rag/RagService'
 import { concurrencyManager } from './ConcurrencyManager'
@@ -30,7 +28,6 @@ import type {
 } from '../types'
 
 const log = logger.createScoped('BackgroundBootstrap')
-const OLLAMA_ERROR_PATTERN = /ollama/i
 const SUMMARY_BULLET_PREFIX_PATTERN = /^[•\-*]\s*/
 const SUMMARY_SENTENCE_SEPARATOR_PATTERN = /[.!?]+/
 const WHITESPACE_PATTERN = /\s+/
@@ -65,16 +62,6 @@ export class BackgroundBootstrap {
     
     this.isInitialized = true
 
-    // Listen for provider preference changes
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes.preferredProvider?.newValue) {
-        const pref = changes.preferredProvider.newValue as string
-        if (pref === 'chrome-ai' || pref === 'ollama') {
-          aiGateway.setPreference(pref)
-        }
-      }
-    })
-
     chrome.runtime.onMessage.addListener((msg: BackgroundMessage, _sender, respond: ResponseCallback) => {
       if (msg.type === 'SUMMARIZE_EMAIL') {
         this._onEmailSummary(msg, respond)
@@ -103,11 +90,6 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'WORD_LOOKUP') {
         this._onWordLookup(msg, respond)
-        return true
-      }
-
-      if (msg.type === 'CHECK_OLLAMA_HEALTH') {
-        this._onHealthCheck(respond)
         return true
       }
 
@@ -200,10 +182,8 @@ export class BackgroundBootstrap {
       } catch (err) {
         log.error('onEmailSummary', (err as Error).message)
         const errMsg = (err as Error)?.message || 'unknown error'
-        const needsOllama = OLLAMA_ERROR_PATTERN.test(errMsg)
         respond({
           error: errMsg,
-          needsOllama,
           summary: {
             summary: `error: ${errMsg}`,
             action_items: [],
@@ -400,18 +380,6 @@ export class BackgroundBootstrap {
       } catch (err) {
         log.error('onWordLookup', (err as Error).message)
         respond({ success: false, error: (err as Error).message || 'lookup failed' })
-      }
-    })()
-  }
-
-  static _onHealthCheck(respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const { available, models } = await OllamaService.checkAvailable()
-        respond({ success: true, connected: available, models })
-      } catch (err) {
-        log.error('onHealthCheck', (err as Error).message)
-        respond({ success: true, connected: false, models: [] })
       }
     })()
   }

@@ -1,5 +1,5 @@
 import { extractText, getDocumentProxy, getMeta, extractLinks } from 'unpdf'
-import { RecursiveSummaryStrategy } from './RecursiveSummaryStrategy'
+import { summarize } from '../RustCore'
 import { pdfOutlineExtractor, type PdfTocEntry, type PdfMetadata } from './PdfOutlineExtractor'
 import { ragService } from '../rag/RagService'
 
@@ -31,7 +31,6 @@ export interface StreamingPdfOptions {
 }
 
 export class PdfService {
-  private strategy = new RecursiveSummaryStrategy()
   private readonly WORDS_PER_CHUNK = 350
   private readonly WORD_OVERLAP = 50
 
@@ -55,7 +54,7 @@ export class PdfService {
       const { text } = await extractText(pdf, { mergePages: true })
       console.log(`[PdfService] Text extracted. Length: ${text.length}`)
       
-      const summary = await this.strategy.execute(text)
+      const summary = (await summarize({ content: text })).text
       
       // index summary for global search
       ragService.indexSummary(summary, {
@@ -140,7 +139,7 @@ export class PdfService {
       const { text } = await extractText(pdf, { mergePages: true })
       console.log(`[PdfService] Text extracted. Length: ${text.length}`)
       
-      const summary = await this.strategy.execute(text)
+      const summary = (await summarize({ content: text })).text
       
       // index summary for global search
       const pdfUrl = sourceUrl || `file://${filename || 'document.pdf'}`
@@ -228,7 +227,7 @@ export class PdfService {
       
       if (sectionText.trim().length > 100) {
         // summarize this section
-        const sectionSummary = await this.strategy.execute(sectionText, { maxBullets: 2 })
+        const sectionSummary = (await summarize({ content: sectionText, length: 'short' })).text.split('\n').filter(line => line.trim()).slice(0, 2).join('\n')
         
         bullets.push({
           text: `**${entry.title}**: ${sectionSummary.replace(MULTILINE_BULLET_PREFIX_PATTERN, '').trim()}`,
@@ -248,7 +247,7 @@ export class PdfService {
     const fullText = pageTexts.join('\n\n')
     const contextText = highlightSection + fullText
     
-    const summary = await this.strategy.execute(contextText)
+    const summary = (await summarize({ content: contextText })).text
     
     const lines = summary.split('\n').filter(l => l.trim())
     const bullets: PdfSummaryBullet[] = []
@@ -271,7 +270,7 @@ export class PdfService {
   // page-aware summarization without toc
   private async summarizeWithPageRefs(pageTexts: string[]): Promise<PdfSummaryBullet[]> {
     const fullText = pageTexts.join('\n\n')
-    const summary = await this.strategy.execute(fullText)
+    const summary = (await summarize({ content: fullText })).text
     
     // parse bullets from summary
     const lines = summary.split('\n').filter(l => l.trim())

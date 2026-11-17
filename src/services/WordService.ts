@@ -1,13 +1,11 @@
-import { OllamaService } from './OllamaService'
 import { dictionaryService } from './DictionaryService'
-import { aiGateway } from './ai'
+import { complete, detectLanguage } from './RustCore'
 import type {
   Definition,
   WordLookupResult,
   LookupContext,
   ApiMeaning,
   ApiEntry,
-  LLMParsedResult
 } from '../types'
 
 /**
@@ -93,36 +91,18 @@ export class WordService {
     const apiHit = await tryApi()
     if (apiHit) return apiHit
 
-    // chrome ai
+    // the model the user chose for page tools, then the downloaded dictionaries
     try {
-      const chromeResult = await this._generateFromChromeAI(word_lc, context)
-      if (chromeResult) {
-        console.log('[WordService] generated via Chrome AI')
-        return chromeResult
-      }
+      const generated = await this._generateWithModel(word_lc, context)
+      if (generated) return generated
     } catch (err) {
-      console.log('[WordService] chrome ai tier error:', (err as Error).message)
+      console.log('[WordService] model tier error:', (err as Error).message)
     }
 
-    const localHit = await tryLocal()
-    if (localHit) return localHit
-
-    // ollama
-    try {
-      const model = await OllamaService.getUserSelected() || await OllamaService.selectBest('word_lookup')
-      if (model) {
-        const result = await this._generateFromLLM(word_lc, context, model)
-        console.log('[WordService] generated via Ollama')
-        return result
-      }
-    } catch (err) {
-      console.log('[WordService] ollama tier error:', (err as Error).message)
-    }
-
-    return null
+    return await tryLocal()
   }
 
-  static async _generateFromChromeAI(word: string, context: LookupContext): Promise<WordLookupResult | null> {
+  static async _generateWithModel(word: string, context: LookupContext): Promise<WordLookupResult | null> {
     const contextStr = context.fullSentence
       ? `Context: "${context.fullSentence}"`
       : (context.contextBefore || context.contextAfter
@@ -144,14 +124,13 @@ export class WordService {
       required: ['pos', 'def']
     }
 
-    const result = await aiGateway.complete({
-      systemPrompt: 'You are a dictionary. Define words concisely.',
-      userPrompt: prompt,
-      temperature: 0,
-      responseConstraint
+    const answer = await complete({
+      system: 'You are a dictionary. Define words concisely.',
+      messages: [{ role: 'user', content: prompt }],
+      schema: responseConstraint
     })
-
-    if (!result.ok || !result.content) return null
+    const result = { content: answer.text }
+    const source = answer.route
 
     try {
       const parsed = JSON.parse(result.content.trim())
@@ -164,7 +143,7 @@ export class WordService {
         }],
         synonyms: parsed.synonyms || [],
         language: lang,
-        source: 'chrome-ai'
+        source
       }
     } catch {
       // fallback if json parse fails
@@ -177,7 +156,7 @@ export class WordService {
         }],
         synonyms: [],
         language: lang,
-        source: 'chrome-ai'
+        source
       }
     }
   }
@@ -245,81 +224,6 @@ export class WordService {
     }
   }
 
-  static async _generateFromLLM(word: string, context: LookupContext, model: string): Promise<WordLookupResult> {
-    const schema = {
-      type: 'object',
-      properties: {
-        partOfSpeech: {
-          type: 'string',
-          enum: ['noun', 'verb', 'adjective', 'adverb', 'pronoun', 'preposition', 'conjunction', 'interjection', 'other']
-        },
-        definition: {
-          type: 'string',
-          description: 'concise 15-20 word definition'
-        },
-        example: {
-          type: 'string',
-          description: 'optional usage example'
-        },
-        synonyms: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '3-5 synonyms'
-        }
-      },
-      required: ['partOfSpeech', 'definition']
-    }
-
-    const contextStr = context.fullSentence
-      ? `Context: "${context.fullSentence}"`
-      : (context.contextBefore || context.contextAfter
-        ? `Context: "${context.contextBefore} [${word}] ${context.contextAfter}"`
-        : '')
-
-    const prompt = `${contextStr}
-
-Define "${word}" (15-20 words max, considering context). Respond only with JSON.`
-
-    const result = await OllamaService.complete(
-      model,
-      [
-        { role: 'system', content: 'define words concisely. return valid json.' },
-        { role: 'user', content: prompt }
-      ],
-      { format: schema, temperature: 0 }
-    )
-
-    if (!result.ok) throw new Error(result.error)
-
-    try {
-      const parsed: LLMParsedResult = JSON.parse(result.content || '{}')
-      return {
-        definitions: [{
-          definition: parsed.definition || 'no definition',
-          partOfSpeech: parsed.partOfSpeech || 'unknown',
-          example: parsed.example || null,
-          synonyms: parsed.synonyms || []
-        }],
-        synonyms: parsed.synonyms || [],
-        language: 'en',
-        source: 'ollama'
-      }
-    } catch {
-      return {
-        definitions: [{
-          definition: (result.content || '').trim(),
-          partOfSpeech: 'unknown',
-          example: null,
-          synonyms: []
-        }],
-        synonyms: [],
-        language: 'en',
-        source: 'ollama'
-      }
-    }
-  }
-
-
   static async detectLanguage(word: string, sentence = ''): Promise<string> {
     const detectionText = sentence && sentence.length > word.length ? sentence : word
 
@@ -327,12 +231,7 @@ Define "${word}" (15-20 words max, considering context). Respond only with JSON.
       const textForDetection = detectionText.length >= 20 ? detectionText : 
         (sentence.length >= 20 ? sentence : `${sentence} ${word}`.trim())
       
-      const chromeResult = await aiGateway.detectLanguage({ text: textForDetection })
-      if (chromeResult.ok && chromeResult.language) {
-        const confidence = chromeResult.confidence || 0
-        console.log('[WordService.detectLanguage] detected via', chromeResult.provider, ':', chromeResult.language, `(confidence: ${(confidence * 100).toFixed(0)}%)`)
-        return chromeResult.language
-      }
+      return await detectLanguage(textForDetection)
     } catch (err) {
       console.log('[WordService.detectLanguage] ai error:', (err as Error).message)
     }

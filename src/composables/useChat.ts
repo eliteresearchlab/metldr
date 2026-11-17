@@ -1,7 +1,7 @@
 import { ref, nextTick, type Ref, computed } from 'vue'
 import type { AppPageSummary, AppChatMessage, AppChatResponse } from '@/types'
-import type { AIProviderPreference } from './useSettings'
-import { sendToBackground, withTiming } from './useMessaging'
+import type { GatewayTurn } from './useGateway'
+import { sendToBackground } from './useMessaging'
 import { logger } from '@/services/LoggerService'
 import { analyticsService } from '@/services/AnalyticsService'
 import { cacheService } from '@/services/CacheService'
@@ -129,21 +129,6 @@ function getUrlMessages(url: string): AppChatMessage[] {
   return state ? [...state.messages] : []
 }
 
-declare const LanguageModel: {
-  availability: (opts?: { languages?: string[] }) => Promise<string | { available: string }>
-  create: (options?: { 
-    initialPrompts?: { role: string; content: string }[]
-    temperature?: number
-    topK?: number
-    expectedInputs?: { type: string; languages: string[] }[]
-    expectedOutputs?: { type: string; languages: string[] }[]
-  }) => Promise<{
-    prompt: (text: string) => Promise<string>
-    promptStreaming: (text: string) => AsyncIterable<string>
-    destroy: () => void
-  }>
-} | undefined
-
 export function useChat() {
   // get current active URL
   async function getActiveUrl(): Promise<string> {
@@ -157,12 +142,10 @@ export function useChat() {
 
   async function sendChatMessage(
     pageSummary: Ref<AppPageSummary | null>,
-    selectedModel: Ref<string>,
-    availableModels: Ref<string[]>,
+    stream: (system: string, messages: GatewayTurn[], onDelta: (text: string) => void) => { done: Promise<{ text: string }> },
     chatContainer: Ref<HTMLElement | null>,
     chatInputRef: Ref<HTMLElement | null>,
-    saveTabSession?: () => Promise<void>,
-    preferredProvider?: Ref<AIProviderPreference>
+    saveTabSession?: () => Promise<void>
   ): Promise<void> {
     if (!chatInput.value.trim() || chatLoading.value) return
     
@@ -398,208 +381,52 @@ RULES:
           : 'You are a helpful assistant. Be concise.'
 
 
-      const useOllama = preferredProvider?.value === 'ollama'
-      
-      let chromeResult: { ok: boolean; content?: string; model?: string; timing?: number } | null = null
-      if (!useOllama) {
-        try {
-          if (typeof LanguageModel !== 'undefined') {
-            const langOpts = { languages: ['en', 'es', 'ja'] }
-            const avail = await LanguageModel.availability(langOpts)
-            const status = typeof avail === 'string' ? avail : avail?.available
-            log.log('LanguageModel availability:', { status, raw: avail })
-            if (status === 'available' || status === 'downloadable' || status === 'readily') {
-              log.log('creating Chrome AI session...')
-              
-              try {
-                const state = getUrlState(targetUrl)
-                const recentMessages = state.messages.slice(-6).map(m => ({
-                  role: m.role as 'user' | 'assistant',
-                  content: m.content
-                }))
-                
-                const initialPrompts: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-                  { role: 'system', content: systemPrompt }
-                ]
-                
-                for (const msg of recentMessages) {
-                  if (msg.content !== userMessage) {
-                    initialPrompts.push(msg)
-                  }
-                }
-                
-                log.log('Chrome AI session with initial prompts:', initialPrompts.length)
-                const session = await LanguageModel.create({ initialPrompts })
-                log.log('session created')
-                  
-                const start = performance.now()
-                
-                let fullResponse = ''
-                
-                try {
-                  const stream = session.promptStreaming(userMessage)
-                  
-                  for await (const chunk of stream) {
-                    fullResponse += chunk
-                    
-                    updateUrlState(targetUrl, state => {
-                      const lastMsg = state.messages[state.messages.length - 1]
-                      if (lastMsg?.role === 'assistant') {
-                        lastMsg.content = fullResponse
-                      } else {
-                        state.messages.push({ role: 'assistant', content: fullResponse })
-                      }
-                    })
-                    
-                    debouncedSaveChat(targetUrl, getUrlState(targetUrl).messages)
-                    
-                    await nextTick()
-                    if (activeUrl === targetUrl && chatContainer.value) {
-                      chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-                    }
-                  }
-                  
-                  flushSaveChat()
-                  
-                  const llmTime = Math.round(performance.now() - start)
-                  const totalTime = Math.round(performance.now() - messageStartTime)
-                  const ragTime = totalTime - llmTime
-                  log.log('streaming complete', { len: fullResponse.length, total: totalTime, llm: llmTime, rag: ragTime })
-                  
-                  updateUrlState(targetUrl, state => {
-                    const lastMsg = state.messages[state.messages.length - 1]
-                    if (lastMsg?.role === 'assistant') {
-                      lastMsg.timing = { 
-                        total: totalTime, 
-                        llm: llmTime,
-                        rag: ragTime > 100 ? ragTime : undefined,  // only show if significant
-                        model: 'gemini-nano' 
-                      }
-                    }
-                  })
-                  
-                  const completedState = getUrlState(targetUrl)
-                  const normalizedUrl = targetUrl.split('?')[0].replace(trailingSlashPattern, '')
-                  cacheService.setTabSession(normalizedUrl, completedState.messages, null, false)
-                    .catch(err => log.warn('post-stream save failed', err.message))
-                  
-                  chromeResult = { ok: true, content: fullResponse, model: 'gemini-nano', timing: totalTime }
-                  analyticsService.trackChat('assistant', fullResponse, totalTime).catch(() => {})
-                } catch (streamErr) {
-                  log.log('streaming failed, trying non-streaming...', (streamErr as Error).message)
-                  
-                  try {
-                    const result = await session.prompt(userMessage)
-                    const timing = Math.round(performance.now() - start)
-                    
-                    updateUrlState(targetUrl, state => {
-                      state.messages.push({ 
-                        role: 'assistant', 
-                        content: result,
-                        timing: { total: timing, model: 'gemini-nano' }
-                      })
-                    })
-                    
-                    chromeResult = { ok: true, content: result, model: 'gemini-nano', timing }
-                    log.log('non-streaming complete', { len: result.length, timing })
-                  } catch (promptErr) {
-                    throw promptErr
-                  }
-                }
-                
-                session.destroy()
-              } catch (sessionErr) {
-                log.log('session/prompt error:', (sessionErr as Error).message)
-                throw sessionErr
-              }
-            } else {
-              log.log('LanguageModel not available, status:', status)
-            }
+      // the reply streams from the model gateway on whichever route the user chose
+      const history = getUrlState(targetUrl).messages.slice(-7)
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+      const start = performance.now()
+      let fullResponse = ''
+      const reply = stream(systemPrompt, history, delta => {
+        fullResponse += delta
+        updateUrlState(targetUrl, state => {
+          const lastMsg = state.messages[state.messages.length - 1]
+          if (lastMsg?.role === 'assistant') {
+            lastMsg.content = fullResponse
           } else {
-            log.log('LanguageModel is undefined')
+            state.messages.push({ role: 'assistant', content: fullResponse })
           }
-        } catch (err) {
-          log.log('Chrome AI failed, falling back', (err as Error).message)
-        }
-      }
+        })
+        debouncedSaveChat(targetUrl, getUrlState(targetUrl).messages)
+        void nextTick(() => {
+          if (activeUrl === targetUrl && chatContainer.value) {
+            chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+          }
+        })
+      })
+      const done = await reply.done
+      flushSaveChat()
 
-      if (chromeResult?.ok && chromeResult.content) {
-      } else {
-        const model = selectedModel.value || availableModels.value[0]
-        if (!model) {
-          throw new Error('no AI available - Chrome AI is off and Ollama is not running')
+      const llmTime = Math.round(performance.now() - start)
+      const totalTime = Math.round(performance.now() - messageStartTime)
+      const ragTime = totalTime - llmTime
+      updateUrlState(targetUrl, state => {
+        const lastMsg = state.messages[state.messages.length - 1]
+        if (lastMsg?.role === 'assistant') {
+          lastMsg.content = done.text
+          lastMsg.timing = { total: totalTime, llm: llmTime, rag: ragTime > 100 ? ragTime : undefined }
+        } else {
+          state.messages.push({ role: 'assistant', content: done.text, timing: { total: totalTime, llm: llmTime } })
         }
-        
-        const state = getUrlState(targetUrl)
-        const recentMessages = state.messages.slice(-6).map(m => ({
-          role: m.role as 'user' | 'assistant' | 'system',
-          content: m.content
-        }))
-        
-        const messagesWithSystem = [
-          { role: 'system' as const, content: systemPrompt },
-          ...recentMessages
-        ]
-        
-        log.log('streaming with ollama...', model)
-        const start = performance.now()
-        
-        const { OllamaService } = await import('@/services/OllamaService')
-        let fullResponse = ''
-        
-        try {
-          for await (const chunk of OllamaService.completeStream(model, messagesWithSystem)) {
-            fullResponse += chunk
-            
-            updateUrlState(targetUrl, state => {
-              const lastMsg = state.messages[state.messages.length - 1]
-              if (lastMsg?.role === 'assistant') {
-                lastMsg.content = fullResponse
-              } else {
-                state.messages.push({ role: 'assistant', content: fullResponse })
-              }
-            })
-            
-            debouncedSaveChat(targetUrl, getUrlState(targetUrl).messages)
-            
-            await nextTick()
-            if (activeUrl === targetUrl && chatContainer.value) {
-              chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-            }
-          }
-          
-          flushSaveChat()
-          
-          const timing = Math.round(performance.now() - start)
-          log.log('ollama streaming complete', { len: fullResponse.length, timing })
-          
-          const llmTime = timing
-          const totalTime = Math.round(performance.now() - messageStartTime)
-          const ragTime = totalTime - llmTime
-          
-          updateUrlState(targetUrl, state => {
-            const lastMsg = state.messages[state.messages.length - 1]
-            if (lastMsg?.role === 'assistant') {
-              lastMsg.timing = { 
-                total: totalTime, 
-                llm: llmTime,
-                rag: ragTime > 100 ? ragTime : undefined,
-                model 
-              }
-            }
-          })
-          
-          // save to IDB immediately - prevents lost response if user switched tabs
-          const ollCompletedState = getUrlState(targetUrl)
-          const ollNormalizedUrl = targetUrl.split('?')[0].replace(trailingSlashPattern, '')
-          cacheService.setTabSession(ollNormalizedUrl, ollCompletedState.messages, null, false)
-            .catch(err => log.warn('post-stream save failed', err.message))
-          
-          analyticsService.trackChat('assistant', fullResponse, totalTime).catch(() => {})
-        } catch (err) {
-          throw err
-        }
-      }
+      })
+
+      // save to IDB immediately - prevents lost response if user switched tabs
+      const completedState = getUrlState(targetUrl)
+      const normalizedUrl = targetUrl.split('?')[0].replace(trailingSlashPattern, '')
+      cacheService.setTabSession(normalizedUrl, completedState.messages, null, false)
+        .catch(err => log.warn('post-stream save failed', err.message))
+
+      analyticsService.trackChat('assistant', done.text, totalTime).catch(() => {})
     } catch (error) {
       log.warn('chat error', (error as Error).message)
       updateUrlState(targetUrl, state => {

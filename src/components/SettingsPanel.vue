@@ -7,22 +7,18 @@ import {
 import { Toggle, ScrollArea, Checkbox, Textarea, Input, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui'
 import AIStatusCards from './AIStatusCards.vue'
 import DonationCard from './DonationCard.vue'
-import type { DropdownPos, DownloadProgressItem } from '@/types'
-import type { AIProviderPreference } from '@/composables/useSettings'
+import type { DownloadProgressItem } from '@/types'
+import type { GatewayRoute } from '@/composables/useGateway'
 
 interface Props {
-  chromeAIStatus: 'available' | 'downloadable' | 'downloading' | 'unavailable' | 'checking'
-  ollamaStatus: 'checking' | 'ready' | 'not-found' | 'error'
-  availableModels: string[]
-  selectedModel: string
-  showModelDropdown: boolean
-  modelDropdownPos: DropdownPos
+  routes: GatewayRoute[]
+  activeRoute: GatewayRoute | null
+  detecting: boolean
   summaryMode: 'manual' | 'auto'
   minAutoWords: number
   allowlistInput: string
   denylistInput: string
   wordPopupEnabled: boolean
-  preferredProvider: AIProviderPreference
   downloadedLanguages: string[]
   selectedLanguages: string[]
   downloadProgress: Record<string, DownloadProgressItem>
@@ -32,17 +28,14 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  'toggle-dropdown': []
-  'select-model': [model: string]
+  prefer: [route: string, model: string]
   'update:summaryMode': [value: 'manual' | 'auto']
   'update:minAutoWords': [value: number]
   'update:allowlistInput': [value: string]
   'update:denylistInput': [value: string]
   'toggle-word-popup': [value: boolean]
-  'set-provider': [provider: AIProviderPreference]
   'toggle-language': [langCode: string]
   'delete-language': [langCode: string]
-  'refresh-ollama': []
   'clear-cache': []
   'open-welcome': []
   'update:fontSize': [size: 'small' | 'medium' | 'large']
@@ -55,18 +48,11 @@ const themeStore = useThemeStore()
   <ScrollArea class="h-full">
     <div class="p-3 space-y-3">
       
-      <AIStatusCards 
-        :chrome-a-i-status="chromeAIStatus"
-        :ollama-status="ollamaStatus"
-        :available-models="availableModels"
-        :selected-model="selectedModel"
-        :show-model-dropdown="showModelDropdown"
-        :model-dropdown-pos="modelDropdownPos"
-        :preferred-provider="preferredProvider"
-        @toggle-dropdown="emit('toggle-dropdown')"
-        @select-model="(m) => emit('select-model', m)"
-        @refresh-ollama="emit('refresh-ollama')"
-        @set-provider="(p) => emit('set-provider', p)"
+      <AIStatusCards
+        :routes="routes"
+        :active="activeRoute"
+        :detecting="detecting"
+        @prefer="(route, model) => emit('prefer', route, model)"
         @open-welcome="emit('open-welcome')"
       />
 

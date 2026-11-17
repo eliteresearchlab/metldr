@@ -1,23 +1,20 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useThemeStore } from '@/stores/theme'
 import { analyticsService } from '@/services/AnalyticsService'
 
 import { 
-  useOllama, 
-  useChromeAI, 
+  useGateway,
   usePageSummary, 
   useChat, 
   useSettings, 
   useDictionary, 
-  useTabSession,
-  useDropdown
+  useTabSession
 } from '@/composables'
 
 import HistoryManager from '@/components/HistoryManager.vue'
 import SummaryCard from '@/components/SummaryCard.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
-import OllamaSetup from '@/components/OllamaSetup.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import HoverRevealNav from '@/components/HoverRevealNav.vue'
 import PdfDropZone from '@/components/PdfDropZone.vue'
@@ -27,19 +24,11 @@ import { pdfService } from '@/services/pdf/PdfService'
 
 
 import { ScrollArea } from '@/components/ui'
-import { Loader2, RefreshCw, X, FileText, BarChart3, Settings, Search } from 'lucide-vue-next'
+import { Loader2, X, FileText, BarChart3, Settings, Search } from 'lucide-vue-next'
 
 const themeStore = useThemeStore()
 
-const { 
-  ollamaStatus, 
-  availableModels, 
-  selectedModel, 
-  checkOllama, 
-  selectModel 
-} = useOllama()
-
-const { chromeAIStatus, checkChromeAI, refreshChromeAI, cleanup: cleanupChromeAI } = useChromeAI()
+const { routes, active: activeRoute, ready: aiReady, detecting: aiChecking, detect, prefer, stream } = useGateway()
 
 const {
   pageSummary,
@@ -80,12 +69,9 @@ const {
   denylistInput,
   minAutoWords,
   wordPopupEnabled,
-  preferredProvider,
   loadSummaryPrefs,
   loadWordPopupSetting,
   toggleWordPopup,
-  loadProviderPreference,
-  setProviderPreference,
   loadFontSize,
   setFontSize,
   fontSize,
@@ -107,32 +93,10 @@ const {
 
 const { saveTabSession, setupTabListener } = useTabSession()
 
-const {
-  showModelDropdown,
-  modelDropdownPos,
-  toggleModelDropdown,
-  closeDropdown,
-  setupDropdownClickHandler
-} = useDropdown()
-
 const activeTab = ref<string>('summary')
 const historyRef = ref<InstanceType<typeof HistoryManager> | null>(null)
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
 const navOpen = ref(false)
-
-const aiReady = computed(() => {
-  if (preferredProvider.value === 'chrome-ai') {
-    return chromeAIStatus.value === 'available' || chromeAIStatus.value === 'downloadable'
-  }
-  return ollamaStatus.value === 'ready'
-})
-
-const aiChecking = computed(() => {
-  if (preferredProvider.value === 'chrome-ai') {
-    return chromeAIStatus.value === 'checking'
-  }
-  return ollamaStatus.value === 'checking'
-})
 
 async function doSaveTabSession(): Promise<void> {
   await saveTabSession(currentTabUrl, chatMessages, pageSummary, summaryCollapsed)
@@ -157,30 +121,13 @@ function declineSummaryPrompt(): void {
 }
 
 async function sendChatMessage(): Promise<void> {
-  await baseSendChatMessage(
-    pageSummary,
-    selectedModel,
-    availableModels,
-    ref(null),
-    ref(null),
-    doSaveTabSession,
-    preferredProvider
-  )
+  await baseSendChatMessage(pageSummary, stream, ref(null), ref(null), doSaveTabSession)
   chatPanelRef.value?.focusInput()
 }
 
 function clearChat(): void {
   baseClearChat(undefined, doSaveTabSession)
   chatPanelRef.value?.focusInput()
-}
-
-async function handleSelectModel(model: string): Promise<void> {
-  await selectModel(model)
-  closeDropdown()
-}
-async function retryDetection(): Promise<void> {
-  ollamaStatus.value = 'checking'
-  await checkOllama(false)
 }
 
 function openWelcomePage(): void {
@@ -248,7 +195,6 @@ function handlePdfDropError(message: string): void {
 }
 
 let cleanupTabListener: (() => void) | null = null
-let cleanupDropdownHandler: (() => void) | null = null
 let statusCheckInterval: ReturnType<typeof setInterval> | null = null
 let sidePanelMessageListener: ((msg: any) => void) | null = null
 
@@ -268,19 +214,15 @@ onMounted(async () => {
   await Promise.all([
     loadWordPopupSetting(),
     loadSummaryPrefs(),
-    loadProviderPreference(),
     loadFontSize()
   ])
   await loadDictionarySettings()
   await initSelectedLanguages()
   
-  await Promise.all([checkOllama(), checkChromeAI()])
+  await detect()
   
   setupSettingsWatcher()
-  setupStorageListener(
-    (model) => { selectedModel.value = model },
-    (langs) => { updateSelectedLanguages(langs) }
-  )
+  setupStorageListener((langs) => { updateSelectedLanguages(langs) })
   
   cleanupTabListener = setupTabListener(
     currentTabId,
@@ -298,22 +240,9 @@ onMounted(async () => {
   
   window.addEventListener('keydown', handleKeydown)
   
-  cleanupDropdownHandler = setupDropdownClickHandler()
   
-  statusCheckInterval = setInterval(async () => {
-    const wasOllamaReady = ollamaStatus.value === 'ready'
-    await checkOllama(false)
-    
-    if (wasOllamaReady && ollamaStatus.value !== 'ready' && preferredProvider.value === 'ollama') {
-      console.log('[App] Ollama disconnected, falling back to Chrome AI')
-      setProviderPreference('chrome-ai')
-    }
-    
-    // also periodically check chrome ai if not yet available (picks up downloads from welcome page)
-    if (chromeAIStatus.value !== 'available') {
-      await refreshChromeAI()
-    }
-  }, 5000)
+  // picks up a server started later or a model downloaded in setup
+  statusCheckInterval = setInterval(() => { detect().catch(() => {}) }, 5000)
   
   const context = isEmailClient.value ? 'gmail' : 'article'
   analyticsService.startSession(context, 'summary', currentTabUrl.value || undefined).catch(() => {})
@@ -332,9 +261,7 @@ watch(currentTabUrl, (newUrl) => {
 onUnmounted(() => {
   if (statusCheckInterval) clearInterval(statusCheckInterval)
   if (cleanupTabListener) cleanupTabListener()
-  if (cleanupDropdownHandler) cleanupDropdownHandler()
   if (sidePanelMessageListener) chrome.runtime.onMessage.removeListener(sidePanelMessageListener)
-  cleanupChromeAI()
   window.removeEventListener('keydown', handleKeydown)
   analyticsService.endSession().catch(() => {})
 })
@@ -375,13 +302,6 @@ onUnmounted(() => {
             <p class="text-[12px] text-foreground/70">connecting to ai...</p>
           </div>
           
-          <OllamaSetup 
-            v-else-if="preferredProvider === 'ollama' && ollamaStatus === 'not-found'"
-            key="setup"
-            @retry="retryDetection"
-            @open-welcome="openWelcomePage"
-          />
-
           <GlobalSearch 
             v-else-if="aiReady && activeTab === 'search'" 
             key="search"
@@ -433,62 +353,46 @@ onUnmounted(() => {
           </ScrollArea>
 
           <SettingsPanel 
+            :routes="routes"
+            :active-route="activeRoute"
+            :detecting="aiChecking"
+            @prefer="prefer"
             v-else-if="activeTab === 'settings'"
             key="settings"
-            :chrome-a-i-status="chromeAIStatus"
-            :ollama-status="ollamaStatus"
-            :available-models="availableModels"
-            :selected-model="selectedModel"
-            :show-model-dropdown="showModelDropdown"
-            :model-dropdown-pos="modelDropdownPos"
             :summary-mode="summaryMode"
             :min-auto-words="minAutoWords"
             :allowlist-input="allowlistInput"
             :denylist-input="denylistInput"
             :word-popup-enabled="wordPopupEnabled"
-            :preferred-provider="preferredProvider"
             :downloaded-languages="downloadedLanguages"
             :selected-languages="selectedLanguages"
             :download-progress="downloadProgress"
-            @toggle-dropdown="toggleModelDropdown"
-            @select-model="handleSelectModel"
             @update:summary-mode="(v) => summaryMode = v"
             @update:min-auto-words="(v) => minAutoWords = v"
             @update:allowlist-input="(v) => allowlistInput = v"
             @update:denylist-input="(v) => denylistInput = v"
             @toggle-word-popup="toggleWordPopup"
-            @set-provider="setProviderPreference"
             @toggle-language="toggleLanguage"
             @delete-language="deleteLanguageData"
             @clear-cache="clearCache"
-            @refresh-ollama="retryDetection"
             @open-welcome="openWelcomePage"
             :font-size="fontSize"
             @update:font-size="setFontSize"
           />
 
-          <div v-else-if="ollamaStatus === 'error'" key="error" class="flex flex-col items-center justify-center h-full p-6">
-            <X :size="32" class="mb-3 text-destructive/50" />
-            <p class="text-[12px] text-foreground/70 mb-3">connection error</p>
-            <button @click="retryDetection" class="px-3 py-1.5 rounded-md text-[11px] bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center gap-1.5">
-              <RefreshCw :size="12" />
-              retry
-            </button>
-          </div>
-
-          <div v-else-if="preferredProvider === 'chrome-ai' && chromeAIStatus === 'unavailable'" key="unavailable" class="flex flex-col items-center justify-center h-full p-6">
+          <div v-else key="setup" class="flex flex-col items-center justify-center h-full p-6">
             <X :size="32" class="mb-3 text-foreground/30" />
-            <p class="text-[13px] font-medium text-foreground/80 mb-2">chrome ai unavailable</p>
-            <p class="text-[11px] text-foreground/50 text-center mb-4 max-w-[200px]">gemini nano is not available on this device. try switching to ollama in settings.</p>
-            <button @click="switchTab('settings')" class="px-3 py-1.5 rounded-md text-[11px] bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center gap-1.5">
-              <Settings :size="12" />
-              open settings
-            </button>
-          </div>
-
-          <div v-else key="waiting" class="flex flex-col items-center justify-center h-full p-6">
-            <Loader2 class="w-6 h-6 mb-3 text-foreground/30" :stroke-width="2" />
-            <p class="text-[11px] text-foreground/50">waiting for ai...</p>
+            <p class="text-[13px] font-medium text-foreground/80 mb-2">no ai yet</p>
+            <p class="text-[11px] text-foreground/50 text-center mb-4 max-w-[220px]">metldr can use chrome's built-in ai, a model server on this computer, or your own key.</p>
+            <div class="flex gap-2">
+              <button @click="openWelcomePage" class="px-3 py-1.5 rounded-md text-[11px] font-medium bg-primary/20 text-primary hover:bg-primary/30 transition-colors active:scale-[0.97]">
+                set up ai
+              </button>
+              <button @click="switchTab('settings')" class="px-3 py-1.5 rounded-md text-[11px] bg-muted text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1.5 active:scale-[0.97]">
+                <Settings :size="12" />
+                settings
+              </button>
+            </div>
           </div>
         </KeepAlive>
       </Transition>
