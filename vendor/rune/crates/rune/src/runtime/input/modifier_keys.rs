@@ -144,24 +144,12 @@ impl ModifierKeys {
 }
 
 impl<S: 'static> Runtime<S> {
-    /// Send `Key::Modifier` presses and releases to `on_key` and the focused input's key
-    /// handler. Off by default: handlers written before it may act on any key.
-    pub fn set_modifier_keys(&mut self, enabled: bool) {
-        if self.modifier_keys.enabled != enabled { self.modifier_keys.held = 0; }
-        self.modifier_keys.enabled = enabled;
-    }
-
-    pub fn modifier_keys(&self) -> bool { self.modifier_keys.enabled }
-
-    /// Whether `event` presses or releases a modifier key, which needs a frame to deliver.
-    pub(super) fn modifier_pending(&self, event: &PhysicalInput) -> bool { self.modifier_keys.pending(event) }
-
     /// After the focused physical handler saw `event` (and `consumed` it or not): route the
     /// modifier keys it presses and releases. True if a handler took one.
     pub(super) fn modifier_dispatch(&mut self, event: &PhysicalInput, consumed: bool, tx: &mut Tx, live: &mut Option<bool>) -> bool {
         let mut ran = false;
         let code = match *event { PhysicalInput::Key { key, .. } => Some(key), _ => None };
-        for ev in self.modifier_keys.apply(event, consumed, ALTGR_CLEARS_FLAGS) {
+        for ev in self.core.modifier_keys.apply(event, consumed, ALTGR_CLEARS_FLAGS) {
             let mut one = self.transaction();
             one.physical_key = code;
             let took = self.route_modifier(&ev, &mut one);
@@ -175,11 +163,11 @@ impl<S: 'static> Runtime<S> {
     /// A modifier key goes to the app and the focused input's key handler, in `route_key`'s
     /// order, and to nothing built in: no editing, selection, focus traversal or focus ring.
     pub(super) fn route_modifier(&mut self, ev: &KeyEvent, one: &mut Tx) -> bool {
-        if !self.modifier_keys.enabled { return false; }
+        if !self.core.modifier_keys.enabled { return false; }
         one.key_repeat = false;
-        let app_first = self.focused.is_none();
+        let app_first = self.core.focused.is_none();
         if app_first && let Some(f) = self.on_key && Tx::took(self.app_key(f, ev, one), one) { return true; }
-        if let Some(f) = self.focused_input().and_then(|input| input.key.clone())
+        if let Some(f) = self.core.focused_input().and_then(|input| input.key.clone())
             && Tx::took(f(states!(self), ev, one), one)
         {
             return true;
@@ -190,6 +178,20 @@ impl<S: 'static> Runtime<S> {
         }
         matches!(ev.key, Key::Modifier { pressed: false, .. }) && self.route_key_up(ev, one)
     }
+}
+
+impl RuntimeCore {
+    /// Send `Key::Modifier` presses and releases to `on_key` and the focused input's key
+    /// handler. Off by default: handlers written before it may act on any key.
+    pub fn set_modifier_keys(&mut self, enabled: bool) {
+        if self.modifier_keys.enabled != enabled { self.modifier_keys.held = 0; }
+        self.modifier_keys.enabled = enabled;
+    }
+
+    pub fn modifier_keys(&self) -> bool { self.modifier_keys.enabled }
+
+    /// Whether `event` presses or releases a modifier key, which needs a frame to deliver.
+    pub(super) fn modifier_pending(&self, event: &PhysicalInput) -> bool { self.modifier_keys.pending(event) }
 }
 
 #[cfg(test)]

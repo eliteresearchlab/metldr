@@ -7,7 +7,7 @@ use super::*;
 /// heights keep changing.
 const VIRTUAL_FILL_FRAMES: u32 = 12;
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     pub(super) fn virtual_window_changed(&self) -> bool {
         self.virtuals.iter().any(|(path, v)| self.wants_window(path, v))
     }

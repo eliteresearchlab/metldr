@@ -381,6 +381,58 @@ fn target_shift(nodes: &[Node], scrolls: &HashMap<NodeId, ScrollState>, j: usize
 }
 
 impl<S: 'static> Runtime<S> {
+    /// Scrolls each kept element's viewport so the element's top lands where it showed before
+    /// the commit, clamped to the content, re-pinning a `stick_bottom` end, and remounting any
+    /// virtual rows the jump brings into view.
+    pub(super) fn apply_keeps(&mut self) {
+        if self.core.keeps.is_empty() { return; }
+        let mut keeps = std::mem::take(&mut self.core.keeps);
+        for pass in 0..4 {
+            // Step with the keeps in place: they own their viewports (`ease_to_shrunk_end`).
+            self.core.keeps = keeps;
+            self.core.step_scroll(0.0);
+            keeps = std::mem::take(&mut self.core.keeps);
+            let mut moved = false;
+            for k in &keeps {
+                let Some(s) = self.core.nodes.iter().position(|n| n.path == k.viewport && n.scroll.is_some() && n.scroll_axes.y()) else { continue };
+                let laid = if let Some(i) = self.core.nodes.iter().position(|n| n.path == k.path) {
+                    if self.core.viewport_of(i) != Some(s) { continue; }
+                    if self.core.scroll_stack(s).and_then(|c| self.core.stacks.get(&self.core.nodes[c].id)).is_some_and(|st| st.growing)
+                        && let Some(st) = self.core.scrolls.get_mut(&self.core.nodes[s].id)
+                    {
+                        st.pinned = false;
+                    }
+                    // Mounted anchors follow drawn geometry after the motion step.
+                    continue;
+                } else if let Some((v_path, row_key, in_row)) = &k.virtual_row
+                    && let Some(v) = self.core.virtuals.get(v_path)
+                    && let Some(idx) = v.index_of(row_key)
+                {
+                    f64::from(v.top + v.pad_top + v.prefix(idx) + *in_row)
+                } else {
+                    continue;
+                };
+                let stick = self.core.nodes[s].scroll.is_some_and(|sc| sc.stick_bottom);
+                let id = self.core.nodes[s].id;
+                let Some(st) = self.core.scrolls.get_mut(&id) else { continue };
+                st.direct = true;
+                let to = (laid - f64::from(k.was)).clamp(0.0, st.max);
+                if pass > 0 && (to - st.offset).abs() < 0.5 { continue; }
+                st.v = 0.0;
+                st.glide = None;
+                st.glide_to = None;
+                st.offset = to;
+                st.pinned = stick && st.offset >= st.max - 0.5;
+                moved = true;
+            }
+            if !moved || !self.core.virtual_window_changed() { break; }
+            self.commit(&Tx::default());
+        }
+        self.core.keeps = keeps;
+    }
+}
+
+impl RuntimeCore {
     /// Replay just one inherited fade edge without the nearest viewport's content-aware
     /// fade. Explicit clips inside it and fades outside it still apply. Recursion follows
     /// parents already painted this frame and needs no scratch allocation.
@@ -519,56 +571,6 @@ impl<S: 'static> Runtime<S> {
             frame[3] = self.sticky_frame[r][3] - (content_bottom(r) - content_bottom(p));
         }
         (frame, viewport)
-    }
-
-    /// Scrolls each kept element's viewport so the element's top lands where it showed before
-    /// the commit, clamped to the content, re-pinning a `stick_bottom` end, and remounting any
-    /// virtual rows the jump brings into view.
-    pub(super) fn apply_keeps(&mut self) {
-        if self.keeps.is_empty() { return; }
-        let mut keeps = std::mem::take(&mut self.keeps);
-        for pass in 0..4 {
-            // Step with the keeps in place: they own their viewports (`ease_to_shrunk_end`).
-            self.keeps = keeps;
-            self.step_scroll(0.0);
-            keeps = std::mem::take(&mut self.keeps);
-            let mut moved = false;
-            for k in &keeps {
-                let Some(s) = self.nodes.iter().position(|n| n.path == k.viewport && n.scroll.is_some() && n.scroll_axes.y()) else { continue };
-                let laid = if let Some(i) = self.nodes.iter().position(|n| n.path == k.path) {
-                    if self.viewport_of(i) != Some(s) { continue; }
-                    if self.scroll_stack(s).and_then(|c| self.stacks.get(&self.nodes[c].id)).is_some_and(|st| st.growing)
-                        && let Some(st) = self.scrolls.get_mut(&self.nodes[s].id)
-                    {
-                        st.pinned = false;
-                    }
-                    // Mounted anchors follow drawn geometry after the motion step.
-                    continue;
-                } else if let Some((v_path, row_key, in_row)) = &k.virtual_row
-                    && let Some(v) = self.virtuals.get(v_path)
-                    && let Some(idx) = v.index_of(row_key)
-                {
-                    f64::from(v.top + v.pad_top + v.prefix(idx) + *in_row)
-                } else {
-                    continue;
-                };
-                let stick = self.nodes[s].scroll.is_some_and(|sc| sc.stick_bottom);
-                let id = self.nodes[s].id;
-                let Some(st) = self.scrolls.get_mut(&id) else { continue };
-                st.direct = true;
-                let to = (laid - f64::from(k.was)).clamp(0.0, st.max);
-                if pass > 0 && (to - st.offset).abs() < 0.5 { continue; }
-                st.v = 0.0;
-                st.glide = None;
-                st.glide_to = None;
-                st.offset = to;
-                st.pinned = stick && st.offset >= st.max - 0.5;
-                moved = true;
-            }
-            if !moved || !self.virtual_window_changed() { break; }
-            self.commit(&Tx::default());
-        }
-        self.keeps = keeps;
     }
 
     /// Compensate this frame's drawn displacement, in viewport coordinates. Sticky

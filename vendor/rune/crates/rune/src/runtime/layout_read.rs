@@ -276,6 +276,97 @@ pub(crate) fn moved(a: Option<[f32; 4]>, b: Option<[f32; 4]>) -> bool {
 }
 
 impl<S: 'static> Runtime<S> {
+    /// Checks `reads` (the last view's when `None`) against `nodes` (the current frame's when
+    /// `None`), by what each read depends on. When one moved, or when `force`, the next view
+    /// gets the current rects; otherwise it keeps what the reads last saw, so drift below a
+    /// read's threshold adds up. Returns whether one moved.
+    pub(super) fn layout_moved(&mut self, reads: Option<LayoutReads>, pass: Option<(&[Node], &[SelectedRange])>, force: bool) -> bool {
+        let reads = reads.unwrap_or_else(|| std::mem::take(&mut self.core.layout_seen.reads));
+        #[cfg(debug_assertions)]
+        let nodes_given = pass.is_some();
+        // A pass's own nodes are seen once; the current nodes are seen again every frame.
+        let own;
+        let (nodes, index) = match pass {
+            Some((nodes, _)) => {
+                own = (reads.len() > key_index::SCAN_READS).then(|| KeyIndex::of(nodes));
+                (nodes, own.as_ref())
+            }
+            None => {
+                self.core.key_index.prepare(&self.core.nodes, self.core.commit_gen, reads.len());
+                (&self.core.nodes[..], self.core.key_index.get(&self.core.nodes, self.core.commit_gen))
+            }
+        };
+        let now: Vec<Option<[f32; 4]>> = reads.iter().map(|r| self.core.layout_of(nodes, index, &r.key)).collect();
+        let boxes = reads.iter().any(|r| r.key == SELECTION).then(|| match pass {
+            Some((nodes, ranges)) => self.core.selection_boxes_in(nodes, ranges),
+            None => self.selection_boxes(),
+        });
+        let rects = &mut self.core.layout_seen.rects;
+        let moved = reads.iter().zip(&now).position(|(r, rect)| rects.get(&r.key).is_none_or(|old| r.moved(*old, *rect)));
+        let changed = moved.is_some() || boxes.as_ref().is_some_and(|b| boxes_moved(&rects.selection, b));
+        // The once-a-frame check names the read for the scroll warning.
+        #[cfg(debug_assertions)]
+        if !nodes_given && let Some(k) = moved { self.core.watch.meter.read(&reads[k].key, reads[k].at); }
+        if changed || force {
+            if let Some(b) = boxes { rects.selection = b.into(); }
+            for (r, rect) in reads.iter().zip(now) {
+                match rects.get_mut(&r.key) {
+                    Some(seen) => *seen = rect,
+                    None => { rects.insert(r.key.clone(), rect); }
+                }
+            }
+        }
+        self.core.layout_seen.reads = reads;
+        changed
+    }
+
+    /// Before a commit runs the view: what it is given for each key it read becomes the
+    /// current rect, since it re-runs anyway.
+    pub(super) fn refresh_layout_seen(&mut self) {
+        if self.core.layout_seen.rects.is_empty() { return; }
+        self.core.key_index.prepare(&self.core.nodes, self.core.commit_gen, self.core.layout_seen.rects.len());
+        let index = self.core.key_index.get(&self.core.nodes, self.core.commit_gen);
+        let now: Vec<_> = self.core.layout_seen.rects.keys().map(|k| self.core.layout_of(&self.core.nodes, index, k)).collect();
+        for (seen, rect) in self.core.layout_seen.rects.values_mut().zip(now) { *seen = rect; }
+        if self.core.layout_seen.rects.contains_key(SELECTION) { self.core.layout_seen.rects.selection = self.selection_boxes().into(); }
+    }
+
+    /// Once a frame: whether a layout read moved, so the view re-runs. Scrolling reopens
+    /// feedback first, so the first scroll frame after feedback stopped still checks.
+    pub(super) fn layout_reads_moved(&mut self) -> bool {
+        if self.core.layout_seen.is_empty() { return false; }
+        if self.core.scrolling() { self.core.layout_echoes = 0; }
+        if self.selection_read_moved() { self.core.dirty = true; }
+        self.core.layout_feedback_open() && self.layout_moved(None, None, false)
+    }
+
+    /// Re-measures `measured` while a layout read moved, at most [`PASSES`] times, then leaves
+    /// the reads matching the final layout so a view that can't settle doesn't loop. Keys no
+    /// pass read any more go only at the end, so one read behind a gate the next pass opens
+    /// keeps its rect.
+    pub(super) fn settle_layout_reads(&mut self, mut measured: Measured, tx: &Tx) -> Measured {
+        if measured.layout_reads.is_empty() {
+            self.core.layout_seen = LayoutSeen::default();
+            return measured;
+        }
+        let mut settled = false;
+        for _ in 0..PASSES {
+            if !self.layout_moved(Some(std::mem::take(&mut measured.layout_reads)), Some((&measured.nodes, &measured.selection)), false) {
+                settled = true;
+                break;
+            }
+            self.core.discard_measured(measured);
+            measured = self.measure(tx);
+        }
+        if !settled { self.layout_moved(Some(std::mem::take(&mut measured.layout_reads)), Some((&measured.nodes, &measured.selection)), true); }
+        let LayoutSeen { rects, reads } = &mut self.core.layout_seen;
+        rects.retain(|k, _| reads.iter().any(|r| r.key == *k));
+        if !rects.contains_key(SELECTION) { rects.selection = Rc::default(); }
+        measured
+    }
+}
+
+impl RuntimeCore {
     /// Node `i`'s laid-out rect `[x, y, w, h]` in window points, after its viewports' scrolling.
     fn laid_out(&self, nodes: &[Node], i: usize) -> [f32; 4] {
         self.placed(nodes, i, true)
@@ -336,95 +427,6 @@ impl<S: 'static> Runtime<S> {
         let node_rect = self.placed(nodes, i, scrolled);
         let t = nodes[i].target;
         Some([node_rect[0] + (x0 - t[0]), node_rect[1] + (y0 - t[1]), x1 - x0, y1 - y0])
-    }
-
-    /// Checks `reads` (the last view's when `None`) against `nodes` (the current frame's when
-    /// `None`), by what each read depends on. When one moved, or when `force`, the next view
-    /// gets the current rects; otherwise it keeps what the reads last saw, so drift below a
-    /// read's threshold adds up. Returns whether one moved.
-    pub(super) fn layout_moved(&mut self, reads: Option<LayoutReads>, pass: Option<(&[Node], &[SelectedRange])>, force: bool) -> bool {
-        let reads = reads.unwrap_or_else(|| std::mem::take(&mut self.layout_seen.reads));
-        #[cfg(debug_assertions)]
-        let nodes_given = pass.is_some();
-        // A pass's own nodes are seen once; the current nodes are seen again every frame.
-        let own;
-        let (nodes, index) = match pass {
-            Some((nodes, _)) => {
-                own = (reads.len() > key_index::SCAN_READS).then(|| KeyIndex::of(nodes));
-                (nodes, own.as_ref())
-            }
-            None => {
-                self.key_index.prepare(&self.nodes, self.commit_gen, reads.len());
-                (&self.nodes[..], self.key_index.get(&self.nodes, self.commit_gen))
-            }
-        };
-        let now: Vec<Option<[f32; 4]>> = reads.iter().map(|r| self.layout_of(nodes, index, &r.key)).collect();
-        let boxes = reads.iter().any(|r| r.key == SELECTION).then(|| match pass {
-            Some((nodes, ranges)) => self.selection_boxes_in(nodes, ranges),
-            None => self.selection_boxes(),
-        });
-        let rects = &mut self.layout_seen.rects;
-        let moved = reads.iter().zip(&now).position(|(r, rect)| rects.get(&r.key).is_none_or(|old| r.moved(*old, *rect)));
-        let changed = moved.is_some() || boxes.as_ref().is_some_and(|b| boxes_moved(&rects.selection, b));
-        // The once-a-frame check names the read for the scroll warning.
-        #[cfg(debug_assertions)]
-        if !nodes_given && let Some(k) = moved { self.watch.meter.read(&reads[k].key, reads[k].at); }
-        if changed || force {
-            if let Some(b) = boxes { rects.selection = b.into(); }
-            for (r, rect) in reads.iter().zip(now) {
-                match rects.get_mut(&r.key) {
-                    Some(seen) => *seen = rect,
-                    None => { rects.insert(r.key.clone(), rect); }
-                }
-            }
-        }
-        self.layout_seen.reads = reads;
-        changed
-    }
-
-    /// Before a commit runs the view: what it is given for each key it read becomes the
-    /// current rect, since it re-runs anyway.
-    pub(super) fn refresh_layout_seen(&mut self) {
-        if self.layout_seen.rects.is_empty() { return; }
-        self.key_index.prepare(&self.nodes, self.commit_gen, self.layout_seen.rects.len());
-        let index = self.key_index.get(&self.nodes, self.commit_gen);
-        let now: Vec<_> = self.layout_seen.rects.keys().map(|k| self.layout_of(&self.nodes, index, k)).collect();
-        for (seen, rect) in self.layout_seen.rects.values_mut().zip(now) { *seen = rect; }
-        if self.layout_seen.rects.contains_key(SELECTION) { self.layout_seen.rects.selection = self.selection_boxes().into(); }
-    }
-
-    /// Once a frame: whether a layout read moved, so the view re-runs. Scrolling reopens
-    /// feedback first, so the first scroll frame after feedback stopped still checks.
-    pub(super) fn layout_reads_moved(&mut self) -> bool {
-        if self.layout_seen.is_empty() { return false; }
-        if self.scrolling() { self.layout_echoes = 0; }
-        if self.selection_read_moved() { self.dirty = true; }
-        self.layout_feedback_open() && self.layout_moved(None, None, false)
-    }
-
-    /// Re-measures `measured` while a layout read moved, at most [`PASSES`] times, then leaves
-    /// the reads matching the final layout so a view that can't settle doesn't loop. Keys no
-    /// pass read any more go only at the end, so one read behind a gate the next pass opens
-    /// keeps its rect.
-    pub(super) fn settle_layout_reads(&mut self, mut measured: Measured, tx: &Tx) -> Measured {
-        if measured.layout_reads.is_empty() {
-            self.layout_seen = LayoutSeen::default();
-            return measured;
-        }
-        let mut settled = false;
-        for _ in 0..PASSES {
-            if !self.layout_moved(Some(std::mem::take(&mut measured.layout_reads)), Some((&measured.nodes, &measured.selection)), false) {
-                settled = true;
-                break;
-            }
-            self.discard_measured(measured);
-            measured = self.measure(tx);
-        }
-        if !settled { self.layout_moved(Some(std::mem::take(&mut measured.layout_reads)), Some((&measured.nodes, &measured.selection)), true); }
-        let LayoutSeen { rects, reads } = &mut self.layout_seen;
-        rects.retain(|k, _| reads.iter().any(|r| r.key == *k));
-        if !rects.contains_key(SELECTION) { rects.selection = Rc::default(); }
-        measured
     }
 
     /// Whether layout feedback may still cause a commit (see the module docs).

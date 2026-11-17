@@ -264,7 +264,7 @@ pub(crate) fn flush_memory<S: 'static>(rt: &mut Runtime<S>) {
 impl<S: 'static> Runtime<S> {
     /// Use a shared in-memory clipboard (`clipboard::memory()`) instead of the OS one: copies,
     /// secret clears and pastes go to it, in headless runs too. For tests.
-    pub fn use_clipboard(&mut self, clipboard: &MemoryClipboard) { self.clipboard = Some(clipboard.clone()); }
+    pub fn use_clipboard(&mut self, clipboard: &MemoryClipboard) { self.core.clipboard = Some(clipboard.clone()); }
 }
 
 /// An in-memory clipboard for tests, shared by its clones and by every runtime given it with

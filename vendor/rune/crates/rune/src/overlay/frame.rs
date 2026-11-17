@@ -69,7 +69,7 @@ pub(super) fn rest<T: 'static>(rt: &mut Runtime<T>, clock: &mut FrameClock, comp
     rt.frame_target = Some(frame_time);
     rt.clock = rt.wall_start.map_or(rt.clock + elapsed, |t0| t0.elapsed().as_secs_f64());
     rt.t += elapsed * rt.time_scale as f64;
-    rt.scene.set_time(rt.t);
+    rt.core.scene.set_time(rt.core.t);
     (false, elapsed)
 }
 
@@ -91,7 +91,7 @@ pub(super) fn render_frame<T: 'static>(f: &mut Frame<'_, T>, compositor: &mut Op
         c.render(f);
         c.animating()
     } else {
-        f.ui.prepare(f.device, f.queue, &mut f.rt.text.atlas, &f.rt.instances, f.size);
+        f.ui.prepare(f.device, f.queue, &mut f.rt.core.text.atlas, &f.rt.core.instances, f.size);
         f.ui.draw(f.encoder, f.target, [0.0; 4]);
         false
     }

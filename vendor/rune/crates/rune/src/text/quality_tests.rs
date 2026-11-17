@@ -607,7 +607,7 @@ fn span_ring_draws_inset_border_on_light_page_merges_runs_wraps_and_stays_on_hov
     let size = (400u32, 88u32);
     let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
     let target = Offscreen::new(&gpu.device, size.0, size.1);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, size);
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, size);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     renderer.draw(&mut encoder, &target.view, [0.0; 4]);
     target.copy(&mut encoder);
@@ -646,8 +646,8 @@ fn span_ring_draws_inset_border_on_light_page_merges_runs_wraps_and_stays_on_hov
     }
     let mut partial_rt = Runtime::new((), partial, (200.0, 44.0), Env::new(false, 1.5));
     partial_rt.frame(0.0);
-    let partial_chip = partial_rt.instances.iter().find(|i| i.params[1] == KIND_RECT && i.params[0] > 0.0).unwrap();
-    renderer.prepare(&gpu.device, &gpu.queue, &mut partial_rt.text.atlas, &partial_rt.instances, size);
+    let partial_chip = partial_rt.core.instances.iter().find(|i| i.params[1] == KIND_RECT && i.params[0] > 0.0).unwrap();
+    renderer.prepare(&gpu.device, &gpu.queue, &mut partial_rt.core.text.atlas, &partial_rt.core.instances, size);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     renderer.draw(&mut encoder, &target.view, [0.0; 4]);
     target.copy(&mut encoder);

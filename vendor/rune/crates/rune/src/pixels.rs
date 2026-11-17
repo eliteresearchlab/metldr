@@ -366,7 +366,7 @@ mod tests {
         let zero = crate::gpu::springs::Track::constant(0.0);
         let node = crate::gpu::springs::Node { x: zero, y: zero, opacity: crate::gpu::springs::Track::constant(1.0) };
         let mut renderer = Renderer::with_springs(&gpu.device, OFFSCREEN_FORMAT, &[node], &vec![0; rt.instances.len()]);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (8,8));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (8,8));
         renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
         renderer.prepare_surfaces(&gpu.device, &gpu.queue, &rt.surfaces, (8,8));
         let target = Offscreen::new(&gpu.device, 8, 8);
@@ -397,7 +397,7 @@ mod tests {
         let (w, h) = (160, 48);
         let gpu = Gpu::headless();
         let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (w, h));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (w, h));
         renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
         let target = Offscreen::new(&gpu.device, w, h);
         let mut enc = gpu.device.create_command_encoder(&Default::default());
@@ -435,7 +435,7 @@ mod tests {
         let target = Offscreen::new(&gpu.device, 100, 60);
         let mut rt = Runtime::new(image.pixels().clone(), view, (100.0, 60.0), Env::new(true, 1.0));
         rt.frame(0.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (100, 60));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (100, 60));
         renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         renderer.draw(&mut enc, &target.view, [0.0, 0.0, 0.0, 1.0]);
@@ -472,7 +472,7 @@ mod tests {
         let mut rt = Runtime::new((image.pixels().clone(), Pixels::new(), false), view, (8.0, 8.0), Env::new(true, 1.0));
         let mut draw = |rt: &mut Runtime<State>| {
             rt.frame(0.0);
-            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (8, 8));
+            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (8, 8));
             renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
             let mut enc = gpu.device.create_command_encoder(&Default::default());
             renderer.draw(&mut enc, &target.view, [0.0, 0.0, 1.0, 1.0]);
@@ -569,7 +569,7 @@ mod tests {
         let target = Offscreen::new(&gpu.device, 4, 4);
         let mut draw = |rt: &mut Runtime<Pixels>| {
             rt.frame(1.0 / 60.0);
-            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (4, 4));
+            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (4, 4));
             renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
             let mut enc = gpu.device.create_command_encoder(&Default::default());
             renderer.draw(&mut enc, &target.view, [0.0, 0.0, 0.0, 1.0]);
@@ -615,7 +615,7 @@ mod tests {
         let mut draw = |fit| {
             let mut rt = Runtime::new((px.clone(), fit), view, (4.0, 4.0), Env::new(true, 1.0));
             rt.frame(0.0);
-            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (4, 4));
+            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (4, 4));
             renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
             let mut enc = gpu.device.create_command_encoder(&Default::default());
             renderer.draw(&mut enc, &target.view, [0.0, 0.0, 0.0, 1.0]);

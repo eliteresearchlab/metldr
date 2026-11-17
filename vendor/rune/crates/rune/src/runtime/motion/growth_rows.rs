@@ -2,7 +2,7 @@
 //! mask, per node index, from its stack's tracks.
 use super::*;
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     /// Fills `row_dy`, `row_h` and `row_mask` for this frame's nodes.
     pub(super) fn place_growth_rows(&mut self) {
         let (s, n_nodes) = (self.env.scale, self.nodes.len());

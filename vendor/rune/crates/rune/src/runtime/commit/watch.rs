@@ -5,13 +5,15 @@ use super::*;
 impl<S: 'static> Runtime<S> {
     /// A frame's commit for `why` (`CommitWhy` bits).
     pub(super) fn commit_for(&mut self, tx: &Tx, why: u16) {
-        self.commit_why |= why;
-        if crate::tooling::interaction::on() { self.watch.interaction.committed(why); }
-        self.watch.cause = why;
+        self.core.commit_why |= why;
+        if crate::tooling::interaction::on() { self.core.watch.interaction.committed(why); }
+        self.core.watch.cause = why;
         self.commit(tx);
-        self.watch.cause = 0;
+        self.core.watch.cause = 0;
     }
+}
 
+impl RuntimeCore {
     /// After a frame's commits, before its scroll requests run: whether it committed since the
     /// `commits0`th commit, while a viewport scrolled; `instant` is the viewport an instant scroll
     /// it asked for moves.

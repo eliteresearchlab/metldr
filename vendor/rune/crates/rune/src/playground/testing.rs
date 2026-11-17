@@ -82,7 +82,7 @@ impl<S: 'static> Runtime<S> {
     /// [`Runtime::find`] and [`Runtime::elements`] see the whole window.
     pub fn playground_element(&self, key: &str) -> Option<ElementInfo> {
         if !self.playground.as_ref().is_some_and(|p| p.is_open()) { return None; }
-        let all = self.elements();
+        let all = self.core.elements();
         let i = stage_element(&all, key)?;
         all.into_iter().nth(i)
     }

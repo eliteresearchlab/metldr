@@ -41,14 +41,14 @@ impl<S: 'static> Runtime<S> {
     /// where the viewport stood and runs to that place, keeping the speed of one already running.
     pub(super) fn reveal_row(&mut self, r: &ScrollReveal, instant: bool) {
         let (scope, key) = (r.scope.as_deref(), r.key.as_str());
-        let glide = r.animated && !instant && !self.reduced_motion && !self.settled;
+        let glide = r.animated && !instant && !self.core.reduced_motion && !self.core.settled;
         let (mut window, was) = self.reveal_row_once(scope, key, r.center, true, instant || glide);
         for _ in 0..8 {
             if !window { break; }
             window = self.reveal_row_once(scope, key, r.center, false, instant || glide).0;
         }
         if glide && let Some(Was { id, offset: start, glide: v, viewport }) = was
-            && let Some(st) = self.scrolls.get_mut(&id)
+            && let Some(st) = self.core.scrolls.get_mut(&id)
             && (st.offset - start).abs() > 0.5
         {
             // A long trip cuts to a couple of viewports out first, as `Tx::scroll_to` does.
@@ -61,58 +61,58 @@ impl<S: 'static> Runtime<S> {
             st.shrink_glide = false;
             st.pinned = false;
             st.direct = true;
-            if self.virtual_window_changed() {
+            if self.core.virtual_window_changed() {
                 self.commit(&Tx { instant: true, ..Tx::default() });
             }
         }
-        self.reveal_row_x(scope, key);
+        self.core.reveal_row_x(scope, key);
     }
 
     /// One placement of [`Self::reveal_row`]: whether it committed, and on the first, where the
     /// viewport stood before. After the first, it moves only when the row would land somewhere
     /// else.
     fn reveal_row_once(&mut self, scope: Option<&str>, key: &str, center: bool, first: bool, instant: bool) -> (bool, Option<Was>) {
-        let target_node = self.nodes.iter().enumerate().find_map(|(i, row)| {
-            if !row.named(key) || self.subtree_exiting(i) || !row.parent.is_none_or(|p| in_scope(&self.nodes[p].path, scope)) {
+        let target_node = self.core.nodes.iter().enumerate().find_map(|(i, row)| {
+            if !row.named(key) || self.core.subtree_exiting(i) || !row.parent.is_none_or(|p| in_scope(&self.core.nodes[p].path, scope)) {
                 return None;
             }
             Some((i, row.target[1], row.local.h, true))
         }).or_else(|| {
-            let (i, [_, y0, _, y1]) = self.highlight_target_in(&self.nodes, scope, key)?;
-            (!self.subtree_exiting(i)).then_some((i, y0, (y1 - y0).max(0.0), false))
+            let (i, [_, y0, _, y1]) = self.core.highlight_target_in(&self.core.nodes, scope, key)?;
+            (!self.core.subtree_exiting(i)).then_some((i, y0, (y1 - y0).max(0.0), false))
         });
         let geometry = target_node.and_then(|(i, target_top, target_h, is_whole_node)| {
-            let s = self.viewport_of(i)?;
-            let parent = &self.nodes[s];
+            let s = self.core.viewport_of(i)?;
+            let parent = &self.core.nodes[s];
             let (laid_top, laid_h) = (target_top - parent.target[1], target_h);
-            let (top, height) = std::iter::successors(Some(i), |&p| self.nodes[p].parent)
+            let (top, height) = std::iter::successors(Some(i), |&p| self.core.nodes[p].parent)
                 .take_while(|&p| p != s)
                 .find_map(|r| {
-                    let c = self.nodes[r].parent?;
-                    self.nodes[c].growth.as_ref()?;
-                    let stack = self.stacks.get(&self.nodes[c].id)?;
-                    let rid = self.nodes[r].id;
+                    let c = self.core.nodes[r].parent?;
+                    self.core.nodes[c].growth.as_ref()?;
+                    let stack = self.core.stacks.get(&self.core.nodes[c].id)?;
+                    let rid = self.core.nodes[r].id;
                     let mut count = 0usize;
                     let before_r: f32 = stack.order.iter()
                         .take_while(|&&id| id != rid)
-                        .filter_map(|id| self.grows.get(id))
+                        .filter_map(|id| self.core.grows.get(id))
                         .map(|g| { count += 1; g.h })
                         .sum::<f32>() + stack.gap * count as f32;
-                    let r_top = (self.nodes[c].target[1] - parent.target[1]) + stack.pad_top + before_r;
-                    let r_h = self.grows.get(&rid).map_or(self.nodes[r].local.h, |g| g.h);
+                    let r_top = (self.core.nodes[c].target[1] - parent.target[1]) + stack.pad_top + before_r;
+                    let r_h = self.core.grows.get(&rid).map_or(self.core.nodes[r].local.h, |g| g.h);
                     if i == r && is_whole_node {
                         Some((r_top, r_h))
                     } else {
-                        let in_row = target_top - self.nodes[r].target[1];
+                        let in_row = target_top - self.core.nodes[r].target[1];
                         Some((r_top + in_row, target_h))
                     }
                 })
                 .unwrap_or((laid_top, laid_h));
-            let laid_end = self.scroll_children(s).map(|c| self.nodes[c].target[3] - parent.target[1]).reduce(f32::max).unwrap_or(0.0);
+            let laid_end = self.core.scroll_children(s).map(|c| self.core.nodes[c].target[3] - parent.target[1]).reduce(f32::max).unwrap_or(0.0);
             Some((parent.path.clone(), f64::from(top), f64::from(height), f64::from(parent.local.h), f64::from(laid_top), f64::from(laid_h), f64::from(laid_end)))
         }).or_else(|| {
-            self.nodes.iter().filter(|n| in_scope(&n.path, scope)).filter_map(|n| {
-                let v = self.virtuals.get(&n.path)?;
+            self.core.nodes.iter().filter(|n| in_scope(&n.path, scope)).filter_map(|n| {
+                let v = self.core.virtuals.get(&n.path)?;
                 let index = v.index_of(key).or_else(|| {
                     key.rmatch_indices('/').find_map(|(at, _)| {
                         let (scope, row_key) = (&key[..at], &key[at + 1..]);
@@ -132,15 +132,15 @@ impl<S: 'static> Runtime<S> {
         });
         let Some((path, top, height, viewport, laid_top, laid_h, laid_end)) = geometry else { return (false, None) };
         // Stuck headers cover the viewport's top: land the row below them.
-        let Some(cover) = self.stuck_cover(&path, key) else { return (false, None) };
+        let Some(cover) = self.core.stuck_cover(&path, key) else { return (false, None) };
         let (top, height) = (top - cover, height + cover);
         let (laid_top, laid_h) = (laid_top - cover, laid_h + cover);
-        let margin = self.node(&path).map_or(0.0, |n| f64::from(n.scroll_edges.margin));
-        let Some(&id) = self.path_ids.get(&path) else { return (false, None) };
-        let Some(&s_idx) = self.node_index.get(&id) else { return (false, None) };
-        let stick = self.nodes[s_idx].scroll.is_some_and(|s| s.stick_bottom);
-        let max = self.scroll_overflow(s_idx).max(0.0);
-        let Some(scroll) = self.scrolls.get_mut(&id) else { return (false, None) };
+        let margin = self.core.node(&path).map_or(0.0, |n| f64::from(n.scroll_edges.margin));
+        let Some(&id) = self.core.path_ids.get(&path) else { return (false, None) };
+        let Some(&s_idx) = self.core.node_index.get(&id) else { return (false, None) };
+        let stick = self.core.nodes[s_idx].scroll.is_some_and(|s| s.stick_bottom);
+        let max = self.core.scroll_overflow(s_idx).max(0.0);
+        let Some(scroll) = self.core.scrolls.get_mut(&id) else { return (false, None) };
         let was = first.then_some(Was { id, offset: scroll.offset, glide: scroll.glide, viewport });
         scroll.max = max;
         if first {
@@ -153,15 +153,15 @@ impl<S: 'static> Runtime<S> {
         let laid_to = place(center, scroll.offset, laid_top, laid_h, viewport, margin).clamp(0.0, laid_max);
         let at_end = stick && (scroll.pinned || offset >= scroll.max - 0.5) && laid_to >= laid_max - 0.5;
         if first {
-            self.scroll_reveals.retain(|r| r.viewport != path);
-            self.scroll_reveals.push(sticky::Reveal {
+            self.core.scroll_reveals.retain(|r| r.viewport != path);
+            self.core.scroll_reveals.push(sticky::Reveal {
                 scope: scope.map(str::to_owned),
                 key: key.to_owned(),
                 viewport: path.clone(),
                 center,
                 at_end,
             });
-        } else if let Some(r) = self.scroll_reveals.iter_mut().find(|r| r.viewport == path) {
+        } else if let Some(r) = self.core.scroll_reveals.iter_mut().find(|r| r.viewport == path) {
             r.at_end |= at_end;
         }
         if (offset - scroll.offset).abs() < 0.5 {
@@ -174,14 +174,14 @@ impl<S: 'static> Runtime<S> {
         scroll.glide = None;
         scroll.glide_to = None;
         scroll.direct = true;
-        let window = self.virtual_window_changed();
+        let window = self.core.virtual_window_changed();
         if window {
             self.commit(&Tx { instant, ..Tx::default() });
             // The commit measured rows that were estimates: the next placement clamps to the end
             // they make.
-            if let Some(i) = self.nodes.iter().position(|n| n.id == id) {
-                let max = self.scroll_overflow(i).max(0.0);
-                if let Some(scroll) = self.scrolls.get_mut(&id) {
+            if let Some(i) = self.core.nodes.iter().position(|n| n.id == id) {
+                let max = self.core.scroll_overflow(i).max(0.0);
+                if let Some(scroll) = self.core.scrolls.get_mut(&id) {
                     scroll.max = max;
                     scroll.pinned = false;
                 }

@@ -947,7 +947,7 @@ fn three_columns(s: &ThreeColumns, _: &mut Cx<ThreeColumns>) -> El {
 
 fn pixels<S: 'static>(gpu: &Gpu, renderer: &mut Renderer, rt: &mut Runtime<S>, size: (u32, u32)) -> Vec<u8> {
     let target = Offscreen::new(&gpu.device, size.0, size.1);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, size);
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, size);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     renderer.draw(&mut encoder, &target.view, [0.0; 4]);
     target.copy(&mut encoder);

@@ -116,7 +116,8 @@ fn a_new_scale_runs_the_view() {
 fn a_new_blend_mode_runs_the_view() {
     let mut rt = Runtime::new(0, paragraphs, (700.0, 600.0), Env::new(true, 2.0));
     rt.frame(0.0);
-    rt.set_srgb_blend(!rt.srgb_blend());
+    let blend = !rt.srgb_blend();
+    rt.set_srgb_blend(blend);
     assert_eq!(resize(&mut rt, 600.0, 2.0), 1);
     assert_eq!(resize(&mut rt, 500.0, 2.0), 0, "and the next resize in that mode doesn't");
 }

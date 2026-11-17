@@ -160,8 +160,8 @@ impl Compositor<State> for Glimm {
         frame.ui.prepare(
             device,
             queue,
-            &mut frame.rt.text.atlas,
-            &frame.rt.instances,
+            &mut frame.rt.core.text.atlas,
+            &frame.rt.core.instances,
             frame.size,
         );
         let (mut sweep, mut ground) = (sweep, ground);

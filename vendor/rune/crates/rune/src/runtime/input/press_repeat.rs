@@ -7,7 +7,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct PressRepeat { due: Option<(String, f64)> }
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     /// After `path`'s drag handler asked for a repeat `after` from now: due then, while the
     /// press it heard is still held.
     pub(super) fn arm_press_repeat(&mut self, path: &str, after: std::time::Duration) {

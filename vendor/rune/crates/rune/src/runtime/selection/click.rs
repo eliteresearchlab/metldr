@@ -126,6 +126,87 @@ fn unit_at(e: &crate::edit::TextEdit, h: Hit, unit: Unit) -> (usize, usize) {
 }
 
 impl<S: 'static> Runtime<S> {
+    pub(super) fn focus_input(&mut self, path: String, x: f32, y: f32, one: &mut Tx) -> bool {
+        let step = if self.core.input_click.steps.front().is_some_and(|(p, _)| *p == path) {
+            self.core.input_click.steps.pop_front().unwrap().1
+        } else {
+            Step::Down { clicks: 1, shift: false }
+        };
+        if matches!(step, Step::Cancelled) {
+            return false;
+        }
+        let Some(access) = self.core.node(&path).and_then(|n| n.input.as_ref()?.access.clone()) else {
+            self.core.input_click.drop_drag();
+            return false;
+        };
+        let single = self.core.node(&path).and_then(|n| n.input.as_ref()).is_some_and(|i| i.single_line);
+        let layout = self.core.node(&path).and_then(|n| n.text_layout.clone());
+        let s = self.core.env.scale;
+        let scroll = self.core.input_scroll.get(&path).copied().unwrap_or(0.0);
+        match step {
+            Step::Down { clicks, shift } => {
+                self.set_focus(Some(path), false);
+                let e = access(states!(self));
+                e.set_single_line(single);
+                e.break_history_group();
+                e.clear_pending();
+                if e.preedit.is_some() {
+                    self.core.input_click.clear();
+                    one.instant = true;
+                    return true;
+                }
+                if let Some(l) = layout {
+                    let h = hit(e, &l, x + scroll, y, s, single);
+                    if shift {
+                        let anchor = e.anchor;
+                        self.core.input_click.unit = Unit::Char;
+                        self.core.input_click.origin = (anchor, anchor);
+                        e.set_selection(anchor, h.caret);
+                    } else {
+                        let unit = match clicks {
+                            1 => Unit::Char,
+                            2 => Unit::Word,
+                            _ => Unit::Paragraph,
+                        };
+                        let origin = unit_at(e, h, unit);
+                        self.core.input_click.unit = unit;
+                        self.core.input_click.origin = origin;
+                        e.set_selection(origin.0, origin.1);
+                    }
+                }
+                one.instant = true;
+                true
+            }
+            Step::Drag => {
+                if self.core.focused.as_deref() != Some(path.as_str()) {
+                    self.core.input_click.drop_drag();
+                    return false;
+                }
+                let e = access(states!(self));
+                e.set_single_line(single);
+                if e.preedit.is_some() {
+                    self.core.input_click.clear();
+                    return false;
+                }
+                let Some(l) = layout else { return false };
+                let h = hit(e, &l, x + scroll, y, s, single);
+                let at = unit_at(e, h, self.core.input_click.unit);
+                let (anchor, focus) = extend(self.core.input_click.origin, at);
+                let before = (e.anchor, e.focus);
+                e.set_selection(anchor, focus);
+                if (e.anchor, e.focus) == before {
+                    return false;
+                }
+                e.break_history_group();
+                one.instant = true;
+                true
+            }
+            Step::Cancelled => false,
+        }
+    }
+}
+
+impl RuntimeCore {
     pub(super) fn input_down(&mut self, ji: usize, x: f32, y: f32) {
         let now = self.now_clock();
         let shift = self.held_mods.shift;
@@ -194,85 +275,6 @@ impl<S: 'static> Runtime<S> {
         let (ix, iy) = (lx - jn.inset[0], ly - jn.inset[1]);
         self.input_click.steps.push_back((path.clone(), Step::Drag));
         self.queue.push(Action::Focus(path, ix, iy));
-    }
-
-    pub(super) fn focus_input(&mut self, path: String, x: f32, y: f32, one: &mut Tx) -> bool {
-        let step = if self.input_click.steps.front().is_some_and(|(p, _)| *p == path) {
-            self.input_click.steps.pop_front().unwrap().1
-        } else {
-            Step::Down { clicks: 1, shift: false }
-        };
-        if matches!(step, Step::Cancelled) {
-            return false;
-        }
-        let Some(access) = self.node(&path).and_then(|n| n.input.as_ref()?.access.clone()) else {
-            self.input_click.drop_drag();
-            return false;
-        };
-        let single = self.node(&path).and_then(|n| n.input.as_ref()).is_some_and(|i| i.single_line);
-        let layout = self.node(&path).and_then(|n| n.text_layout.clone());
-        let s = self.env.scale;
-        let scroll = self.input_scroll.get(&path).copied().unwrap_or(0.0);
-        match step {
-            Step::Down { clicks, shift } => {
-                self.set_focus(Some(path), false);
-                let e = access(states!(self));
-                e.set_single_line(single);
-                e.break_history_group();
-                e.clear_pending();
-                if e.preedit.is_some() {
-                    self.input_click.clear();
-                    one.instant = true;
-                    return true;
-                }
-                if let Some(l) = layout {
-                    let h = hit(e, &l, x + scroll, y, s, single);
-                    if shift {
-                        let anchor = e.anchor;
-                        self.input_click.unit = Unit::Char;
-                        self.input_click.origin = (anchor, anchor);
-                        e.set_selection(anchor, h.caret);
-                    } else {
-                        let unit = match clicks {
-                            1 => Unit::Char,
-                            2 => Unit::Word,
-                            _ => Unit::Paragraph,
-                        };
-                        let origin = unit_at(e, h, unit);
-                        self.input_click.unit = unit;
-                        self.input_click.origin = origin;
-                        e.set_selection(origin.0, origin.1);
-                    }
-                }
-                one.instant = true;
-                true
-            }
-            Step::Drag => {
-                if self.focused.as_deref() != Some(path.as_str()) {
-                    self.input_click.drop_drag();
-                    return false;
-                }
-                let e = access(states!(self));
-                e.set_single_line(single);
-                if e.preedit.is_some() {
-                    self.input_click.clear();
-                    return false;
-                }
-                let Some(l) = layout else { return false };
-                let h = hit(e, &l, x + scroll, y, s, single);
-                let at = unit_at(e, h, self.input_click.unit);
-                let (anchor, focus) = extend(self.input_click.origin, at);
-                let before = (e.anchor, e.focus);
-                e.set_selection(anchor, focus);
-                if (e.anchor, e.focus) == before {
-                    return false;
-                }
-                e.break_history_group();
-                one.instant = true;
-                true
-            }
-            Step::Cancelled => false,
-        }
     }
 }
 

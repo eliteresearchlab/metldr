@@ -68,45 +68,53 @@ pub(super) struct Measured {
 
 impl<S: 'static> Runtime<S> {
     pub(super) fn commit(&mut self, tx: &Tx) {
-        self.native_geometry_valid = false;
+        self.core.native_geometry_valid = false;
         let _commit_time = crate::frame::profile::Scope::new(crate::frame::profile::Phase::Commit);
-        let _first_view = crate::tooling::perf_warn::launch::FirstView::start(self.commits == 0);
+        let _first_view = crate::tooling::perf_warn::launch::FirstView::start(self.core.commits == 0);
         let budget = crate::tooling::perf_warn::budget::Commit::start();
         self.apply_playground();
         let _history = crate::memo::snapshot::enter();
         COMMITS.set(COMMITS.get() + 1);
-        self.last_commit_clock = self.clock;
-        self.memo_since = self.memo.next_pass();
-        for r in &self.scroll_reveals {
-            if r.at_end && let Some(&id) = self.path_ids.get(&r.viewport)
-                && let Some(scroll) = self.scrolls.get_mut(&id)
+        self.core.last_commit_clock = self.core.clock;
+        self.core.memo_since = self.core.memo.next_pass();
+        for r in &self.core.scroll_reveals {
+            if r.at_end && let Some(&id) = self.core.path_ids.get(&r.viewport)
+                && let Some(scroll) = self.core.scrolls.get_mut(&id)
             {
                 scroll.pinned = true;
             }
         }
-        self.note_drawn_rows();
+        self.core.note_drawn_rows();
         let mut measured = self.measure_commit(tx);
-        self.focus_before_commit = self.focused.clone();
+        self.core.focus_before_commit = self.core.focused.clone();
         // Settle layout reads first so a field that mounts once a rect is known is in `nodes`.
         measured = self.settle_layout_reads(measured, tx);
         if self.sync_requested_focus(&mut measured.nodes) {
-            self.discard_measured(measured);
+            self.core.discard_measured(measured);
             measured = self.measure(tx);
             measured = self.settle_layout_reads(measured, tx);
         }
-        if measured.caret_read && self.caret_moved(Some(&measured.nodes)) {
-            self.discard_measured(measured);
+        if measured.caret_read && self.core.caret_moved(Some(&measured.nodes)) {
+            self.core.discard_measured(measured);
             measured = self.measure(tx);
             measured = self.settle_layout_reads(measured, tx);
         }
-        self.apply(measured, tx);
-        self.scene.keep_flights(false);
-        self.memo.keep_since(self.memo_since);
-        self.track_focused_rows();
+        self.core.apply(measured, tx);
+        // The playground finds its stage root in the committed nodes, outside the state-free apply.
+        self.find_app_root();
+        // Focus follows modals and keyed follows; it reaches the app's focus handler, so it runs
+        // here in the generic commit rather than in the state-free apply.
+        self.sync_modals();
+        self.sync_follows();
+        self.core.scene.keep_flights(false);
+        self.core.memo.keep_since(self.core.memo_since);
+        self.core.track_focused_rows();
         self.prune_text_selection();
-        budget.end(self.watch.cause);
+        budget.end(self.core.watch.cause);
     }
+}
 
+impl RuntimeCore {
     /// Restores any nodes moved out of `self.nodes` and recycles `measured`'s buffers before a
     /// commit pass re-measures.
     pub(super) fn discard_measured(&mut self, mut measured: Measured) {

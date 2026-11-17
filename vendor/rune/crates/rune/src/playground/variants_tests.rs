@@ -15,7 +15,7 @@ fn digits_switch_a_storys_variant_and_r_remakes_the_one_its_on() {
     assert!(find(&rt, "playground-variant-0").is_some() && find(&rt, "playground-variant-1").is_some(), "the side column lists them");
     assert_eq!(shows(&rt, "playground-hint").replace('\u{a0}', " "), "↑↓ stories · ←→ groups · / filter · Tab controls · Esc back");
     let (hint, side) = (find(&rt, "playground-hint").unwrap().rect, find(&rt, "playground-side").unwrap().rect);
-    let (one_line, line) = rt.text.measure(&shows(&rt, "playground-hint"), crate::tok::type_::SECTION, 1.0);
+    let (one_line, line) = rt.core.text.measure(&shows(&rt, "playground-hint"), crate::tok::type_::SECTION, 1.0);
     assert!(hint[0] + hint[2] <= side[0] + side[2], "{hint:?} in {side:?}");
     assert!(one_line <= hint[2] - 8.0 || hint[3] > 1.5 * line, "a hint too long for one line wraps: {one_line} wide, {hint:?}");
     let all = rt.elements();

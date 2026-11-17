@@ -5,6 +5,20 @@ use super::*;
 use crate::text::FontSmoothing;
 
 impl<S: 'static> Runtime<S> {
+    pub fn clear_color(&self) -> [f32; 4] {
+        if self.core.transparent { return [0.0; 4]; }
+        self.core.nodes.get(self.core.app_root()).map_or([0.0, 0.0, 0.0, 1.0], |n| {
+            let c = self.core.color(n.id, P_FILL, n.vis.fill);
+            if self.core.srgb_blend {
+                [srgb_encode(c.r), srgb_encode(c.g), srgb_encode(c.b), 1.0]
+            } else {
+                [c.r, c.g, c.b, 1.0]
+            }
+        })
+    }
+}
+
+impl RuntimeCore {
     /// Enable or disable gamma-space (sRGB) blending for translucent fills, shadows, blurs,
     /// images and video, as `App::srgb_blend` does for a window. Every colour the next frame
     /// builds, hover and press tints included, is premultiplied in sRGB encoding
@@ -34,18 +48,6 @@ impl<S: 'static> Runtime<S> {
 
     pub fn font_smoothing(&self) -> FontSmoothing {
         self.text.smoothing
-    }
-
-    pub fn clear_color(&self) -> [f32; 4] {
-        if self.transparent { return [0.0; 4]; }
-        self.nodes.get(self.app_root()).map_or([0.0, 0.0, 0.0, 1.0], |n| {
-            let c = self.color(n.id, P_FILL, n.vis.fill);
-            if self.srgb_blend {
-                [srgb_encode(c.r), srgb_encode(c.g), srgb_encode(c.b), 1.0]
-            } else {
-                [c.r, c.g, c.b, 1.0]
-            }
-        })
     }
 }
 

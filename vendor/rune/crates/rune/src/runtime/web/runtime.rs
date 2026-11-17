@@ -284,10 +284,10 @@ fn byte_at(text: &str, utf16: usize) -> Option<usize> {
 impl<S: 'static> Runtime<S> {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn native_submit_binding(&mut self) -> Option<NativeSubmitBinding> {
-        let index = self.focused_index()?;
-        let node = &self.nodes[index];
-        if node.a11y.disabled || node.inert || !self.can_focus(index)
-            || !self.allowed(index) || self.subtree_exiting(index) { return None; }
+        let index = self.core.focused_index()?;
+        let node = &self.core.nodes[index];
+        if node.a11y.disabled || node.inert || !self.core.can_focus(index)
+            || !self.core.allowed(index) || self.core.subtree_exiting(index) { return None; }
         let input = node.input.as_deref()?;
         if input.edit.is_secure() || input.edit.preedit.is_some() { return None; }
         let (key, handler) = input.native_submit.clone()?;
@@ -303,13 +303,6 @@ impl<S: 'static> Runtime<S> {
             id, path, element_key, key, handler, access, text, base,
             window: window.to_owned(), anchor, focus,
         })
-    }
-
-    pub(crate) fn web_context(&self, mirror: &mut Mirror) -> bool {
-        match self.focused_input().filter(|i| i.access.is_some()) {
-            Some(input) => mirror.update(self.focused.as_deref().unwrap_or_default(), Some(&input.edit)),
-            None => mirror.update("", None),
-        }
     }
 
     pub(crate) fn web_key(&mut self, event: &serde_json::Value) -> bool {
@@ -338,35 +331,16 @@ impl<S: 'static> Runtime<S> {
         if let Some(key) = code {
             self.physical_with_fallback(crate::PhysicalInput::Key { key, mods, pressed: true, repeat }, Some(event_key));
         } else if repeat {
-            self.repeat_key(event_key);
+            self.core.repeat_key(event_key);
         } else {
-            self.key(event_key);
+            self.core.key(event_key);
         }
         activate
     }
 
-    /// A key the hidden text field typed or released, as a native host reports it to the focused
-    /// element's `on_physical_input`; the typed text itself arrives as an edit.
-    pub(crate) fn web_physical(&mut self, event: &serde_json::Value) {
-        let flag = |key: &str| event[key].as_bool().unwrap_or(false);
-        let (shift, ctrl, alt, logo) = (flag("shift"), flag("ctrl"), flag("alt"), flag("meta"));
-        let mods = crate::Mods { shift, alt, ctrl, logo, cmd: logo || ctrl };
-        let Some(key) = event["code"].as_str().filter(|c| !c.is_empty() && !c.contains('+'))
-            .and_then(|c| c.parse::<crate::Shortcut>().ok())
-            .map(|s| s.physical_key()) else { return };
-        self.physical_input(crate::PhysicalInput::Key { key, mods, pressed: flag("pressed"), repeat: flag("repeat") });
-    }
-
-    pub(crate) fn web_secure(&mut self, key: &str, text: String) {
-        let event = crate::KeyEvent { key: crate::Key::Text(text), mods: crate::Mods::default() };
-        if self.focused.as_deref() == Some(key) && self.has_secure_focus() {
-            self.key(event);
-        }
-    }
-
     pub(crate) fn web_edit(&mut self, event: &serde_json::Value) {
         let Some(key) = event["key"].as_str() else { return };
-        if self.focused.as_deref() != Some(key) || self.has_secure_focus() { return; }
+        if self.core.focused.as_deref() != Some(key) || self.core.has_secure_focus() { return; }
         let number = |key: &str| event[key].as_u64().and_then(|n| usize::try_from(n).ok());
         let Some(base) = number("base") else { return };
         let Some(expected) = event["expected"].as_str() else { return };
@@ -399,8 +373,36 @@ impl<S: 'static> Runtime<S> {
             }
             EditOutcome::default()
         }, &mut tx);
-        if composing_before || event["kind"] == "preedit" { self.ime_eat_key_up = true; }
-        if changed { self.dirty = true; }
-        merge(&mut self.pending, tx);
+        if composing_before || event["kind"] == "preedit" { self.core.ime_eat_key_up = true; }
+        if changed { self.core.dirty = true; }
+        merge(&mut self.core.pending, tx);
+    }
+}
+
+impl RuntimeCore {
+    pub(crate) fn web_context(&self, mirror: &mut Mirror) -> bool {
+        match self.focused_input().filter(|i| i.access.is_some()) {
+            Some(input) => mirror.update(self.focused.as_deref().unwrap_or_default(), Some(&input.edit)),
+            None => mirror.update("", None),
+        }
+    }
+
+    /// A key the hidden text field typed or released, as a native host reports it to the focused
+    /// element's `on_physical_input`; the typed text itself arrives as an edit.
+    pub(crate) fn web_physical(&mut self, event: &serde_json::Value) {
+        let flag = |key: &str| event[key].as_bool().unwrap_or(false);
+        let (shift, ctrl, alt, logo) = (flag("shift"), flag("ctrl"), flag("alt"), flag("meta"));
+        let mods = crate::Mods { shift, alt, ctrl, logo, cmd: logo || ctrl };
+        let Some(key) = event["code"].as_str().filter(|c| !c.is_empty() && !c.contains('+'))
+            .and_then(|c| c.parse::<crate::Shortcut>().ok())
+            .map(|s| s.physical_key()) else { return };
+        self.physical_input(crate::PhysicalInput::Key { key, mods, pressed: flag("pressed"), repeat: flag("repeat") });
+    }
+
+    pub(crate) fn web_secure(&mut self, key: &str, text: String) {
+        let event = crate::KeyEvent { key: crate::Key::Text(text), mods: crate::Mods::default() };
+        if self.focused.as_deref() == Some(key) && self.has_secure_focus() {
+            self.key(event);
+        }
     }
 }

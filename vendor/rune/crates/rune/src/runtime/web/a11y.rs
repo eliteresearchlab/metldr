@@ -484,7 +484,7 @@ fn text_runs(path: &str, spec: &crate::el::TextSpec) -> Vec<A11yRun> {
     out
 }
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     fn scroll_digest(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         let mut entries: Vec<_> = self

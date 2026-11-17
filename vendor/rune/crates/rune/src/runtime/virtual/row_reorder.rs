@@ -48,7 +48,7 @@ impl Reorder {
     }
 }
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     /// How far node `i`, a growth row, jumped because its stack's rows changed order this commit.
     pub(super) fn reorder_jump(&self, nodes: &[Node], i: usize) -> f32 {
         nodes[i].parent.and_then(|p| self.stacks.get(&nodes[p].id)).map_or(0.0, |s| s.reorder.jump(nodes[i].id))

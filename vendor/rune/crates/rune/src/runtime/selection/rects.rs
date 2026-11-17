@@ -43,7 +43,7 @@ impl<S: 'static> Runtime<S> {
     /// The selection's line boxes laid out in the last commit's nodes.
     pub(super) fn selection_boxes(&self) -> Vec<[f32; 4]> {
         let mut out = Vec::new();
-        for (i, a, b) in self.selection_ranges() { self.text_boxes(&self.nodes, i, a, b, &mut out); }
+        for (i, a, b) in self.core.selection_ranges() { self.core.text_boxes(&self.core.nodes, i, a, b, &mut out); }
         out
     }
 
@@ -51,9 +51,18 @@ impl<S: 'static> Runtime<S> {
     /// runs: reusing a `memo` moves its nodes out of the last commit's, leaving placeholders
     /// the selection can't be found in.
     pub(crate) fn selection_by_path(&self) -> Vec<SelectedRange> {
-        self.selection_ranges().into_iter().map(|(i, a, b)| (self.nodes[i].path.clone(), a, b)).collect()
+        self.core.selection_ranges().into_iter().map(|(i, a, b)| (self.core.nodes[i].path.clone(), a, b)).collect()
     }
 
+    /// Once a frame: the selection moved since the view last read it (a drag, a click, code,
+    /// scrolling). That isn't layout feedback, so the view re-runs as for a state change.
+    pub(super) fn selection_read_moved(&self) -> bool {
+        let seen = &self.core.layout_seen.rects;
+        seen.contains_key(SELECTION) && boxes_moved(&seen.selection, &self.selection_boxes())
+    }
+}
+
+impl RuntimeCore {
     /// The line boxes of `ranges` laid out in a measure's `nodes`, found there by path.
     pub(super) fn selection_boxes_in(&self, nodes: &[Node], ranges: &[SelectedRange]) -> Vec<[f32; 4]> {
         let mut out = Vec::new();
@@ -91,13 +100,6 @@ impl<S: 'static> Runtime<S> {
             let (x0, y0) = (ox + bb.x0 as f32 / s, oy + bb.y0 as f32 / s);
             out.push([x0, y0, (bb.x1 - bb.x0) as f32 / s, (bb.y1 - bb.y0) as f32 / s]);
         }
-    }
-
-    /// Once a frame: the selection moved since the view last read it (a drag, a click, code,
-    /// scrolling). That isn't layout feedback, so the view re-runs as for a state change.
-    pub(super) fn selection_read_moved(&self) -> bool {
-        let seen = &self.layout_seen.rects;
-        seen.contains_key(SELECTION) && boxes_moved(&seen.selection, &self.selection_boxes())
     }
 }
 

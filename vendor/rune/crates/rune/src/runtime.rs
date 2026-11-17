@@ -363,7 +363,9 @@ mod commit;
 use commit::{Measured, Measurement, unwrapped_width};
 
 pub struct Runtime<S: 'static> {
-    pub(crate) native_geometry_valid: bool,
+    /// Everything that does not depend on the app's state type, compiled once instead of once
+    /// per state type.
+    pub core: RuntimeCore,
     pub state: S,
     pub(crate) on_focus: Option<fn(&mut S, bool, &mut Tx)>,
     /// `App::on_ime` and the composition it has open.
@@ -371,6 +373,16 @@ pub struct Runtime<S: 'static> {
     view: fn(&S, &mut Cx<S>) -> El,
     /// `App::playground`, when this run shows it.
     pub(crate) playground: Option<Box<crate::playground::Live<S>>>,
+    /// Called at the start of every frame with the clock; return true when state changed (new data).
+    pub poll: Option<fn(&mut S, f64, &mut Tx) -> bool>,
+    /// Called for keys unhandled by the focused control; return true to consume it.
+    pub on_key: Option<fn(&mut S, &KeyEvent, &mut Tx) -> bool>,
+}
+
+pub struct RuntimeCore {
+    /// The node the app's view starts at: 0, or the playground stage's root while it shows.
+    stage_root: usize,
+    pub(crate) native_geometry_valid: bool,
     #[cfg(feature = "hot")]
     pub(crate) hot: Option<crate::hot::Session>,
     pub text: TextSystem,
@@ -397,8 +409,6 @@ pub struct Runtime<S: 'static> {
     system_accent: crate::SystemAccent,
     scroll_bars: system_settings::ScrollBarHost,
     pub time_scale: f32,
-    /// Called at the start of every frame with the clock; return true when state changed (new data).
-    pub poll: Option<fn(&mut S, f64, &mut Tx) -> bool>,
     /// Seconds since the first frame, unscaled (virtual when headless).
     pub clock: f64,
     wake_deadlines: Vec<f64>,
@@ -407,8 +417,6 @@ pub struct Runtime<S: 'static> {
     watch: crate::tooling::perf_warn::Watch,
     /// Windowed runs read the clock from the wall instead of summing frame steps.
     pub wall_start: Option<crate::time::Instant>,
-    /// Called for keys unhandled by the focused control; return true to consume it.
-    pub on_key: Option<fn(&mut S, &KeyEvent, &mut Tx) -> bool>,
     pub(crate) nodes: Vec<Node>,
     /// The last commit's node buffer, emptied, for the next flatten to fill: an app of a few
     /// thousand elements otherwise maps and faults in megabytes every commit.
@@ -792,6 +800,16 @@ pub struct Runtime<S: 'static> {
     drags_open: usize,
     /// The accessibility tree, while an assistive client listens (`a11y/tree.rs`).
     a11y: Option<Box<a11y_tree::A11yTree>>,
+
+}
+
+impl<S: 'static> std::ops::Deref for Runtime<S> {
+    type Target = RuntimeCore;
+    fn deref(&self) -> &RuntimeCore { &self.core }
+}
+
+impl<S: 'static> std::ops::DerefMut for Runtime<S> {
+    fn deref_mut(&mut self) -> &mut RuntimeCore { &mut self.core }
 }
 
 impl<S: 'static> Runtime<S> {
@@ -800,15 +818,30 @@ impl<S: 'static> Runtime<S> {
     }
 
     pub fn with_text(state: S, view: fn(&S, &mut Cx<S>) -> El, viewport: (f32, f32), env: Env, text: TextSystem) -> Self {
+        Runtime {
+            core: RuntimeCore::new(viewport, env, text),
+            state,
+            view,
+            playground: None,
+            poll: None,
+            on_key: None,
+            on_focus: None,
+            app_ime: Default::default(),
+        }
+    }
+}
+
+impl RuntimeCore {
+    /// Everything a runtime starts with apart from the app's state and view, built once for
+    /// every state type.
+    fn new(viewport: (f32, f32), env: Env, text: TextSystem) -> Self {
         let mut scene = Scene::new();
         scene.set_pixel_scale(env.scale);
         crate::recorder::headless_reset();
         crate::video::headless_reset();
-        Runtime {
+        RuntimeCore {
+            stage_root: 0,
             native_geometry_valid: false,
-            state,
-            view,
-            playground: None,
             #[cfg(feature = "hot")]
             hot: None,
             text,
@@ -828,14 +861,12 @@ impl<S: 'static> Runtime<S> {
             system_accent: crate::SystemAccent::DEFAULT,
             scroll_bars: Default::default(),
             time_scale: 1.0,
-            poll: None,
             clock: 0.0,
             wake_deadlines: Vec::new(),
             timer_wake: Default::default(),
             idle_meter: Default::default(),
             watch: Default::default(),
             wall_start: None,
-            on_key: None,
             nodes: Vec::new(),
             spare_nodes: Vec::new(),
             apply_scratch: Default::default(),
@@ -1028,8 +1059,6 @@ impl<S: 'static> Runtime<S> {
             video_signature: 0,
             window_focused: None,
             keys_lost: false,
-            on_focus: None,
-            app_ime: Default::default(),
             live_subscriptions: Vec::new(),
             live_dirty: false,
             live_only_skips: 0,

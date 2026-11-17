@@ -453,7 +453,7 @@ fn video_gpu_colour_sharpness_geometry_and_lifetime_on(gpu: Gpu) {
     rt.frame(0.0);
     assert_eq!(rt.surfaces[0].rect, [0.0, 0.0, 16.0, 8.0]);
     let mut renderer = crate::render::Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (16, 8));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (16, 8));
     renderer.prepare_surfaces(&gpu.device, &gpu.queue, &rt.surfaces, (16, 8));
     let target = Offscreen::new(&gpu.device, 16, 8);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
@@ -473,7 +473,7 @@ fn video_gpu_colour_sharpness_geometry_and_lifetime_on(gpu: Gpu) {
     let node = crate::gpu::springs::Node { x: zero, y: zero, opacity: crate::gpu::springs::Track::constant(1.0) };
     let mut sprung =
         crate::render::Renderer::with_springs(&gpu.device, OFFSCREEN_FORMAT, &[node], &vec![0; rt.instances.len()]);
-    sprung.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (16, 8));
+    sprung.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (16, 8));
     sprung.prepare_surfaces(&gpu.device, &gpu.queue, &rt.surfaces, (16, 8));
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     sprung.draw(&mut encoder, &target.view, [0.0; 4]);

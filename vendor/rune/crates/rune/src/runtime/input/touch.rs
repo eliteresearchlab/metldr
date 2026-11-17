@@ -62,57 +62,59 @@ impl<S: 'static> Runtime<S> {
         }
     }
 
-    /// Whether a finger is down: a host ignores the mouse events its system makes up from it.
-    pub fn touching(&self) -> bool {
-        self.touch.finger.is_some()
-    }
-
     fn touch_down(&mut self, id: u64, x: f32, y: f32, time: f64) {
-        if self.touch.finger.is_some() { return; }
-        let scroll = self.touch_scroll_start(x, y);
+        if self.core.touch.finger.is_some() { return; }
+        let scroll = self.core.touch_scroll_start(x, y);
         self.pointer_move(x, y);
         self.pointer_down(x, y);
-        let focus = self.queue.take_where(|a| matches!(a, Action::FocusControl(_) | Action::Focus(..) | Action::Blur));
-        self.touch.finger = Some(Finger { id, origin: (x, y), last: 0.0, at: time, velocity: 0.0, mode: Mode::Pending, scroll, horizontal: false, focus });
+        let focus = self.core.queue.take_where(|a| matches!(a, Action::FocusControl(_) | Action::Focus(..) | Action::Blur));
+        self.core.touch.finger = Some(Finger { id, origin: (x, y), last: 0.0, at: time, velocity: 0.0, mode: Mode::Pending, scroll, horizontal: false, focus });
     }
 
     fn touch_move(&mut self, id: u64, x: f32, y: f32, time: f64) {
-        let Some(f) = self.touch.finger.as_ref().filter(|f| f.id == id) else { return };
+        let Some(f) = self.core.touch.finger.as_ref().filter(|f| f.id == id) else { return };
         let (dx, dy) = (x - f.origin.0, y - f.origin.1);
         if f.mode == Mode::Pending && dx.hypot(dy) > TOUCH_SLOP {
             let (origin, scroll) = (f.origin, f.scroll);
-            let (scroll, horizontal) = if self.press_drags() { (None, false) } else { self.touch_scroll_pan(origin.0, origin.1, dx.abs() > dy.abs(), scroll) };
-            let f = self.touch.finger.as_mut().unwrap();
+            let (scroll, horizontal) = if self.core.press_drags() { (None, false) } else { self.core.touch_scroll_pan(origin.0, origin.1, dx.abs() > dy.abs(), scroll) };
+            let f = self.core.touch.finger.as_mut().unwrap();
             (f.scroll, f.horizontal, f.mode) = (scroll, horizontal, if scroll.is_some() { Mode::Pan } else { Mode::Drag });
         }
-        let f = self.touch.finger.as_mut().unwrap();
+        let f = self.core.touch.finger.as_mut().unwrap();
         let along = if f.horizontal { dx } else { dy };
         let dt = time - f.at;
         if dt > 0.0 { f.velocity = (along - f.last) / dt as f32; }
         (f.last, f.at) = (along, time);
         match (f.mode, f.scroll) {
-            (Mode::Pan, Some(scroll)) => self.touch_scroll_move(scroll, along),
+            (Mode::Pan, Some(scroll)) => self.core.touch_scroll_move(scroll, along),
             (Mode::Drag, _) => self.pointer_move(x, y),
             _ => {}
         }
     }
 
     fn touch_up(&mut self, id: u64, x: f32, y: f32, time: f64, cancelled: bool) {
-        let Some(f) = self.touch.finger.take_if(|f| f.id == id) else { return };
+        let Some(f) = self.core.touch.finger.take_if(|f| f.id == id) else { return };
         let pan = f.mode == Mode::Pan;
         let velocity = if pan && !cancelled && time - f.at < FLING_HOLD { f.velocity } else { 0.0 };
-        self.touch_scroll_end(f.scroll, velocity);
+        self.core.touch_scroll_end(f.scroll, velocity);
         if cancelled {
-            self.cancel_pointer();
+            self.core.cancel_pointer();
             return;
         }
         // A pan cancelled the press, so its release clicks nothing.
         let (x, y) = if pan { f.origin } else { (x, y) };
-        if !pan { self.queue.extend(f.focus); }
+        if !pan { self.core.queue.extend(f.focus); }
         if f.mode == Mode::Drag { self.pointer_move(x, y); }
         self.pointer_up(x, y);
         // No hover is left under a lifted finger.
-        self.pointer_leave();
+        self.core.pointer_leave();
+    }
+}
+
+impl RuntimeCore {
+    /// Whether a finger is down: a host ignores the mouse events its system makes up from it.
+    pub fn touching(&self) -> bool {
+        self.touch.finger.is_some()
     }
 
     /// Whether the held press is on an element that drags, so a finger drags it, not the page.

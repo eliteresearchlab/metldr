@@ -2,7 +2,7 @@
 //! what they publish into the scene each frame.
 use super::*;
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     /// Install before the first frame. Live updates use this separate coalesced wake lane.
     pub fn set_live_waker(&mut self, waker: Waker) {
         for sub in &self.live_subscriptions { sub.active.store(false, std::sync::atomic::Ordering::Release); }
