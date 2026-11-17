@@ -1,16 +1,12 @@
 mod chunking;
-mod decoder;
 pub mod gateway;
 pub mod query;
 pub mod retrieval;
-mod thinking;
 
 pub use chunking::{Chunk, ContentType, chunk_for_embedding};
-pub use decoder::Decoder;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {
-    use super::Decoder;
     use super::retrieval::Chunk;
     use wasm_bindgen::prelude::*;
 
@@ -105,28 +101,5 @@ mod wasm {
     #[wasm_bindgen]
     pub fn suggested_terms(answer: &str) -> String {
         super::query::suggested_terms(answer).join(" ")
-    }
-
-    #[wasm_bindgen]
-    pub struct OllamaStream(Decoder);
-
-    #[wasm_bindgen]
-    impl OllamaStream {
-        #[wasm_bindgen(constructor)]
-        pub fn new() -> Self {
-            Self(Decoder::new())
-        }
-
-        pub fn push(&mut self, bytes: &[u8]) -> Result<String, JsError> {
-            self.0.push(bytes).map_err(|error| JsError::new(&error))
-        }
-
-        pub fn finish(&mut self) -> Result<String, JsError> {
-            self.0.finish().map_err(|error| JsError::new(&error))
-        }
-
-        pub fn is_done(&self) -> bool {
-            self.0.is_done()
-        }
     }
 }
