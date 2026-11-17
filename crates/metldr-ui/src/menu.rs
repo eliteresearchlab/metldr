@@ -96,14 +96,12 @@ pub fn item<S: 'static>(
     on_select: impl Fn(&mut S, &mut Tx) + 'static,
     on_close: impl Fn(&mut S) + 'static,
 ) -> El {
-    let run = Rc::new(move |s: &mut S, tx: &mut Tx| {
-        if disabled {
-            return;
+    crate::press::activate(el.role("menuitem").focusable(true).unavailable(disabled), move |s: &mut S, tx: &mut Tx| {
+        if !disabled {
+            on_select(s, tx);
+            on_close(s);
         }
-        on_select(s, tx);
-        on_close(s);
-    });
-    with_activation(el.role("menuitem").focusable(true).unavailable(disabled), run)
+    })
 }
 
 /// Closes the menu after a checkbox or radio item is chosen (`closeOnSelect`); without it they
@@ -119,7 +117,7 @@ pub fn radio_item<S: 'static>(
     close_on_select: CloseOnSelect<S>,
     on_select: impl Fn(&mut S, &mut Tx) + 'static,
 ) -> El {
-    let run = Rc::new(move |s: &mut S, tx: &mut Tx| {
+    crate::press::activate(el.role("menuitemradio").checked(checked).focusable(true).unavailable(disabled), move |s: &mut S, tx: &mut Tx| {
         if disabled {
             return;
         }
@@ -129,8 +127,7 @@ pub fn radio_item<S: 'static>(
         if let Some(close) = &close_on_select {
             close(s);
         }
-    });
-    with_activation(el.role("menuitemradio").checked(checked).focusable(true).unavailable(disabled), run)
+    })
 }
 
 /// A checkbox item, `checked` now: choosing it asks `on_change` for the other state, then
@@ -142,7 +139,7 @@ pub fn checkbox_item<S: 'static>(
     close_on_select: CloseOnSelect<S>,
     on_change: impl Fn(&mut S, bool, &mut Tx) + 'static,
 ) -> El {
-    let run = Rc::new(move |s: &mut S, tx: &mut Tx| {
+    crate::press::activate(el.role("menuitemcheckbox").checked(checked).focusable(true).unavailable(disabled), move |s: &mut S, tx: &mut Tx| {
         if disabled {
             return;
         }
@@ -150,20 +147,12 @@ pub fn checkbox_item<S: 'static>(
         if let Some(close) = &close_on_select {
             close(s);
         }
-    });
-    with_activation(el.role("menuitemcheckbox").checked(checked).focusable(true).unavailable(disabled), run)
+    })
 }
 
 /// A rule between groups of items: not focusable, hidden from assistive technology.
 pub fn separator(el: El) -> El {
     el.a11y_hidden()
-}
-
-/// An item's action, shared by its press and its keys.
-type Run<S> = Rc<dyn Fn(&mut S, &mut Tx)>;
-
-fn with_activation<S: 'static>(el: El, run: Run<S>) -> El {
-    crate::press::activate(el, move |s: &mut S, tx: &mut Tx| run(s, tx))
 }
 
 #[cfg(test)]

@@ -107,6 +107,7 @@ fn control_role(role: &str) -> Option<&'static str> {
         "tab" => "tab",
         "option" => "option",
         "treeitem" => "treeitem",
+        "combobox" => "combobox",
         _ => return None,
     })
 }
@@ -124,6 +125,9 @@ pub(crate) struct RangeSemantics {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct InputSemantics {
+    /// Set for an input that opens a list of suggestions (`role("combobox")`): whether it is open
+    /// and the kind of popup it opens.
+    combobox: Option<(bool, &'static str)>,
     name: String,
     placeholder: String,
     description: String,
@@ -274,6 +278,11 @@ impl A11yItem {
             }
             A11yKind::Input(input) => {
                 o.field("k", "input");
+                if let Some((expanded, popup)) = input.combobox {
+                    o.field("role", "combobox");
+                    o.field("x", &expanded);
+                    o.field("popup", popup);
+                }
                 o.field("name", &input.name);
                 o.field("placeholder", &input.placeholder);
                 o.field("description", &input.description);
@@ -484,6 +493,9 @@ fn text_runs(path: &str, spec: &crate::el::TextSpec) -> Vec<A11yRun> {
     out
 }
 
+/// Each key another element names, and its first node.
+type Named<'a> = rustc_hash::FxHashMap<&'a str, Option<usize>>;
+
 impl RuntimeCore {
     fn scroll_digest(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -497,12 +509,13 @@ impl RuntimeCore {
         h.finish()
     }
 
-    /// Node `i`'s `El::controls` and `El::active_descendant` targets, from their keys to the paths
-    /// the mirror names them by. A key with no element now relates to nothing.
-    fn relations(&self, i: usize) -> Option<Box<Relations>> {
+    /// Node `i`'s `El::controls` and `El::active_descendant` targets, from their keys (each named
+    /// key's first node in `named`) to the paths the mirror names them by. A key with no element
+    /// now relates to nothing.
+    fn relations(&self, i: usize, named: &Named) -> Option<Box<Relations>> {
         let more = self.nodes[i].a11y.more.as_deref()?;
         let path = |key: &Option<String>| {
-            key.as_deref().and_then(|key| self.nodes.iter().find(|n| n.key.as_deref() == Some(key))).map(|n| n.path.clone())
+            key.as_deref().and_then(|key| named.get(key).copied().flatten()).map(|j| self.nodes[j].path.clone())
         };
         let relate = Relations { controls: path(&more.controls), active: path(&more.active) };
         (relate.controls.is_some() || relate.active.is_some()).then(|| Box::new(relate))
@@ -559,12 +572,21 @@ impl RuntimeCore {
         let mut last_flow_parent: Option<usize> = None;
         let mut groups: Vec<Option<usize>> = vec![None; self.nodes.len()];
         let ends = self.subtree_ends();
-        // The elements another one names: each needs an element in the mirror to point at.
-        let named: std::collections::HashSet<&str> = self.nodes.iter()
+        // The elements another one names, each needing an element in the mirror to point at,
+        // found in one pass over the keyed nodes rather than one scan of the tree per relation.
+        let mut named: Named = self.nodes.iter()
             .filter_map(|n| n.a11y.more.as_deref())
             .flat_map(|more| [more.controls.as_deref(), more.active.as_deref()])
             .flatten()
+            .map(|key| (key, None))
             .collect();
+        if !named.is_empty() {
+            for (j, n) in self.nodes.iter().enumerate() {
+                if let Some(slot @ None) = n.key.as_deref().and_then(|key| named.get_mut(key)) {
+                    *slot = Some(j);
+                }
+            }
+        }
         let mut i = 0;
         while i < self.nodes.len() {
             let n = &self.nodes[i];
@@ -616,7 +638,8 @@ impl RuntimeCore {
                     ("row", Some(A11yKind::Table)) => Some(A11yKind::Row),
                     ("columnheader", Some(A11yKind::Row)) => Some(A11yKind::ColumnHeader),
                     ("cell", Some(A11yKind::Row)) => Some(A11yKind::Cell),
-                    _ if n.key.as_deref().is_some_and(|key| named.contains(key)) => Some(A11yKind::Box),
+                    // A control another element names is already an element to point at.
+                    _ if n.key.as_deref().is_some_and(|key| named.contains_key(key)) && n.role != "button" && control_role(n.role).is_none() => Some(A11yKind::Box),
                     _ => None,
                 }
             } else {
@@ -641,7 +664,7 @@ impl RuntimeCore {
                     font_size: 0.0,
                     text: n.label.clone().unwrap_or_default(),
                     runs: Vec::new(),
-                    relate: self.relations(i),
+                    relate: self.relations(i, &named),
                 });
                 last_flow_parent = None;
             }
@@ -659,6 +682,7 @@ impl RuntimeCore {
                         .filter(|h| name.is_none_or(|name| !h.trim().starts_with(name.trim())));
                     out.push(A11yItem {
                         kind: A11yKind::Input(Box::new(InputSemantics {
+                            combobox: (n.role == "combobox").then(|| (n.a11y.expanded.unwrap_or(false), n.a11y.has_popup.unwrap_or("listbox"))),
                             name: name.unwrap_or_default().to_owned(),
                             placeholder: input.placeholder.clone(),
                             description: more
@@ -682,7 +706,7 @@ impl RuntimeCore {
                         font_size: n.text.as_deref().map_or(14.0, |t| round1(t.style.size)),
                         text: String::new(),
                         runs: Vec::new(),
-                        relate: self.relations(i),
+                        relate: self.relations(i, &named),
                     });
                 }
                 i = end;
@@ -706,7 +730,7 @@ impl RuntimeCore {
                     font_size: 0.0,
                     text: n.label.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| self.descendant_label(i, end)),
                     runs: Vec::new(),
-                    relate: self.relations(i),
+                    relate: self.relations(i, &named),
                 });
                 i = end;
                 last_flow_parent = None;
@@ -747,7 +771,7 @@ impl RuntimeCore {
                         font_size: 0.0,
                         text: label,
                         runs: Vec::new(),
-                        relate: self.relations(i),
+                        relate: self.relations(i, &named),
                     });
                     i = end;
                     last_flow_parent = None;
@@ -848,7 +872,7 @@ impl RuntimeCore {
                         font_size: round1(spec.style.size),
                         text: plain,
                         runs: rich_runs,
-                        relate: self.relations(i),
+                        relate: self.relations(i, &named),
                     });
                     last_flow_parent = if semantic_text { None } else { flow_group };
                 }
@@ -863,7 +887,7 @@ impl RuntimeCore {
                     font_size: 16.0,
                     text: lbl,
                     runs: Vec::new(),
-                    relate: self.relations(i),
+                    relate: self.relations(i, &named),
                 });
                 last_flow_parent = None;
             }

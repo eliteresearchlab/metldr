@@ -56,6 +56,15 @@ pub(super) struct Settings {
     agents: Vec<AgentDraft>,
     completed: Rc<RefCell<Option<Completed>>>,
     message: Option<&'static str>,
+    /// The provider whose endpoint preset list is open.
+    preset_open: Option<usize>,
+}
+
+const PRESET_TRIGGER: &str = "settings-preset-trigger";
+
+/// The Chat Completions preset whose endpoint `draft` holds now.
+fn chosen_preset(draft: &ProviderDraft) -> Option<usize> {
+    crate::model::CHAT_PRESETS.iter().position(|&(_, endpoint, _)| endpoint == draft.endpoint.text)
 }
 
 impl Default for Settings {
@@ -94,6 +103,7 @@ impl Default for Settings {
                 .collect(),
             completed: Rc::new(RefCell::new(None)),
             message: None,
+            preset_open: None,
         }
     }
 }
@@ -694,6 +704,68 @@ fn button(
 }
 
 impl Settings {
+    /// The select that fills provider `i`'s endpoint from a known provider.
+    fn preset_trigger(&self, i: usize, label: &str, enabled: bool, typography: super::preferences::Typography, palette: &super::preferences::Palette) -> El {
+        let draft = &self.providers[i];
+        let (version, chosen) = (draft.version, chosen_preset(draft));
+        let shown = chosen.map_or("Custom endpoint", |n| crate::model::CHAT_PRESETS[n].0);
+        let trigger = row()
+            .key(PRESET_TRIGGER)
+            .gap(6.0)
+            .center_y()
+            .child(typography.legend(shown))
+            .child(::rune::el::icon(&super::composer::CHEVRON, 11.0).color(palette.ink_2))
+            .label(format!("{label} endpoint preset, {shown}"));
+        let trigger = super::preferences::keyed(typography, trigger).border(1.0, typography.line);
+        if !enabled {
+            return trigger.role("combobox").disabled(true).opacity(0.5);
+        }
+        let items: Rc<[metldr_ui::select::Item]> = crate::model::CHAT_PRESETS
+            .iter()
+            .enumerate()
+            .map(|(n, &(name, _, _))| metldr_ui::select::Item { key: format!("settings-preset-{n}"), label: name.into(), disabled: false })
+            .collect();
+        let open = self.preset_open == Some(i);
+        let trigger = metldr_ui::select::trigger(
+            trigger,
+            "settings-preset-list",
+            open,
+            items,
+            chosen,
+            move |state: &mut State, open, _| {
+                state.sound(crate::interaction_audio::Cue::Press);
+                state.settings.preset_open = open.then_some(i);
+            },
+            move |state: &mut State, n, _| Settings::chat_preset(state, i, version, n),
+        );
+        if typography.lip.is_some() { trigger.press(typography.press) } else { trigger.press(typography.press).press_scale(super::theme::PRESS_SCALE) }
+    }
+
+    /// The open endpoint preset list, drawn over the settings so their scroll never clips it.
+    pub(super) fn preset_list(&self, typography: super::preferences::Typography, p: &super::preferences::Palette) -> Option<El> {
+        let i = self.preset_open?;
+        let draft = self.providers.get(i)?;
+        let (version, chosen) = (draft.version, chosen_preset(draft));
+        let close = |state: &mut State, _: &mut Tx| state.settings.preset_open = None;
+        let options = crate::model::CHAT_PRESETS.iter().enumerate().map(|(n, &(name, _, _))| {
+            let row = super::composer::menu_row(typography, p, format!("settings-preset-{n}"), name.into(), "", chosen == Some(n)).label(name).press(p.line_strong);
+            metldr_ui::select::option(row, false, chosen == Some(n), move |state: &mut State, _| {
+                state.sound(crate::interaction_audio::Cue::Press);
+                Settings::chat_preset(state, i, version, n);
+            }, close)
+        });
+        let list = col()
+            .key("settings-preset-list")
+            .min_w(176.0)
+            .padding(4.0)
+            .fill(p.surface)
+            .border(1.0, p.line)
+            .radius(10.0)
+            .shadow(0.0, 8.0, p.line.alpha(0.28))
+            .children(options);
+        Some(metldr_ui::select::popup(list, "Endpoint presets", PRESET_TRIGGER, super::theme::pop_in(p), close))
+    }
+
     /// Display inside the caller's settings route, after `sync`.
     pub(super) fn view(
         &self,
@@ -788,18 +860,7 @@ impl Settings {
                         palette,
                     ));
                 if draft.protocol == ProviderProtocol::ChatCompletions {
-                    let mut presets = ::rune::el::row().flex_wrap().gap(6.0);
-                    for (index, &(name, _, _)) in crate::model::CHAT_PRESETS.iter().enumerate() {
-                        presets = presets.child(button(
-                            typography,
-                            name,
-                            format!("Use the {name} endpoint for {label}"),
-                            format!("settings-provider-{i}-preset-{index}"),
-                            enabled,
-                            move |state| Settings::chat_preset(state, i, version, index),
-                        ));
-                    }
-                    section = section.child(presets);
+                    section = section.child(self.preset_trigger(i, label, enabled, typography, palette));
                     let keyless = draft.keyless;
                     section = section
                         .child(button(
