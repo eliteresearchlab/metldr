@@ -139,10 +139,6 @@ pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(
         Some(value) => progress.set_attribute("value", &(value * 100.0).to_string())?,
         None => progress.remove_attribute("value")?,
     }
-    document
-        .document_element()
-        .ok_or_else(|| JsValue::from_str("Document root unavailable"))?
-        .set_attribute("data-theme", &setup.theme)?;
     element(document, "theme-choice")?
         .dyn_into::<HtmlSelectElement>()?
         .set_value(&setup.theme);
