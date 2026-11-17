@@ -582,6 +582,7 @@ dependencies = [
  "metldr-messages",
  "metldr-responses",
  "metldr-sse",
+ "neo_frizbee",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -645,6 +646,15 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "neo_frizbee"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb0dd0e69b342eaddb657120a21a56f3e887ddc505fac780cf430dbbbb3aed26"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
