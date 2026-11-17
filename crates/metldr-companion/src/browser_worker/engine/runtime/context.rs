@@ -135,7 +135,7 @@ impl ContextMap {
         let session = event.session.as_deref();
         self.session(session)?;
         let params = &event.params;
-        match event.method.as_ref() {
+        match event.method.as_str() {
             "Target.attachedToTarget" => {
                 let child = text(params, "sessionId")?.to_owned();
                 let info = params

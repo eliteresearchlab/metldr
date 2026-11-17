@@ -15,8 +15,6 @@ sha2 = "=0.10.9"
 futures = "=0.3.34"
 tokio = { version = "=1.53.1", features = ["rt", "net", "time", "sync", "macros", "io-util"] }
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls"] }
-chromiumoxide = { version = "=0.9.1", default-features = false }
-async-tungstenite = { version = "=0.32.1", features = ["tokio-runtime"] }
 metldr-pi-session = { path = "../metldr-pi-session" }
 metldr-codex-session = { path = "../metldr-codex-session" }
 metldr-opencode-session = { path = "../metldr-opencode-session" }

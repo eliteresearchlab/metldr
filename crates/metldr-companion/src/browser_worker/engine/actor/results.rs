@@ -1,7 +1,4 @@
 use super::*;
-use chromiumoxide::cdp::js_protocol::runtime::{
-    RemoteObject, RemoteObjectSubtype, RemoteObjectType,
-};
 impl Actor {
     pub(super) fn result(&mut self, id: CallId, result: runtime::Result<Value>) -> Result<()> {
         let pending = self.pending.remove(&id).ok_or("unknown actor response")?;
@@ -47,7 +44,9 @@ impl Actor {
             Work::Capture { generation, job } => {
                 let context = context.ok_or("capture lost its context")?;
                 let root = match evaluation(&value).and_then(|o| {
-                    o.object_id
+                    o.get("objectId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
                         .ok_or_else(|| "browser observation did not retain its snapshot".into())
                 }) {
                     Ok(root) => root,
@@ -377,20 +376,25 @@ fn ref_error(value: &Value) -> Option<&'static str> {
     .find(|reason| description.lines().next() == Some(format!("Error: {reason}").as_str()))
 }
 
-pub(super) fn evaluation(value: &Value) -> Result<RemoteObject> {
+/// The remote object a script call returned; a script that threw is a failure.
+pub(super) fn evaluation(value: &Value) -> Result<&serde_json::Map<String, Value>> {
     if value.get("exceptionDetails").is_some() {
         return Err("browser script failed".into());
     }
-    Ok(serde_json::from_value(value["result"].clone())?)
+    value["result"]
+        .as_object()
+        .filter(|object| object.get("type").is_some_and(Value::is_string))
+        .ok_or_else(|| "invalid browser script result".into())
 }
 pub(super) fn evaluation_value(value: &Value) -> Result<Value> {
     let object = evaluation(value)?;
-    if object.r#type == RemoteObjectType::Object
-        && object.subtype == Some(RemoteObjectSubtype::Null)
-    {
+    if object["type"] == "object" && object.get("subtype").is_some_and(|s| s == "null") {
         return Ok(Value::Null);
     }
-    Ok(chromiumoxide::js::EvaluationResult::new(object).into_value::<Value>()?)
+    match object.get("value") {
+        Some(value) if !value.is_null() => Ok(value.clone()),
+        _ => Err("browser script returned no value".into()),
+    }
 }
 
 #[cfg(test)]

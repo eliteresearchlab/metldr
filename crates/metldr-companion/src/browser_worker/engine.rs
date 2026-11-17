@@ -148,13 +148,13 @@ impl Engine {
             if attached["grant_revision"] != 1 {
                 return Err("invalid browser grant revision".into());
             }
-            let target: chromiumoxide::cdp::browser_protocol::target::TargetInfo =
-                serde_json::from_value(attached["targetInfo"].clone())?;
-            if target.url != source.url || target.r#type != "page" {
+            let target = &attached["targetInfo"];
+            let target_id = target["targetId"].as_str().ok_or("invalid browser target")?;
+            if target["url"].as_str() != Some(source.url.as_str()) || target["type"] != "page" {
                 return Err("browser target changed during attachment".into());
             }
-            let transport = runtime::Transport::connect(deadline).await?;
-            let contexts = runtime::ContextMap::new(target.target_id.as_ref())?;
+            let transport = runtime::Transport::new();
+            let contexts = runtime::ContextMap::new(target_id)?;
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>((transport, contexts))
         };
         let (transport, contexts) = match tokio::time::timeout_at(deadline, setup).await {

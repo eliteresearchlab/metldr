@@ -14,7 +14,7 @@ pub(super) struct Documents(VecDeque<(String, NavigationEvidence)>);
 impl Documents {
     pub(super) fn event(&mut self, event: &runtime::RawEvent) {
         // The method is a cheap string check; most events stop here before any JSON lookup.
-        let request = match event.method.as_ref() {
+        let request = match event.method.as_str() {
             "Network.requestWillBeSent" => true,
             "Network.responseReceived" => false,
             _ => return,
@@ -87,7 +87,11 @@ mod tests {
     use serde_json::json;
 
     fn event(method: &str, params: Value) -> runtime::RawEvent {
-        serde_json::from_value(json!({"method": method, "params": params})).unwrap()
+        runtime::RawEvent {
+            method: method.into(),
+            session: None,
+            params,
+        }
     }
 
     #[test]

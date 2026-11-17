@@ -1,21 +1,16 @@
-use super::{CAPACITY, MAX_MESSAGE, RawEvent, Result, TIMEOUT, WireCommand, socket::Socket};
-use chromiumoxide::{
-    cdp::browser_protocol::target::SessionId,
-    types::{CallId, Message, MethodId},
-};
-use futures::StreamExt;
-use serde_json::{Value, json};
+use super::{CAPACITY, CallId, MAX_MESSAGE, RawEvent, Result, TIMEOUT, WireCommand};
+use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use tokio::time::{Instant, sleep_until};
 
 /// The caller owns context selection, approvals and actual Chrome dispatch.
-/// This transport correlates the normal Chromiumoxide connection with that caller.
+/// This transport orders each admitted command against the notices and replies around it.
 pub struct Transport {
-    socket: Socket,
     pending: HashMap<CallId, Pending>,
     commands: VecDeque<WireCommand>,
+    incoming: VecDeque<Incoming>,
     undecoded_events: usize,
-    admitted: usize,
+    admitted: u64,
     ended: bool,
 }
 
@@ -27,9 +22,14 @@ pub enum Output {
 
 pub struct Dispatch {
     pub id: CallId,
-    pub method: MethodId,
+    pub method: String,
     pub session: Option<String>,
     pub params: Value,
+}
+
+enum Incoming {
+    Event(RawEvent),
+    Reply(CallId, Result<Value>),
 }
 
 struct Pending {
@@ -47,56 +47,42 @@ enum State {
 }
 
 impl Transport {
-    pub async fn connect(deadline: Instant) -> Result<Self> {
-        Ok(Self {
-            socket: Socket::open(deadline).await?,
+    pub fn new() -> Self {
+        Self {
             pending: HashMap::new(),
             commands: VecDeque::new(),
+            incoming: VecDeque::new(),
             undecoded_events: 0,
             admitted: 0,
             ended: false,
-        })
+        }
     }
 
-    pub fn submit(
-        &mut self,
-        method: MethodId,
-        session: Option<String>,
-        params: Value,
-    ) -> Result<CallId> {
+    pub fn submit(&mut self, method: String, session: Option<String>, params: Value) -> Result<CallId> {
         self.live()?;
         if self.pending.len() >= CAPACITY || self.admitted == 1_000_000 {
             return Err("browser command capacity reached".into());
         }
-        let candidate = WireCommand {
-            id: CallId::new(0),
+        let command = WireCommand {
+            id: CallId(self.admitted),
             method,
             session,
             params,
         };
-        candidate.validate()?;
-        let encoded = serde_json::to_vec(&candidate).map_err(|_| "invalid browser command")?;
-        // Reserve space for the largest permitted connection ID.
-        if encoded.len() > MAX_MESSAGE - 20 {
+        command.validate()?;
+        if command.method.len() + command.session.as_ref().map_or(0, String::len) + json_len(&command.params)? > MAX_MESSAGE {
             return Err("browser command exceeds message limit".into());
         }
-        let id = self
-            .socket
-            .connection
-            .submit_command(
-                candidate.method.clone(),
-                candidate.session.clone().map(SessionId::new),
-                candidate.params.clone(),
-            )
-            .map_err(|_| "cannot queue browser command")?;
+        let id = command.id;
         self.pending.insert(
             id,
             Pending {
-                command: WireCommand { id, ..candidate },
+                command: command.clone(),
                 deadline: Instant::now() + TIMEOUT,
                 state: State::Queued,
             },
         );
+        self.commands.push_back(command);
         self.admitted += 1;
         Ok(id)
     }
@@ -110,8 +96,10 @@ impl Transport {
         if self.undecoded_events == CAPACITY {
             return self.fail("browser event decode capacity reached");
         }
-        let value = serde_json::to_value(event).map_err(|_| "invalid browser event")?;
-        self.send(value)?;
+        if event.method.len() + json_len(&event.params)? > MAX_MESSAGE {
+            return self.fail("browser message exceeds limit");
+        }
+        self.incoming.push_back(Incoming::Event(event));
         self.undecoded_events += 1;
         Ok(())
     }
@@ -146,8 +134,7 @@ impl Transport {
         if pending.state != State::Offered || pending.deadline <= Instant::now() {
             return self.fail("rejected browser request is stale or already dispatched");
         }
-        self.send(json!({"id":id,"error":{"code":-32001,"message":"browser command prevented"}}))?;
-        self.pending.get_mut(&id).unwrap().state = State::Replied;
+        self.answer(id, Err("browser command failed".into()));
         Ok(())
     }
 
@@ -162,13 +149,17 @@ impl Transport {
         if pending.state != State::Dispatched {
             return self.fail("browser reply was not dispatched or was already supplied");
         }
-        let value = match result {
-            Ok(value) if value.is_object() => json!({"id":id,"result":value}),
+        let result = match result {
+            Ok(value) if value.is_object() => {
+                if json_len(&value)? > MAX_MESSAGE {
+                    return self.fail("browser message exceeds limit");
+                }
+                Ok(value)
+            }
             Ok(_) => return self.fail("browser result must be an object"),
-            Err(_) => json!({"id":id,"error":{"code":-32000,"message":"browser command failed"}}),
+            Err(_) => Err("browser command failed".into()),
         };
-        self.send(value)?;
-        self.pending.get_mut(&id).unwrap().state = State::Replied;
+        self.answer(id, result);
         Ok(())
     }
 
@@ -178,75 +169,58 @@ impl Transport {
 
     pub async fn next(&mut self) -> Result<Output> {
         self.live()?;
-        loop {
-            let deadline = self.pending.values().map(|p| p.deadline).min();
-            if deadline.is_some_and(|d| d <= Instant::now()) {
-                return self.fail("browser command deadline expired");
+        let deadline = self.pending.values().map(|p| p.deadline).min();
+        if deadline.is_some_and(|d| d <= Instant::now()) {
+            return self.fail("browser command deadline expired");
+        }
+        if self.undecoded_events == 0
+            && let Some(command) = self.commands.pop_front()
+        {
+            let pending = self
+                .pending
+                .get_mut(&command.id)
+                .ok_or("unknown browser command")?;
+            if pending.state != State::Queued {
+                return self.fail("browser command does not match admitted request");
             }
-            if self.undecoded_events == 0
-                && let Some(command) = self.commands.pop_front()
-            {
-                let pending = self
-                    .pending
-                    .get_mut(&command.id)
-                    .ok_or("unknown browser command")?;
-                if pending.state != State::Queued || pending.command != command {
-                    return self.fail("browser command does not match admitted request");
-                }
-                pending.state = State::Offered;
-                return Ok(Output::Dispatch(Dispatch {
-                    id: command.id,
-                    method: command.method,
-                    session: command.session,
-                    params: command.params,
-                }));
+            pending.state = State::Offered;
+            return Ok(Output::Dispatch(Dispatch {
+                id: command.id,
+                method: command.method,
+                session: command.session,
+                params: command.params,
+            }));
+        }
+        match self.incoming.pop_front() {
+            Some(Incoming::Event(event)) => {
+                self.undecoded_events -= 1;
+                Ok(Output::Event(event))
             }
-            // Idle transport has no request deadline. Socket failure still ends the stream.
-            let sleep = sleep_until(deadline.unwrap_or_else(|| Instant::now() + TIMEOUT));
-            tokio::select! {
-                biased;
-                message = self.socket.connection.next() => {
-                    match message {
-                        Some(Ok(Message::Event(event))) => {
-                            if event.validate().is_err() { return self.fail("invalid browser socket event"); }
-                            if self.undecoded_events == 0 {
-                                return self.fail("unsolicited browser socket event");
-                            }
-                            self.undecoded_events -= 1;
-                            return Ok(Output::Event(event));
-                        }
-                        Some(Ok(Message::Response(response))) => {
-                            let Some(pending) = self.pending.remove(&response.id) else { return self.fail("unknown browser response"); };
-                            if pending.deadline<=Instant::now() { return self.fail("browser response deadline expired") }
-                            if pending.state != State::Replied {
-                                return self.fail("browser response preceded dispatch");
-                            }
-                            let result = match (response.result, response.error) {
-                                (Some(value), None) if value.is_object() => Ok(value),
-                                (None, Some(_)) => Err("browser command failed".into()),
-                                _ => return self.fail("invalid browser response"),
-                            };
-                            return Ok(Output::Reply { id:response.id, result });
-                        }
-                        Some(Err(_)) | None => return self.fail("browser connection ended"),
-                    }
-                }
-                command = self.socket.commands.recv(), if self.commands.len() < CAPACITY => {
-                    let Some(command) = command else { return self.fail("browser socket ended") };
-                    self.commands.push_back(command);
-                }
-                _ = sleep => {
-                    if deadline.is_some() { return self.fail("browser command deadline expired") }
-                }
+            Some(Incoming::Reply(id, result)) => {
+                self.pending.remove(&id);
+                Ok(Output::Reply { id, result })
             }
+            // Nothing is ready: an idle transport waits for the caller; a pending command fails at its deadline.
+            None => match deadline {
+                Some(deadline) => {
+                    sleep_until(deadline).await;
+                    self.fail("browser command deadline expired")
+                }
+                None => std::future::pending().await,
+            },
         }
     }
 
-    pub async fn close(mut self) -> Result<()> {
+    pub fn close(mut self) {
         self.ended = true;
         self.pending.clear();
         self.commands.clear();
-        self.socket.shutdown().await
+        self.incoming.clear();
+    }
+
+    fn answer(&mut self, id: CallId, result: Result<Value>) {
+        self.pending.get_mut(&id).unwrap().state = State::Replied;
+        self.incoming.push_back(Incoming::Reply(id, result));
     }
 
     fn live(&self) -> Result<()> {
@@ -257,34 +231,36 @@ impl Transport {
         }
     }
 
-    fn send(&mut self, value: Value) -> Result<()> {
-        if serde_json::to_vec(&value)
-            .map_err(|_| "invalid browser message")?
-            .len()
-            > MAX_MESSAGE
-        {
-            return self.fail("browser message exceeds limit");
-        }
-        if self.socket.incoming.try_send(value).is_err() {
-            return self.fail("browser incoming queue unavailable or full");
-        }
-        Ok(())
-    }
-
     fn fail<T>(&mut self, message: &str) -> Result<T> {
         self.ended = true;
-        self.socket.abort();
         Err(message.into())
     }
+}
+
+fn json_len(value: &Value) -> Result<usize> {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    serde_json::to_writer(&mut count, value).map_err(|_| "invalid browser message")?;
+    Ok(count.0)
 }
 
 #[cfg(test)]
 mod checks {
     use super::*;
+    use serde_json::json;
 
     #[tokio::test]
     async fn normal_connection_preserves_events_before_dispatch_and_rejects_duplicate_reply() {
-        let mut transport = Transport::connect(Instant::now() + TIMEOUT).await.unwrap();
+        let mut transport = Transport::new();
         let id = transport
             .submit(
                 "Runtime.enable".into(),
@@ -306,7 +282,7 @@ mod checks {
             Output::Dispatch(command) => {
                 assert_eq!(command.id, id);
                 assert_eq!(command.session.as_deref(), Some("child-session"));
-                assert_eq!(command.method.as_ref(), "Runtime.enable");
+                assert_eq!(command.method, "Runtime.enable");
                 transport.dispatch(&command).unwrap();
             }
             _ => panic!("admitted command did not reach dispatch"),
@@ -317,20 +293,21 @@ mod checks {
                 assert_eq!(reply, id);
                 assert_eq!(result.unwrap(), json!({}));
             }
-            _ => panic!("normal Connection did not decode the response"),
+            _ => panic!("the reply did not come back"),
         }
         assert!(transport.reply(id, Ok(json!({}))).is_err());
-        transport.close().await.unwrap();
+        transport.close();
     }
 }
 
 #[cfg(test)]
 mod deadline_check {
     use super::*;
+    use serde_json::json;
 
     #[tokio::test]
     async fn late_reply_ends_the_connection_without_another_poll() {
-        let mut transport = Transport::connect(Instant::now() + TIMEOUT).await.unwrap();
+        let mut transport = Transport::new();
         let id = transport
             .submit("Page.enable".into(), None, json!({}))
             .unwrap();
@@ -350,6 +327,6 @@ mod deadline_check {
                 .submit("Page.enable".into(), None, json!({}))
                 .is_err()
         );
-        transport.close().await.unwrap();
+        transport.close();
     }
 }
