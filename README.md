@@ -93,7 +93,7 @@ The app is free. Your model provider may charge.
 
 The browser agent is in development. Its current build needs Linux and the companion.
 
-metldr thanks [beautiful-ui](https://github.com/slev12397/beautiful-ui), [Rune](https://github.com/anomalyco/rune), [browse](https://github.com/anomalyco/browse), [t3code](https://github.com/pingdotgg/t3code), [Chart.js](https://www.chartjs.org), [LiteLLM](https://github.com/BerriAI/litellm), [glimm](https://glimm.dev), [audio](https://github.com/raphaelsalaja/audio), and the design skills of [Emil Kowalski](https://github.com/emilkowalski/skills), [Jakub Krehel](https://github.com/jakubkrehel/skills) and [Impeccable](https://github.com/pbakaus/impeccable).
+metldr thanks [beautiful-ui](https://github.com/slev12397/beautiful-ui), [Rune](https://github.com/anomalyco/rune), [browse](https://github.com/anomalyco/browse), [t3code](https://github.com/pingdotgg/t3code), [Chart.js](https://www.chartjs.org), [LiteLLM](https://github.com/BerriAI/litellm), [glimm](https://glimm.dev), [audio](https://github.com/raphaelsalaja/audio), [Sakuga VFX](https://github.com/finktheartist/sakuga-vfx), and the design skills of [Emil Kowalski](https://github.com/emilkowalski/skills), [Jakub Krehel](https://github.com/jakubkrehel/skills) and [Impeccable](https://github.com/pbakaus/impeccable).
 
 Free for noncommercial use under the [PolyForm Noncommercial License](LICENSE). Commercial use needs written permission from [Elite Research Lab LLC](https://elitelab.ai).
 

@@ -26,7 +26,7 @@ use crate::color::Color;
 use crate::tok::{Family, OpticalSize, TextStyle};
 
 mod added;
-pub use added::add_fonts;
+pub use added::{add_fonts, cjk_seen};
 mod atlas;
 mod case;
 mod cursor;
@@ -448,6 +448,7 @@ impl TextSystem {
         wrap_anywhere: bool,
         cache: bool,
     ) -> Rc<Layout<Ink>> {
+        added::note_text(text);
         self.follow_language();
         let shared = (!cache).then(|| std::mem::replace(&mut self.layout_cx, LayoutContext::new()));
         let has_indented_blocks = blocks.iter().any(|&b| b != crate::edit::Block::Paragraph);

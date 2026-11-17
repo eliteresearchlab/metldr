@@ -25,6 +25,32 @@ pub fn add_fonts(fonts: &[&'static [u8]]) {
     measure::note_added();
 }
 
+thread_local! {
+    /// Whether text laid out on this thread held CJK, so an app that adds its CJK font on
+    /// demand knows when to.
+    static CJK_SEEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether any text laid out on this thread held Han, kana, Hangul or Bopomofo. An app that
+/// ships a large CJK font adds it (`add_fonts`) once this turns true instead of at start.
+pub fn cjk_seen() -> bool {
+    CJK_SEEN.get()
+}
+
+/// Notes `text` for [`cjk_seen`]. ASCII text, and every call once CJK was seen, costs one check.
+pub(super) fn note_text(text: &str) {
+    if text.is_ascii() || CJK_SEEN.get() {
+        return;
+    }
+    let cjk = |c: char| matches!(c as u32,
+        0x1100..=0x11FF | 0x2E80..=0x2FDF | 0x3000..=0x303F | 0x3040..=0x30FF | 0x3100..=0x312F
+        | 0x3130..=0x318F | 0x31A0..=0x31FF | 0x3200..=0x4DBF | 0x4E00..=0x9FFF | 0xA960..=0xA97F
+        | 0xAC00..=0xD7FF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x3FFFF);
+    if text.chars().any(cjk) {
+        CJK_SEEN.set(true);
+    }
+}
+
 impl TextSystem {
     /// Whether fonts were added since this text system last registered them.
     pub(crate) fn fonts_behind(&self) -> bool {
@@ -34,7 +60,8 @@ impl TextSystem {
     /// Registers the fonts added since it last looked as fallbacks and drops what it shaped
     /// without them. True when there were any.
     pub(crate) fn follow_added(&mut self) -> bool {
-        let fresh: Vec<&'static [u8]> = ADDED.with_borrow(|added| added.get(self.added..).unwrap_or_default().to_vec());
+        let fresh: Vec<&'static [u8]> =
+            ADDED.with_borrow(|added| added[self.added.min(added.len())..].to_vec());
         if fresh.is_empty() {
             return false;
         }
@@ -43,7 +70,8 @@ impl TextSystem {
         let primary = [collection.family_id(&self.families.0), collection.family_id(&self.families.1)];
         let mut fallbacks: Vec<FamilyId> = Vec::new();
         for data in fresh {
-            let mut ids: Vec<FamilyId> = collection.register_fonts(Blob::new(Arc::new(data)), None).into_iter().map(|(id, _)| id).collect();
+            let registered = collection.register_fonts(Blob::new(Arc::new(data)), None);
+            let mut ids: Vec<FamilyId> = registered.into_iter().map(|(id, _)| id).collect();
             ids.sort_unstable();
             for id in ids {
                 if !primary.contains(&Some(id)) && !fallbacks.contains(&id) {
@@ -64,6 +92,17 @@ mod tests {
 
     const INTER: &[u8] = include_bytes!("../../assets/Inter-Regular.ttf");
     const PLEX: &[u8] = include_bytes!("../../assets/IBMPlexMono-Regular.ttf");
+
+    /// CJK text marks the thread; ASCII and other scripts never do.
+    #[test]
+    fn cjk_text_is_noted_once_laid_out() {
+        let mut ts = TextSystem::new(&[INTER], ("Inter", "Inter"));
+        let style = TextStyle::new(13.0, 400.0);
+        ts.layout_rich("plain text, العربية, ★", &[], style, 1.0, None);
+        assert!(!cjk_seen());
+        ts.layout_rich("日本語", &[], style, 1.0, None);
+        assert!(cjk_seen());
+    }
 
     /// A running text system and one built later both draw with an added font, and the
     /// measurer's epoch moves so cached sizes follow.
