@@ -40,6 +40,8 @@ pub struct Setup {
     pub theme: String,
     pub theme_saving: bool,
     pub downloaded_at: Option<f64>,
+    /// The easiest working choice found on this computer, marked for the user.
+    pub recommended: Option<Choice>,
 }
 
 impl Default for Setup {
@@ -47,18 +49,19 @@ impl Default for Setup {
         Self {
             preview: false,
             panel: Panel::Preparing,
-            choice: Choice::Provider,
+            choice: Choice::Chrome,
             status: Status::Idle,
             generation: 0,
             models: Vec::new(),
             model: String::new(),
             progress: None,
-            detail: "In the panel, choose Settings, then Providers.".into(),
+            detail: "Checking what works on this computer. No prompt or page content is sent.".into(),
             loading: true,
             saving: false,
             theme: "catppuccin".into(),
             theme_saving: false,
             downloaded_at: None,
+            recommended: None,
         }
     }
 }
@@ -91,9 +94,8 @@ impl Setup {
                 return;
             }
             None => match local {
-                Some("chrome-ai") => Choice::Chrome,
                 Some("ollama") => Choice::Ollama,
-                _ => Choice::Provider,
+                _ => Choice::Chrome,
             },
         };
         self.choose(choice);
@@ -107,9 +109,19 @@ impl Setup {
         self.detail = match choice {
             Choice::Chrome => "Check whether Chrome AI is ready on this device.",
             Choice::Ollama => "Check the Ollama service at 127.0.0.1:11434. The check lists installed models and sends no prompt.",
-            Choice::Provider => "In the panel, choose Settings, then Providers.",
+            Choice::Provider => "In the panel, choose Settings, then Providers, and paste your key.",
             Choice::Agent => "In the panel, choose Settings, then Installed agents.",
         }.into();
+    }
+
+    /// The easiest choice that works here: Chrome's built-in AI when Chrome offers it, then a
+    /// local Ollama with a model, then the user's own key.
+    pub fn recommend(chrome: Option<&str>, ollama_models: &[String]) -> Choice {
+        match chrome {
+            Some("available" | "downloadable" | "downloading") => Choice::Chrome,
+            _ if !ollama_models.is_empty() => Choice::Ollama,
+            _ => Choice::Provider,
+        }
     }
 
     pub fn begin(&mut self, status: Status) -> u64 {
@@ -218,9 +230,9 @@ mod tests {
 
     #[test]
     fn saved_destinations_take_precedence_over_legacy_local_choices() {
-        assert_eq!(Setup::default().choice, Choice::Provider);
+        assert_eq!(Setup::default().choice, Choice::Chrome);
         for (destination, local, expected) in [
-            (None, None, Choice::Provider),
+            (None, None, Choice::Chrome),
             (None, Some("chrome-ai"), Choice::Chrome),
             (None, Some("ollama"), Choice::Ollama),
             (Some("browser"), Some("ollama"), Choice::Provider),
@@ -248,5 +260,15 @@ mod tests {
         let mut setup = Setup::default();
         setup.restore_choice(Some("unknown"), Some("ollama"));
         assert!(setup.detail.contains("Review your saved destination"));
+    }
+
+    #[test]
+    fn the_easiest_working_choice_is_recommended() {
+        let model = vec!["llama3.2:latest".to_string()];
+        assert_eq!(Setup::recommend(Some("available"), &model), Choice::Chrome);
+        assert_eq!(Setup::recommend(Some("downloadable"), &[]), Choice::Chrome);
+        assert_eq!(Setup::recommend(Some("unavailable"), &model), Choice::Ollama);
+        assert_eq!(Setup::recommend(None, &model), Choice::Ollama);
+        assert_eq!(Setup::recommend(Some("missing-api"), &[]), Choice::Provider);
     }
 }
