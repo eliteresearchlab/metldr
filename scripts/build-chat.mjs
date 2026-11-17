@@ -88,7 +88,7 @@ async function copyRune() {
   const list = constant => {
     const start = source.indexOf(`const ${constant}:`);
     const block = source.slice(start, source.indexOf('];', start));
-    return Array.from(block.matchAll(/"([^"]+\.tt[fc])"/g), match => match[1]);
+    return Array.from(block.matchAll(/"([^"]+\.(?:tt[fc]|otf))"/g), match => match[1]);
   };
   const names = list('NAMES');
   const fallbacks = list('FALLBACKS');

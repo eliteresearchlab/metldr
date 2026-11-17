@@ -1,7 +1,7 @@
 use super::*;
 use metldr_ui::collapsible;
 use ::rune::{
-    App, AppHandle, AppSpec, Cx, El, ScrollSpec, TextEdit, TextStyle, Tx, col, row,
+    App, AppHandle, AppSpec, Cx, El, ScrollSpec, TextEdit, Tx, col, row,
 };
 use wasm_bindgen_futures::spawn_local;
 
@@ -1828,7 +1828,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         let lamp = if fault { p.red } else if status == "Ready" { p.green } else { p.orange };
         let line = typography
             .text(status)
-            .font(typography.font(12.0, 400.0).lh(16.0 * typography.scale))
+            .font(typography.font(12.0, 400.0).features("'tnum' 1").lh(16.0 * typography.scale))
             .color(if p.molded() { p.print } else if p.neon() || p.retro() { p.accent } else { p.ink_2 })
             .single_line()
             .truncate()
