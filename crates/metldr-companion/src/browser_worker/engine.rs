@@ -104,7 +104,7 @@ pub(super) struct Engine {
     requests: mpsc::Sender<Request>,
     stop: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
-    task: JoinHandle<(Result<()>, Result<()>)>,
+    task: JoinHandle<()>,
     client: Client,
     tab: i32,
 }
@@ -148,13 +148,13 @@ impl Engine {
             if attached["grant_revision"] != 1 {
                 return Err("invalid browser grant revision".into());
             }
-            let target: chromiumoxide::cdp::browser_protocol::target::TargetInfo =
-                serde_json::from_value(attached["targetInfo"].clone())?;
-            if target.url != source.url || target.r#type != "page" {
+            let target = &attached["targetInfo"];
+            let target_id = target["targetId"].as_str().ok_or("invalid browser target")?;
+            if target["url"].as_str() != Some(source.url.as_str()) || target["type"] != "page" {
                 return Err("browser target changed during attachment".into());
             }
-            let transport = runtime::Transport::connect(deadline).await?;
-            let contexts = runtime::ContextMap::new(target.target_id.as_ref())?;
+            let transport = runtime::Transport::new();
+            let contexts = runtime::ContextMap::new(target_id)?;
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>((transport, contexts))
         };
         let (transport, contexts) = match tokio::time::timeout_at(deadline, setup).await {
@@ -423,9 +423,8 @@ impl Engine {
     }
     pub(super) async fn detach(mut self) -> Result<()> {
         self.shutdown.store(true, Ordering::Release);
-        let task = match tokio::time::timeout(TIMEOUT, &mut self.task).await {
-            // Requests own execution outcomes; release still requires both cleanup checks.
-            Ok(Ok((_, cleanup))) => cleanup,
+        let task: Result<()> = match tokio::time::timeout(TIMEOUT, &mut self.task).await {
+            Ok(Ok(())) => Ok(()),
             Ok(Err(e)) if e.is_cancelled() => Ok(()),
             Ok(Err(e)) => Err(e.into()),
             Err(_) => {

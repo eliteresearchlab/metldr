@@ -1,5 +1,4 @@
 use super::*;
-use chromiumoxide::cdp::browser_protocol::input::{GestureSourceType, SynthesizeTapGestureParams};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -147,17 +146,10 @@ impl Actor {
             .ok_or("button snapshot disappeared")?;
         let context = snapshot.context.clone();
         let root = snapshot.root.clone();
-        let params = SynthesizeTapGestureParams::builder()
-            .x(point.x)
-            .y(point.y)
-            .duration(50)
-            .tap_count(1)
-            .gesture_source_type(GestureSourceType::Mouse)
-            .build()?;
         self.queue(
-            SynthesizeTapGestureParams::IDENTIFIER,
+            "Input.synthesizeTapGesture",
             session(&context),
-            serde_json::to_value(params)?,
+            json!({"x":point.x,"y":point.y,"duration":50,"tapCount":1,"gestureSourceType":"mouse"}),
             Work::Gesture { action, job },
             Some(context),
             Some(root),

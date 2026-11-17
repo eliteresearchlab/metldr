@@ -1,34 +1,20 @@
-use chromiumoxide::types::{CallId, EventMessage, Method, MethodId};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
-
-mod socket;
 
 pub type Result<T> = std::result::Result<T, String>;
 const MAX_MESSAGE: usize = 65_536;
 const CAPACITY: usize = 64;
 const TIMEOUT: Duration = Duration::from_secs(8);
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+/// One browser command's id, unique for the life of its transport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CallId(u64);
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct RawEvent {
-    pub method: MethodId,
-    #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")]
+    pub method: String,
     pub session: Option<String>,
     pub params: Value,
-}
-
-impl Method for RawEvent {
-    fn identifier(&self) -> MethodId {
-        self.method.clone()
-    }
-}
-
-impl EventMessage for RawEvent {
-    fn session_id(&self) -> Option<&str> {
-        self.session.as_deref()
-    }
 }
 
 impl RawEvent {
@@ -37,12 +23,10 @@ impl RawEvent {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WireCommand {
     pub id: CallId,
-    pub method: MethodId,
-    #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")]
+    pub method: String,
     pub session: Option<String>,
     pub params: Value,
 }

@@ -2,7 +2,6 @@ use super::runtime::FrameContext;
 mod controls;
 use crate::Result;
 use crate::browser_action::{Choice, Point, ScrollKind, SecretKind};
-use chromiumoxide::cdp::js_protocol::runtime::RemoteObjectId;
 pub(super) use controls::{NativeControl, NativeState};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -118,7 +117,7 @@ pub(super) struct Field {
 
 pub(super) struct Snapshot {
     pub(super) context: FrameContext,
-    pub(super) root: RemoteObjectId,
+    pub(super) root: String,
     pub(super) fields: BTreeMap<String, Field>,
     pub(super) buttons: BTreeMap<String, Field>,
     pub(super) selects: BTreeMap<String, SelectControl>,
@@ -154,7 +153,7 @@ impl Snapshot {
 
     pub(super) fn from_census(
         context: FrameContext,
-        root: RemoteObjectId,
+        root: String,
         run: &str,
         generation: u64,
         value: Value,

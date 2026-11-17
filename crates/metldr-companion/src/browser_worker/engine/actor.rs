@@ -9,7 +9,7 @@ use crate::{
     browser_action::{Action, Binding, Intent, Outcome, Phase, Proposal},
     browser_io::{Client, Notice},
 };
-use chromiumoxide::{cdp::js_protocol::runtime::RemoteObjectId, types::CallId};
+use runtime::CallId;
 use futures::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -50,7 +50,7 @@ struct Initialization {
 struct Pending {
     work: Work,
     context: Option<FrameContext>,
-    object: Option<RemoteObjectId>,
+    object: Option<String>,
     deadline: Instant,
     prevented: Option<String>,
 }
@@ -258,10 +258,10 @@ impl Actor {
             network,
         }
     }
-    pub(super) async fn run(mut self) -> (Result<()>, Result<()>) {
-        let result = self.drive().await;
-        let closed = self.transport.close().await.map_err(Into::into);
-        (result, closed)
+    /// Requests own execution outcomes, so the drive result ends here with the transport.
+    pub(super) async fn run(mut self) {
+        let _ = self.drive().await;
+        self.transport.close();
     }
     async fn drive(&mut self) -> Result<()> {
         self.initialize(None, true)?;
@@ -339,7 +339,7 @@ impl Actor {
         }
         self.documents.event(&event);
         let change = self.contexts.event(&event)?;
-        if event.method.as_ref() == "Target.detachedFromTarget" {
+        if event.method == "Target.detachedFromTarget" {
             self.page_logs
                 .retain_sessions(|session| self.contexts.owns(session));
         }
@@ -389,7 +389,7 @@ impl Actor {
         params: Value,
         work: Work,
         context: Option<FrameContext>,
-        object: Option<RemoteObjectId>,
+        object: Option<String>,
     ) -> Result<()> {
         let deadline = work
             .job()
@@ -611,7 +611,7 @@ impl Work {
 fn session(context: &FrameContext) -> Option<String> {
     (context.session_id() != "metldr-owned-root").then(|| context.session_id().to_owned())
 }
-fn call_params(context: &FrameContext, object: &RemoteObjectId, declaration: String) -> Value {
+fn call_params(context: &FrameContext, object: &String, declaration: String) -> Value {
     json!({"functionDeclaration":declaration,"arguments":[{"objectId":object}],"returnByValue":true,"awaitPromise":true,"uniqueContextId":context.unique_context_id()})
 }
 async fn wait_reply(
