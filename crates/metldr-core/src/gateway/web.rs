@@ -1319,8 +1319,7 @@ async fn chrome_summary(request: &Summarize, kind: &str, length: &str) -> Option
 
 /// The language of `text` as a two letter code. Chrome's own detector answers first since it
 /// costs no model call.
-#[wasm_bindgen]
-pub async fn gateway_detect_language(text: String) -> Result<String, JsValue> {
+async fn detect_language(text: String) -> Result<String, JsValue> {
     if let Some(found) = chrome_language(&text).await {
         return Ok(found);
     }

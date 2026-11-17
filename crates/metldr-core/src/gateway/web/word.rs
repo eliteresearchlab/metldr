@@ -23,7 +23,7 @@ pub async fn gateway_word_lookup(word: String, context: JsValue) -> Result<JsVal
             .unwrap_or(JsValue::NULL),
     );
     let detected = if context.page_lang.is_empty() {
-        gateway_detect_language(word::detection_text(&word, &context))
+        detect_language(word::detection_text(&word, &context))
             .await
             .unwrap_or_else(|_| "en".into())
     } else {
