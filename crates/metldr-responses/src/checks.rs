@@ -13,7 +13,7 @@ fn events(tool: bool) -> Vec<Value> {
     let item = if tool {
         let arguments = "{}";
         let item = json!({"type":"function_call","id":"fc_owned","call_id":"call_owned",
-            "name":"observe_page","arguments":arguments,"status":"completed"});
+            "name":"snapshot_page","arguments":arguments,"status":"completed"});
         let mut initial = item.clone();
         initial["status"] = json!("in_progress");
         initial["arguments"] = json!("");
@@ -95,7 +95,7 @@ fn streams_unicode_and_preserves_finalized_opaque_tool_history() {
         assert_eq!(turn.output[1]["phase"], "final_answer");
         let (tool, text) = replay(&events(true), size).unwrap();
         assert!(text.is_empty());
-        assert_eq!(tool.call.as_ref().unwrap().name, "observe_page");
+        assert_eq!(tool.call.as_ref().unwrap().name, "snapshot_page");
         let mut conversation = client().start(prompt()).unwrap();
         conversation.phase = Phase::Pending(tool);
         let result = json!({"kind":"page_observation","untrusted":true});
@@ -306,7 +306,7 @@ fn accepts_only_the_source_table_presentation_shape() {
     };
     assert_eq!(table.title(), "Quarterly sales");
     assert_eq!(table.rows()[1], ["Q2", "$250"]);
-    assert!(client::decode_presentation("observe_page", &args).is_err());
+    assert!(client::decode_presentation("snapshot_page", &args).is_err());
 
     for (key, value) in [
         ("catalogId", json!("other")),
@@ -520,7 +520,7 @@ fn constructs_direct_stateless_request_without_provider_credentials() {
         assert!(tool["parameters"]["required"].is_array());
         assert_eq!(tool["parameters"]["additionalProperties"], false);
     }
-    assert_eq!(request["tools"][4]["name"], "select_option");
+    assert_eq!(request["tools"][4]["name"], "type");
     assert_eq!(
         request["tools"][4]["parameters"],
         metldr_browser_tools::definitions()[4].input_schema

@@ -8,6 +8,11 @@ const CAPTURE: &str = include_str!("../js/capture.js");
 /// Playwright's InjectedScript (Apache-2.0), vendored from patchright-core by js/generate.sh.
 const INJECTED: &str = include_str!("../js/injected-script.js");
 
+/// Playwright's InjectedScript source, for a host that ships it alongside instead of sending it.
+pub fn injected_source() -> &'static str {
+    INJECTED
+}
+
 /// The helpers object for one world (js/helpers.js with the snapshot naming and capture sources filled in).
 pub fn helpers() -> &'static str {
     static SOURCE: OnceLock<String> = OnceLock::new();

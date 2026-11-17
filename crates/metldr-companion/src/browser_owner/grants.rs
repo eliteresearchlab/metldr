@@ -51,21 +51,33 @@ impl SessionGrant {
 /// A secret entry always needs its own consent, so no grant covers it.
 pub(crate) fn tier_one(intent: &Intent) -> bool {
     match intent {
-        Intent::Field { .. }
-        | Intent::Navigate { .. }
-        | Intent::SelectOption { .. }
-        | Intent::Scroll { .. }
-        | Intent::SetNativeControl { .. } => true,
-        // Enter can submit a form, so only the other keys are Tier 1.
-        Intent::PressKey { key, .. } => key != "Enter",
-        Intent::ActivateButton { .. } | Intent::Secret { .. } => false,
+        Intent::Navigate { .. } => true,
+        // Clicks and drags can submit, send, delete or buy; so can Enter and a fill that submits.
+        Intent::Act { tool, args, .. } => match tool.as_str() {
+            "fill" | "type" => args["submit"] != true,
+            "press" => !pressed(&args["key"]).any(|key| key.ends_with("Enter")),
+            "select" | "hover" | "scroll" => true,
+            _ => false,
+        },
+        Intent::Secret { .. } => false,
     }
+}
+
+/// The keys of a press, one or a list.
+fn pressed(key: &serde_json::Value) -> impl Iterator<Item = &str> {
+    key.as_str().into_iter().chain(
+        key.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|k| k.as_str()),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::browser_action::Binding;
+    use serde_json::json;
 
     fn proposal(session: &str, intent: Intent) -> Proposal {
         Proposal {
@@ -104,37 +116,48 @@ mod tests {
             "a new plan revision ends the grant"
         );
         assert!(!grant.covers(&proposal("session-2", navigate()), 2, now));
-        let button = proposal(
+        let click = proposal(
             "session-1",
-            Intent::ActivateButton {
-                button_id: "b".into(),
-                button_label: "Buy".into(),
-            },
+            Intent::act("click", json!({"ref":"e1"}), &[("e1", "button", "Buy")]),
         );
-        assert!(!grant.covers(&button, 2, now));
+        assert!(!grant.covers(&click, 2, now));
         let secret = proposal(
             "session-1",
             Intent::Secret {
-                field_id: "field_1".into(),
-                field_label: "Password".into(),
+                element: crate::browser_action::element("e2", "textbox", "Password"),
                 secret: crate::browser_action::SecretKind::Password,
                 reference: "0".repeat(32),
                 expires_at_ms: 1,
             },
         );
-        assert!(!grant.covers(&secret, 2, now), "a secret needs its own consent");
-        let key = |key: &str| {
+        assert!(
+            !grant.covers(&secret, 2, now),
+            "a secret needs its own consent"
+        );
+        let press = |key: serde_json::Value| {
+            proposal("session-1", Intent::act("press", json!({"key":key}), &[]))
+        };
+        assert!(grant.covers(&press(json!("Tab")), 2, now));
+        assert!(
+            !grant.covers(&press(json!("Enter")), 2, now),
+            "Enter can submit, so it always asks"
+        );
+        assert!(!grant.covers(&press(json!(["a", "Shift+Enter"])), 2, now));
+        let fill = |submit: bool| {
             proposal(
                 "session-1",
-                Intent::PressKey {
-                    field_id: "field_1".into(),
-                    field_label: "Search".into(),
-                    key: key.into(),
-                },
+                Intent::act(
+                    "fill",
+                    json!({"ref":"e3","value":"x","submit":submit}),
+                    &[("e3", "textbox", "Search")],
+                ),
             )
         };
-        assert!(grant.covers(&key("Tab"), 2, now));
-        assert!(!grant.covers(&key("Enter"), 2, now), "Enter can submit, so it always asks");
+        assert!(grant.covers(&fill(false), 2, now));
+        assert!(
+            !grant.covers(&fill(true), 2, now),
+            "a submitting fill always asks"
+        );
         assert!(!grant.covers(&step, 2, now + GRANT_TTL));
     }
 }

@@ -1,7 +1,8 @@
 use crate::model::{
-    BrowserActionIntent, BrowserActionOutcome, BrowserActionPhase, BrowserActionView, Control,
-    ControlReceipt, ScrollDirection,
+    BrowserActionIntent, BrowserActionOutcome, BrowserActionPhase, BrowserActionView,
+    BrowserElement,
 };
+use serde_json::Value;
 
 pub(crate) struct Display {
     pub(crate) title: &'static str,
@@ -16,53 +17,71 @@ pub(crate) struct Detail {
     pub(crate) value: String,
 }
 
+/// The card title of a page action: to approve, and once it ran.
+fn act_title(tool: &str) -> (&'static str, &'static str) {
+    match tool {
+        "click" => ("Approve click", "Click"),
+        "fill" => ("Approve fill", "Fill"),
+        "type" => ("Approve typing", "Typing"),
+        "press" => ("Approve key press", "Key press"),
+        "select" => ("Approve option choice", "Option choice"),
+        "hover" => ("Approve hover", "Hover"),
+        "drag" => ("Approve drag", "Drag"),
+        _ => ("Approve scroll", "Scroll"),
+    }
+}
+
+/// How an element reads on the card: `button "Save"`.
+fn named(element: &BrowserElement) -> String {
+    if element.name.is_empty() {
+        element.role.clone()
+    } else {
+        format!("{} \"{}\"", element.role, element.name)
+    }
+}
+
+/// One text, or a list joined with commas.
+fn listed(value: &Value) -> String {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", "),
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn checked(value: &Value) -> String {
+    if value == true {
+        "Checked"
+    } else {
+        "Not checked"
+    }
+    .to_owned()
+}
+
 pub(crate) fn display(action: &BrowserActionView) -> Display {
     let pending = action.phase == BrowserActionPhase::Pending;
     let title = match &action.intent {
         BrowserActionIntent::Navigate { .. } if pending => "Approve navigation",
         BrowserActionIntent::Navigate { .. } => "Navigation",
-        BrowserActionIntent::ActivateButton { .. } if pending => "Approve button click",
-        BrowserActionIntent::ActivateButton { .. } => "Button action",
-        BrowserActionIntent::Field { .. } => "Browser action",
-        BrowserActionIntent::SelectOption { .. } if pending => "Approve option selection",
-        BrowserActionIntent::SelectOption { .. } => "Option selection",
-        BrowserActionIntent::Scroll { .. } if pending => "Approve scroll",
-        BrowserActionIntent::Scroll { .. } => "Page scroll",
-        BrowserActionIntent::SetNativeControl { .. } if pending => "Approve control change",
-        BrowserActionIntent::SetNativeControl { .. } => "Control change",
-        BrowserActionIntent::PressKey { .. } if pending => "Approve key press",
-        BrowserActionIntent::PressKey { .. } => "Key press",
+        BrowserActionIntent::Act { tool, .. } => {
+            let (ask, done) = act_title(tool);
+            if pending { ask } else { done }
+        }
         BrowserActionIntent::EnterSecret { .. } if pending => "Enter a secret",
         BrowserActionIntent::EnterSecret { .. } => "Secret entry",
     };
     let mut details = Vec::new();
     let mut add = |part, label, value: String| details.push(Detail { part, label, value });
     match &action.intent {
-        BrowserActionIntent::Field {
-            field_label,
-            previous_value,
-            value,
-            ..
-        } => {
-            add("destination", "Destination", action.url.clone());
-            add("field", "Field", field_label.clone());
-            add("previous-value", "Previous value", previous_value.clone());
-            add("value", "Proposed value", value.clone());
-        }
-        BrowserActionIntent::PressKey {
-            field_label, key, ..
-        } => {
-            add("destination", "Destination", action.url.clone());
-            add("field", "Field", field_label.clone());
-            add("key", "Key", key.clone());
-        }
         BrowserActionIntent::EnterSecret {
-            field_label,
-            secret,
-            ..
+            element, secret, ..
         } => {
             add("destination", "Site", origin(&action.url));
-            add("field", "Field", field_label.clone());
+            add("field", "Field", named(element));
             add("secret", "Kind", secret.label().to_owned());
         }
         BrowserActionIntent::Navigate { destination } => {
@@ -72,142 +91,108 @@ pub(crate) fn display(action: &BrowserActionView) -> Display {
                 format!("{} → {destination}", action.url),
             );
         }
-        BrowserActionIntent::ActivateButton { button_label, .. } => {
-            add("destination", "Source", action.url.clone());
-            add("button", "Button", button_label.clone());
-        }
-        BrowserActionIntent::SelectOption { selection } => {
-            add("destination", "Destination", action.url.clone());
-            add("field", "Control", selection.control_label.clone());
-            add(
-                "previous-value",
-                "Previous selection",
-                selection.previous.as_ref().map_or_else(
-                    || "No selection".to_owned(),
-                    |choice| format!("{} (option {})", choice.label, choice.index + 1),
-                ),
-            );
-            add(
-                "value",
-                "Chosen option",
-                format!(
-                    "{} (option {})",
-                    selection.selected.label,
-                    selection.selected.index + 1
-                ),
-            );
-        }
-        BrowserActionIntent::Scroll { scroll } => {
-            add("destination", "Destination", action.url.clone());
-            add("scroll-target", "Target", scroll.label.clone());
-            add(
-                "scroll-motion",
-                "Scroll",
-                format!(
-                    "{} {} px",
-                    match scroll.direction {
-                        ScrollDirection::Up => "Up",
-                        ScrollDirection::Down => "Down",
-                        ScrollDirection::Left => "Left",
-                        ScrollDirection::Right => "Right",
-                    },
-                    scroll.pixels
-                ),
-            );
-            add(
-                "scroll-before",
-                "Before",
-                format!("x: {}, y: {}", scroll.before.x, scroll.before.y),
-            );
-            if let Some(point) = &action.observed_scroll {
-                add(
-                    "scroll-after",
-                    "After",
-                    format!("x: {}, y: {}", point.x, point.y),
-                );
-            }
-        }
-        BrowserActionIntent::SetNativeControl { control } => {
-            add("destination", "Destination", action.url.clone());
-            let (label, previous, requested, group, peer) = match control {
-                Control::Checkbox {
-                    control_label,
-                    before,
-                    checked,
-                    ..
-                } => (
-                    control_label.as_str(),
-                    checkbox_state(before.checked, before.indeterminate).to_owned(),
-                    checkbox_state(*checked, false).to_owned(),
-                    String::new(),
-                    String::new(),
-                ),
-                Control::Radio {
-                    control_label,
-                    index,
-                    group,
-                    ..
-                } => (
-                    control_label.as_str(),
-                    "Not checked".to_owned(),
-                    format!("Select {} (option {})", control_label, index + 1),
-                    if group.member_count == 1 {
-                        "1 option".to_owned()
+        BrowserActionIntent::Act {
+            tool,
+            args,
+            elements,
+        } => {
+            add("destination", "Page", action.url.clone());
+            let target = |index: usize| elements.get(index).map(named);
+            match tool.as_str() {
+                "fill" if args["fields"].is_array() => {
+                    for (field, element) in args["fields"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .zip(elements)
+                    {
+                        add("field", "Field", named(element));
+                        if let Some(value) = field["value"].as_str() {
+                            add("value", "Value", value.to_owned());
+                        } else {
+                            add("value", "State", checked(&field["checked"]));
+                        }
+                    }
+                }
+                "fill" => {
+                    add("field", "Field", target(0).unwrap_or_default());
+                    if let Some(value) = args["value"].as_str() {
+                        add("value", "Value", value.to_owned());
                     } else {
-                        format!("{} options", group.member_count)
-                    },
-                    group
-                        .prior_selected
-                        .as_ref()
-                        .map_or_else(|| "None selected".to_owned(), radio_choice),
-                ),
-            };
-            add("control-target", "Control", label.to_owned());
-            add("control-previous", "Previous state", previous);
-            add("control-requested", "Requested state", requested);
-            if matches!(control, Control::Radio { .. }) {
-                add("control-group", "Radio group", group);
-                add("control-peer", "Previous radio choice", peer);
-            }
-            if let Some(receipt) = &action.observed_control {
-                add(
-                    "control-observed",
-                    "Observed local state",
-                    match receipt {
-                        ControlReceipt::Checkbox {
-                            checked,
-                            indeterminate,
-                        } => checkbox_state(*checked, *indeterminate).to_owned(),
-                        ControlReceipt::Radio {
-                            selected,
-                            cleared_peer,
-                            ..
-                        } => format!(
-                            "Selected {} (option {}). Cleared {}.",
-                            selected.label,
-                            selected.index + 1,
-                            cleared_peer
-                                .as_ref()
-                                .map_or("no other choice".to_owned(), radio_choice),
+                        add("value", "State", checked(&args["checked"]));
+                    }
+                }
+                "type" => {
+                    add(
+                        "field",
+                        "Field",
+                        target(0).unwrap_or_else(|| "The focused element".into()),
+                    );
+                    add("value", "Text", listed(&args["text"]));
+                }
+                "press" => {
+                    add(
+                        "field",
+                        "Element",
+                        target(0).unwrap_or_else(|| "The focused element".into()),
+                    );
+                    let mut keys = listed(&args["key"]);
+                    if let Some(count) = args["count"].as_u64().filter(|count| *count > 1) {
+                        keys = format!("{keys} × {count}");
+                    }
+                    add("key", "Keys", keys);
+                }
+                "select" => {
+                    add("field", "Control", target(0).unwrap_or_default());
+                    add("value", "Choice", listed(&args["values"]));
+                }
+                "drag" => {
+                    add("button", "From", target(0).unwrap_or_default());
+                    add("button", "To", target(1).unwrap_or_default());
+                }
+                "scroll" => {
+                    add(
+                        "scroll-target",
+                        "Target",
+                        target(0).unwrap_or_else(|| "The page".into()),
+                    );
+                    let motion = match (args["to"].as_str(), &args["deltaX"], &args["deltaY"]) {
+                        (Some(edge), _, _) => format!("To the {edge}"),
+                        (None, Value::Null, Value::Null) => "Into view".to_owned(),
+                        (None, x, y) => format!(
+                            "{} px across, {} px down",
+                            x.as_i64().unwrap_or(0),
+                            y.as_i64().unwrap_or(0)
                         ),
-                    },
-                );
+                    };
+                    add("scroll-motion", "Scroll", motion);
+                }
+                _ => add("button", "Element", target(0).unwrap_or_default()),
+            }
+            if args["submit"] == true {
+                add("key", "Then", "Press Enter".to_owned());
+            }
+            if let Some(result) = &action.result {
+                add("result", "What changed", result.clone());
             }
         }
     }
     let status = match action.outcome {
-        Some(BrowserActionOutcome::ClickObserved) => "Button click observed".to_owned(),
-        Some(BrowserActionOutcome::SelectionObserved) => "Selection observed".to_owned(),
-        Some(BrowserActionOutcome::ScrollObserved) if action.observed_scroll.as_ref().is_some_and(|after| {
-            matches!(&action.intent, BrowserActionIntent::Scroll { scroll } if scroll.before == *after)
-        }) => "No movement observed".to_owned(),
-        Some(BrowserActionOutcome::ScrollObserved) => "Scroll position observed".to_owned(),
-        Some(BrowserActionOutcome::ControlObserved) => "Control state observed on this page".to_owned(),
+        Some(BrowserActionOutcome::Acted) => "Done on this page".to_owned(),
         Some(BrowserActionOutcome::SecretEntered) => "Secret entered on this page".to_owned(),
-        Some(BrowserActionOutcome::KeyObserved) => "Key press observed".to_owned(),
-        _ => format!("{}{}{}", action.phase,
-            action.outcome.map(|outcome| format!(" ({outcome})")).unwrap_or_default(),
-            action.reason.as_ref().map(|reason| format!(": {reason}")).unwrap_or_default()),
+        _ => format!(
+            "{}{}{}",
+            action.phase,
+            action
+                .outcome
+                .map(|outcome| format!(" ({outcome})"))
+                .unwrap_or_default(),
+            action
+                .reason
+                .as_ref()
+                .map(|reason| format!(": {reason}"))
+                .unwrap_or_default()
+        ),
     };
     Display {
         title,
@@ -215,36 +200,10 @@ pub(crate) fn display(action: &BrowserActionView) -> Display {
         receipt: action.phase == BrowserActionPhase::Settled
             && matches!(
                 action.outcome,
-                Some(
-                    BrowserActionOutcome::Verified
-                        | BrowserActionOutcome::ClickObserved
-                        | BrowserActionOutcome::SelectionObserved
-                        | BrowserActionOutcome::ScrollObserved
-                        | BrowserActionOutcome::ControlObserved
-                )
+                Some(BrowserActionOutcome::Verified | BrowserActionOutcome::Acted)
             ),
         details,
     }
-}
-
-fn checkbox_state(checked: bool, indeterminate: bool) -> &'static str {
-    if indeterminate {
-        "Mixed"
-    } else if checked {
-        "Checked"
-    } else {
-        "Not checked"
-    }
-}
-
-fn radio_choice(member: &crate::model::RadioMember) -> String {
-    format!(
-        "{} (option {}{}{})",
-        member.label,
-        member.index + 1,
-        if member.hidden { ", hidden" } else { "" },
-        if member.disabled { ", disabled" } else { "" }
-    )
 }
 
 /// The scheme, host and port of `url`, which is all a secret entry card shows of the page.

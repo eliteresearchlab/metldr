@@ -1,3 +1,4 @@
+use crate::MAX_FRAME;
 use crate::{await_call, call, chrome_api, err, flow::validate_url, get};
 use js_sys::Function;
 use serde::Deserialize;
@@ -9,11 +10,11 @@ use std::{
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 use wasm_bindgen_futures::spawn_local;
 
-mod button;
+mod act;
+mod bundled;
 mod navigation;
 mod release;
 
-const MAX_FRAME: usize = 65_536;
 const MAX_SESSIONS: usize = 64;
 const MAX_SAFE_CALL: u64 = 9_007_199_254_740_991;
 
@@ -47,7 +48,10 @@ struct Attachment {
     sessions: BTreeMap<String, Option<String>>,
     grant_revision: u64,
     pending_navigation: Option<navigation::PendingNavigation>,
-    clicks: BTreeSet<String>,
+    /// Approved actions that opened an act window; each opens one once.
+    acts: BTreeSet<String>,
+    /// The approved action whose act window is open, and when it closes at the latest.
+    acting: Option<(String, f64)>,
     confirming_navigation: bool,
     command_count: usize,
 }
@@ -84,26 +88,14 @@ enum Operation {
         destination: String,
         params: Value,
     },
-    ActivateButton {
+    ActBegin {
         action: String,
         revision: u64,
         binding: navigation::Binding,
         url: String,
-        params: Value,
     },
-    ActivateControl {
+    ActEnd {
         action: String,
-        revision: u64,
-        binding: navigation::Binding,
-        url: String,
-        params: Value,
-    },
-    PressKey {
-        action: String,
-        revision: u64,
-        binding: navigation::Binding,
-        url: String,
-        params: Value,
     },
     ConfirmNavigation {
         action: String,
@@ -224,14 +216,13 @@ async fn handle(envelope: Envelope, connection: u64) -> Result<Value, String> {
             )
             .await
         }
-        Operation::ActivateButton {
+        Operation::ActBegin {
             action,
             revision,
             binding,
             url,
-            params,
         } => {
-            button::activate(
+            act::begin(
                 connection,
                 envelope.call,
                 &envelope.run,
@@ -239,51 +230,10 @@ async fn handle(envelope: Envelope, connection: u64) -> Result<Value, String> {
                 revision,
                 binding,
                 url,
-                params,
-                "button",
             )
             .await
         }
-        Operation::ActivateControl {
-            action,
-            revision,
-            binding,
-            url,
-            params,
-        } => {
-            button::activate(
-                connection,
-                envelope.call,
-                &envelope.run,
-                action,
-                revision,
-                binding,
-                url,
-                params,
-                "control",
-            )
-            .await
-        }
-        Operation::PressKey {
-            action,
-            revision,
-            binding,
-            url,
-            params,
-        } => {
-            button::activate(
-                connection,
-                envelope.call,
-                &envelope.run,
-                action,
-                revision,
-                binding,
-                url,
-                params,
-                "key",
-            )
-            .await
-        }
+        Operation::ActEnd { action } => act::end(&envelope.run, &action),
         Operation::ConfirmNavigation {
             action,
             revision,
@@ -351,7 +301,8 @@ async fn attach(
             sessions: BTreeMap::new(),
             grant_revision: 1,
             pending_navigation: None,
-            clicks: BTreeSet::new(),
+            acts: BTreeSet::new(),
+            acting: None,
             confirming_navigation: false,
             command_count: 0,
         });
@@ -445,6 +396,7 @@ async fn command(
     {
         return Err("Unsupported or oversized debugger command.".into());
     }
+    let params = bundled::expand(method, params).await?;
     let epoch = reserve_call(connection, call_id, run, tab, session.as_deref())?;
     let pending = STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -454,6 +406,9 @@ async fn command(
         let pending = active.pending_navigation.is_some();
         if pending && !navigation::allowed_while_pending(method) {
             return Err("Debugger command is blocked until navigation is confirmed.".into());
+        }
+        if act::INPUT.contains(&method) && !act::open(active) {
+            return Err("Input is allowed only during an approved step.".into());
         }
         active.command_count = active
             .command_count
@@ -1307,7 +1262,8 @@ fn allowed_method(method: &str) -> bool {
             | "DOM.describeNode"
             | "DOM.resolveNode"
             | "DOM.getFrameOwner"
-    )
+            | "Page.getLayoutMetrics"
+    ) || act::INPUT.contains(&method)
 }
 
 fn valid_event(method: &str, value: &Value) -> bool {
@@ -1422,11 +1378,11 @@ mod checks {
     }
 
     #[test]
-    fn activate_control_wire_shape_rejects_unrecognized_fields() {
+    fn act_window_wire_shape_rejects_unrecognized_fields() {
         let operation = json!({
-            "op":"activate_control",
+            "op":"act_begin",
             "action":"action_1",
-            "revision":1,
+            "revision":3,
             "binding":{
                 "tab":1,
                 "document":"document_1",
@@ -1436,19 +1392,26 @@ mod checks {
                 "unique_context":"context_1",
                 "grant_revision":1
             },
-            "url":"https://example.com/",
-            "params":{
-                "x":1.0,
-                "y":2.0,
-                "duration":50,
-                "tapCount":1,
-                "gestureSourceType":"mouse"
-            }
+            "url":"https://example.com/"
         });
         assert!(serde_json::from_value::<Operation>(operation.clone()).is_ok());
         let mut extended = operation;
-        extended["selector"] = json!("button");
+        extended["params"] = json!({"x":1.0,"y":2.0});
         assert!(serde_json::from_value::<Operation>(extended).is_err());
+        assert!(
+            serde_json::from_value::<Operation>(json!({"op":"act_end","action":"action_1"}))
+                .is_ok()
+        );
+        assert!(
+            serde_json::from_value::<Operation>(
+                json!({"op":"activate_button","action":"action_1"})
+            )
+            .is_err()
+        );
+        for method in act::INPUT {
+            assert!(allowed_method(method), "{method}");
+        }
+        assert!(!allowed_method("Input.synthesizeTapGesture"));
     }
 }
 

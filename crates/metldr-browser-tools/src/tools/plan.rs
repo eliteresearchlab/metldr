@@ -2,7 +2,6 @@ use crate::{Call, Definition, Result};
 use serde_json::{Map, Value, json};
 
 pub const NAME: &str = "propose_task_plan";
-pub const ORDER: u8 = 10;
 
 pub fn definition() -> Definition {
     Definition {

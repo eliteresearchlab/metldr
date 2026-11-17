@@ -7,7 +7,7 @@ use crate::{
     browser_owner,
     flow::Event,
 };
-use metldr_browser_tools::valid_handle;
+use metldr_browser_tools::valid_ref;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -43,7 +43,6 @@ pub(crate) struct Tools {
     client: Client,
     current: Target,
     stop: Arc<AtomicBool>,
-    observation_generation: u64,
     completed: BTreeMap<String, (Call, Arc<Value>)>,
     release_unknown: bool,
 }
@@ -64,7 +63,6 @@ impl Tools {
             client,
             current: source,
             stop,
-            observation_generation: 0,
             completed: BTreeMap::new(),
             release_unknown: false,
         }
@@ -145,110 +143,28 @@ impl Tools {
         if stop.load(Ordering::Acquire) {
             return Err("browser task stopped".into());
         }
-        let handle = match &call {
-            Call::Change { handle, .. }
-            | Call::EnterSecret { handle, .. }
-            | Call::PressKey { handle, .. }
-            | Call::ActivateButton { handle }
-            | Call::SelectOption { handle, .. }
-            | Call::Scroll { handle, .. }
-            | Call::SetNativeControl { handle, .. } => Some(handle),
-            _ => None,
-        };
-        if let Some(handle) = handle
-            && self.attached()?.child_action(handle).await?
-        {
-            let result = serde_json::to_value(Outcome::Prevented {
-                reason: "actions inside frames are not supported yet".into(),
-            })?;
-            return Ok(self.remember(call_id, call, result));
-        }
         let result = match &call {
-            Call::SetNativeControl { handle, checked } => {
-                let prepared = self
-                    .attached()?
-                    .prepare_control(call_id, handle, *checked)
-                    .await?;
-                match prepared {
-                    super::engine::ControlPreparation::NoOp { state } => {
-                        let (ack, rx) = mpsc::sync_channel(1);
-                        self.client
-                            .tx
-                            .try_send(Event::Browser(browser_owner::Event::NoOp {
-                                run: self.client.run.clone(),
-                                ack,
-                                budget: budget.cloned(),
-                            }))
-                            .map_err(|_| "browser owner channel unavailable")?;
-                        loop {
-                            if stop.load(Ordering::Acquire) {
-                                return Err("browser task stopped".into());
-                            }
-                            match rx.try_recv() {
-                                Ok(result) => {
-                                    result.map_err(owner_error)?;
-                                    break;
-                                }
-                                Err(mpsc::TryRecvError::Disconnected) => {
-                                    return Err("plan owner ended".into());
-                                }
-                                Err(mpsc::TryRecvError::Empty) => {
-                                    tokio::time::sleep(Duration::from_millis(20)).await
-                                }
-                            }
-                        }
-                        json!({"kind":"control_no_op", "state":state, "scope":"local_observation", "untrusted":true})
-                    }
-                    super::engine::ControlPreparation::Propose { proposal } => {
-                        self.perform(proposal, stop, budget).await?
-                    }
-                }
-            }
-            Call::Observe => self.observe().await?,
-            Call::ObserveWithin { within } => self.observe_within(Some(within.clone())).await?,
             Call::Navigate { destination } => {
                 self.navigate(call_id, destination, stop, budget).await?
             }
-            Call::Change { handle, value } => {
-                self.change(call_id, handle, value, stop, budget).await?
-            }
-            Call::PressKey { handle, key } => {
-                let proposal = self.attached()?.prepare_key(call_id, handle, *key).await?;
-                self.perform(proposal, stop, budget).await?
-            }
-            Call::EnterSecret { handle, kind } => {
+            Call::Act { tool, args } => {
                 let proposal = self
                     .attached()?
-                    .prepare_secret(call_id, handle, (*kind).into())
+                    .prepare_act(call_id, tool.as_str(), args)
                     .await?;
                 self.perform(proposal, stop, budget).await?
             }
-            Call::ActivateButton { handle } => {
-                let proposal = self.attached()?.prepare_button(call_id, handle).await?;
-                self.perform(proposal, stop, budget).await?
-            }
-            Call::SelectOption { handle, option } => {
+            Call::EnterSecret { reference, kind } => {
                 let proposal = self
                     .attached()?
-                    .prepare_selection(call_id, handle, option)
-                    .await?;
-                self.perform(proposal, stop, budget).await?
-            }
-            Call::Scroll {
-                handle,
-                direction,
-                pixels,
-            } => {
-                let proposal = self
-                    .attached()?
-                    .prepare_scroll(call_id, handle, *direction, *pixels)
+                    .prepare_secret(call_id, reference, (*kind).into())
                     .await?;
                 self.perform(proposal, stop, budget).await?
             }
             // Read-only: the captured output is returned as data and triggers no effect.
+            Call::Snapshot { args } => self.attached()?.snapshot(args.clone()).await?,
             Call::PageLogs => self.attached()?.page_logs().await?,
             Call::NetworkRequests => self.attached()?.network_requests().await?,
-            Call::Snapshot => self.attached()?.snapshot().await?,
             Call::Status | Call::Settings | Call::ProposeTaskPlan { .. } => {
                 return Err("read-only browser call reached the attached path".into());
             }
@@ -330,35 +246,6 @@ impl Tools {
         }
     }
 
-    async fn observe(&mut self) -> Result<Value> {
-        self.observe_within(None).await
-    }
-
-    async fn observe_within(&mut self, within: Option<String>) -> Result<Value> {
-        self.observation_generation = self
-            .observation_generation
-            .checked_add(1)
-            .ok_or("browser observation capacity reached")?;
-        self.attached()?
-            .observe(self.observation_generation, within)
-            .await
-    }
-
-    async fn change(
-        &mut self,
-        tool_use_id: &str,
-        handle: &str,
-        value: &str,
-        stop: &AtomicBool,
-        budget: Option<&browser_owner::Budget>,
-    ) -> Result<Value> {
-        let proposal = self
-            .attached()?
-            .prepare_change(tool_use_id, handle, value)
-            .await?;
-        self.perform(proposal, stop, budget).await
-    }
-
     async fn perform(
         &self,
         proposal: Proposal,
@@ -385,13 +272,8 @@ impl Tools {
                 .await?;
                 let engine = self.attached()?;
                 let outcome = match &dispatched.proposal.intent {
-                    Intent::Field { .. } => engine.change(&dispatched).await,
+                    Intent::Act { .. } => engine.act(&dispatched).await,
                     Intent::Secret { .. } => engine.enter_secret(&dispatched).await,
-                    Intent::PressKey { .. } => engine.press_key(&dispatched).await,
-                    Intent::ActivateButton { .. } => engine.activate_button(&dispatched).await,
-                    Intent::SelectOption { .. } => engine.select_option(&dispatched).await,
-                    Intent::Scroll { .. } => engine.scroll(&dispatched).await,
-                    Intent::SetNativeControl { .. } => engine.set_native_control(&dispatched).await,
                     Intent::Navigate { .. } => {
                         return Err("navigation requires its own result owner".into());
                     }
@@ -428,11 +310,6 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
         return Err("invalid browser tool id".into());
     }
     match call {
-        Call::SetNativeControl { handle, .. } if valid_handle(handle) => Ok(()),
-        Call::SetNativeControl { .. } => Err("invalid native control handle".into()),
-        Call::Observe => Ok(()),
-        Call::ObserveWithin { within } if valid_handle(within) => Ok(()),
-        Call::ObserveWithin { .. } => Err("invalid observation scope ref".into()),
         Call::Navigate { destination }
             if !destination.is_empty()
                 && destination.len() <= 2048
@@ -441,27 +318,9 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
             Ok(())
         }
         Call::Navigate { .. } => Err("invalid browser navigation URL".into()),
-        Call::Change { handle, value } if valid_handle(handle) && value.len() <= 1024 => Ok(()),
-        Call::Change { .. } => Err("invalid browser field change".into()),
-        Call::PressKey { handle, .. } if valid_handle(handle) => Ok(()),
-        Call::PressKey { .. } => Err("invalid key target handle".into()),
-        Call::EnterSecret { handle, .. } if valid_handle(handle) => Ok(()),
-        Call::EnterSecret { .. } => Err("invalid secret field handle".into()),
-        Call::ActivateButton { handle } if valid_handle(handle) => Ok(()),
-        Call::ActivateButton { .. } => Err("invalid browser button handle".into()),
-        Call::SelectOption { handle, option }
-            if [handle, option].into_iter().all(|id| valid_handle(id)) =>
-        {
-            Ok(())
-        }
-        Call::SelectOption { .. } => Err("invalid browser selection handle".into()),
-        Call::Scroll { handle, pixels, .. }
-            if valid_handle(handle) && (1..=2000).contains(pixels) =>
-        {
-            Ok(())
-        }
-        Call::Scroll { .. } => Err("invalid browser scroll request".into()),
-        Call::PageLogs | Call::NetworkRequests | Call::Snapshot => Ok(()),
+        Call::EnterSecret { reference, .. } if valid_ref(reference) => Ok(()),
+        Call::EnterSecret { .. } => Err("invalid secret field ref".into()),
+        Call::Act { .. } | Call::Snapshot { .. } | Call::PageLogs | Call::NetworkRequests => Ok(()),
         Call::Status | Call::Settings | Call::ProposeTaskPlan { .. } => Ok(()),
     }
 }
@@ -571,18 +430,37 @@ mod failed_attach_check {
         );
         tools.completed.insert(
             "cached".into(),
-            (Call::Observe, Arc::new(serde_json::json!({"cached":true}))),
+            (
+                Call::Snapshot {
+                    args: serde_json::json!({}),
+                },
+                Arc::new(serde_json::json!({"cached":true})),
+            ),
         );
         let stop = AtomicBool::new(true);
         assert!(
             tools
-                .dispatch("cached", Call::Observe, &stop, None)
+                .dispatch(
+                    "cached",
+                    Call::Snapshot {
+                        args: serde_json::json!({})
+                    },
+                    &stop,
+                    None
+                )
                 .await
                 .is_err()
         );
         assert!(
             tools
-                .dispatch("fresh", Call::Observe, &stop, None)
+                .dispatch(
+                    "fresh",
+                    Call::Snapshot {
+                        args: serde_json::json!({})
+                    },
+                    &stop,
+                    None
+                )
                 .await
                 .is_err()
         );
@@ -625,7 +503,14 @@ mod failed_attach_check {
                 Arc::new(AtomicBool::new(false)),
             );
             let result = tools
-                .dispatch("call-1", Call::Observe, &AtomicBool::new(false), None)
+                .dispatch(
+                    "call-1",
+                    Call::Snapshot {
+                        args: serde_json::json!({}),
+                    },
+                    &AtomicBool::new(false),
+                    None,
+                )
                 .await;
             assert!(result.is_err());
             assert_eq!(
@@ -675,7 +560,14 @@ mod failed_attach_check {
             );
             assert!(
                 tools
-                    .dispatch("call-1", Call::Observe, &AtomicBool::new(false), None)
+                    .dispatch(
+                        "call-1",
+                        Call::Snapshot {
+                            args: serde_json::json!({})
+                        },
+                        &AtomicBool::new(false),
+                        None
+                    )
                     .await
                     .is_err()
             );
@@ -697,7 +589,14 @@ mod failed_attach_check {
             );
             assert_eq!(
                 tools
-                    .dispatch("status-1", Call::Observe, &AtomicBool::new(false), None)
+                    .dispatch(
+                        "status-1",
+                        Call::Snapshot {
+                            args: serde_json::json!({})
+                        },
+                        &AtomicBool::new(false),
+                        None
+                    )
                     .await
                     .unwrap_err()
                     .to_string(),
@@ -752,14 +651,22 @@ mod failed_attach_check {
                     unique_context: "unique-1".into(),
                     grant_revision: 1,
                 },
-                intent: Intent::ActivateButton {
-                    button_id: "metldr-button".into(),
-                    button_label: "Submit".into(),
-                },
+                intent: Intent::act(
+                    "click",
+                    serde_json::json!({"ref":"e1"}),
+                    &[("e1", "button", "Submit")],
+                ),
             },
             state: Phase::Dispatching,
         };
-        let result = action_observed(&client, &action, Outcome::ButtonClickObserved).await;
+        let result = action_observed(
+            &client,
+            &action,
+            Outcome::Acted {
+                result: String::new(),
+            },
+        )
+        .await;
         owner.join().unwrap();
         assert_eq!(
             result.unwrap_err().to_string(),

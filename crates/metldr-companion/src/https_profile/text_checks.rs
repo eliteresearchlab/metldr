@@ -16,7 +16,7 @@ fn frames(protocol: Protocol, tool: bool, complete: bool) -> String {
                 json!({"type":"message_start","message":{"type":"message","id":"msg_1","model":MODEL,"role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}),
             )];
             if tool {
-                v.push(("content_block_start".into(), json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_1","name":"observe_page","input":{}}})));
+                v.push(("content_block_start".into(), json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_1","name":"snapshot_page","input":{}}})));
                 v.push((
                     "content_block_stop".into(),
                     json!({"type":"content_block_stop","index":0}),
@@ -37,7 +37,7 @@ fn frames(protocol: Protocol, tool: bool, complete: bool) -> String {
         }
         Protocol::Responses => {
             let item = if tool {
-                json!({"type":"function_call","id":"fc_1","call_id":"call_1","name":"observe_page","arguments":"{}","status":"completed"})
+                json!({"type":"function_call","id":"fc_1","call_id":"call_1","name":"snapshot_page","arguments":"{}","status":"completed"})
             } else {
                 json!({"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":OUTPUT,"annotations":[]}]})
             };
@@ -80,7 +80,7 @@ fn frames(protocol: Protocol, tool: bool, complete: bool) -> String {
                 json!({"event_type":"interaction.created","interaction":{"id":"ix_1","model":MODEL,"status":"in_progress"}}),
             ];
             if tool {
-                v.push(json!({"event_type":"step.start","index":0,"step":{"type":"function_call","id":"call_1","name":"observe_page","arguments":{}}}));
+                v.push(json!({"event_type":"step.start","index":0,"step":{"type":"function_call","id":"call_1","name":"snapshot_page","arguments":{}}}));
             } else {
                 v.push(json!({"event_type":"step.start","index":0,"step":{"type":"model_output","content":[]}}));
                 v.push(json!({"event_type":"step.delta","index":0,"delta":{"type":"text","text":OUTPUT}}));
@@ -101,7 +101,7 @@ fn frames(protocol: Protocol, tool: bool, complete: bool) -> String {
         }
         Protocol::Chat => {
             let delta = if tool {
-                json!({"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"observe_page","arguments":"{}"}}]})
+                json!({"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"snapshot_page","arguments":"{}"}}]})
             } else {
                 json!({"role":"assistant","content":OUTPUT})
             };

@@ -21,62 +21,28 @@ pub(super) fn browser_actions(actions: &BTreeMap<String, crate::browser_action::
                 let mut value = json!({"id":action.id,"revision":action.revision,"run":p.run,
                     "tab":p.binding.tab,"document":p.binding.document,"url":p.url,"phase":phase});
                 match &p.intent {
-                    crate::browser_action::Intent::Field {
-                        field_id,
-                        field_label,
-                        previous_value,
-                        value: field_value,
-                    } => {
-                        value["kind"] = json!("field");
-                        value["field_id"] = json!(field_id);
-                        value["field_label"] = json!(field_label);
-                        value["previous_value"] = json!(previous_value);
-                        value["value"] = json!(field_value);
-                    }
                     crate::browser_action::Intent::Navigate { destination } => {
                         value["kind"] = json!("navigate");
                         value["destination"] = json!(destination);
                     }
-                    crate::browser_action::Intent::ActivateButton {
-                        button_id,
-                        button_label,
+                    crate::browser_action::Intent::Act {
+                        tool,
+                        args,
+                        elements,
                     } => {
-                        value["kind"] = json!("activate_button");
-                        value["button_id"] = json!(button_id);
-                        value["button_label"] = json!(button_label);
-                    }
-                    crate::browser_action::Intent::SelectOption { selection } => {
-                        value["kind"] = json!("select_option");
-                        value["selection"] = json!(selection);
-                    }
-                    crate::browser_action::Intent::Scroll { scroll } => {
-                        value["kind"] = json!("scroll");
-                        value["scroll"] = json!(scroll);
-                    }
-                    crate::browser_action::Intent::SetNativeControl { control } => {
-                        value["kind"] = json!("set_native_control");
-                        value["control"] = json!(control);
-                    }
-                    crate::browser_action::Intent::PressKey {
-                        field_id,
-                        field_label,
-                        key,
-                    } => {
-                        value["kind"] = json!("press_key");
-                        value["field_id"] = json!(field_id);
-                        value["field_label"] = json!(field_label);
-                        value["key"] = json!(key);
+                        value["kind"] = json!("act");
+                        value["tool"] = json!(tool);
+                        value["args"] = args.clone();
+                        value["elements"] = json!(elements);
                     }
                     crate::browser_action::Intent::Secret {
-                        field_id,
-                        field_label,
+                        element,
                         secret,
                         reference,
                         expires_at_ms,
                     } => {
                         value["kind"] = json!("enter_secret");
-                        value["field_id"] = json!(field_id);
-                        value["field_label"] = json!(field_label);
+                        value["element"] = json!(element);
                         value["secret"] = json!(secret);
                         value["reference"] = json!(reference);
                         value["expires_at_ms"] = json!(expires_at_ms);
@@ -85,27 +51,18 @@ pub(super) fn browser_actions(actions: &BTreeMap<String, crate::browser_action::
                 if let crate::browser_action::Phase::Settled { outcome } = &action.state {
                     use crate::browser_action::Outcome;
                     value["outcome"] = json!(match outcome {
-                        Outcome::Verified { .. } | Outcome::Navigated { .. } => "verified",
-                        Outcome::ButtonClickObserved => "click_observed",
-                        Outcome::SelectionObserved { .. } => "selection_observed",
-                        Outcome::ScrollObserved { .. } => "scroll_observed",
-                        Outcome::ControlObserved { .. } => "control_observed",
+                        Outcome::Navigated { .. } => "verified",
+                        Outcome::Acted { .. } => "acted",
                         Outcome::SecretEntered { .. } => "secret_entered",
-                        Outcome::KeyPressObserved => "key_observed",
                         Outcome::Prevented { .. } => "prevented",
                         Outcome::Uncertain { .. } => "uncertain",
                     });
-                    if let Outcome::Prevented { reason } | Outcome::Uncertain { reason } = outcome {
-                        value["reason"] = json!(reason);
-                    }
-                    if let Outcome::SelectionObserved { selected } = outcome {
-                        value["observed_selection"] = json!(selected);
-                    }
-                    if let Outcome::ScrollObserved { after } = outcome {
-                        value["observed_scroll"] = json!(after);
-                    }
-                    if let Outcome::ControlObserved { receipt } = outcome {
-                        value["observed_control"] = json!(receipt);
+                    match outcome {
+                        Outcome::Prevented { reason } | Outcome::Uncertain { reason } => {
+                            value["reason"] = json!(reason);
+                        }
+                        Outcome::Acted { result } => value["result"] = json!(result),
+                        _ => {}
                     }
                 }
                 value

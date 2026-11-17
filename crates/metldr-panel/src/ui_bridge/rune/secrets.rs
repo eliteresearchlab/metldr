@@ -92,7 +92,7 @@ pub(super) fn card(
 ) -> El {
     let action = &row.action;
     let BrowserActionIntent::EnterSecret {
-        field_label,
+        element,
         secret,
         expires_at_ms,
         ..
@@ -123,24 +123,21 @@ pub(super) fn card(
     };
     let typed = state.secret.target.as_ref() == Some(&(action.id.clone(), action.revision))
         && !state.secret.edit.text.is_empty();
-    let field = ::rune::el::text_input(
-        &state.secret.edit,
-        typography.input(),
-    )
-    .key("secret-entry-field")
-    .label(format!("{} for {site}", secret.label()))
-    .w_full()
-    .min_h(36.0)
-    .padding(6.0)
-    .single_line()
-    .secure()
-    .fill(palette.field)
-    .border(1.0, palette.line)
-    .color(ink)
-    .caret(ink, palette.selection)
-    .theme_caret(palette)
-    .disabled(!row.approve)
-    .on_edit(|state: &mut State| &mut state.secret.edit);
+    let field = ::rune::el::text_input(&state.secret.edit, typography.input())
+        .key("secret-entry-field")
+        .label(format!("{} for {site}", secret.label()))
+        .w_full()
+        .min_h(36.0)
+        .padding(6.0)
+        .single_line()
+        .secure()
+        .fill(palette.field)
+        .border(1.0, palette.line)
+        .color(ink)
+        .caret(ink, palette.selection)
+        .theme_caret(palette)
+        .disabled(!row.approve)
+        .on_edit(|state: &mut State| &mut state.secret.edit);
     let mut card = col()
         .key(format!("browser-action:{}", action.id.as_str()))
         .role("group")
@@ -148,8 +145,26 @@ pub(super) fn card(
         .w_full()
         .gap(8.0)
         .child(typography.text(row.display.title).wrap())
-        .child(typography.text(format!("{proposer} asks for a {} on {site}", secret.label().to_lowercase())).wrap())
-        .child(typography.text(format!("Field: {field_label}")).wrap())
+        .child(
+            typography
+                .text(format!(
+                    "{proposer} asks for a {} on {site}",
+                    secret.label().to_lowercase()
+                ))
+                .wrap(),
+        )
+        .child(
+            typography
+                .text(format!(
+                    "Field: {}",
+                    if element.name.is_empty() {
+                        &element.role
+                    } else {
+                        &element.name
+                    }
+                ))
+                .wrap(),
+        )
         .child(typography.text(&expiry).role("status"))
         .child(field)
         .child(
@@ -173,7 +188,10 @@ pub(super) fn card(
                 .role("button")
                 .focusable(true)
                 .disabled(!enabled)
-                .label(format!("{label} {} for {site}", secret.label().to_lowercase()))
+                .label(format!(
+                    "{label} {} for {site}",
+                    secret.label().to_lowercase()
+                ))
                 .native_activation()
                 .on_press_tx(move |state: &mut State, tx| {
                     if approve {

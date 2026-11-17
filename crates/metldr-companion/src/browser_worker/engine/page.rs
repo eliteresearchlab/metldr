@@ -1,5 +1,6 @@
 //! Browse's page layer on the attached tab. Its commands reach Chrome only through the actor,
-//! which sends the read-only set below for the sessions it owns.
+//! which sends the reads below for the sessions it owns, and the input set only while an approved
+//! step's act window is open.
 
 use super::{Job, Kind, Request, TIMEOUT};
 use async_trait::async_trait;
@@ -8,11 +9,50 @@ use browse_core::{
     ToolContext,
 };
 use serde_json::{Value, json};
-use std::sync::Arc;
+use sha2::{Digest, Sha256};
+use std::sync::{Arc, OnceLock};
 use tokio::{
     sync::{broadcast, mpsc, oneshot},
     time::Instant,
 };
+
+/// Browse's page scripts, which the extension ships as browse/<name>.js: the InjectedScript
+/// (326 KB) and the filled helpers object (90 KB), each over the 64 KB message limit.
+const BUNDLED: [(&str, fn() -> &'static str); 2] = [
+    ("injected-script", browse_page::injected_source),
+    ("helpers", browse_page::helpers),
+];
+
+/// For each bundled script, the marker sent in its place: its name and SHA-256. The extension
+/// puts its own copy back after checking the hash, so both sides always run the same script.
+fn markers() -> &'static [String; 2] {
+    static MARKERS: OnceLock<[String; 2]> = OnceLock::new();
+    MARKERS.get_or_init(|| {
+        BUNDLED.map(|(name, script)| {
+            let digest = Sha256::digest(script().as_bytes());
+            let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+            format!("/*metldr-bundled-script:{name}:{hex}*/")
+        })
+    })
+}
+
+/// `params` with any bundled script in the evaluated source replaced by its marker.
+fn bundled(method: &str, mut params: Value) -> Value {
+    let field = match method {
+        "Runtime.callFunctionOn" => "functionDeclaration",
+        "Runtime.evaluate" => "expression",
+        _ => return params,
+    };
+    if let Some(Value::String(source)) = params.get_mut(field) {
+        for ((_, script), marker) in BUNDLED.iter().zip(markers()) {
+            let script = script();
+            if source.len() >= script.len() && source.contains(script) {
+                *source = source.replacen(script, marker, 1);
+            }
+        }
+    }
+    params
+}
 
 /// Setup the actor already did for the tab; Browse's own request for it is answered here.
 const DONE: [&str; 5] = [
@@ -23,8 +63,10 @@ const DONE: [&str; 5] = [
     "Emulation.setFocusEmulationEnabled",
 ];
 
-/// What Browse's page layer may send: frame and node reads, and calls in its own isolated world.
-const READ: [&str; 9] = [
+/// What Browse's page layer may always send: frame, node and layout reads, and calls in its own
+/// isolated world.
+const READ: [&str; 10] = [
+    "Page.getLayoutMetrics",
     "Page.getFrameTree",
     "Page.createIsolatedWorld",
     "Runtime.evaluate",
@@ -36,9 +78,20 @@ const READ: [&str; 9] = [
     "DOM.getFrameOwner",
 ];
 
+/// Trusted input and the scroll that brings a target into view: sent only inside an act window.
+pub(crate) const INPUT: [&str; 6] = [
+    "Input.dispatchMouseEvent",
+    "Input.dispatchKeyEvent",
+    "Input.insertText",
+    "Input.dispatchDragEvent",
+    "Input.setInterceptDrags",
+    "DOM.scrollIntoViewIfNeeded",
+];
+
 pub(super) enum Route {
     Done,
     Send,
+    Input,
     Refused,
 }
 
@@ -47,6 +100,8 @@ pub(super) fn route(method: &str) -> Route {
         Route::Done
     } else if READ.contains(&method) {
         Route::Send
+    } else if INPUT.contains(&method) {
+        Route::Input
     } else {
         Route::Refused
     }
@@ -70,7 +125,7 @@ impl Cdp for ActorCdp {
         let kind = Kind::Page {
             method: method.into(),
             session: session_id.map(Into::into),
-            params,
+            params: bundled(method, params),
         };
         self.requests
             .try_send(Request {
@@ -154,14 +209,15 @@ impl Page {
         }
     }
 
-    /// The page outline from Browse's snapshot tool.
-    pub(super) async fn snapshot(&self) -> crate::Result<Value> {
+    /// Runs Browse's tool `name` on the attached tab and returns its text.
+    pub(super) async fn tool(&self, name: &str, mut args: Value) -> crate::Result<String> {
         let tool = browse_page::tools()
             .into_iter()
-            .find(|tool| tool.spec().name == "snapshot")
-            .ok_or("the snapshot tool is missing")?;
+            .find(|tool| tool.spec().name == name)
+            .ok_or("the browser tool is missing")?;
+        args["tab"] = json!(self.tab);
         let output = tool
-            .call(self.context.clone(), json!({ "tab": self.tab }))
+            .call(self.context.clone(), args)
             .await
             .map_err(|error| error.to_string())?;
         let text: Vec<&str> = output
@@ -175,6 +231,78 @@ impl Page {
         if output.is_error {
             return Err(text.join("\n").into());
         }
-        Ok(json!({ "kind": "page_snapshot", "text": text.join("\n") }))
+        Ok(text.join("\n"))
+    }
+
+    /// The page outline from Browse's snapshot tool; `args` are the snapshot tool's options.
+    pub(super) async fn snapshot(&self, args: Value) -> crate::Result<Value> {
+        Ok(json!({ "kind": "page_snapshot", "text": self.tool("snapshot", args).await? }))
+    }
+
+    /// The role and accessible name of each ref of the latest snapshot.
+    pub(super) async fn refs(
+        &self,
+    ) -> crate::Result<std::collections::HashMap<String, (String, String)>> {
+        Ok(browse_page::snapshot_refs(&self.context, self.tab)
+            .await
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|(reference, role, name)| (reference, (role, name.unwrap_or_default())))
+            .collect())
+    }
+
+    /// Focuses the password or one-time code field `reference` with its text selected, so the
+    /// consented secret replaces whatever it holds.
+    pub(super) async fn focus_secret_field(&self, reference: &str) -> crate::Result<()> {
+        let (page, element, _) = browse_page::resolve_element(
+            &self.context,
+            self.tab,
+            Some(reference),
+            None,
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        let call = |method: &'static str| {
+            let page = page.clone();
+            let element = element.clone();
+            async move {
+                page.call_element(&element, method, Vec::new(), true)
+                    .await
+                    .map_err(|error| error.to_string())
+            }
+        };
+        if call("isSecret").await? != json!(true) {
+            return Err("that field is not a password or one-time code field".into());
+        }
+        call("focus").await?;
+        call("selectText").await?;
+        if call("isFocused").await? != json!(true) {
+            return Err("the secret field did not take focus".into());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_scripts_cross_the_native_pipe_as_markers() {
+        for (name, script) in BUNDLED {
+            let script = script();
+            let declaration = format!("function () {{\n{script}\nreturn true;\n}}");
+            let params = bundled("Runtime.callFunctionOn", json!({ "functionDeclaration": declaration }));
+            let sent = params["functionDeclaration"].as_str().unwrap();
+            assert!(sent.len() < 200, "{name} still crosses in full");
+            assert!(sent.contains(&format!("/*metldr-bundled-script:{name}:")));
+            let evaluated = bundled("Runtime.evaluate", json!({ "expression": script }));
+            let marker = evaluated["expression"].as_str().unwrap();
+            assert!(marker.starts_with("/*metldr-bundled-script:") && marker.ends_with("*/"));
+            assert!(sent.contains(marker));
+        }
+        let other = json!({ "functionDeclaration": "function () { return 1; }" });
+        assert_eq!(bundled("Runtime.callFunctionOn", other.clone()), other);
     }
 }

@@ -31,26 +31,16 @@ pub(super) enum Operation {
         destination: String,
         params: Value,
     },
-    ActivateButton {
+    /// Opens the act window of an approved page action or secret entry: until `ActEnd`, the
+    /// extension passes trusted input for this tab.
+    ActBegin {
         action: String,
         revision: u64,
         binding: crate::browser_action::Binding,
         url: String,
-        params: Value,
     },
-    ActivateControl {
+    ActEnd {
         action: String,
-        revision: u64,
-        binding: crate::browser_action::Binding,
-        url: String,
-        params: Value,
-    },
-    PressKey {
-        action: String,
-        revision: u64,
-        binding: crate::browser_action::Binding,
-        url: String,
-        params: Value,
     },
     ConfirmNavigation {
         action: String,
@@ -101,7 +91,8 @@ pub(super) struct Slot {
     pending: BTreeMap<u64, oneshot::Sender<Reply>>,
     next: u64,
     navigations: std::collections::BTreeSet<String>,
-    buttons: std::collections::BTreeSet<String>,
+    /// Act windows opened in this attachment; each approved action opens one once.
+    acts: std::collections::BTreeSet<String>,
     secret: Option<crate::browser_owner::HeldSecret>,
 }
 
@@ -116,7 +107,7 @@ impl Slot {
                 pending: BTreeMap::new(),
                 next: 0,
                 navigations: Default::default(),
-                buttons: Default::default(),
+                acts: Default::default(),
                 secret: None,
             },
             rx,
@@ -205,9 +196,7 @@ impl Owner {
             let saved_action = match &call.operation {
                 Operation::Navigate { action, .. }
                 | Operation::EnterSecret { action, .. }
-                | Operation::ActivateButton { action, .. }
-                | Operation::ActivateControl { action, .. }
-                | Operation::PressKey { action, .. }
+                | Operation::ActBegin { action, .. }
                 | Operation::ConfirmNavigation { action, .. } => {
                     Some(self.saved_browser_action(action)?)
                 }
@@ -251,58 +240,26 @@ impl Owner {
                         );
                     }
                 }
-                Operation::ActivateButton {
+                Operation::ActBegin {
                     action,
                     revision,
                     binding,
                     url,
-                    ..
-                }
-                | Operation::ActivateControl {
-                    action,
-                    revision,
-                    binding,
-                    url,
-                    ..
                 } => {
-                    let record = saved_action.as_ref().ok_or("unknown button action")?;
-                    if !fresh(record, &call.run, *revision, binding, url, slot.tab)
-                        || !matches!(
-                            (&call.operation, &record.proposal.intent),
-                            (
-                                Operation::ActivateButton { .. },
-                                crate::browser_action::Intent::ActivateButton { .. }
-                            ) | (
-                                Operation::ActivateControl { .. },
-                                crate::browser_action::Intent::SetNativeControl { .. }
-                            )
-                        )
-                        || !slot.buttons.insert(action.clone())
-                    {
-                        return Err(
-                            "button dispatch does not match a fresh durable approval".into()
-                        );
-                    }
-                }
-                Operation::PressKey {
-                    action,
-                    revision,
-                    binding,
-                    url,
-                    params,
-                } => {
-                    let record = saved_action.as_ref().ok_or("unknown key action")?;
+                    let record = saved_action.as_ref().ok_or("unknown page action")?;
                     if !fresh(record, &call.run, *revision, binding, url, slot.tab)
                         || !matches!(
                             &record.proposal.intent,
-                            crate::browser_action::Intent::PressKey { key, .. }
-                                if params.as_object().is_some_and(|p| p.len() == 1)
-                                    && params["key"] == key.as_str()
+                            crate::browser_action::Intent::Act { .. }
+                                | crate::browser_action::Intent::Secret { .. }
                         )
-                        || !slot.buttons.insert(action.clone())
+                        || !slot.acts.insert(action.clone())
                     {
-                        return Err("key dispatch does not match a fresh durable approval".into());
+                        return Err("page action does not match a fresh durable approval".into());
                     }
+                }
+                Operation::ActEnd { action } if !slot.acts.contains(action) => {
+                    return Err("that act window was never opened".into());
                 }
                 Operation::EnterSecret {
                     action,
@@ -318,12 +275,11 @@ impl Owner {
                             &record.proposal.intent,
                             crate::browser_action::Intent::Secret { .. }
                         )
-                        || params["arguments"].as_array().is_none_or(|a| a.len() != 1)
+                        || *params != json!({"text":""})
+                        || !slot.acts.contains(action)
                         || slot.secret.as_ref().is_none_or(|s| &s.action != action)
                     {
-                        return Err(
-                            "secret entry does not match a fresh durable approval".into()
-                        );
+                        return Err("secret entry does not match a fresh durable approval".into());
                     }
                 }
                 Operation::ConfirmNavigation {
@@ -390,22 +346,22 @@ impl Owner {
             ..
         } = call.operation
         {
-            let (Some(secret), Some(arguments)) =
-                (slot.take_secret(Some(&action)), params["arguments"].as_array_mut())
-            else {
+            let Some(secret) = slot.take_secret(Some(&action)) else {
                 if let Some(ack) = slot.pending.remove(&id) {
                     let _ = ack.send(Err("secret entry lost its secret".into()));
                 }
                 return Ok(());
             };
-            arguments.push(json!({"value": crate::wire::SECRET_SENTINEL}));
+            params["text"] = json!(crate::wire::SECRET_SENTINEL);
             let message = json!({"v":crate::WIRE_VERSION,"kind":"browser_rpc","call":id,
                 "run":call.run,"operation":{"op":"command","tab":binding.tab,"session":session,
-                "method":"Runtime.callFunctionOn","params":params}});
+                "method":"Input.insertText","params":params}});
             self.transport.emit_secret(&message, &secret.value)
         } else {
-            self.emit(json!({"v":crate::WIRE_VERSION,"kind":"browser_rpc","call":id,
-                "run":call.run,"operation":call.operation}))
+            self.emit(
+                json!({"v":crate::WIRE_VERSION,"kind":"browser_rpc","call":id,
+                "run":call.run,"operation":call.operation}),
+            )
         };
         if let Err(error) = sent {
             self.browser_io_finish(&call.run);

@@ -409,7 +409,9 @@ impl Core {
         let secret = matches!(row.intent, BrowserActionIntent::EnterSecret { .. });
         match &answer {
             Answer::Decide(true) if secret => {
-                return Err(FlowError::InvalidInput("Type the secret to enter it.".into()));
+                return Err(FlowError::InvalidInput(
+                    "Type the secret to enter it.".into(),
+                ));
             }
             Answer::Secret(_) if !secret => {
                 return Err(FlowError::InvalidInput(
@@ -425,8 +427,13 @@ impl Core {
             let flow = core.flow();
             let result = match answer {
                 Answer::Decide(approve) => {
-                    flow.decide_browser_action(core.scope.clone(), key.id.clone(), key.revision, approve)
-                        .await
+                    flow.decide_browser_action(
+                        core.scope.clone(),
+                        key.id.clone(),
+                        key.revision,
+                        approve,
+                    )
+                    .await
                 }
                 Answer::Secret(secret) => {
                     flow.enter_secret(core.scope.clone(), key.id.clone(), key.revision, secret)
@@ -527,18 +534,19 @@ mod tests {
             tab: 1,
             document: "document".into(),
             url: "https://example.test/".into(),
-            intent: BrowserActionIntent::Field {
-                field_id: "field".into(),
-                field_label: "Name".into(),
-                previous_value: "".into(),
-                value: "Alex".into(),
+            intent: BrowserActionIntent::Act {
+                tool: "fill".into(),
+                args: serde_json::json!({"ref":"e1","value":"Alex"}),
+                elements: vec![crate::model::BrowserElement {
+                    reference: "e1".into(),
+                    role: "textbox".into(),
+                    name: "Name".into(),
+                }],
             },
             phase: BrowserActionPhase::Pending,
             outcome: None,
             reason: None,
-            observed_selection: None,
-            observed_scroll: None,
-            observed_control: None,
+            result: None,
             target_current: false,
         };
         let shown = Key { id, revision: 1 };
@@ -560,18 +568,19 @@ mod tests {
             tab: 1,
             document: "document".into(),
             url: "https://example.test/".into(),
-            intent: BrowserActionIntent::Field {
-                field_id: "field".into(),
-                field_label: "Name".into(),
-                previous_value: "".into(),
-                value: "Alex".into(),
+            intent: BrowserActionIntent::Act {
+                tool: "fill".into(),
+                args: serde_json::json!({"ref":"e1","value":"Alex"}),
+                elements: vec![crate::model::BrowserElement {
+                    reference: "e1".into(),
+                    role: "textbox".into(),
+                    name: "Name".into(),
+                }],
             },
             phase: BrowserActionPhase::Pending,
             outcome: None,
             reason: None,
-            observed_selection: None,
-            observed_scroll: None,
-            observed_control: None,
+            result: None,
             target_current: false,
         };
         let key = Key {

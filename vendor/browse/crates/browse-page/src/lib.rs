@@ -27,6 +27,7 @@ pub mod target;
 mod tools;
 
 pub use page::{Element, TabPage};
+pub use scripts::{helpers, injected_source};
 pub use tools::tools;
 
 use std::sync::Arc;

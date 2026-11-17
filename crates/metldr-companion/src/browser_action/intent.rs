@@ -1,43 +1,43 @@
-use super::{Binding, Control, Proposal, Scroll, Selection, bounded};
+use super::bounded;
 use crate::Result;
-use metldr_browser_tools::valid_handle;
+use metldr_browser_tools::{ActTool, Call, valid_ref};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// An element a step acts on, named as the latest snapshot showed it.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Element {
+    pub reference: String,
+    pub role: String,
+    pub name: String,
+}
+
+impl Element {
+    fn valid(&self) -> bool {
+        valid_ref(&self.reference)
+            && bounded(&self.role, 64)
+            && self.name.len() <= 256
+            && !self.name.chars().any(char::is_control)
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Intent {
-    Field {
-        field_id: String,
-        field_label: String,
-        previous_value: String,
-        value: String,
-    },
     Navigate {
         destination: String,
     },
-    ActivateButton {
-        button_id: String,
-        button_label: String,
-    },
-    SelectOption {
-        selection: Selection,
-    },
-    Scroll {
-        scroll: Scroll,
-    },
-    SetNativeControl {
-        control: Control,
-    },
-    /// One trusted key press in an observed text field.
-    PressKey {
-        field_id: String,
-        field_label: String,
-        key: String,
+    /// A page action run with the browser's trusted input. `args` are the tool's checked
+    /// arguments; `elements` are the refs they name, in the order they name them.
+    Act {
+        tool: String,
+        args: Value,
+        elements: Vec<Element>,
     },
     /// One consented secret entry. The record keeps an opaque reference, never the secret.
     Secret {
-        field_id: String,
-        field_label: String,
+        element: Element,
         secret: SecretKind,
         reference: String,
         expires_at_ms: u64,
@@ -49,15 +49,6 @@ pub(crate) enum Intent {
 pub(crate) enum SecretKind {
     Password,
     OneTimeCode,
-}
-
-impl SecretKind {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Password => "password",
-            Self::OneTimeCode => "one_time_code",
-        }
-    }
 }
 
 impl From<metldr_browser_tools::SecretKind> for SecretKind {
@@ -79,99 +70,75 @@ pub(crate) fn valid_reference(reference: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct WireProposal {
-    run: String,
-    tool_use_id: String,
-    binding: Binding,
-    url: String,
-    intent: Option<Intent>,
-    field_id: Option<String>,
-    field_label: Option<String>,
-    previous_value: Option<String>,
-    value: Option<String>,
-}
-
-impl TryFrom<WireProposal> for Proposal {
-    type Error = String;
-
-    fn try_from(wire: WireProposal) -> std::result::Result<Self, String> {
-        let legacy = wire.field_id.is_some()
-            || wire.field_label.is_some()
-            || wire.previous_value.is_some()
-            || wire.value.is_some();
-        let intent = match wire.intent {
-            Some(intent) if !legacy => intent,
-            Some(_) => return Err("mixed browser proposal formats".into()),
-            None => Intent::Field {
-                field_id: wire.field_id.ok_or("missing field handle")?,
-                field_label: wire.field_label.unwrap_or_else(|| "Text field".into()),
-                previous_value: wire.previous_value.ok_or("missing previous value")?,
-                value: wire.value.ok_or("missing field value")?,
-            },
-        };
-        Ok(Proposal {
-            run: wire.run,
-            tool_use_id: wire.tool_use_id,
-            binding: wire.binding,
-            url: wire.url,
-            intent,
-        })
+/// The refs a page action's arguments name, in order: `ref`, `from`, `to`, then each field's.
+pub(crate) fn named_refs(args: &Value) -> Vec<&str> {
+    let mut refs: Vec<&str> = ["ref", "from", "to"]
+        .into_iter()
+        .filter_map(|key| args[key].as_str())
+        .collect();
+    if let Some(fields) = args["fields"].as_array() {
+        refs.extend(fields.iter().filter_map(|field| field["ref"].as_str()));
     }
+    refs
 }
 
 impl Intent {
     pub(super) fn validate(&self) -> Result<()> {
         match self {
-            Self::Field {
-                field_id,
-                field_label,
-                previous_value,
-                value,
-            } if valid_handle(field_id)
-                && bounded(field_label, 128)
-                && previous_value.len() <= 1024
-                && value.len() <= 1024 =>
-            {
-                Ok(())
-            }
             Self::Navigate { destination }
                 if crate::model::validate_page_url(destination).is_ok() =>
             {
                 Ok(())
             }
-            Self::ActivateButton {
-                button_id,
-                button_label,
-            } if valid_handle(button_id) && bounded(button_label, 128) => Ok(()),
-            Self::SelectOption { selection } if selection.valid() => Ok(()),
-            Self::Scroll { scroll } if scroll.valid() => Ok(()),
-            Self::SetNativeControl { control } if control.valid() => Ok(()),
-            Self::PressKey {
-                field_id,
-                field_label,
-                key,
-            } if valid_handle(field_id)
-                && bounded(field_label, 128)
-                && metldr_browser_tools::Key::parse(key).is_some() =>
+            Self::Act {
+                tool,
+                args,
+                elements,
+            } if ActTool::parse(tool).is_some()
+                && matches!(
+                    metldr_browser_tools::decode_call(tool, args.clone()),
+                    Ok(Call::Act { .. })
+                )
+                && elements.len() <= 33
+                && elements.iter().all(Element::valid)
+                && elements
+                    .iter()
+                    .map(|element| element.reference.as_str())
+                    .eq(named_refs(args)) =>
             {
                 Ok(())
             }
             Self::Secret {
-                field_id,
-                field_label,
+                element,
                 reference,
                 expires_at_ms,
                 ..
-            } if valid_handle(field_id)
-                && bounded(field_label, 128)
-                && valid_reference(reference)
-                && *expires_at_ms > 0 =>
-            {
-                Ok(())
-            }
+            } if element.valid() && valid_reference(reference) && *expires_at_ms > 0 => Ok(()),
             _ => Err("invalid browser action intent".into()),
         }
+    }
+}
+
+#[cfg(test)]
+impl Intent {
+    /// A page action on `elements` (ref, role, name), for checks.
+    pub(crate) fn act(tool: &str, args: Value, elements: &[(&str, &str, &str)]) -> Self {
+        Self::Act {
+            tool: tool.into(),
+            args,
+            elements: elements
+                .iter()
+                .map(|(r, role, name)| element(r, role, name))
+                .collect(),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn element(reference: &str, role: &str, name: &str) -> Element {
+    Element {
+        reference: reference.into(),
+        role: role.into(),
+        name: name.into(),
     }
 }

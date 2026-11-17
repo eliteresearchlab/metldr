@@ -27,7 +27,7 @@ fn text_and_call() -> Vec<Value> {
         json!({"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}),
         json!({"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Read বাংলা 🦀"}}),
         json!({"type":"content_block_stop","index":2}),
-        json!({"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"call_1","name":"observe_page","input":{}}}),
+        json!({"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"call_1","name":"snapshot_page","input":{}}}),
         json!({"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":"{"}}),
         json!({"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":"}"}}),
         json!({"type":"content_block_stop","index":3}),
@@ -87,17 +87,27 @@ fn streams_unicode_and_preserves_exact_tool_continuation() {
     for chunk in [1, 2, 7, 127, 4096] {
         let (turn, text) = replay(&text_and_call(), chunk).unwrap();
         assert_eq!(text, "Read বাংলা 🦀");
-        assert_eq!(turn.call.as_ref().unwrap().call, Call::Observe);
+        assert_eq!(
+            turn.call.as_ref().unwrap().call,
+            Call::Snapshot {
+                args: serde_json::json!({})
+            }
+        );
         let usage = (Some(44), Some(30), Some(4), Some(12));
         assert_eq!(
-            (turn.usage.input, turn.usage.cached, turn.usage.written, turn.usage.output),
+            (
+                turn.usage.input,
+                turn.usage.cached,
+                turn.usage.written,
+                turn.usage.output
+            ),
             usage
         );
         let expected = json!([
             {"type":"thinking","thinking":"private thought","signature":"opaque-signature","metadata":"kept"},
             {"type":"redacted_thinking","data":"opaque encrypted bytes"},
             {"type":"text","text":"Read বাংলা 🦀"},
-            {"type":"tool_use","id":"call_1","name":"observe_page","input":{}}
+            {"type":"tool_use","id":"call_1","name":"snapshot_page","input":{}}
         ]);
         assert_eq!(json!(turn.content), expected);
         let mut conversation = client().start(prompt()).unwrap();
@@ -237,7 +247,7 @@ fn constructs_native_request_and_enforces_conversation_order() {
         q["tools"][0]["input_schema"],
         metldr_browser_tools::definitions()[0].input_schema
     );
-    assert_eq!(q["tools"][4]["name"], "select_option");
+    assert_eq!(q["tools"][4]["name"], "type");
     assert_eq!(
         q["tools"][4]["input_schema"],
         metldr_browser_tools::definitions()[4].input_schema

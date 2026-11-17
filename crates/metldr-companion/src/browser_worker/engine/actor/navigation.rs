@@ -83,7 +83,6 @@ impl Actor {
             json!({}),
             Work::FrameTree(nav),
             Some(context),
-            None,
         )
     }
     pub(super) fn navigation_tree(

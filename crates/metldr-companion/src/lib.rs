@@ -5,7 +5,7 @@ const STORE_MAX: usize = 49_152;
 const TEXT_MAX: usize = 8_192;
 const CONFIG_MAX: usize = 4_096;
 use metldr_history_pages::WIRE_VERSION;
-const STORE_VERSION: u8 = 8;
+const STORE_VERSION: u8 = 9;
 
 mod agent;
 mod agent_model;

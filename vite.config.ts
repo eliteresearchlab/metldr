@@ -3,7 +3,7 @@ import { copySandboxAssets } from './scripts/copy-sandbox-assets.mjs'
 import { defineConfig, normalizePath, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
-import { copyFileSync, existsSync, watch } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 
@@ -89,6 +89,18 @@ const copyInboxSDKPlugin = () => ({
   }
 })
 
+// Browse's page scripts ship as files: the companion sends each one's hash, the extension the
+// script. helpers.js is filled exactly as browse-page's scripts::helpers() fills it.
+const copyBrowseScripts = (): Plugin => ({
+  name: 'copy-browse-scripts',
+  writeBundle() {
+    const js = (name: string) => readFileSync(resolve('vendor/browse/crates/browse-page/js', name), 'utf8')
+    mkdirSync(resolve('dist/browse'), { recursive: true })
+    copyFileSync(resolve('vendor/browse/crates/browse-page/js/injected-script.js'), resolve('dist/browse/injected-script.js'))
+    writeFileSync(resolve('dist/browse/helpers.js'), js('helpers.js').replaceAll('__NAMING__', js('naming.js')).replaceAll('__CAPTURE__', js('capture.js')))
+  }
+})
+
 const originalConsoleWarn = console.warn
 console.warn = (...args: unknown[]) => {
   const message = args.join(' ')
@@ -103,7 +115,7 @@ export default defineConfig({
     watch: { ignored: privateFiles },
     fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', ...privateFiles] },
   },
-  plugins: isContentBuild ? [] : [rustWelcome(), chatDevelopment(), vue(), tailwindcss(), copyInboxSDKPlugin(), copyWasmAssets()],
+  plugins: isContentBuild ? [] : [rustWelcome(), chatDevelopment(), vue(), tailwindcss(), copyInboxSDKPlugin(), copyWasmAssets(), copyBrowseScripts()],
   resolve: {
     alias: {
       '@': resolve(__dirname, './src')

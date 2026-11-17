@@ -2,7 +2,6 @@ use crate::{Call, Definition, NETWORK_TOOL, Result};
 use serde_json::{Map, Value, json};
 
 pub const NAME: &str = NETWORK_TOOL;
-pub const ORDER: u8 = 11;
 
 pub fn definition() -> Definition {
     Definition {

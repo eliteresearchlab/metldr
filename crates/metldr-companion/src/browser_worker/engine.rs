@@ -1,6 +1,6 @@
 use crate::{
     Result,
-    browser_action::{Action, Outcome, Proposal, Target},
+    browser_action::{Action, Element, Intent, Outcome, Proposal, SecretKind, Target, named_refs},
     browser_io::{Client, Notice, Operation},
 };
 use serde::de::DeserializeOwned;
@@ -22,10 +22,8 @@ mod actor;
 mod admission;
 mod events;
 mod network;
-mod observation;
 mod page;
 mod runtime;
-mod scripts;
 
 const TIMEOUT: Duration = Duration::from_secs(8);
 type Reply = oneshot::Sender<runtime::Result<Value>>;
@@ -45,60 +43,28 @@ enum Kind {
         session: Option<String>,
         params: Value,
     },
-    ActionScope {
-        handle: String,
-    },
-    PrepareControl {
+    PrepareAct {
         tool: String,
-        handle: String,
-        checked: bool,
+        act: String,
+        args: Value,
+        elements: Vec<Element>,
     },
-    SetNativeControl(Action),
-    Observe {
-        generation: u64,
-        within: Option<String>,
-    },
-    PrepareChange {
-        tool: String,
-        handle: String,
-        value: String,
-    },
-    Change(Action),
+    /// Opens the act window of an approved step, so the extension passes its trusted input.
+    ActBegin(Action),
+    /// Closes the act window of the action with this id.
+    ActEnd(String),
     PrepareSecret {
         tool: String,
-        handle: String,
-        kind: crate::browser_action::SecretKind,
+        element: Element,
+        kind: SecretKind,
     },
+    /// Types the consented secret into the focused field; the owner adds the secret.
     EnterSecret(Action),
-    PrepareKey {
-        tool: String,
-        handle: String,
-        key: metldr_browser_tools::Key,
-    },
-    PressKey(Action),
-    PrepareSelection {
-        tool: String,
-        handle: String,
-        option: String,
-    },
-    SelectOption(Action),
-    PrepareButton {
-        tool: String,
-        handle: String,
-    },
-    ActivateButton(Action),
     PrepareNavigation {
         tool: String,
         destination: String,
     },
     Navigate(Action),
-    PrepareScroll {
-        tool: String,
-        handle: String,
-        direction: metldr_browser_tools::ScrollDirection,
-        pixels: u16,
-    },
-    Scroll(Action),
     PageLogs,
     NetworkRequests,
 }
@@ -115,13 +81,6 @@ pub(super) struct Engine {
     client: Client,
     tab: i32,
     page: page::Page,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(tag = "preparation", rename_all = "snake_case", deny_unknown_fields)]
-pub(super) enum ControlPreparation {
-    NoOp { state: observation::NativeState },
-    Propose { proposal: Proposal },
 }
 
 impl Engine {
@@ -256,68 +215,43 @@ impl Engine {
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
         Ok(serde_json::from_value(value)?)
     }
-    pub(super) async fn observe(&self, generation: u64, within: Option<String>) -> Result<Value> {
-        self.request(Kind::Observe { generation, within }).await
-    }
-    pub(super) async fn snapshot(&self) -> Result<Value> {
-        self.page.snapshot().await
-    }
-    pub(super) async fn child_action(&self, handle: &str) -> Result<bool> {
-        self.request(Kind::ActionScope {
-            handle: handle.into(),
-        })
-        .await
+    pub(super) async fn snapshot(&self, args: Value) -> Result<Value> {
+        self.page.snapshot(args).await
     }
     pub(super) async fn page_logs(&self) -> Result<Value> {
         self.request(Kind::PageLogs).await
     }
-
     pub(super) async fn network_requests(&self) -> Result<Value> {
         self.request(Kind::NetworkRequests).await
     }
-    pub(super) async fn prepare_control(
+    /// The elements `args` names, as the latest snapshot showed them.
+    async fn elements(&self, refs: &[&str]) -> Result<Vec<Element>> {
+        let known = self.page.refs().await?;
+        refs.iter()
+            .map(|reference| {
+                let (role, name) = known.get(*reference).ok_or_else(|| {
+                    format!("ref {reference} is not in the latest snapshot; take a new snapshot")
+                })?;
+                Ok(Element {
+                    reference: (*reference).into(),
+                    role: bound(role, 64),
+                    name: bound(name, 256),
+                })
+            })
+            .collect()
+    }
+    pub(super) async fn prepare_act(
         &self,
         tool: &str,
-        handle: &str,
-        checked: bool,
-    ) -> Result<ControlPreparation> {
-        self.request(Kind::PrepareControl {
-            tool: tool.into(),
-            handle: handle.into(),
-            checked,
-        })
-        .await
-    }
-    pub(super) async fn set_native_control(&self, action: &Action) -> Outcome {
-        self.effect(
-            Kind::SetNativeControl(action.clone()),
-            "native control dispatch result was lost",
-        )
-        .await
-    }
-    pub(super) async fn prepare_change(
-        &self,
-        tool: &str,
-        handle: &str,
-        value: &str,
+        act: &str,
+        args: &Value,
     ) -> Result<Proposal> {
-        self.request(Kind::PrepareChange {
+        let elements = self.elements(&named_refs(args)).await?;
+        self.request(Kind::PrepareAct {
             tool: tool.into(),
-            handle: handle.into(),
-            value: value.into(),
-        })
-        .await
-    }
-    pub(super) async fn prepare_selection(
-        &self,
-        tool: &str,
-        handle: &str,
-        option: &str,
-    ) -> Result<Proposal> {
-        self.request(Kind::PrepareSelection {
-            tool: tool.into(),
-            handle: handle.into(),
-            option: option.into(),
+            act: act.into(),
+            args: args.clone(),
+            elements,
         })
         .await
     }
@@ -326,77 +260,91 @@ impl Engine {
         match self.request_with(kind, Some(guard.0.clone())).await {
             Ok(outcome) => outcome,
             Err(error) if guard.0.cancel() => Outcome::Prevented {
-                reason: format!("browser action was not dispatched: {error}"),
+                reason: bound(&format!("browser action was not dispatched: {error}"), 200),
             },
             Err(_) => Outcome::Uncertain {
                 reason: lost_reason.into(),
             },
         }
     }
-    pub(super) async fn change(&self, action: &Action) -> Outcome {
-        self.effect(
-            Kind::Change(action.clone()),
-            "field dispatch result was lost",
-        )
-        .await
+    /// Opens the step's act window, or the outcome that ends the step before any input.
+    async fn open_window(&self, action: &Action) -> Option<Outcome> {
+        match self
+            .effect(
+                Kind::ActBegin(action.clone()),
+                "the act window was not confirmed",
+            )
+            .await
+        {
+            Outcome::Acted { .. } => None,
+            outcome => Some(outcome),
+        }
+    }
+    async fn close_window(&self, action: &Action) {
+        let _ = self.request::<Value>(Kind::ActEnd(action.id.clone())).await;
+    }
+    /// Runs an approved page action with the browser's trusted input.
+    pub(super) async fn act(&self, action: &Action) -> Outcome {
+        let Intent::Act { tool, args, .. } = &action.proposal.intent else {
+            return Outcome::Prevented {
+                reason: "not a page action".into(),
+            };
+        };
+        if let Some(outcome) = self.open_window(action).await {
+            return outcome;
+        }
+        let result = self.page.tool(tool, args.clone()).await;
+        self.close_window(action).await;
+        match result {
+            Ok(result) => Outcome::Acted {
+                result: bound_lines(&result, 4096),
+            },
+            Err(error) => Outcome::Prevented {
+                reason: bound(&error.to_string(), 200),
+            },
+        }
     }
     pub(super) async fn prepare_secret(
         &self,
         tool: &str,
-        handle: &str,
-        kind: crate::browser_action::SecretKind,
+        reference: &str,
+        kind: SecretKind,
     ) -> Result<Proposal> {
+        let element = self
+            .elements(&[reference])
+            .await?
+            .pop()
+            .ok_or("secret field ref is missing")?;
         self.request(Kind::PrepareSecret {
             tool: tool.into(),
-            handle: handle.into(),
+            element,
             kind,
         })
         .await
     }
-    pub(super) async fn prepare_key(
-        &self,
-        tool: &str,
-        handle: &str,
-        key: metldr_browser_tools::Key,
-    ) -> Result<Proposal> {
-        self.request(Kind::PrepareKey {
-            tool: tool.into(),
-            handle: handle.into(),
-            key,
-        })
-        .await
-    }
-    pub(super) async fn press_key(&self, action: &Action) -> Outcome {
-        self.effect(Kind::PressKey(action.clone()), "key press result was lost")
-            .await
-    }
     pub(super) async fn enter_secret(&self, action: &Action) -> Outcome {
-        self.effect(
-            Kind::EnterSecret(action.clone()),
-            "secret entry result was lost",
-        )
-        .await
-    }
-    pub(super) async fn select_option(&self, action: &Action) -> Outcome {
-        self.effect(
-            Kind::SelectOption(action.clone()),
-            "selection dispatch result was lost",
-        )
-        .await
-    }
-    pub(super) async fn prepare_button(&self, tool: &str, handle: &str) -> Result<Proposal> {
-        self.request(Kind::PrepareButton {
-            tool: tool.into(),
-            handle: handle.into(),
-        })
-        .await
-    }
-    pub(super) async fn activate_button(&self, action: &Action) -> Outcome {
-        self.effect(
-            Kind::ActivateButton(action.clone()),
-            "button input result was lost",
-        )
-        .await
+        let Intent::Secret { element, .. } = &action.proposal.intent else {
+            return Outcome::Prevented {
+                reason: "not a secret entry".into(),
+            };
+        };
+        if let Some(outcome) = self.open_window(action).await {
+            return outcome;
+        }
+        let outcome = match self.page.focus_secret_field(&element.reference).await {
+            Ok(()) => {
+                self.effect(
+                    Kind::EnterSecret(action.clone()),
+                    "secret entry result was lost",
+                )
+                .await
+            }
+            Err(error) => Outcome::Prevented {
+                reason: bound(&error.to_string(), 200),
+            },
+        };
+        self.close_window(action).await;
+        outcome
     }
     pub(super) async fn prepare_navigation(
         &self,
@@ -413,28 +361,6 @@ impl Engine {
         self.effect(
             Kind::Navigate(action.clone()),
             "navigation destination or effect could not be verified",
-        )
-        .await
-    }
-    pub(super) async fn prepare_scroll(
-        &self,
-        tool: &str,
-        handle: &str,
-        direction: metldr_browser_tools::ScrollDirection,
-        pixels: u16,
-    ) -> Result<Proposal> {
-        self.request(Kind::PrepareScroll {
-            tool: tool.into(),
-            handle: handle.into(),
-            direction,
-            pixels,
-        })
-        .await
-    }
-    pub(super) async fn scroll(&self, action: &Action) -> Outcome {
-        self.effect(
-            Kind::Scroll(action.clone()),
-            "scroll dispatch result was lost",
         )
         .await
     }
@@ -485,4 +411,26 @@ async fn release_error(client: &Client, tab: i32, message: String) -> AttachFail
             released: false,
         },
     }
+}
+
+/// `text` cut to at most `max` bytes at a character boundary, one line, for a reason.
+fn bound(text: &str, max: usize) -> String {
+    let flat: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    bound_lines(&flat, max)
+}
+
+/// `text` cut to at most `max` bytes at a character boundary; newlines stay.
+fn bound_lines(text: &str, max: usize) -> String {
+    let clean: String = text
+        .chars()
+        .map(|c| if c.is_control() && c != '\n' { ' ' } else { c })
+        .collect();
+    let mut end = clean.len().min(max);
+    while !clean.is_char_boundary(end) {
+        end -= 1;
+    }
+    clean[..end].to_owned()
 }

@@ -2,7 +2,6 @@ use crate::{Call, Definition, PAGE_LOGS_TOOL, Result};
 use serde_json::{Map, Value, json};
 
 pub const NAME: &str = PAGE_LOGS_TOOL;
-pub const ORDER: u8 = 7;
 
 pub fn definition() -> Definition {
     Definition {

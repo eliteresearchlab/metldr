@@ -19,7 +19,7 @@ fn events(tool: bool) -> Vec<Value> {
     ]);
     if tool {
         v.extend([
-            json!({"event_type":"step.start","index":2,"step":{"type":"function_call","id":"owned-call","name":"observe_page","arguments":{}}}),
+            json!({"event_type":"step.start","index":2,"step":{"type":"function_call","id":"owned-call","name":"snapshot_page","arguments":{}}}),
             json!({"event_type":"step.delta","index":2,"delta":{"type":"arguments_delta","arguments":"{"}}),
             json!({"event_type":"step.delta","index":2,"delta":{"type":"arguments_delta","arguments":"}"}}),
             json!({"event_type":"step.stop","index":2}),
@@ -90,7 +90,12 @@ fn streams_unicode_and_retains_complete_stateless_steps() {
             Some(&TextEvent::Final("North 🌍 ready".into()))
         );
         assert_eq!(turn.text, text);
-        assert_eq!(turn.call.as_ref().unwrap().call, Call::Observe);
+        assert_eq!(
+            turn.call.as_ref().unwrap().call,
+            Call::Snapshot {
+                args: serde_json::json!({})
+            }
+        );
         let mut conversation = client().start(prompt()).unwrap();
         conversation.phase = Phase::Pending(turn);
         let result = json!({"kind":"page_observation","untrusted":true});
@@ -108,7 +113,7 @@ fn streams_unicode_and_retains_complete_stateless_steps() {
         assert_eq!(input[3]["id"], "owned-call");
         assert_eq!(
             input[4],
-            json!({"type":"function_result","name":"observe_page","call_id":"owned-call","result":[{"type":"text","text":result.to_string()}]})
+            json!({"type":"function_result","name":"snapshot_page","call_id":"owned-call","result":[{"type":"text","text":result.to_string()}]})
         );
         let (turn, text, _) = replay(&events(false), size).unwrap();
         assert!(turn.call.is_none());
@@ -198,7 +203,7 @@ fn closes_completed_output_before_leaving_later_interrupted_output_partial() {
     let input = [
         json!({"event_type":"interaction.created","interaction":{"id":"owned-turn"}}),
         json!({"event_type":"step.start","index":0,"step":{"type":"thought"}}),
-        json!({"event_type":"step.start","index":1,"step":{"type":"function_call","id":"owned-call","name":"observe_page","arguments":{}}}),
+        json!({"event_type":"step.start","index":1,"step":{"type":"function_call","id":"owned-call","name":"snapshot_page","arguments":{}}}),
         json!({"event_type":"step.start","index":2,"step":{"type":"model_output","content":[]}}),
         json!({"event_type":"step.delta","index":2,"delta":{"type":"text","text":"first"}}),
         json!({"event_type":"step.stop","index":2}),
@@ -245,7 +250,7 @@ async fn encodes_native_request_and_enforces_conversation_order() {
         request["tools"].as_array().unwrap().len(),
         metldr_browser_tools::definitions().len()
     );
-    assert_eq!(request["tools"][4]["name"], "select_option");
+    assert_eq!(request["tools"][4]["name"], "type");
     assert_eq!(
         request["tools"][4]["parameters"],
         metldr_browser_tools::definitions()[4].input_schema

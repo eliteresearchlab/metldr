@@ -1,264 +1,114 @@
-use metldr_browser_tools::{
-    ACTIVATE_TOOL, CONTROL_TOOL, Call, SCROLL_TOOL, SELECT_TOOL, ScrollDirection, decode_call,
-    definitions,
-};
+use metldr_browser_tools::{ActTool, Call, SecretKind, decode_call, definitions};
 use serde_json::json;
 
 #[test]
 fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
     assert_eq!(decode_call("propose_task_plan", json!({"goal":"Update field", "intended_effects":["Change value"], "scope":"Current page"})).unwrap(), Call::ProposeTaskPlan { goal: "Update field".into(), intended_effects: vec!["Change value".into()], scope: "Current page".into() });
-    assert!(
-        decode_call(
-            "propose_task_plan",
-            json!({"goal":"", "intended_effects":[], "scope":"Current page"})
-        )
-        .is_err()
-    );
-    assert!(
-        decode_call(
-            "propose_task_plan",
-            json!({"goal":"Update", "intended_effects":[], "scope":"Current page", "approve":true})
-        )
-        .is_err()
-    );
-    assert_eq!(
-        decode_call("observe_page", json!({})).unwrap(),
-        Call::Observe
-    );
-    assert_eq!(
-        decode_call("observe_page", json!({"within":"r1-2-0"})).unwrap(),
-        Call::ObserveWithin {
-            within: "r1-2-0".into()
-        }
-    );
-    for input in [
-        json!({"within":""}),
-        json!({"within":1}),
-        json!({"within":"r1", "extra":true}),
-    ] {
-        assert!(decode_call("observe_page", input).is_err());
-    }
-    assert_eq!(
-        decode_call(
-            SCROLL_TOOL,
-            json!({"handle":"r1-2-0","direction":"left","pixels":2000})
-        )
-        .unwrap(),
-        Call::Scroll {
-            handle: "r1-2-0".into(),
-            direction: ScrollDirection::Left,
-            pixels: 2000
-        }
-    );
-    assert_eq!(
-        decode_call(ACTIVATE_TOOL, json!({"handle":"button_1-A"})).unwrap(),
-        Call::ActivateButton {
-            handle: "button_1-A".into()
-        }
-    );
-    assert_eq!(
-        decode_call(
-            SELECT_TOOL,
-            json!({"handle":"select_1-A","option":"option_2-B"})
-        )
-        .unwrap(),
-        Call::SelectOption {
-            handle: "select_1-A".into(),
-            option: "option_2-B".into()
-        }
-    );
-    assert_eq!(
-        decode_call(
-            CONTROL_TOOL,
-            json!({"handle":"checkbox_1-A","checked":true})
-        )
-        .unwrap(),
-        Call::SetNativeControl {
-            handle: "checkbox_1-A".into(),
-            checked: true
-        }
-    );
-    assert_eq!(
-        decode_call("enter_secret", json!({"handle":"field_3","kind":"one_time_code"})).unwrap(),
-        Call::EnterSecret {
-            handle: "field_3".into(),
-            kind: metldr_browser_tools::SecretKind::OneTimeCode
-        }
-    );
-    assert_eq!(
-        decode_call("press_key", json!({"handle":"field_2","key":"Enter"})).unwrap(),
-        Call::PressKey {
-            handle: "field_2".into(),
-            key: metldr_browser_tools::Key::Enter
-        }
-    );
-    assert_eq!(
-        decode_call(CONTROL_TOOL, json!({"handle":"radio_2","checked":false})).unwrap(),
-        Call::SetNativeControl {
-            handle: "radio_2".into(),
-            checked: false
-        }
-    );
-    assert!(
-        decode_call(
-            CONTROL_TOOL,
-            json!({"handle":"a".repeat(64),"checked":true})
-        )
-        .is_ok()
-    );
-    assert!(
-        decode_call(
-            SELECT_TOOL,
-            json!({"handle":"a".repeat(64),"option":"b".repeat(64)})
-        )
-        .is_ok()
-    );
     assert_eq!(
         decode_call("navigate_page", json!({"url":"https://example.com/report"})).unwrap(),
         Call::Navigate {
             destination: "https://example.com/report".into()
         }
     );
-    let value = "é".repeat(512);
     assert_eq!(
-        decode_call("set_field_value", json!({"handle":"h_1-A","value":value})).unwrap(),
-        Call::Change {
-            handle: "h_1-A".into(),
-            value
+        decode_call("snapshot_page", json!({"delta":true,"find":"Total"})).unwrap(),
+        Call::Snapshot {
+            args: json!({"delta":true,"find":"Total"})
         }
     );
-    assert!(
-        decode_call(
-            "set_field_value",
-            json!({"handle":"a".repeat(64),"value":""})
-        )
-        .is_ok()
+    assert_eq!(
+        decode_call("enter_secret", json!({"ref":"e3","kind":"one_time_code"})).unwrap(),
+        Call::EnterSecret {
+            reference: "e3".into(),
+            kind: SecretKind::OneTimeCode
+        }
     );
-    assert!(decode_call("navigate_page", json!({"url":"a".repeat(2048)})).is_ok());
+    // Every page action keeps its arguments as given once they pass the tool's checks.
     for (name, arguments) in [
-        (CONTROL_TOOL, json!({})),
-        (CONTROL_TOOL, json!({"handle":"checkbox_1"})),
-        (CONTROL_TOOL, json!({"checked":true})),
+        ("click", json!({"ref":"e12"})),
         (
-            CONTROL_TOOL,
-            json!({"handle":"checkbox_1","checked":"true"}),
+            "click",
+            json!({"ref":"f1e3","button":"right","clickCount":2,"modifiers":["Shift"]}),
         ),
-        (CONTROL_TOOL, json!({"handle":"checkbox_1","checked":1})),
-        (CONTROL_TOOL, json!({"handle":"checkbox_1","checked":null})),
+        ("fill", json!({"ref":"e4","value":"ready\nline two"})),
+        ("fill", json!({"ref":"e4","value":""})),
+        ("fill", json!({"ref":"e5","checked":true})),
         (
-            CONTROL_TOOL,
-            json!({"handle":"checkbox_1","checked":true,"approve":true}),
+            "fill",
+            json!({"fields":[{"ref":"e4","value":"a"},{"ref":"e5","checked":false}],"submit":true}),
         ),
-        (CONTROL_TOOL, json!({"handle":"","checked":true})),
-        (CONTROL_TOOL, json!({"handle":"#checkbox","checked":true})),
-        (CONTROL_TOOL, json!({"handle":"é","checked":true})),
+        ("type", json!({"text":"rust é","submit":true})),
+        ("press", json!({"key":"Backspace","count":3})),
+        ("press", json!({"ref":"e4","key":["Control+A","Delete"]})),
+        ("press", json!({"key":"é"})),
+        ("select", json!({"ref":"e6","values":["Red","Blue"]})),
+        ("hover", json!({"ref":"a5"})),
+        ("drag", json!({"from":"e7","to":"e8"})),
+        ("scroll", json!({"deltaY":-600})),
+        ("scroll", json!({"ref":"e9","to":"bottom"})),
+    ] {
+        assert_eq!(
+            decode_call(name, arguments.clone()).unwrap(),
+            Call::Act {
+                tool: ActTool::parse(name).unwrap(),
+                args: arguments
+            },
+            "{name}"
+        );
+    }
+    for (name, arguments) in [
         (
-            CONTROL_TOOL,
-            json!({"handle":"a".repeat(65),"checked":true}),
-        ),
-        ("unknown", json!({})),
-        (SCROLL_TOOL, json!({"handle":"page","direction":"down"})),
-        (
-            SCROLL_TOOL,
-            json!({"handle":"#region","direction":"down","pixels":100}),
-        ),
-        (
-            SCROLL_TOOL,
-            json!({"handle":"r1","direction":"diagonal","pixels":100}),
-        ),
-        (
-            SCROLL_TOOL,
-            json!({"handle":"r1","direction":"down","pixels":0}),
-        ),
-        (
-            SCROLL_TOOL,
-            json!({"handle":"r1","direction":"down","pixels":2001}),
-        ),
-        (
-            SCROLL_TOOL,
-            json!({"handle":"r1","direction":"down","pixels":1.5}),
-        ),
-        (
-            SCROLL_TOOL,
-            json!({"handle":"r1","direction":"down","pixels":"100"}),
-        ),
-        (
-            SCROLL_TOOL,
-            json!({"handle":"r1","direction":"down","pixels":100,"approve":true}),
-        ),
-        ("observe_page", json!([])),
-        ("observe_page", json!({"selector":"body"})),
-        (ACTIVATE_TOOL, json!({})),
-        (
-            ACTIVATE_TOOL,
-            json!({"handle":"button_1","selector":"button"}),
-        ),
-        (ACTIVATE_TOOL, json!({"handle":"#submit"})),
-        (ACTIVATE_TOOL, json!({"handle":"é"})),
-        (ACTIVATE_TOOL, json!({"handle":"a".repeat(65)})),
-        (SELECT_TOOL, json!({})),
-        (SELECT_TOOL, json!({"handle":"select_1"})),
-        (SELECT_TOOL, json!({"option":"option_1"})),
-        (SELECT_TOOL, json!({"handle":"select_1","option":null})),
-        (SELECT_TOOL, json!({"handle":"#select","option":"option_1"})),
-        (
-            SELECT_TOOL,
-            json!({"handle":"select_1","option":"[value=x]"}),
-        ),
-        (SELECT_TOOL, json!({"handle":"é","option":"option_1"})),
-        (SELECT_TOOL, json!({"handle":"select_1","option":"é"})),
-        (
-            SELECT_TOOL,
-            json!({"handle":"a".repeat(65),"option":"option_1"}),
-        ),
-        (
-            SELECT_TOOL,
-            json!({"handle":"select_1","option":"a".repeat(65)}),
-        ),
-        (
-            SELECT_TOOL,
-            json!({"handle":"select_1","option":"option_1","approve":true}),
-        ),
-        ("enter_secret", json!({"handle":"field_1","kind":"card_number"})),
-        ("press_key", json!({"handle":"field_1","key":"a"})),
-        ("press_key", json!({"handle":"field_1","key":"Enter","count":2})),
-        (
-            "enter_secret",
-            json!({"handle":"field_1","kind":"password","value":"hunter2"}),
+            "propose_task_plan",
+            json!({"goal":"", "intended_effects":[], "scope":"Current page"}),
         ),
         ("navigate_page", json!({})),
-        ("navigate_page", json!({"url":""})),
-        ("navigate_page", json!({"url":12})),
         ("navigate_page", json!({"url":"https://example.com/\n"})),
-        ("navigate_page", json!({"url":"é".repeat(1025)})),
         (
             "navigate_page",
             json!({"url":"https://example.com","approve":true}),
         ),
-        ("set_field_value", json!({"handle":"field_1"})),
-        ("set_field_value", json!({"handle":"field_1","value":null})),
-        ("set_field_value", json!({"handle":"","value":"ready"})),
+        ("snapshot_page", json!({"within":"#main"})),
+        ("snapshot_page", json!({"diff":true})),
+        ("snapshot_page", json!([])),
+        ("enter_secret", json!({"ref":"e1","kind":"card_number"})),
         (
-            "set_field_value",
-            json!({"handle":"#subject","value":"ready"}),
+            "enter_secret",
+            json!({"ref":"e1","kind":"password","value":"hunter2"}),
         ),
+        ("click", json!({})),
+        ("click", json!({"ref":"E12"})),
+        ("click", json!({"ref":"#submit"})),
+        ("click", json!({"ref":"e".repeat(17)})),
+        ("click", json!({"selector":"button"})),
+        ("click", json!({"ref":"e1","x":10,"y":10})),
+        ("click", json!({"ref":"e1","force":true})),
+        ("click", json!({"ref":"e1","clickCount":4})),
+        ("click", json!({"ref":"e1","approve":true})),
+        ("fill", json!({"ref":"e1"})),
+        ("fill", json!({"ref":"e1","value":"a","checked":true})),
+        ("fill", json!({"ref":"e1","value":"\u{7}"})),
+        ("fill", json!({"ref":"e1","value":"a".repeat(8193)})),
         (
-            "set_field_value",
-            json!({"handle":"[name=subject]","value":"ready"}),
+            "fill",
+            json!({"ref":"e1","value":"a","fields":[{"ref":"e2","value":"b"}]}),
         ),
-        ("set_field_value", json!({"handle":"é","value":"ready"})),
-        (
-            "set_field_value",
-            json!({"handle":"a".repeat(65),"value":"ready"}),
-        ),
-        (
-            "set_field_value",
-            json!({"handle":"field_1","value":"é".repeat(513)}),
-        ),
-        (
-            "set_field_value",
-            json!({"handle":"field_1","value":"ready","approve":true}),
-        ),
+        ("fill", json!({"fields":[]})),
+        ("fill", json!({"fields":[{"ref":"e2"}]})),
+        ("fill", json!({"value":"a"})),
+        ("type", json!({"ref":"e1"})),
+        ("type", json!({"text":""})),
+        ("press", json!({"key":"Ctrl A"})),
+        ("press", json!({"key":"Enter","count":51})),
+        ("press", json!({"key":[]})),
+        ("select", json!({"ref":"e1"})),
+        ("select", json!({"values":"Red"})),
+        ("hover", json!({"ref":"e1","x":1})),
+        ("drag", json!({"from":"e1"})),
+        ("drag", json!({"ref":"e1","to":"e2"})),
+        ("scroll", json!({})),
+        ("scroll", json!({"deltaY":20001})),
+        ("scroll", json!({"deltaY":1.5})),
+        ("scroll", json!({"to":"middle"})),
         ("settings", json!({"name":"pi.offline","value":false})),
     ] {
         assert!(
@@ -270,21 +120,22 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
     assert_eq!(
         tools.each_ref().map(|tool| tool.name),
         [
-            "observe_page",
-            "set_field_value",
+            "snapshot_page",
             "navigate_page",
-            ACTIVATE_TOOL,
-            SELECT_TOOL,
-            SCROLL_TOOL,
-            CONTROL_TOOL,
+            "click",
+            "fill",
+            "type",
+            "press",
+            "select",
+            "hover",
+            "drag",
+            "scroll",
             "page_logs",
             "status",
             "settings",
             "propose_task_plan",
             "network_requests",
             "enter_secret",
-            "press_key",
-            "snapshot_page"
         ]
     );
     assert!(
@@ -292,38 +143,6 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             .windows(2)
             .all(|pair| pair[0].order < pair[1].order),
         "the registry order must ascend"
-    );
-    assert_eq!(tools[3].input_schema["required"], json!(["handle"]));
-    assert_eq!(
-        tools[3].input_schema["properties"]
-            .as_object()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        tools[4].input_schema,
-        json!({
-            "type":"object",
-            "properties":{
-                "handle":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"},
-                "option":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"}
-            },
-            "required":["handle","option"],
-            "additionalProperties":false
-        })
-    );
-    assert_eq!(
-        tools[6].input_schema,
-        json!({
-            "type":"object",
-            "properties":{
-                "handle":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"},
-                "checked":{"type":"boolean"}
-            },
-            "required":["handle","checked"],
-            "additionalProperties":false
-        })
     );
     for tool in definitions() {
         assert_eq!(tool.input_schema["additionalProperties"], false);

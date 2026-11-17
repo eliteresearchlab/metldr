@@ -2,7 +2,6 @@ use crate::{Call, Definition, Result, SETTINGS_TOOL};
 use serde_json::{Map, Value, json};
 
 pub const NAME: &str = SETTINGS_TOOL;
-pub const ORDER: u8 = 9;
 
 pub fn definition() -> Definition {
     Definition {
