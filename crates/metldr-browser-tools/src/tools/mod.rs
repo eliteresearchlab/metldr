@@ -6,19 +6,12 @@
 //! caller (provider request builders, the MCP server, the installed agents)
 //! picks it up without editing their own dispatch.
 
-pub mod activate;
-pub mod control;
-pub mod field;
-pub mod keys;
+pub mod act;
 pub mod logs;
 pub mod navigate;
 pub mod network;
-pub mod observe;
 pub mod plan;
-mod schema;
-pub mod scroll;
 pub mod secret;
-pub mod select;
 pub mod settings;
 pub mod snapshot;
 pub mod status;
@@ -70,64 +63,85 @@ const LOCAL_READ: Annotations = Annotations {
 };
 
 /// Every browser tool, in advertised order.
-pub static TOOLS: [Tool; 15] = [
+pub static TOOLS: [Tool; 16] = [
     Tool {
-        name: observe::NAME,
-        order: observe::ORDER,
+        name: snapshot::NAME,
+        order: 1,
         annotations: Annotations {
             read_only: true,
             destructive: false,
             idempotent: true,
             open_world: true,
         },
-        definition: observe::definition,
-        decode: observe::decode,
-    },
-    Tool {
-        name: field::NAME,
-        order: field::ORDER,
-        annotations: WRITE,
-        definition: field::definition,
-        decode: field::decode,
+        definition: snapshot::definition,
+        decode: snapshot::decode,
     },
     Tool {
         name: navigate::NAME,
-        order: navigate::ORDER,
+        order: 2,
         annotations: WRITE,
         definition: navigate::definition,
         decode: navigate::decode,
     },
     Tool {
-        name: activate::NAME,
-        order: activate::ORDER,
+        name: "click",
+        order: 3,
         annotations: WRITE,
-        definition: activate::definition,
-        decode: activate::decode,
+        definition: act::click_definition,
+        decode: act::click_decode,
     },
     Tool {
-        name: select::NAME,
-        order: select::ORDER,
+        name: "fill",
+        order: 4,
         annotations: WRITE,
-        definition: select::definition,
-        decode: select::decode,
+        definition: act::fill_definition,
+        decode: act::fill_decode,
     },
     Tool {
-        name: scroll::NAME,
-        order: scroll::ORDER,
+        name: "type",
+        order: 5,
+        annotations: WRITE,
+        definition: act::type_definition,
+        decode: act::type_decode,
+    },
+    Tool {
+        name: "press",
+        order: 6,
+        annotations: WRITE,
+        definition: act::press_definition,
+        decode: act::press_decode,
+    },
+    Tool {
+        name: "select",
+        order: 7,
+        annotations: WRITE,
+        definition: act::select_definition,
+        decode: act::select_decode,
+    },
+    Tool {
+        name: "hover",
+        order: 8,
         annotations: LOCAL_WRITE,
-        definition: scroll::definition,
-        decode: scroll::decode,
+        definition: act::hover_definition,
+        decode: act::hover_decode,
     },
     Tool {
-        name: control::NAME,
-        order: control::ORDER,
+        name: "drag",
+        order: 9,
         annotations: WRITE,
-        definition: control::definition,
-        decode: control::decode,
+        definition: act::drag_definition,
+        decode: act::drag_decode,
+    },
+    Tool {
+        name: "scroll",
+        order: 10,
+        annotations: LOCAL_WRITE,
+        definition: act::scroll_definition,
+        decode: act::scroll_decode,
     },
     Tool {
         name: logs::NAME,
-        order: logs::ORDER,
+        order: 11,
         annotations: Annotations {
             read_only: true,
             destructive: false,
@@ -139,28 +153,28 @@ pub static TOOLS: [Tool; 15] = [
     },
     Tool {
         name: status::NAME,
-        order: status::ORDER,
+        order: 12,
         annotations: LOCAL_READ,
         definition: status::definition,
         decode: status::decode,
     },
     Tool {
         name: settings::NAME,
-        order: settings::ORDER,
+        order: 13,
         annotations: LOCAL_READ,
         definition: settings::definition,
         decode: settings::decode,
     },
     Tool {
         name: plan::NAME,
-        order: plan::ORDER,
+        order: 14,
         annotations: LOCAL_WRITE,
         definition: plan::definition,
         decode: plan::decode,
     },
     Tool {
         name: network::NAME,
-        order: network::ORDER,
+        order: 15,
         annotations: Annotations {
             read_only: true,
             destructive: false,
@@ -172,29 +186,10 @@ pub static TOOLS: [Tool; 15] = [
     },
     Tool {
         name: secret::NAME,
-        order: secret::ORDER,
+        order: 16,
         annotations: WRITE,
         definition: secret::definition,
         decode: secret::decode,
-    },
-    Tool {
-        name: keys::NAME,
-        order: keys::ORDER,
-        annotations: WRITE,
-        definition: keys::definition,
-        decode: keys::decode,
-    },
-    Tool {
-        name: snapshot::NAME,
-        order: snapshot::ORDER,
-        annotations: Annotations {
-            read_only: true,
-            destructive: false,
-            idempotent: true,
-            open_world: true,
-        },
-        definition: snapshot::definition,
-        decode: snapshot::decode,
     },
 ];
 
@@ -204,6 +199,6 @@ pub fn find(name: &str) -> Option<&'static Tool> {
 }
 
 /// Every definition in advertised order.
-pub fn definitions() -> [Definition; 15] {
+pub fn definitions() -> [Definition; 16] {
     TOOLS.each_ref().map(|tool| (tool.definition)())
 }

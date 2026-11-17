@@ -61,14 +61,7 @@ impl Actor {
             }
         };
         if let Some((method, params)) = command {
-            self.queue(
-                method,
-                init.session.clone(),
-                params,
-                Work::Init(init),
-                None,
-                None,
-            )
+            self.queue(method, init.session.clone(), params, Work::Init(init), None)
         } else {
             self.contexts.ready(init.session.as_deref())?;
             Ok(())

@@ -1,9 +1,7 @@
 use super::{
     Job, Kind, Operation, Request, Result, TIMEOUT, Target,
     events::{PageLogs, Subscriptions},
-    observation::Snapshot,
     runtime::{self, ContextMap, FrameContext, Transport},
-    scripts,
 };
 use crate::{
     browser_action::{Action, Binding, Intent, Outcome, Phase, Proposal},
@@ -14,7 +12,7 @@ use runtime::CallId;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -25,18 +23,11 @@ use tokio::{
     time::Instant,
 };
 
-mod buttons;
-mod controls;
 mod documents;
 mod initialization;
-mod keys;
 mod navigation;
-mod observation;
 mod requests;
 mod results;
-mod scroll;
-mod secrets;
-mod selects;
 
 struct Initialization {
     session: Option<String>,
@@ -50,106 +41,14 @@ struct Initialization {
 struct Pending {
     work: Work,
     context: Option<FrameContext>,
-    object: Option<String>,
     deadline: Instant,
     prevented: Option<String>,
 }
 enum Work {
-    ReadControl {
-        tool: String,
-        handle: String,
-        checked: bool,
-        job: Job,
-    },
-    ArmControl {
-        action: Action,
-        job: Job,
-    },
-    ControlReceipt {
-        action: Action,
-        job: Job,
-    },
     Init(Initialization),
     CreateWorld,
-    Capture {
-        generation: u64,
-        job: Job,
-    },
-    Census {
-        generation: u64,
-        job: Job,
-    },
-    ReadField {
-        tool: String,
-        handle: String,
-        value: String,
-        job: Job,
-    },
-    ReadButton {
-        tool: String,
-        handle: String,
-        job: Job,
-    },
-    ReadSelection {
-        tool: String,
-        handle: String,
-        option: String,
-        job: Job,
-    },
-    ReadScroll {
-        tool: String,
-        handle: String,
-        direction: metldr_browser_tools::ScrollDirection,
-        pixels: u16,
-        job: Job,
-    },
-    WriteSelection {
-        action: Action,
-        job: Job,
-    },
-    VerifySelection {
-        action: Action,
-        job: Job,
-    },
-    WriteScroll {
-        action: Action,
-        job: Job,
-    },
-    VerifyScroll {
-        after: crate::browser_action::Point,
-        job: Job,
-    },
-    ArmButton {
-        action: Action,
-        job: Job,
-    },
-    Gesture {
-        action: Action,
-        job: Job,
-    },
-    ButtonReceipt {
-        job: Job,
-    },
-    Write {
-        action: Action,
-        job: Job,
-    },
-    WriteSecret {
-        action: Action,
-        job: Job,
-    },
-    ArmKey {
-        action: Action,
-        job: Job,
-    },
-    KeyGesture {
-        action: Action,
-        job: Job,
-    },
-    KeyReceipt {
-        job: Job,
-    },
-    Verify {
+    /// The consented secret typed into the focused field; the owner adds the secret.
+    EnterSecret {
         action: Action,
         job: Job,
     },
@@ -159,7 +58,6 @@ enum Work {
         job: Job,
     },
     FrameTree(Navigation),
-    Cleanup,
     /// A command from Browse's page layer; it answers its caller and leaves the actor free.
     Page(Job),
 }
@@ -173,6 +71,8 @@ struct Navigation {
 enum Completion {
     Command(CallId),
     Confirmation(Navigation, FrameContext, String),
+    /// The extension opened or closed an act window.
+    Window(Job),
 }
 
 pub(super) struct Actor {
@@ -192,14 +92,8 @@ pub(super) struct Actor {
     pending: HashMap<CallId, Pending>,
     offers: VecDeque<runtime::Dispatch>,
     inflight: FuturesUnordered<BoxFuture<'static, (Completion, runtime::Result<Value>)>>,
-    snapshot: Option<Snapshot>,
-    snapshots: Vec<Snapshot>,
-    observation_contexts: VecDeque<FrameContext>,
-    observation_results: Vec<Value>,
-    observation_bytes: usize,
-    retired_snapshots: Vec<Snapshot>,
-    frames_truncated: bool,
-    generation: u64,
+    /// The approved step whose act window is open, and when it closes at the latest.
+    acting: Option<(String, Instant)>,
     busy: bool,
     seen: HashSet<(String, u64)>,
     navigation: Option<Navigation>,
@@ -245,14 +139,7 @@ impl Actor {
             pending: HashMap::new(),
             offers: VecDeque::new(),
             inflight: FuturesUnordered::new(),
-            snapshot: None,
-            snapshots: Vec::new(),
-            observation_contexts: VecDeque::new(),
-            observation_results: Vec::new(),
-            observation_bytes: 0,
-            retired_snapshots: Vec::new(),
-            frames_truncated: false,
-            generation: 0,
+            acting: None,
             busy: false,
             seen: HashSet::new(),
             navigation: None,
@@ -325,6 +212,10 @@ impl Actor {
                     match completion {
                         Completion::Command(id)=>self.transport.reply(id,result)?,
                         Completion::Confirmation(nav,context,url)=>self.confirmed(nav,context,url,result)?,
+                        Completion::Window(job)=>{
+                            if result.is_err() {self.acting=None}
+                            self.finish(job,result.map_err(Into::into));
+                        }
                     }
                 }
                 request=self.requests.recv(),if self.ready.is_none()=>{
@@ -369,7 +260,6 @@ impl Actor {
                 } else {
                     None
                 },
-                None,
             )?,
             runtime::Change::None | runtime::Change::CreateWorld { .. } => (),
         }
@@ -401,7 +291,6 @@ impl Actor {
         params: Value,
         work: Work,
         context: Option<FrameContext>,
-        object: Option<String>,
     ) -> Result<()> {
         let deadline = work
             .job()
@@ -416,7 +305,6 @@ impl Actor {
             Pending {
                 work,
                 context,
-                object,
                 deadline,
                 prevented: None,
             },
@@ -440,25 +328,12 @@ impl Actor {
             if let Some(context) = &pending.context {
                 self.contexts.validate(context)?;
             }
-            if let Some(object) = &pending.object {
-                if self.snapshot.as_ref().is_none_or(|s| &s.root != object) {
-                    return Err("browser snapshot changed before dispatch".into());
-                }
-            }
             match &pending.work {
-                Work::Write { action, .. }
-                | Work::WriteSecret { action, .. }
-                | Work::ArmKey { action, .. }
-                | Work::KeyGesture { action, .. }
-                | Work::WriteSelection { action, .. }
-                | Work::WriteScroll { action, .. }
-                | Work::Navigate { action, .. }
-                | Work::ArmButton { action, .. }
-                | Work::ArmControl { action, .. }
-                | Work::Gesture { action, .. } => self.validate_action(
-                    action,
-                    pending.context.as_ref().ok_or("missing action context")?,
-                )?,
+                Work::EnterSecret { action, .. } | Work::Navigate { action, .. } => self
+                    .validate_action(
+                        action,
+                        pending.context.as_ref().ok_or("missing action context")?,
+                    )?,
                 _ => (),
             }
             Ok(())
@@ -475,32 +350,7 @@ impl Actor {
         self.transport.dispatch(&command)?;
         let navigating = matches!(pending.work, Work::Navigate { .. });
         let operation = match &pending.work {
-            Work::Gesture { action, .. }
-                if matches!(&action.proposal.intent, Intent::SetNativeControl { .. }) =>
-            {
-                Operation::ActivateControl {
-                    action: action.id.clone(),
-                    revision: action.revision,
-                    binding: action.proposal.binding.clone(),
-                    url: action.proposal.url.clone(),
-                    params: command.params,
-                }
-            }
-            Work::Gesture { action, .. } => Operation::ActivateButton {
-                action: action.id.clone(),
-                revision: action.revision,
-                binding: action.proposal.binding.clone(),
-                url: action.proposal.url.clone(),
-                params: command.params,
-            },
-            Work::KeyGesture { action, .. } => Operation::PressKey {
-                action: action.id.clone(),
-                revision: action.revision,
-                binding: action.proposal.binding.clone(),
-                url: action.proposal.url.clone(),
-                params: command.params,
-            },
-            Work::WriteSecret { action, .. } => Operation::EnterSecret {
+            Work::EnterSecret { action, .. } => Operation::EnterSecret {
                 action: action.id.clone(),
                 revision: action.revision,
                 binding: action.proposal.binding.clone(),
@@ -529,13 +379,7 @@ impl Actor {
             },
         };
         let reply = match &pending.work {
-            Work::Write { job, .. }
-            | Work::WriteSecret { job, .. }
-            | Work::KeyGesture { job, .. }
-            | Work::WriteSelection { job, .. }
-            | Work::WriteScroll { job, .. }
-            | Work::Navigate { job, .. }
-            | Work::Gesture { job, .. } => job
+            Work::EnterSecret { job, .. } | Work::Navigate { job, .. } => job
                 .admission
                 .as_ref()
                 .ok_or("browser action admission absent")?
@@ -592,40 +436,13 @@ impl Actor {
 impl Work {
     fn job(&self) -> Option<&Job> {
         match self {
-            Self::Capture { job, .. }
-            | Self::Census { job, .. }
-            | Self::ReadField { job, .. }
-            | Self::ReadButton { job, .. }
-            | Self::ReadSelection { job, .. }
-            | Self::ReadScroll { job, .. }
-            | Self::WriteSelection { job, .. }
-            | Self::VerifySelection { job, .. }
-            | Self::WriteScroll { job, .. }
-            | Self::VerifyScroll { job, .. }
-            | Self::ArmButton { job, .. }
-            | Self::ReadControl { job, .. }
-            | Self::ArmControl { job, .. }
-            | Self::ControlReceipt { job, .. }
-            | Self::Gesture { job, .. }
-            | Self::ButtonReceipt { job }
-            | Self::Write { job, .. }
-            | Self::WriteSecret { job, .. }
-            | Self::ArmKey { job, .. }
-            | Self::KeyGesture { job, .. }
-            | Self::KeyReceipt { job }
-            | Self::Verify { job, .. }
-            | Self::Navigate { job, .. } => Some(job),
+            Self::EnterSecret { job, .. } | Self::Navigate { job, .. } | Self::Page(job) => {
+                Some(job)
+            }
             Self::FrameTree(nav) => Some(&nav.job),
-            Self::Page(job) => Some(job),
-            _ => None,
+            Self::Init(_) | Self::CreateWorld => None,
         }
     }
-}
-fn session(context: &FrameContext) -> Option<String> {
-    (context.session_id() != "metldr-owned-root").then(|| context.session_id().to_owned())
-}
-fn call_params(context: &FrameContext, object: &String, declaration: String) -> Value {
-    json!({"functionDeclaration":declaration,"arguments":[{"objectId":object}],"returnByValue":true,"awaitPromise":true,"uniqueContextId":context.unique_context_id()})
 }
 async fn wait_reply(
     deadline: Instant,

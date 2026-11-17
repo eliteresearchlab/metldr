@@ -11,10 +11,10 @@ mod grants;
 mod review;
 mod secret;
 pub(crate) use grants::{GRANT_TTL, SessionGrant};
-pub(crate) use secret::{Held as HeldSecret, SecretText};
+pub(crate) use review::Budget;
 #[cfg(test)]
 pub(crate) use secret::now_ms;
-pub(crate) use review::Budget;
+pub(crate) use secret::{Held as HeldSecret, SecretText};
 
 pub(super) enum Event {
     Plan {
@@ -23,11 +23,6 @@ pub(super) enum Event {
         intended_effects: Vec<String>,
         scope: String,
         ack: SyncSender<std::result::Result<u32, String>>,
-    },
-    NoOp {
-        run: String,
-        ack: SyncSender<std::result::Result<(), String>>,
-        budget: Option<Budget>,
     },
     Proposed {
         proposal: Proposal,
@@ -54,25 +49,16 @@ pub(super) enum PlanHold {
         budget: Option<Budget>,
         review: Option<review::Review>,
     },
-    NoOp {
-        run: String,
-        ack: SyncSender<std::result::Result<(), String>>,
-        review: Option<review::Review>,
-    },
 }
 impl PlanHold {
     fn run(&self) -> &str {
         match self {
             Self::Action { proposal, .. } => &proposal.run,
-            Self::NoOp { run, .. } => run,
         }
     }
     fn reject(self, error: &str) {
         match self {
             Self::Action { ack, .. } => {
-                let _ = ack.send(Err(error.into()));
-            }
-            Self::NoOp { ack, .. } => {
                 let _ = ack.send(Err(error.into()));
             }
         }
@@ -149,36 +135,6 @@ impl Owner {
                     })
                 });
                 return acknowledge(ack, result);
-            }
-            Event::NoOp { run, ack, budget } => {
-                let result = self.browser_operation(&run).and_then(|_| {
-                    self.record_history.edit(|edit| {
-                        let execution = edit.execution(&run)?;
-                        edit.task_plan(&execution)
-                    })
-                });
-                match result {
-                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Approved => {
-                        acknowledge(ack, Ok(()))
-                    }
-                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Proposed => {
-                        if self.plan_hold.is_some() || self.browser_approval.is_some() {
-                            return acknowledge(
-                                ack,
-                                Err("browser approval already pending".into()),
-                            );
-                        }
-                        let review = match budget.as_ref().map(Budget::pause).transpose() {
-                            Ok(review) => review,
-                            Err(error) => return acknowledge(ack, Err(error)),
-                        };
-                        self.plan_hold = Some(PlanHold::NoOp { run, ack, review });
-                        Ok(())
-                    }
-                    Ok(Some(_)) => acknowledge(ack, Err("task plan declined".into())),
-                    Ok(None) => acknowledge(ack, Err("call propose_task_plan first".into())),
-                    Err(error) => acknowledge(ack, Err(error)),
-                }
             }
             Event::Proposed {
                 proposal,
@@ -407,10 +363,6 @@ impl Owner {
                         ack,
                         budget,
                     })?;
-                }
-                PlanHold::NoOp { ack, review, .. } => {
-                    drop(review);
-                    let _ = ack.send(Ok(()));
                 }
             }
         }

@@ -220,12 +220,11 @@ fn native_group(
                     grant_revision: 1,
                 },
                 url: source.page.url.clone(),
-                intent: Intent::Field {
-                    field_id: "load-field".into(),
-                    field_label: "Load field".into(),
-                    previous_value: String::new(),
-                    value: "load".into(),
-                },
+                intent: Intent::act(
+                    "fill",
+                    serde_json::json!({"ref":"e1","value":"load"}),
+                    &[("e1", "textbox", "Load field")],
+                ),
             },
         )?;
         if !created {

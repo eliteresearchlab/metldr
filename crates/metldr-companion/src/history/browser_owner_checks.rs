@@ -168,11 +168,16 @@ fn proposal(run: &str, tool: &str, binding: &Binding, url: &str, intent: Intent)
 }
 
 fn field() -> Intent {
-    Intent::Field {
-        field_id: "owned-field".into(),
-        field_label: "Email".into(),
-        previous_value: "old@example.invalid".into(),
-        value: "new@example.invalid".into(),
+    Intent::act(
+        "fill",
+        serde_json::json!({"ref":"e1","value":"new@example.invalid"}),
+        &[("e1", "textbox", "Email")],
+    )
+}
+
+fn acted() -> Outcome {
+    Outcome::Acted {
+        result: "{\"filled\":1}".into(),
     }
 }
 
@@ -336,29 +341,16 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
     binding = next_binding;
     for index in 1..17 {
         let (intent, outcome) = if index == 1 {
-            use crate::browser_action::{Direction, Point, Scroll, ScrollKind};
-            let before: Point = serde_json::from_value(serde_json::json!({"x":-40.5,"y":120.25}))?;
-            let after: Point = serde_json::from_value(serde_json::json!({"x":-40.5,"y":620.25}))?;
             (
-                Intent::Scroll {
-                    scroll: Scroll {
-                        handle: "r1-1-0".into(),
-                        kind: ScrollKind::Region,
-                        label: "Results".into(),
-                        direction: Direction::Down,
-                        pixels: 500,
-                        before,
-                    },
-                },
-                Outcome::ScrollObserved { after },
+                Intent::act(
+                    "scroll",
+                    serde_json::json!({"ref":"e2","deltaY":500}),
+                    &[("e2", "region", "Results")],
+                ),
+                acted(),
             )
         } else {
-            (
-                field(),
-                Outcome::Verified {
-                    observed: "new@example.invalid".into(),
-                },
-            )
+            (field(), acted())
         };
         approve_dispatch_settle(
             &mut owner,
@@ -742,30 +734,6 @@ fn effect_without_plan_is_refused() -> crate::Result<()> {
 }
 
 #[test]
-fn control_noop_obeys_the_plan_gate() -> crate::Result<()> {
-    let directory = Directory::new()?;
-    let (mut owner, run) = make_owner_without_plan(&directory)?;
-    let (ack, reply) = mpsc::sync_channel(1);
-    owner.browser_event(Event::NoOp {
-        run: run.clone(),
-        ack,
-        budget: None,
-    })?;
-    assert!(reply.recv()?.unwrap_err().contains("propose_task_plan"));
-    let plan = propose_plan(&mut owner, &run)?;
-    let (ack, reply) = mpsc::sync_channel(1);
-    owner.browser_event(Event::NoOp {
-        run: run.clone(),
-        ack,
-        budget: None,
-    })?;
-    assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
-    panel_plan_reply(&mut owner, &run, plan.revision, "panel-noop")?;
-    assert_eq!(reply.recv()?, Ok(()));
-    Ok(())
-}
-
-#[test]
 fn effect_is_held_until_plan_approval() -> crate::Result<()> {
     let directory = Directory::new()?;
     let (mut owner, run) = make_owner_without_plan(&directory)?;
@@ -950,9 +918,7 @@ fn session_grant_auto_approves_bound_tier_one_steps_only() -> crate::Result<()> 
         grant_revision: 1,
     };
     let url = "http://127.0.0.1:4567/article";
-    let verified = || Outcome::Verified {
-        observed: "new@example.invalid".into(),
-    };
+    let verified = acted;
     // The first Tier 1 step still asks; approving it binds the grant.
     approve_dispatch_settle(
         &mut owner,
@@ -983,10 +949,11 @@ fn session_grant_auto_approves_bound_tier_one_steps_only() -> crate::Result<()> 
     })?;
     reply.recv()?.map_err(std::io::Error::other)?;
     // A button is Tier 2 and always asks.
-    let button = Intent::ActivateButton {
-        button_id: "owned-button".into(),
-        button_label: "Send".into(),
-    };
+    let button = Intent::act(
+        "click",
+        serde_json::json!({"ref":"e3"}),
+        &[("e3", "button", "Send")],
+    );
     let reply = propose_only(&mut owner, proposal(&run, "grant-3", &binding, url, button))?;
     assert!(owner.browser_approval.is_some());
     assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
@@ -1012,8 +979,7 @@ fn session_grant_auto_approves_bound_tier_one_steps_only() -> crate::Result<()> 
 
 fn secret_intent(reference: &str) -> Intent {
     Intent::Secret {
-        field_id: "owned-password".into(),
-        field_label: "Password".into(),
+        element: crate::browser_action::element("e4", "textbox", "Password"),
         secret: crate::browser_action::SecretKind::Password,
         reference: reference.into(),
         expires_at_ms: crate::browser_owner::now_ms() + crate::browser_action::SECRET_TTL_MS,
@@ -1064,9 +1030,7 @@ fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Resu
     approve_dispatch_settle(
         &mut owner,
         proposal(&run, "grant-1", &binding, url, field()),
-        Outcome::Verified {
-            observed: "new@example.invalid".into(),
-        },
+        acted(),
     )?;
     // An approved plan and a bound grant still leave the secret waiting for the user.
     let reference = "0123456789abcdef0123456789abcdef";
@@ -1089,38 +1053,45 @@ fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Resu
         ack,
     })?;
     let dispatched = reply.recv()?.map_err(std::io::Error::other)?;
+    let enter = |owner: &mut Owner| {
+        let (ack, rpc) = tokio::sync::oneshot::channel();
+        owner
+            .browser_io_call(crate::browser_io::Call {
+                run: run.clone(),
+                operation: crate::browser_io::Operation::EnterSecret {
+                    action: action.clone(),
+                    revision: dispatched.revision,
+                    binding: binding.clone(),
+                    url: url.into(),
+                    session: None,
+                    params: serde_json::json!({"text":""}),
+                },
+                ack,
+            })
+            .map(|()| rpc)
+    };
+    // Without its open act window the entry is refused before anything is sent.
     frames.lock().unwrap().clear();
-    let (ack, _rpc) = tokio::sync::oneshot::channel();
+    assert!(enter(&mut owner)?.blocking_recv()?.is_err());
+    let (ack, _window) = tokio::sync::oneshot::channel();
     owner.browser_io_call(crate::browser_io::Call {
         run: run.clone(),
-        operation: crate::browser_io::Operation::EnterSecret {
+        operation: crate::browser_io::Operation::ActBegin {
             action: action.clone(),
             revision: dispatched.revision,
             binding: binding.clone(),
             url: url.into(),
-            session: Some("session-1".into()),
-            params: serde_json::json!({"functionDeclaration":"function(root, secret) {}","arguments":[{"objectId":"root-1"}],"returnByValue":true}),
         },
         ack,
     })?;
-    let sent = String::from_utf8(frames.lock().unwrap().clone())?;
-    assert!(sent.contains(&format!(r#"{{"value":"{SECRET}"}}"#)), "{sent}");
+    frames.lock().unwrap().clear();
+    let _rpc = enter(&mut owner)?;
+    let sent = String::from_utf8_lossy(&frames.lock().unwrap()).into_owned();
+    assert!(sent.contains(&format!(r#""text":"{SECRET}""#)), "{sent}");
+    assert!(sent.contains(r#""method":"Input.insertText""#), "{sent}");
     assert!(sent.contains(r#""op":"command""#) && !sent.contains("metldr-secret"));
     // The secret is single use: a replayed entry finds nothing to send.
-    let (ack, rpc) = tokio::sync::oneshot::channel();
-    owner.browser_io_call(crate::browser_io::Call {
-        run: run.clone(),
-        operation: crate::browser_io::Operation::EnterSecret {
-            action: action.clone(),
-            revision: dispatched.revision,
-            binding: binding.clone(),
-            url: url.into(),
-            session: Some("session-1".into()),
-            params: serde_json::json!({"arguments":[{"objectId":"root-1"}]}),
-        },
-        ack,
-    })?;
-    assert!(rpc.blocking_recv()?.is_err());
+    assert!(enter(&mut owner)?.blocking_recv()?.is_err());
     let (ack, reply) = mpsc::sync_channel(1);
     owner.browser_event(Event::Observed {
         action: action.clone(),
@@ -1166,10 +1137,19 @@ fn stop_prevents_a_pending_secret_entry_and_drops_a_held_secret() -> crate::Resu
     owner.operations.get_mut(&run).unwrap().browser_io = Some(Box::new(slot));
     let reply = propose_only(
         &mut owner,
-        proposal(&run, "secret-1", &binding, url, secret_intent(&"a".repeat(32))),
+        proposal(
+            &run,
+            "secret-1",
+            &binding,
+            url,
+            secret_intent(&"a".repeat(32)),
+        ),
     )?;
     owner.cancel_browser_approval(&run);
-    assert!(reply.recv()?.is_err(), "a stopped entry must not be approved");
+    assert!(
+        reply.recv()?.is_err(),
+        "a stopped entry must not be approved"
+    );
     assert!(owner.browser_approval.is_none());
     // An entry approved before Stop loses its secret before dispatch.
     owner.record_history.edit(|edit| {
@@ -1178,13 +1158,25 @@ fn stop_prevents_a_pending_secret_entry_and_drops_a_held_secret() -> crate::Resu
     })?;
     let reply = propose_only(
         &mut owner,
-        proposal(&run, "secret-2", &binding, url, secret_intent(&"b".repeat(32))),
+        proposal(
+            &run,
+            "secret-2",
+            &binding,
+            url,
+            secret_intent(&"b".repeat(32)),
+        ),
     )?;
     let action = owner.browser_approval.as_ref().unwrap().action.clone();
     secret_entry(&mut owner, "panel-secret", &action, "synthetic-held")?;
     reply.recv()?.map_err(std::io::Error::other)?;
     owner.cancel_browser_approval(&run);
-    let slot = owner.operations.get_mut(&run).unwrap().browser_io.as_mut().unwrap();
+    let slot = owner
+        .operations
+        .get_mut(&run)
+        .unwrap()
+        .browser_io
+        .as_mut()
+        .unwrap();
     assert!(slot.take_secret(None).is_none());
     Ok(())
 }

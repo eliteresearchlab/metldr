@@ -121,10 +121,10 @@ async fn tools_list_and_tool_responses_keep_their_exact_bytes() {
         serde_json::from_str(RESPONSES).unwrap();
     for (case, message, reply) in [
         (
-            "observe",
-            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"observe_page","arguments":{}}}),
+            "snapshot",
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"snapshot_page","arguments":{}}}),
             Some(Ok(
-                json!({"url":"https://example.com/","title":"Example","text":"Body","fields":[],"buttons":[]}),
+                json!({"kind":"page_snapshot","text":"- heading \"Example\" [level=1]\n- button \"Save\" [ref=e1]"}),
             )),
         ),
         (
@@ -139,13 +139,13 @@ async fn tools_list_and_tool_responses_keep_their_exact_bytes() {
         ),
         (
             "invalid arguments",
-            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"set_field_value","arguments":{"handle":"field_1"}}}),
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"fill","arguments":{"ref":"e1"}}}),
             None,
         ),
         (
             "failed dispatch",
-            json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"observe_page","arguments":{}}}),
-            Some(Err("browser observation failed".into())),
+            json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"snapshot_page","arguments":{}}}),
+            Some(Err("browser snapshot failed".into())),
         ),
         (
             "initialize",

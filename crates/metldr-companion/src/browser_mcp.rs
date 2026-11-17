@@ -917,21 +917,22 @@ mod tests {
                             serde_json::from_str(reply.split_once("\r\n\r\n").unwrap().1).unwrap();
                         let tools = value["result"]["tools"].as_array().unwrap();
                         let advertised = [
-                            ("observe_page", true, false, true),
-                            ("set_field_value", false, true, false),
+                            ("snapshot_page", true, false, true),
                             ("navigate_page", false, true, false),
-                            ("activate_button", false, true, false),
-                            ("select_option", false, true, false),
-                            ("scroll_page", false, false, false),
-                            ("set_native_control", false, true, false),
+                            ("click", false, true, false),
+                            ("fill", false, true, false),
+                            ("type", false, true, false),
+                            ("press", false, true, false),
+                            ("select", false, true, false),
+                            ("hover", false, false, false),
+                            ("drag", false, true, false),
+                            ("scroll", false, false, false),
                             ("page_logs", true, false, true),
                             ("status", true, false, true),
                             ("settings", true, false, true),
                             ("propose_task_plan", false, false, false),
                             ("network_requests", true, false, true),
                             ("enter_secret", false, true, false),
-                            ("press_key", false, true, false),
-                            ("snapshot_page", true, false, true),
                         ];
                         assert_eq!(
                             tools.len(),
@@ -1094,7 +1095,7 @@ mod tests {
         let failed = Arc::new(AtomicBool::new(false));
         let client = async {
             let mut socket = TcpStream::connect(address).await.unwrap();
-            let body=json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"observe_page","arguments":{}}}).to_string();
+            let body=json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"snapshot_page","arguments":{}}}).to_string();
             let request = format!(
                 "POST /mcp HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {capability}\r\nContent-Type: application/json\r\nMcp-Protocol-Version: 2025-11-25\r\nContent-Length: {}\r\n\r\n{body}",
                 body.len()

@@ -1,5 +1,6 @@
 //! Browse's page layer on the attached tab. Its commands reach Chrome only through the actor,
-//! which sends the read-only set below for the sessions it owns.
+//! which sends the reads below for the sessions it owns, and the input set only while an approved
+//! step's act window is open.
 
 use super::{Job, Kind, Request, TIMEOUT};
 use async_trait::async_trait;
@@ -23,8 +24,10 @@ const DONE: [&str; 5] = [
     "Emulation.setFocusEmulationEnabled",
 ];
 
-/// What Browse's page layer may send: frame and node reads, and calls in its own isolated world.
-const READ: [&str; 9] = [
+/// What Browse's page layer may always send: frame, node and layout reads, and calls in its own
+/// isolated world.
+const READ: [&str; 10] = [
+    "Page.getLayoutMetrics",
     "Page.getFrameTree",
     "Page.createIsolatedWorld",
     "Runtime.evaluate",
@@ -36,9 +39,20 @@ const READ: [&str; 9] = [
     "DOM.getFrameOwner",
 ];
 
+/// Trusted input and the scroll that brings a target into view: sent only inside an act window.
+pub(crate) const INPUT: [&str; 6] = [
+    "Input.dispatchMouseEvent",
+    "Input.dispatchKeyEvent",
+    "Input.insertText",
+    "Input.dispatchDragEvent",
+    "Input.setInterceptDrags",
+    "DOM.scrollIntoViewIfNeeded",
+];
+
 pub(super) enum Route {
     Done,
     Send,
+    Input,
     Refused,
 }
 
@@ -47,6 +61,8 @@ pub(super) fn route(method: &str) -> Route {
         Route::Done
     } else if READ.contains(&method) {
         Route::Send
+    } else if INPUT.contains(&method) {
+        Route::Input
     } else {
         Route::Refused
     }
@@ -154,14 +170,15 @@ impl Page {
         }
     }
 
-    /// The page outline from Browse's snapshot tool.
-    pub(super) async fn snapshot(&self) -> crate::Result<Value> {
+    /// Runs Browse's tool `name` on the attached tab and returns its text.
+    pub(super) async fn tool(&self, name: &str, mut args: Value) -> crate::Result<String> {
         let tool = browse_page::tools()
             .into_iter()
-            .find(|tool| tool.spec().name == "snapshot")
-            .ok_or("the snapshot tool is missing")?;
+            .find(|tool| tool.spec().name == name)
+            .ok_or("the browser tool is missing")?;
+        args["tab"] = json!(self.tab);
         let output = tool
-            .call(self.context.clone(), json!({ "tab": self.tab }))
+            .call(self.context.clone(), args)
             .await
             .map_err(|error| error.to_string())?;
         let text: Vec<&str> = output
@@ -175,6 +192,55 @@ impl Page {
         if output.is_error {
             return Err(text.join("\n").into());
         }
-        Ok(json!({ "kind": "page_snapshot", "text": text.join("\n") }))
+        Ok(text.join("\n"))
+    }
+
+    /// The page outline from Browse's snapshot tool; `args` are the snapshot tool's options.
+    pub(super) async fn snapshot(&self, args: Value) -> crate::Result<Value> {
+        Ok(json!({ "kind": "page_snapshot", "text": self.tool("snapshot", args).await? }))
+    }
+
+    /// The role and accessible name of each ref of the latest snapshot.
+    pub(super) async fn refs(
+        &self,
+    ) -> crate::Result<std::collections::HashMap<String, (String, String)>> {
+        Ok(browse_page::snapshot_refs(&self.context, self.tab)
+            .await
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|(reference, role, name)| (reference, (role, name.unwrap_or_default())))
+            .collect())
+    }
+
+    /// Focuses the password or one-time code field `reference` with its text selected, so the
+    /// consented secret replaces whatever it holds.
+    pub(super) async fn focus_secret_field(&self, reference: &str) -> crate::Result<()> {
+        let (page, element, _) = browse_page::resolve_element(
+            &self.context,
+            self.tab,
+            Some(reference),
+            None,
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        let call = |method: &'static str| {
+            let page = page.clone();
+            let element = element.clone();
+            async move {
+                page.call_element(&element, method, Vec::new(), true)
+                    .await
+                    .map_err(|error| error.to_string())
+            }
+        };
+        if call("isSecret").await? != json!(true) {
+            return Err("that field is not a password or one-time code field".into());
+        }
+        call("focus").await?;
+        call("selectText").await?;
+        if call("isFocused").await? != json!(true) {
+            return Err("the secret field did not take focus".into());
+        }
+        Ok(())
     }
 }

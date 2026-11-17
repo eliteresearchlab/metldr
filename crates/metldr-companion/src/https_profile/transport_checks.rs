@@ -1,5 +1,5 @@
 use super::*;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{
     io::{Cursor, Read, Write},
     net::TcpListener,
@@ -398,14 +398,14 @@ fn chat_rejects_malformed_siblings_and_changed_reused_ids_before_yielding() {
         .unwrap();
     runtime.block_on(async {
         for malformed in [true, false] {
-            let observe = json!({"index":0,"id":"same","type":"function","function":{"name":"observe_page","arguments":"{}"}});
+            let observe = json!({"index":0,"id":"same","type":"function","function":{"name":"snapshot_page","arguments":"{}"}});
             let replies = if malformed {
                 vec![response("chat-one", json!([observe,
                     {"index":1,"id":"bad","type":"function","function":{"name":"missing","arguments":"{}"}}
                 ]))]
             } else {
                 vec![response("chat-one", json!([observe])), response("chat-two", json!([
-                    {"index":0,"id":"fresh","type":"function","function":{"name":"observe_page","arguments":"{}"}},
+                    {"index":0,"id":"fresh","type":"function","function":{"name":"snapshot_page","arguments":"{}"}},
                     {"index":1,"id":"same","type":"function","function":{"name":"navigate_page","arguments":"{\"url\":\"https://example.org/other\"}"}}
                 ]))]
             };
@@ -419,7 +419,7 @@ fn chat_rejects_malformed_siblings_and_changed_reused_ids_before_yielding() {
             if !malformed {
                 let first = conversation.next(&stop, 8, |_| Ok(())).await.unwrap().unwrap();
                 assert_eq!(first.id, "same");
-                assert_eq!(first.call, metldr_browser_tools::Call::Observe);
+                assert_eq!(first.call, metldr_browser_tools::Call::Snapshot { args: json!({}) });
                 conversation.submit_tool_result(&json!({"observed":"actual result"})).unwrap();
             }
             let error = conversation.next(&stop, 7, |_| Ok(())).await.err().unwrap();

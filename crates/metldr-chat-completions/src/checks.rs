@@ -20,19 +20,23 @@ fn queued() -> Conversation {
         .unwrap();
     conversation.request["messages"].as_array_mut().unwrap().push(json!({
         "role":"assistant", "content":null, "tool_calls":[
-            {"id":"first","type":"function","function":{"name":"observe_page","arguments":"{}"}},
-            {"id":"second","type":"function","function":{"name":"observe_page","arguments":"{}"}}
+            {"id":"first","type":"function","function":{"name":"snapshot_page","arguments":"{}"}},
+            {"id":"second","type":"function","function":{"name":"snapshot_page","arguments":"{}"}}
         ]
     }));
     conversation.phase = Phase::Queued(
         [
             Invocation {
                 id: "first".into(),
-                call: Call::Observe,
+                call: Call::Snapshot {
+                    args: serde_json::json!({}),
+                },
             },
             Invocation {
                 id: "second".into(),
-                call: Call::Observe,
+                call: Call::Snapshot {
+                    args: serde_json::json!({}),
+                },
             },
         ]
         .into(),
@@ -48,10 +52,7 @@ async fn queued_calls_require_one_matching_result_before_the_next_call() {
         conversation.request["tools"].as_array().unwrap().len(),
         metldr_browser_tools::definitions().len()
     );
-    assert_eq!(
-        conversation.request["tools"][4]["function"]["name"],
-        "select_option"
-    );
+    assert_eq!(conversation.request["tools"][4]["function"]["name"], "type");
     assert_eq!(
         conversation.request["tools"][4]["function"]["parameters"],
         metldr_browser_tools::definitions()[4].input_schema

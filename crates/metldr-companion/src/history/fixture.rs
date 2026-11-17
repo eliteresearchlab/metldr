@@ -288,12 +288,11 @@ pub(super) fn legacy() -> Store {
                 grant_revision: 1,
             },
             url: "http://127.0.0.1:4311/article".into(),
-            intent: crate::browser_action::Intent::Field {
-                field_id: "query".into(),
-                field_label: "Search".into(),
-                previous_value: "".into(),
-                value: "fixture".into(),
-            },
+            intent: crate::browser_action::Intent::act(
+                "fill",
+                serde_json::json!({"ref":"e1","value":"fixture"}),
+                &[("e1", "searchbox", "Search")],
+            ),
         },
         state,
     };
@@ -304,8 +303,8 @@ pub(super) fn legacy() -> Store {
             "050",
             "call-settled",
             crate::browser_action::Phase::Settled {
-                outcome: crate::browser_action::Outcome::Verified {
-                    observed: "fixture".into(),
+                outcome: crate::browser_action::Outcome::Acted {
+                    result: "{\"filled\":1}".into(),
                 },
             },
         ),

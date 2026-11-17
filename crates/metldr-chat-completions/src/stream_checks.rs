@@ -20,13 +20,13 @@ fn ordered_calls_wait_for_done_and_keep_usage() {
         chunk(json!({"content":"k"}), None),
         chunk(
             json!({"tool_calls":[
-                {"index":0,"id":"call-a","type":"function","function":{"name":"observe_page","arguments":"{"}},
-                {"index":1,"id":"call-b","type":"function","function":{"name":"observe_page","arguments":"{}"}}
+                {"index":0,"id":"call-a","type":"function","function":{"name":"snapshot_page","arguments":"{"}},
+                {"index":1,"id":"call-b","type":"function","function":{"name":"snapshot_page","arguments":"{}"}}
             ]}),
             None,
         ),
         chunk(
-            json!({"tool_calls":[{"index":0,"function":{"name":"observe_page","arguments":"}"}}]}),
+            json!({"tool_calls":[{"index":0,"function":{"name":"snapshot_page","arguments":"}"}}]}),
             Some("tool_calls"),
         ),
         json!({"id":"chatcmpl-test","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10,"prompt_tokens_details":{"cached_tokens":2},"completion_tokens_details":{"reasoning_tokens":1}}}),
@@ -69,7 +69,7 @@ fn malformed_sibling_truncation_and_stream_error_fail_closed() {
         &mut state,
         chunk(
             json!({"role":"assistant","tool_calls":[
-                {"index":0,"id":"call-a","function":{"name":"observe_page","arguments":"{}"}},
+                {"index":0,"id":"call-a","function":{"name":"snapshot_page","arguments":"{}"}},
                 {"index":1,"id":"call-b","function":{"name":"missing","arguments":"{}"}}
             ]}),
             Some("tool_calls"),
@@ -202,7 +202,7 @@ fn encrypted_reasoning_allows_tool_calls_with_stop() {
             &mut state,
             chunk(
                 json!({"role":"assistant","content":content,"reasoning_details":[{"type":"reasoning.encrypted","data":"opaque"}],"tool_calls":[
-                {"index":0,"id":"call-a","function":{"name":"observe_page","arguments":"{}"}}
+                {"index":0,"id":"call-a","function":{"name":"snapshot_page","arguments":"{}"}}
                 ]}),
                 Some("stop"),
             ),
@@ -222,7 +222,7 @@ fn encrypted_reasoning_allows_tool_calls_with_stop() {
         &mut state,
         chunk(
             json!({"role":"assistant","tool_calls":[
-                {"index":0,"id":"call-a","function":{"name":"observe_page","arguments":"{}"}}
+                {"index":0,"id":"call-a","function":{"name":"snapshot_page","arguments":"{}"}}
             ]}),
             Some("stop"),
         ),

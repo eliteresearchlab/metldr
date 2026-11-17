@@ -2,7 +2,6 @@ use crate::{Call, Definition, Result, STATUS_TOOL};
 use serde_json::{Map, Value, json};
 
 pub const NAME: &str = STATUS_TOOL;
-pub const ORDER: u8 = 8;
 
 pub fn definition() -> Definition {
     Definition {

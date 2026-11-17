@@ -3,7 +3,7 @@ use redb::TableDefinition;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::io::{self, Write};
 
-pub(super) const FORMAT: u8 = 22;
+pub(super) const FORMAT: u8 = 23;
 const RECORD_MAX: usize = 2 * 1024 * 1024;
 pub(super) const META: TableDefinition<&str, &[u8]> = TableDefinition::new("metadata");
 pub(super) const CONVERSATIONS: TableDefinition<&str, &[u8]> =
@@ -32,10 +32,10 @@ pub(super) const OPENCODE: TableDefinition<&str, &[u8]> =
     TableDefinition::new("opencode_workflows");
 /// Workflows of harnesses on the generic path. Created on first write, so a read of an
 /// older history treats it as empty.
-pub(super) const HARNESS: TableDefinition<&str, &[u8]> =
-    TableDefinition::new("harness_workflows");
+pub(super) const HARNESS: TableDefinition<&str, &[u8]> = TableDefinition::new("harness_workflows");
 /// Every saved native workflow table; a workflow name lives in at most one.
-pub(super) const NATIVE_WORKFLOWS: [TableDefinition<&str, &[u8]>; 4] = [PI, CODEX, OPENCODE, HARNESS];
+pub(super) const NATIVE_WORKFLOWS: [TableDefinition<&str, &[u8]>; 4] =
+    [PI, CODEX, OPENCODE, HARNESS];
 pub(super) const ACTIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("actions");
 pub(super) const TASK_PLANS: TableDefinition<&str, &[u8]> = TableDefinition::new("task_plans");
 pub(super) const RUN_ORDER: TableDefinition<(&str, u64), &str> = TableDefinition::new("run_order");

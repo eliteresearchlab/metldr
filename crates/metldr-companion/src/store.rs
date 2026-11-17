@@ -61,7 +61,6 @@ impl Disk {
                     return Err("saved store is from an older companion; delete the state directory to start fresh".into());
                 }
                 let state: Store = serde_json::from_slice(&bytes)?;
-                crate::browser_action::reject_scroll_actions(&state.browser_actions)?;
                 self.save(&state)?;
                 state
             }

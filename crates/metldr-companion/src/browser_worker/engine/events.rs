@@ -4,7 +4,10 @@
 //! each subscribed event to those handlers only when the event belongs to a
 //! session of the owned tab, so a handler never sees another tab's events.
 
-use super::{runtime::RawEvent, scripts::SECRET_METADATA_PATTERN};
+use super::runtime::RawEvent;
+
+/// Field names whose values log redaction hides.
+const SECRET_METADATA_PATTERN: &str = r"password|passcode|one[ _-]?time[ _-]?code|(^|[^a-z0-9])otp($|[^a-z0-9])|token|secret|api[ _-]?key|payment|bank|card|cc-|cc[ _-]?(number|name|exp|csc|cvc|cvv)|(^|[^a-z0-9])(cvc|cvv|ssn)($|[^a-z0-9])|social[ _-]?security";
 use crate::Result;
 use regex::Regex;
 use serde::Serialize;

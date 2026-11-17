@@ -112,12 +112,11 @@ fn with_owner_seed(
             unique_context: "unique-1".into(),
             grant_revision: 1,
         },
-        intent: Intent::Field {
-            field_id: "metldr-field".into(),
-            field_label: "Email address".into(),
-            previous_value: "Existing value".into(),
-            value: "Approved value".into(),
-        },
+        intent: Intent::act(
+            "fill",
+            serde_json::json!({"ref":"e1","value":"Approved value"}),
+            &[("e1", "textbox", "Email address")],
+        ),
     };
     seed(&mut state, &proposal);
     state.validate().unwrap();
@@ -931,8 +930,8 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
             .browser_event(Event::Observed {
                 action: dispatched.id.clone(),
                 revision: dispatched.revision,
-                outcome: Outcome::Verified {
-                    observed: "wrong field value".into(),
+                outcome: Outcome::SecretEntered {
+                    reference: "0".repeat(32),
                 },
                 ack,
             })
@@ -947,8 +946,8 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
             .browser_event(Event::Observed {
                 action: dispatched.id.clone(),
                 revision: dispatched.revision,
-                outcome: Outcome::Verified {
-                    observed: "Approved value".into(),
+                outcome: Outcome::Acted {
+                    result: "{\"filled\":1}".into(),
                 },
                 ack,
             })
@@ -958,17 +957,17 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
         assert!(matches!(
             verified.state,
             Phase::Settled {
-                outcome: Outcome::Verified { .. }
+                outcome: Outcome::Acted { .. }
             }
         ));
         cached(owner, proposal.clone(), &verified);
         let mut state = saved(owner);
         assert_eq!(state.propose_browser(proposal.clone()).unwrap(), verified);
         let mut changed = proposal;
-        let Intent::Field { value, .. } = &mut changed.intent else {
+        let Intent::Act { args, .. } = &mut changed.intent else {
             unreachable!()
         };
-        value.push('!');
+        args["value"] = "Approved value!".into();
         assert!(state.propose_browser(changed).is_err());
         let mut changed = state
             .browser_actions
@@ -977,10 +976,10 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
             .unwrap()
             .proposal
             .clone();
-        let Intent::Field { previous_value, .. } = &mut changed.intent else {
+        let Intent::Act { elements, .. } = &mut changed.intent else {
             unreachable!()
         };
-        previous_value.push('!');
+        elements[0].name.push('!');
         assert!(state.propose_browser(changed).is_err());
         assert_eq!(state.browser_actions.len(), 1);
         let projected = crate::public_view::render(
@@ -999,14 +998,14 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
             None,
         )
         .unwrap();
-        assert_eq!(projected["browser_actions"][0]["outcome"], "verified");
+        assert_eq!(projected["browser_actions"][0]["outcome"], "acted");
         assert_eq!(
-            projected["browser_actions"][0]["field_label"],
+            projected["browser_actions"][0]["elements"][0]["name"],
             "Email address"
         );
         assert_eq!(
-            projected["browser_actions"][0]["previous_value"],
-            "Existing value"
+            projected["browser_actions"][0]["args"]["value"],
+            "Approved value"
         );
     });
     with_owner(false, |owner, proposal| {
@@ -1054,19 +1053,16 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
 }
 
 #[test]
-fn browser_proposal_requires_bounded_previous_value() {
+fn browser_proposal_requires_bounded_checked_arguments() {
     with_owner(false, |owner, mut proposal| {
         let mut serialized = serde_json::to_value(&proposal).unwrap();
-        let Intent::Field { previous_value, .. } = &mut proposal.intent else {
+        let Intent::Act { args, .. } = &mut proposal.intent else {
             unreachable!()
         };
-        *previous_value = "x".repeat(1_025);
+        args["value"] = "x".repeat(8_193).into();
         assert!(owner.state.propose_browser(proposal).is_err());
 
-        serialized["intent"]
-            .as_object_mut()
-            .unwrap()
-            .remove("previous_value");
+        serialized["intent"].as_object_mut().unwrap().remove("args");
         assert!(serde_json::from_value::<Proposal>(serialized).is_err());
     });
 }
@@ -1082,7 +1078,7 @@ fn navigation_requires_durable_destination_before_a_new_field_proposal() {
                 legacy[name] = value.clone();
             }
         }
-        assert_eq!(serde_json::from_value::<Proposal>(legacy).unwrap(), field);
+        assert!(serde_json::from_value::<Proposal>(legacy).is_err());
         let mut navigation = field.clone();
         let destination = owner.fixture.as_ref().unwrap().origin.clone() + "/decoy";
         navigation.intent = Intent::Navigate {

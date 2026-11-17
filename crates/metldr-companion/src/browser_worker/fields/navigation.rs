@@ -58,21 +58,20 @@ impl Tools {
             } => {
                 self.current.document = binding.document;
                 self.current.url = url;
-                let mut observation = self.observe().await?;
-                if !evidence.is_empty()
-                    && let Some(object) = observation.as_object_mut()
-                {
+                let mut observation = self.attached()?.snapshot(json!({})).await?;
+                observation["url"] = json!(self.current.url);
+                if !evidence.is_empty() {
                     let mut report = serde_json::to_value(&evidence)?;
-                    // A 2xx page titled like an error is only a labelled suspicion, never a failure.
+                    // A 2xx page headed like an error is only a labelled suspicion, never a failure.
                     if matches!(evidence.status, Some(200..=299))
-                        && object
-                            .get("title")
-                            .and_then(Value::as_str)
+                        && observation["text"]
+                            .as_str()
+                            .and_then(first_heading)
                             .is_some_and(soft_404_title)
                     {
                         report["soft_404_suspected"] = true.into();
                     }
-                    object.insert("navigation".into(), report);
+                    observation["navigation"] = report;
                 }
                 Ok(observation)
             }
@@ -84,7 +83,17 @@ impl Tools {
     }
 }
 
-/// A page title that usually means a missing page served with a success status.
+/// The name of the first heading in a snapshot, e.g. `- heading "Not found" [level=1]`.
+fn first_heading(text: &str) -> Option<&str> {
+    let line = text
+        .lines()
+        .find(|line| line.trim_start().starts_with("- heading \""))?;
+    let start = line.find('"')? + 1;
+    let end = start + line[start..].find('"')?;
+    Some(&line[start..end])
+}
+
+/// A page title or heading that usually means a missing page served with a success status.
 fn soft_404_title(title: &str) -> bool {
     let title = title.to_ascii_lowercase();
     title.starts_with("404")

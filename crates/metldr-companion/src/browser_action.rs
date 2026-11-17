@@ -1,18 +1,12 @@
 use crate::{Result, model::Store};
 use serde::{Deserialize, Serialize};
 
-mod control;
-#[cfg(test)]
-pub(crate) use control::RadioMember;
 mod intent;
-mod scroll;
-mod selection;
 mod target;
-pub(crate) use control::{CheckboxState, Control, ControlReceipt, RadioGroup};
 pub(super) use intent::Intent;
-pub(crate) use intent::{SECRET_TTL_MS, SecretKind};
-pub(crate) use scroll::{Direction, Point, Scroll, ScrollKind};
-pub(crate) use selection::{Choice, Selection};
+#[cfg(test)]
+pub(crate) use intent::element;
+pub(crate) use intent::{Element, SECRET_TTL_MS, SecretKind, named_refs};
 pub(super) use target::Target;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -28,7 +22,7 @@ pub(super) struct Binding {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(try_from = "intent::WireProposal")]
+#[serde(deny_unknown_fields)]
 pub(super) struct Proposal {
     pub run: String,
     pub tool_use_id: String,
@@ -40,9 +34,6 @@ pub(super) struct Proposal {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Outcome {
-    Verified {
-        observed: String,
-    },
     Navigated {
         binding: Binding,
         url: String,
@@ -51,18 +42,10 @@ pub(super) enum Outcome {
         #[serde(default, skip_serializing_if = "no_evidence")]
         evidence: Box<NavigationEvidence>,
     },
-    ButtonClickObserved,
-    SelectionObserved {
-        selected: Choice,
+    /// A page action ran; `result` is the browser's short account of what changed.
+    Acted {
+        result: String,
     },
-    ScrollObserved {
-        after: Point,
-    },
-    ControlObserved {
-        receipt: ControlReceipt,
-    },
-    /// One trusted key press reached the approved field.
-    KeyPressObserved,
     /// The page field holds the consented secret. Only the opaque reference is reported.
     SecretEntered {
         reference: String,
@@ -219,27 +202,9 @@ impl Action {
             Phase::Settled { outcome } => {
                 validate_outcome(outcome, &self.proposal)?;
                 let valid_revision = match outcome {
-                    Outcome::Verified { .. }
-                    | Outcome::Navigated { .. }
+                    Outcome::Navigated { .. }
+                    | Outcome::Acted { .. }
                     | Outcome::Uncertain { .. } => self.revision == 4,
-                    Outcome::SelectionObserved { .. } => {
-                        self.revision == 4
-                            && matches!(&self.proposal.intent, Intent::SelectOption { .. })
-                    }
-                    Outcome::ScrollObserved { .. } => {
-                        self.revision == 4 && matches!(&self.proposal.intent, Intent::Scroll { .. })
-                    }
-                    Outcome::ControlObserved { .. } => {
-                        self.revision == 4
-                            && matches!(&self.proposal.intent, Intent::SetNativeControl { .. })
-                    }
-                    Outcome::ButtonClickObserved => {
-                        self.revision == 4
-                            && matches!(&self.proposal.intent, Intent::ActivateButton { .. })
-                    }
-                    Outcome::KeyPressObserved => {
-                        self.revision == 4 && matches!(&self.proposal.intent, Intent::PressKey { .. })
-                    }
                     Outcome::SecretEntered { .. } => {
                         self.revision == 4 && matches!(&self.proposal.intent, Intent::Secret { .. })
                     }
@@ -325,7 +290,12 @@ impl Store {
             .iter()
             .find(|r| r.id == proposal.run)
             .ok_or("unknown browser run")?;
-        let initial = if self.launches.get(&proposal.run).and_then(|l| l.native_workflow()).is_some() {
+        let initial = if self
+            .launches
+            .get(&proposal.run)
+            .and_then(|l| l.native_workflow())
+            .is_some()
+        {
             self.native_browser_target(&proposal.run)?
         } else {
             Target::from(&source.page)
@@ -457,27 +427,18 @@ pub(super) fn validate(state: &Store, valid_id: impl Fn(&str) -> bool) -> Result
 
 fn validate_outcome(outcome: &Outcome, proposal: &Proposal) -> Result<()> {
     match (outcome, &proposal.intent) {
-        (Outcome::Verified { observed }, Intent::Field { value, .. }) if observed == value => {
-            Ok(())
-        }
-        (Outcome::ButtonClickObserved, Intent::ActivateButton { .. })
-        | (Outcome::KeyPressObserved, Intent::PressKey { .. }) => Ok(()),
-        (Outcome::SecretEntered { reference }, Intent::Secret { reference: approved, .. })
-            if reference == approved =>
+        (Outcome::Acted { result }, Intent::Act { .. })
+            if result.len() <= 4096 && !result.chars().any(|c| c.is_control() && c != '\n') =>
         {
             Ok(())
         }
-        (Outcome::ScrollObserved { after }, Intent::Scroll { .. }) if after.valid() => Ok(()),
-        (Outcome::ControlObserved { receipt }, Intent::SetNativeControl { control })
-            if control.matches(receipt) =>
-        {
-            Ok(())
-        }
-        (Outcome::SelectionObserved { selected }, Intent::SelectOption { selection })
-            if selected == &selection.selected =>
-        {
-            Ok(())
-        }
+        (
+            Outcome::SecretEntered { reference },
+            Intent::Secret {
+                reference: approved,
+                ..
+            },
+        ) if reference == approved => Ok(()),
         (
             Outcome::Navigated {
                 binding,
@@ -507,82 +468,5 @@ fn validate_outcome(outcome: &Outcome, proposal: &Proposal) -> Result<()> {
             Ok(())
         }
         _ => Err("invalid browser outcome".into()),
-    }
-}
-
-pub(super) fn reject_scroll_actions(
-    actions: &std::collections::BTreeMap<String, Action>,
-) -> Result<()> {
-    actions.values().try_for_each(reject_scroll_action)
-}
-
-pub(super) fn reject_scroll_action(action: &Action) -> Result<()> {
-    if matches!(&action.proposal.intent, Intent::Scroll { .. })
-        || matches!(
-            &action.state,
-            Phase::Settled {
-                outcome: Outcome::ScrollObserved { .. }
-            }
-        )
-    {
-        return Err("legacy browser store contains scroll action data".into());
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod selection_checks {
-    use super::*;
-
-    #[test]
-    fn selection_receipt_must_match_the_approved_choice() {
-        let selected = Choice {
-            id: "option_2".into(),
-            label: "North".into(),
-            index: 1,
-        };
-        let proposal = Proposal {
-            run: "store:1".into(),
-            tool_use_id: "call-1".into(),
-            binding: Binding {
-                tab: 1,
-                document: "document".into(),
-                target: "target".into(),
-                frame: "frame".into(),
-                session: "session".into(),
-                unique_context: "context".into(),
-                grant_revision: 1,
-            },
-            url: "http://127.0.0.1:8000/article".into(),
-            intent: Intent::SelectOption {
-                selection: Selection {
-                    control_id: "select_1".into(),
-                    control_label: "Region".into(),
-                    previous: None,
-                    selected: selected.clone(),
-                },
-            },
-        };
-        assert!(
-            validate_outcome(
-                &Outcome::SelectionObserved {
-                    selected: selected.clone(),
-                },
-                &proposal,
-            )
-            .is_ok()
-        );
-        assert!(
-            validate_outcome(
-                &Outcome::SelectionObserved {
-                    selected: Choice {
-                        id: "option_3".into(),
-                        ..selected
-                    },
-                },
-                &proposal,
-            )
-            .is_err()
-        );
     }
 }
