@@ -801,7 +801,10 @@ fn saved_fixture_start_replays_but_cannot_retarget_https() {
 fn propose(
     owner: &mut Owner,
     p: Proposal,
-) -> (Action, tokio::sync::oneshot::Receiver<std::result::Result<Action, String>>) {
+) -> (
+    Action,
+    tokio::sync::oneshot::Receiver<std::result::Result<Action, String>>,
+) {
     let (ack, mut rx) = tokio::sync::oneshot::channel();
     owner
         .browser_event(Event::Proposed {
@@ -810,7 +813,10 @@ fn propose(
             budget: None,
         })
         .unwrap();
-    assert!(matches!(rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+    assert!(matches!(
+        rx.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
     let action = owner.browser_view.values().next().unwrap().clone();
     assert_eq!(saved(owner).browser_actions[&action.id], action);
     (action, rx)
@@ -914,7 +920,10 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
         let (pending, mut rx) = propose(owner, proposal.clone());
         cached(owner, proposal.clone(), &pending);
         assert!(owner.browser_decide(&pending.id, 2, true).is_err());
-        assert!(matches!(rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
         owner.browser_decide(&pending.id, 1, true).unwrap();
         let approved = rx.blocking_recv().unwrap().unwrap();
         assert_eq!(approved.state, Phase::Approved);

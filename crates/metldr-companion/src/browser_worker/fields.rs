@@ -115,13 +115,16 @@ impl Tools {
                     ack,
                 }))
                 .map_err(|_| "browser owner channel unavailable")?;
-            let revision = owner_reply(rx, Some(stop), "browser task stopped", "plan owner ended")
-                .await?;
+            let revision =
+                owner_reply(rx, Some(stop), "browser task stopped", "plan owner ended").await?;
             if stop.load(Ordering::Acquire) {
                 return Err("browser task stopped".into());
             }
-            let revision = revision.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
-            let result = json!({"revision":revision,"status":"proposed","next":"call the first step now; it waits for the user's approval"});
+            let result = json!({
+                "revision": revision?,
+                "status": "proposed",
+                "next": "call the first step now; it waits for the user's approval",
+            });
             return Ok(self.remember(call_id, call, result));
         }
         // Reads run before attachment, so reporting state never attaches the browser.
@@ -193,7 +196,13 @@ impl Tools {
                 ack,
             })
             .map_err(|_| "settings owner channel unavailable")?;
-        let value = owner_reply(rx, Some(stop), "browser task stopped", "settings owner ended").await?;
+        let value = owner_reply(
+            rx,
+            Some(stop),
+            "browser task stopped",
+            "settings owner ended",
+        )
+        .await?;
         if stop.load(Ordering::Acquire) {
             return Err("browser task stopped".into());
         }
@@ -312,9 +321,14 @@ async fn action(
         .tx
         .try_send(Event::Browser(event(ack)))
         .map_err(|_| "browser owner channel unavailable")?;
-    owner_reply(rx, stop, "browser action cancelled", "browser approval owner ended")
-        .await?
-        .map_err(owner_error)
+    owner_reply(
+        rx,
+        stop,
+        "browser action cancelled",
+        "browser approval owner ended",
+    )
+    .await?
+    .map_err(owner_error)
 }
 
 /// Awaits the owner's answer, which wakes the worker as soon as it is sent. An answer that has

@@ -728,7 +728,12 @@ fn effect_without_plan_is_refused() -> crate::Result<()> {
         ack,
         budget: None,
     })?;
-    assert!(reply.blocking_recv()?.unwrap_err().contains("propose_task_plan"));
+    assert!(
+        reply
+            .blocking_recv()?
+            .unwrap_err()
+            .contains("propose_task_plan")
+    );
     assert!(owner.browser_approval.is_none());
     Ok(())
 }
@@ -768,7 +773,10 @@ fn effect_is_held_until_plan_approval() -> crate::Result<()> {
         budget: None,
     })?;
     assert!(owner.browser_approval.is_none());
-    assert!(matches!(reply.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+    assert!(matches!(
+        reply.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
     panel_plan_reply(&mut owner, &run, revision, "panel-1")?;
     let action = owner.browser_approval.as_ref().unwrap().action.clone();
     owner.browser_decide(&action, 1, true)?;
@@ -813,7 +821,10 @@ fn declining_plan_releases_held_action_and_allows_replanning() -> crate::Result<
         budget: None,
     })?;
     assert!(owner.browser_approval.is_none());
-    assert!(matches!(reply.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+    assert!(matches!(
+        reply.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
     let scope = crate::history_io::Scope::from(&owner.record_history.selection()?);
     owner.command(
         "panel-decline",
@@ -871,7 +882,9 @@ fn session_command(
 fn propose_only(
     owner: &mut Owner,
     proposal: Proposal,
-) -> crate::Result<tokio::sync::oneshot::Receiver<std::result::Result<crate::browser_action::Action, String>>> {
+) -> crate::Result<
+    tokio::sync::oneshot::Receiver<std::result::Result<crate::browser_action::Action, String>>,
+> {
     let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal,
@@ -956,7 +969,10 @@ fn session_grant_auto_approves_bound_tier_one_steps_only() -> crate::Result<()> 
     );
     let mut reply = propose_only(&mut owner, proposal(&run, "grant-3", &binding, url, button))?;
     assert!(owner.browser_approval.is_some());
-    assert!(matches!(reply.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+    assert!(matches!(
+        reply.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
     owner.cancel_browser_approval(&run);
     // Stop ended the grant, so a later Tier 1 step asks again.
     assert!(!owner.session_grants.contains_key(&run));
@@ -1039,7 +1055,10 @@ fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Resu
         proposal(&run, "secret-1", &binding, url, secret_intent(reference)),
     )?;
     let action = owner.browser_approval.as_ref().unwrap().action.clone();
-    assert!(matches!(reply.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+    assert!(matches!(
+        reply.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
     assert!(owner.browser_decide(&action, 1, true).is_err());
     let (slot, _events) = crate::browser_io::Slot::new(17);
     owner.operations.get_mut(&run).unwrap().browser_io = Some(Box::new(slot));

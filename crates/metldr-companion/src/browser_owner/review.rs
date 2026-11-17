@@ -141,7 +141,10 @@ mod tests {
                     budget: Some(budget.clone()),
                 })
                 .unwrap();
-            assert!(matches!(rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+            assert!(matches!(
+                rx.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ));
             assert!(owner.browser_approval.is_some());
             assert_eq!(saved(owner).browser_actions.len(), 1);
             assert!(budget.review_elapsed().is_some());
