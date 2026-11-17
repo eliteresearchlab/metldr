@@ -1,8 +1,14 @@
 import { databaseService, DB_CONFIGS } from '../DatabaseService'
 import { localModels } from '../ai/LocalModelProvider'
-import type { VectorEntry } from '../../types'
-import { Bm25Index } from './bm25'
-import type { RankedHit } from './rankFusion'
+import type { SearchResult, VectorEntry } from '../../types'
+import { KeywordIndex } from '../../../crates/metldr-core/pkg/metldr_core'
+import { loadRustCore } from '../RustCore'
+
+// one chunk in the Rust keyword index: summary chunks are lifted and repeated sources spread out
+function indexEntry(index: KeywordIndex, entry: VectorEntry): void {
+  const meta = entry.metadata ?? {}
+  index.add(entry.id, entry.content, String(meta.sourceUrl ?? ''), String(meta.sourceId ?? ''), meta.isSummary === true)
+}
 
 export class VectorStore {
   private operationQueue: Promise<void> = Promise.resolve()
@@ -10,7 +16,8 @@ export class VectorStore {
   private saveDebounceMs = 300
   private loaded = false
   private loadingPromise: Promise<void> | null = null
-  private invertedIndex = new Bm25Index<VectorEntry>()
+  private keywordIndex: KeywordIndex | null = null
+  private entries = new Map<string, VectorEntry>()
   private pendingAdds = 0
   
   // sandbox lifecycle tracking
@@ -22,7 +29,7 @@ export class VectorStore {
     this.operationQueue = this.operationQueue.then(async () => {
       await this.ensureIndexLoaded()
       await this.storeDocument(entry)
-      this.invertedIndex.add(entry.id, entry.content, entry)
+      this.remember(entry)
       await localModels.voyAdd(entry.id, Array.from(embedding), String(entry.metadata?.title || entry.id), String(entry.metadata?.sourceUrl || ''))
       this.pendingAdds--
       this.scheduleDebouncedSave()
@@ -33,23 +40,18 @@ export class VectorStore {
     return this.operationQueue
   }
 
-  // dense leg: Voy returns neighbours nearest-first and no similarity value, so the position is the only signal
-  async search(queryEmbedding: number[], limit: number): Promise<Array<RankedHit<VectorEntry>>> {
+  // dense neighbours from Voy (nearest first, no similarity value) fused in Rust with the BM25 hits:
+  // rank-only reciprocal rank fusion, then the summary lift and the repeated-source penalty
+  async rank(query: string, queryEmbedding: number[], limit: number): Promise<SearchResult[]> {
     await this.ensureIndexLoaded()
-    const ids = await localModels.voySearch(queryEmbedding, limit)
-
-    const hydrated = await Promise.all(ids.map(async id => {
-      const entry = await this.retrieveDocument(id)
-      return entry ? { id, item: entry } : null
-    }))
-
-    return hydrated.filter((hit): hit is RankedHit<VectorEntry> => hit !== null)
+    const dense = await localModels.voySearch(queryEmbedding, limit)
+    const hits = JSON.parse(this.keywordIndex!.rank(query, dense, limit)) as Array<[string, number, SearchResult['matchType']]>
+    return hits.map(([id, score, matchType]) => ({ entry: this.entries.get(id)!, score, matchType }))
   }
 
-  // lexical leg: BM25 hits, best first
-  async searchKeyword(query: string, limit: number): Promise<Array<RankedHit<VectorEntry>>> {
-    await this.ensureIndexLoaded()
-    return this.invertedIndex.search(query, limit).map(({ id, item }) => ({ id, item }))
+  private remember(entry: VectorEntry): void {
+    this.entries.set(entry.id, entry)
+    indexEntry(this.keywordIndex!, entry)
   }
 
   async addBatch(entries: Array<{ entry: VectorEntry; embedding: Float32Array }>): Promise<void> {
@@ -60,7 +62,7 @@ export class VectorStore {
       this.operationQueue = this.operationQueue.then(async () => {
         await this.ensureIndexLoaded()
         await this.storeDocuments(entries.map(({ entry }) => entry))
-        for (const { entry } of entries) this.invertedIndex.add(entry.id, entry.content, entry)
+        for (const { entry } of entries) this.remember(entry)
         await localModels.voyAddBatch(entries.map(({ entry, embedding }) => ({
           id: entry.id,
           embedding: Array.from(embedding),
@@ -149,7 +151,7 @@ export class VectorStore {
     
     this.loaded = true
     this.lastSandboxId = localModels.getSandboxId()
-    console.log(`[VectorStore] Index ready. ${this.invertedIndex.size} docs in keyword index. (${Date.now() - startTime}ms total)`)
+    console.log(`[VectorStore] Index ready. ${this.entries.size} docs in keyword index. (${Date.now() - startTime}ms total)`)
   }
 
   // force reload from IDB - call when index seems stale
@@ -163,8 +165,7 @@ export class VectorStore {
   async hasDocument(sourceId: string): Promise<boolean> {
     await this.ensureIndexLoaded()
     
-    // direct metadata check in the keyword index (O(n) but reliable)
-    if (this.hasIndexedSource(sourceId)) {
+    if (this.keywordIndex!.has_source(sourceId)) {
       return true
     }
     
@@ -176,22 +177,15 @@ export class VectorStore {
 
   // get doc count for verification
   getDocCount(): number {
-    return this.invertedIndex.size
-  }
-
-  // check if any document has this sourceUrl in metadata (fast O(n) scan, but docs are small)
-  private hasIndexedSource(sourceUrl: string): boolean {
-    for (const entry of this.invertedIndex.values()) {
-      if (entry.metadata?.sourceUrl === sourceUrl || entry.metadata?.sourceId === sourceUrl) {
-        return true
-      }
-    }
-    return false
+    return this.entries.size
   }
 
   private async rebuildInvertedIndex(): Promise<void> {
     console.log('[VectorStore] Rebuilding inverted index from IDB...')
-    this.invertedIndex.clear()
+    await loadRustCore()
+    this.keywordIndex ??= new KeywordIndex()
+    this.keywordIndex.clear()
+    this.entries.clear()
     const db = await databaseService.getDatabase(DB_CONFIGS.cache)
     const tx = db.transaction('page_cache', 'readonly')
     const store = tx.objectStore('page_cache')
@@ -202,8 +196,7 @@ export class VectorStore {
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result
         if (cursor) {
-          const entry = cursor.value as VectorEntry
-          this.invertedIndex.add(entry.id, entry.content, entry)
+          this.remember(cursor.value as VectorEntry)
           count++
           cursor.continue()
         } else {
@@ -294,11 +287,6 @@ export class VectorStore {
       timestamp: Date.now(),
       ttl: 24 * 60 * 60 * 1000 * 60 // 60 days
     })), entries.length)
-  }
-
-  private async retrieveDocument(id: string): Promise<VectorEntry | undefined> {
-    const item = await databaseService.get<any>(DB_CONFIGS.cache, 'page_cache', `rag:${id}`)
-    return item as VectorEntry | undefined
   }
 }
 

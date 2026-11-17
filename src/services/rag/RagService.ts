@@ -5,7 +5,6 @@ import { databaseService, DB_CONFIGS } from '../DatabaseService'
 import { aiGateway } from '../ai/AIGateway'
 import { LRUCache } from 'lru-cache'
 import type { VectorEntry, SearchResult } from '../../types'
-import { rankHybrid, type HybridRankOptions } from './rankFusion'
 
 interface ChunkMetadata {
   sourceId: string
@@ -37,11 +36,6 @@ const QUERY_CACHE_MAX = 100
 const QUERY_CACHE_TTL = 5 * 60 * 1000
 const WHITESPACE_PATTERN = /\s+/
 const COLLAPSED_WHITESPACE_PATTERN = /\s+/g
-// post-fusion adjustments carried over from the previous scorer; fusion itself is rank-based RRF (rankFusion.ts)
-const HYBRID_RANK_OPTIONS: HybridRankOptions<VectorEntry> = {
-  summaryBoost: { points: 8, isSummary: entry => entry.metadata?.isSummary === true },
-  sourceDiversity: { penaltyPerRepeat: 15, sourceOf: entry => (entry.metadata?.sourceUrl as string) || '' }
-}
 const LLM_TERM_QUOTES_PATTERN = /[\"\'\n]/g
 const LLM_TERM_SEPARATOR_PATTERN = /[,;]/
 const TRAILING_SLASH_PATTERN = /\/$/
@@ -326,21 +320,11 @@ export class RagService {
       const expanded = await this.expandQueryWithLLM(query)
       const processed = this.preprocessQuery(expanded)
       
-      // 2. parallel retrieval: dense hits and BM25 hits, each best first
+      // 2. dense neighbours and BM25 hits, fused by rank in Rust
       const queryEmbedding = await embeddingProvider.embedQuery(processed)
-      const [denseHits, lexicalHits] = await Promise.all([
-        vectorStore.search(Array.from(queryEmbedding), limit * 5),
-        vectorStore.searchKeyword(processed, limit * 5)
-      ])
-      
-      // 3. rank-based Reciprocal Rank Fusion (k = 60), then the summary boost and the source-diversity penalty
-      const fused = rankHybrid(denseHits, lexicalHits, HYBRID_RANK_OPTIONS)
-      
-      const results: SearchResult[] = fused.slice(0, limit).map(hit => ({
-        entry: hit.item,
-        score: Math.round(hit.score),
-        matchType: hit.matchType
-      }))
+      const results = (await vectorStore.rank(processed, Array.from(queryEmbedding), limit * 5))
+        .slice(0, limit)
+        .map(hit => ({ ...hit, score: Math.round(hit.score) }))
       
       // cache results
       this.queryCache.set(cacheKey, results)
