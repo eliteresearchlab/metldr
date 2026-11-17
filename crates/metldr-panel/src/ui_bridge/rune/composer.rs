@@ -332,7 +332,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         if p.crafted() {
             TextStyle::new((16.0 * typography.scale).max(16.0), 400.0).mono()
         } else {
-            TextStyle::new((16.0 * typography.scale).max(16.0), 400.0)
+            typography.input()
         },
     )
     .key("rune-composer-field")

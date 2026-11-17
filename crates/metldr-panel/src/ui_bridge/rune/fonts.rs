@@ -6,9 +6,31 @@
 
 use std::cell::OnceCell;
 
-/// Approved interface files in renderer order: 13 Inter and JetBrains Mono subsets. The chat
-/// starts with these alone.
-pub(super) const NAMES: [&str; 13] = [
+/// Approved interface files in renderer order: the Allo variable face (optical size, weight
+/// and roundness axes) and 6 JetBrains Mono subsets. The chat starts with these alone.
+pub(super) const NAMES: [&str; 7] = [
+    "AlloVariable.ttf",
+    "0aa834ed78bf6d07-s.ttf",
+    "67957d42bae0796d-s.ttf",
+    "886030b0b59bc5a7-s.ttf",
+    "939c4f875ee75fbb-s.ttf",
+    "bb3ef058b751a6ad-s.p.ttf",
+    "f911b923c6adde36-s.ttf",
+];
+/// Approved fallbacks, added after the first frame so a cold open neither fetches nor parses
+/// them first: Allo's oblique in each weight (named into the variable face's family, so italic
+/// text finds them), Inter for the Greek, Cyrillic, Vietnamese and extended Latin Allo lacks,
+/// and Noto for other scripts, symbols and emoji (about 13 MB, mostly emoji).
+pub(super) const FALLBACKS: [&str; 25] = [
+    "AlloVariable-ThinItalic.otf",
+    "AlloVariable-ExtraLightItalic.otf",
+    "AlloVariable-LightItalic.otf",
+    "AlloVariable-Italic.otf",
+    "AlloVariable-MediumItalic.otf",
+    "AlloVariable-SemiBoldItalic.otf",
+    "AlloVariable-BoldItalic.otf",
+    "AlloVariable-ExtraBoldItalic.otf",
+    "AlloVariable-BlackItalic.otf",
     "ba9851c3c22cd980-s.ttf",
     "21350d82a1f187e9-s.ttf",
     "c5fe6dc8356a8c31-s.ttf",
@@ -16,16 +38,6 @@ pub(super) const NAMES: [&str; 13] = [
     "df0a9ae256c0569c-s.ttf",
     "8e9860b6e62d6359-s.ttf",
     "e4af272ccee01ff0-s.p.ttf",
-    "886030b0b59bc5a7-s.ttf",
-    "0aa834ed78bf6d07-s.ttf",
-    "67957d42bae0796d-s.ttf",
-    "f911b923c6adde36-s.ttf",
-    "939c4f875ee75fbb-s.ttf",
-    "bb3ef058b751a6ad-s.p.ttf",
-];
-/// Approved fallbacks for other scripts, symbols and emoji (about 13 MB, mostly emoji), added
-/// after the first frame so a cold open neither fetches nor parses them first.
-pub(super) const FALLBACKS: [&str; 9] = [
     "NotoSansHebrew-Regular.ttf",
     "NotoSansArabic-Regular.ttf",
     "NotoSansDevanagari-Regular.ttf",
@@ -41,7 +53,7 @@ pub(super) const CJK: [&str; 1] = ["NotoSansCJK-Regular.ttc"];
 /// Upper bound for one file. The largest approved file, the CJK collection, is about 19.5 MB.
 const MAX_FONT_BYTES: usize = 24 * 1024 * 1024;
 
-pub(super) const FAMILIES: (&str, &str) = ("Inter", "JetBrains Mono");
+pub(super) const FAMILIES: (&str, &str) = ("Allo Variable", "JetBrains Mono");
 
 thread_local! {
     static RETAINED: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };

@@ -1,10 +1,73 @@
-/* ibm plex sans - variable font with full weight range */
+/* allo: variable in optical size, weight and roundness, with a true oblique in each weight */
 @font-face {
-  font-family: "IBM Plex Sans";
+  font-family: "Allo";
   font-style: normal;
-  font-weight: 100 700;
+  font-weight: 100 900;
   font-display: swap;
-  src: url("/fonts/IBMPlexSans-Variable.ttf") format("truetype");
+  src: url("/fonts/AlloVariable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Allo";
+  font-style: italic;
+  font-weight: 100;
+  font-display: swap;
+  src: url("/fonts/Allo-ThinOblique.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Allo";
+  font-style: italic;
+  font-weight: 200;
+  font-display: swap;
+  src: url("/fonts/Allo-ExtraLightOblique.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Allo";
+  font-style: italic;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/fonts/Allo-LightOblique.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Allo";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Allo-Oblique.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Allo";
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/Allo-MediumOblique.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Allo";
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/Allo-SemiBoldOblique.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Allo";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/Allo-BoldOblique.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Allo";
+  font-style: italic;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/Allo-ExtraBoldOblique.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Allo";
+  font-style: italic;
+  font-weight: 900;
+  font-display: swap;
+  src: url("/fonts/Allo-BlackOblique.woff2") format("woff2");
 }
 
 /* jetbrains mono for code */
