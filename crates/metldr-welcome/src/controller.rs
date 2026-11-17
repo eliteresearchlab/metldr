@@ -2,11 +2,13 @@ use std::{cell::RefCell, rc::Rc};
 
 use wasm_bindgen::{JsCast, prelude::*};
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{AbortController, Document, Element, Event, HtmlSelectElement};
+use web_sys::{AbortController, Document, Element, Event, HtmlInputElement, HtmlSelectElement};
 
 use crate::{
-    backdrop, browser, dom, download, guide_view, setup_view,
-    state::{Choice, Panel, Setup, Status},
+    backdrop, browser, dom, download,
+    gateway::{self, Gateway},
+    guide_view, setup_view,
+    state::{Choice, Panel, Server, Service, Setup, Status},
 };
 
 pub type Shared = Rc<RefCell<App>>;
@@ -16,6 +18,7 @@ pub struct App {
     pub setup: Setup,
     pub download: Option<AbortController>,
     pub alive: bool,
+    gateway: Option<Rc<Gateway>>,
     theme_changed: bool,
     theme_revision: u64,
 }
@@ -65,6 +68,11 @@ pub fn mount() -> Result<(), JsValue> {
         },
         download: None,
         alive: true,
+        gateway: if preview {
+            None
+        } else {
+            Gateway::connect().ok()
+        },
         theme_changed: false,
         theme_revision: 0,
     }));
@@ -151,7 +159,7 @@ fn open_panel(app: Shared) {
     if current.setup.preview
         || !current.alive
         || current.setup.saving
-        || !matches!(current.setup.choice, Choice::Provider | Choice::Agent)
+        || current.setup.choice != Choice::Agent
     {
         return;
     }
@@ -185,119 +193,121 @@ fn open_panel(app: Shared) {
 
 async fn load(shared: Shared) {
     let destination = browser::saved_destination();
-    let result = browser::load_settings().await;
-    let mut fresh = false;
+    // Chrome's check starts before the gateway's, so the two run at the same time.
+    let chrome = browser::summarizer()
+        .and_then(|api| browser::call(&api, "availability", &[]).ok())
+        .and_then(|value| browser::within(&value, 3_000.0).ok())
+        .map(wasm_bindgen_futures::JsFuture::from);
+    let gateway = shared.borrow().gateway.clone();
+    let detected = match &gateway {
+        Some(gateway) => gateway.detect().await,
+        None => Err("The gateway is not reachable.".into()),
+    };
+    let theme = browser::load_theme().await;
+    let availability = match chrome {
+        Some(future) => future.await.ok().and_then(|value| value.as_string()),
+        None => Some("missing-api".into()),
+    };
     let mut app = shared.borrow_mut();
     if !app.alive {
         return;
     }
+    let preferred = detected
+        .as_ref()
+        .ok()
+        .and_then(|found| browser::get(found, "preferred").ok())
+        .filter(|preferred| preferred.is_object());
+    let preferred_route = preferred
+        .as_ref()
+        .and_then(|preferred| browser::get(preferred, "route").ok())
+        .and_then(|route| route.as_string());
+    let preferred_model = preferred
+        .as_ref()
+        .and_then(|preferred| browser::get(preferred, "model").ok())
+        .and_then(|model| model.as_string());
+    app.setup.servers = detected.as_ref().map(servers).unwrap_or_default();
+    let pick = Setup::recommend(availability.as_deref(), &app.setup.servers);
+    app.setup.recommended = Some(pick);
     if app.setup.generation == 0 {
-        let saved = |key| {
-            result
-                .as_ref()
-                .ok()
-                .and_then(|settings| browser::get(settings, key).ok())
-                .and_then(|value| value.as_string())
-        };
-        let local = saved("preferredProvider");
-        if let Some(model) =
-            saved("selectedModel").filter(|model| !model.is_empty() && model.len() <= 512)
-        {
-            app.setup.model = model;
-        }
-        fresh = matches!(destination, Ok(None)) && local.is_none();
-        match destination {
+        match &destination {
+            Ok(None) if preferred_route.is_none() => app.setup.choose(pick),
             Ok(destination) => app
                 .setup
-                .restore_choice(destination.as_deref(), local.as_deref()),
+                .restore_choice(destination.as_deref(), preferred_route.as_deref()),
             Err(_) => {
                 app.setup.detail =
                     "Your saved destination could not be read. Review it in the panel before connecting."
                         .into();
             }
         }
-    }
-    match result {
-        Ok(settings) => {
-            if !app.theme_changed {
-                if let Some(theme) = browser::get(&settings, "theme")
-                    .ok()
-                    .and_then(|v| v.as_string())
-                    .filter(|v| valid_theme(v))
-                {
-                    app.setup.theme = theme;
-                }
-            }
-            app.notice("Choose a connection to get started.");
+        if let Some(model) = preferred_model.filter(|model| app.setup.models.contains(model)) {
+            app.setup.model = model;
         }
-        Err(_) => app.notice(
-            "Saved settings could not be read. Choose your settings again or reload to retry.",
-        ),
-    }
-    app.setup.loading = false;
-    if fresh {
-        app.setup.status = Status::Checking;
-        let generation = app.setup.generation;
-        spawn_local(detect(shared.clone(), generation));
-    }
-    app.paint();
-}
-
-/// Checks Chrome's built-in AI and a local Ollama together, then recommends the easiest choice
-/// that works and selects it unless the user already chose. Sends no prompt or page content.
-async fn detect(app: Shared, generation: u64) {
-    // Chrome's check starts before Ollama's request, so the two run at the same time.
-    let chrome = browser::summarizer()
-        .and_then(|api| browser::call(&api, "availability", &[]).ok())
-        .and_then(|value| browser::within(&value, 3_000.0).ok())
-        .map(wasm_bindgen_futures::JsFuture::from);
-    let models = browser::check_ollama().await.unwrap_or_default();
-    let availability = match chrome {
-        Some(future) => future.await.ok().and_then(|value| value.as_string()),
-        None => Some("missing-api".into()),
-    };
-    let mut app = app.borrow_mut();
-    if !app.alive {
-        return;
-    }
-    let pick = Setup::recommend(availability.as_deref(), &models);
-    app.setup.recommended = Some(pick);
-    if !models.is_empty() {
-        app.setup.models = models;
-        if !app.setup.models.contains(&app.setup.model) {
-            app.setup.model = app.setup.models.first().cloned().unwrap_or_default();
-        }
-        let _ = dom::models(&app.document, &app.setup.models, &app.setup.model);
-    }
-    if app.setup.current(generation) && !app.setup.saving {
-        app.setup.choose(pick);
-        match pick {
+        match app.setup.choice {
             Choice::Chrome => app
                 .setup
                 .availability(availability.as_deref().unwrap_or("unknown")),
-            Choice::Ollama => {
-                app.setup.status = Status::Ready;
-                app.setup.detail =
-                    "Ollama is running here. Choose a model, then continue.".into();
+            Choice::Provider if destination.as_ref().is_ok_and(Option::is_none) => {
+                if pick == Choice::Provider {
+                    app.setup.detail = "Chrome's built-in AI and local model servers were not found here. Paste a key from a service you use.".into();
+                }
             }
-            Choice::Provider | Choice::Agent => {
-                app.setup.detail = "Chrome's built-in AI and Ollama were not found here. Paste a key from a service you use, or set up Ollama with the guide below.".into();
-            }
+            _ => {}
         }
     }
+    if !app.theme_changed {
+        if let Ok(Some(theme)) = theme {
+            app.setup.theme = theme;
+        }
+    }
+    app.notice(if detected.is_ok() {
+        "Choose a connection to get started."
+    } else {
+        "metldr's model gateway did not answer. Reload this page to try again."
+    });
+    app.setup.loading = false;
+    let _ = dom::models(&app.document, &app.setup.models, &app.setup.model);
     app.paint();
 }
 
+/// The local servers in a gateway `detect` reply that answered, with their models.
+fn servers(detected: &JsValue) -> Vec<(Server, Vec<String>)> {
+    let routes = browser::get(detected, "routes")
+        .ok()
+        .and_then(|routes| routes.dyn_into::<js_sys::Array>().ok());
+    let Some(routes) = routes else {
+        return Vec::new();
+    };
+    routes
+        .iter()
+        .filter(|state| {
+            browser::get(state, "state")
+                .ok()
+                .and_then(|v| v.as_string())
+                .as_deref()
+                == Some("ready")
+        })
+        .filter_map(|state| {
+            let route = browser::get(&state, "route").ok()?.as_string()?;
+            Some((Server::from_route(&route)?, gateway::models(&state)))
+        })
+        .collect()
+}
+
 fn handle_click(app: Shared, id: &str) {
-    let have = if app.borrow().setup.models.is_empty() {
-        Choice::Agent
-    } else {
-        Choice::Ollama
+    let found = {
+        let app = app.borrow();
+        match app.setup.recommended {
+            Some(Choice::Local(server)) => Some(server),
+            _ => app.setup.servers.first().map(|(server, _)| *server),
+        }
     };
     let choice = match id {
         "choose-local" => Some(Choice::Chrome),
-        "choose-agent" => Some(have),
-        "choose-ollama" => Some(Choice::Ollama),
+        "choose-agent" => Some(found.map_or(Choice::Agent, Choice::Local)),
+        "choose-ollama" => Some(Choice::Local(Server::Ollama)),
+        "choose-lmstudio" => Some(Choice::Local(Server::LmStudio)),
+        "choose-llamacpp" => Some(Choice::Local(Server::LlamaCpp)),
         "choose-installed" => Some(Choice::Agent),
         "choose-provider" => Some(Choice::Provider),
         _ => None,
@@ -309,6 +319,7 @@ fn handle_click(app: Shared, id: &str) {
         }
         app.cancel();
         app.setup.choose(choice);
+        let _ = dom::models(&app.document, &app.setup.models, &app.setup.model);
         app.paint();
         return;
     }
@@ -317,6 +328,7 @@ fn handle_click(app: Shared, id: &str) {
     }
     match id {
         "check-button" => check(app),
+        "key-connect" => connect_key(app),
         "download-button" => {
             if download::start(app.clone()).is_err() {
                 let mut app = app.borrow_mut();
@@ -335,8 +347,12 @@ fn handle_click(app: Shared, id: &str) {
             app.setup.detail = "The setup request was cancelled. Chrome may continue a model download shared with other pages.".into();
             app.paint();
         }
-        "continue-button" => finish(app, true),
-        "explore-button" => finish(app, false),
+        "continue-button" => finish(app),
+        "explore-button" => {
+            if let Some(window) = web_sys::window() {
+                let _ = window.close();
+            }
+        }
         _ => {}
     }
 }
@@ -348,7 +364,15 @@ fn handle_change(app: Shared, id: &str, value: String) {
     }
     match id {
         "model-choice" if current.setup.models.contains(&value) => current.setup.model = value,
-        "theme-choice" if valid_theme(&value) => {
+        "key-service" => match Service::from_route(&value) {
+            Some(service) => {
+                current.cancel();
+                current.setup.service = service;
+                current.setup.choose(Choice::Provider);
+            }
+            None => return,
+        },
+        "theme-choice" if browser::valid_theme(&value) => {
             current.theme_changed = true;
             current.theme_revision += 1;
             current.setup.theme = value;
@@ -371,10 +395,7 @@ async fn save_theme(app: Shared) {
             }
             (app.setup.theme.clone(), app.theme_revision)
         };
-        let result = match browser::object(&[("theme", theme.into())]) {
-            Ok(settings) => browser::save_settings(&settings).await,
-            Err(error) => Err(error),
-        };
+        let result = browser::save_theme(&theme).await;
         let mut app = app.borrow_mut();
         if !app.alive {
             return;
@@ -393,115 +414,175 @@ async fn save_theme(app: Shared) {
 }
 
 fn check(app: Shared) {
-    let (generation, choice) = {
+    let (generation, choice, gateway) = {
         let mut app = app.borrow_mut();
         if app.setup.saving || app.download.is_some() || app.setup.status == Status::Checking {
             return;
         }
         let choice = app.setup.choice;
-        if !matches!(choice, Choice::Chrome | Choice::Ollama) {
+        if !matches!(choice, Choice::Chrome | Choice::Local(_)) {
             return;
         }
         let generation = app.setup.begin(Status::Checking);
         app.setup.detail = "Checking availability. No prompt or page content is sent.".into();
         app.paint();
-        (generation, choice)
+        (generation, choice, app.gateway.clone())
     };
     spawn_local(async move {
-        let result = match choice {
-            Choice::Chrome => {
-                if let Some(api) = browser::summarizer() {
-                    browser::await_call(&api, "availability", &[])
-                        .await
-                        .map(|v| (v.as_string(), Vec::new()))
-                } else {
-                    Ok((Some("missing-api".into()), Vec::new()))
-                }
+        // Chrome reports its availability; a local server is found by the gateway's detect.
+        let result = match (choice, gateway) {
+            (Choice::Chrome, _) => match browser::summarizer() {
+                Some(api) => browser::await_call(&api, "availability", &[])
+                    .await
+                    .map(|value| (value.as_string(), Vec::new()))
+                    .map_err(|_| {
+                        "Chrome AI could not be checked. Try again or choose another connection."
+                            .to_owned()
+                    }),
+                None => Ok((Some("missing-api".into()), Vec::new())),
+            },
+            (_, Some(gateway)) => gateway.detect().await.map(|found| (None, servers(&found))),
+            (_, None) => {
+                Err("metldr's model gateway did not answer. Reload this page to try again.".into())
             }
-            Choice::Ollama => browser::check_ollama().await.map(|models| (None, models)),
-            _ => return,
         };
         let mut app = app.borrow_mut();
         if !app.alive || !app.setup.current(generation) {
             return;
         }
-        match result {
-            Ok((availability, _)) if choice == Choice::Chrome => app
+        match (choice, result) {
+            (Choice::Chrome, Ok((availability, _))) => app
                 .setup
                 .availability(availability.as_deref().unwrap_or("unknown")),
-            Ok((_, models)) => {
-                app.setup.models = models;
-                if !app.setup.models.contains(&app.setup.model) {
-                    app.setup.model = app.setup.models.first().cloned().unwrap_or_default();
+            (Choice::Local(server), Ok((_, found))) => {
+                app.setup.servers = found;
+                app.setup.choose(choice);
+                if app.setup.found(server).is_none() {
+                    app.setup.status = Status::Unavailable;
+                    app.setup.detail = format!(
+                        "Nothing answered at {}. Start {}, then check again.",
+                        server.address(),
+                        server.name()
+                    );
                 }
-                app.setup.status = if app.setup.models.is_empty() {
-                    Status::Unavailable
-                } else {
-                    Status::Ready
-                };
-                app.setup.detail = if app.setup.models.is_empty() {
-                    "Ollama is reachable but has no installed models. Install a model in Ollama, then check again."
-                } else { "Ollama is reachable. Choose an installed model before saving your settings." }.into();
                 if dom::models(&app.document, &app.setup.models, &app.setup.model).is_err() {
                     app.setup.status = Status::Error;
                     app.setup.detail =
                         "Installed models could not be shown. Reload to try again.".into();
                 }
             }
-            Err(_) => {
+            (_, Err(error)) => {
                 app.setup.status = Status::Error;
-                app.setup.detail = match choice {
-                    Choice::Chrome => "Chrome AI could not be checked. Try again or choose another connection.",
-                    _ => "Ollama could not be checked at 127.0.0.1:11434. Start Ollama and allow this extension origin, then retry.",
-                }.into();
+                app.setup.detail = error;
+            }
+            _ => {}
+        }
+        app.paint();
+    });
+}
+
+/// Checks the pasted key with its service through the gateway, which stores it encrypted.
+fn connect_key(app: Shared) {
+    let (generation, route, key, gateway) = {
+        let mut app = app.borrow_mut();
+        if app.setup.saving || app.setup.status == Status::Checking {
+            return;
+        }
+        let Ok(input) = dom::element(&app.document, "key-input")
+            .and_then(|input| input.dyn_into::<HtmlInputElement>().map_err(Into::into))
+        else {
+            return;
+        };
+        let key = input.value().trim().to_owned();
+        if key.is_empty() {
+            app.setup.status = Status::Error;
+            app.setup.detail = "Paste your API key.".into();
+            app.paint();
+            return;
+        }
+        let Some(gateway) = app.gateway.clone() else {
+            app.setup.status = Status::Error;
+            app.setup.detail =
+                "metldr's model gateway did not answer. Reload this page to try again.".into();
+            app.paint();
+            return;
+        };
+        let generation = app.setup.begin(Status::Checking);
+        app.setup.detail =
+            "Checking the key with the service. No prompt or page content is sent.".into();
+        app.paint();
+        (generation, app.setup.service.route(), key, gateway)
+    };
+    spawn_local(async move {
+        let result = gateway.connect_key(route, key).await;
+        let mut app = app.borrow_mut();
+        if !app.alive || !app.setup.current(generation) {
+            return;
+        }
+        match result {
+            Ok(state) => {
+                if let Ok(input) = dom::element(&app.document, "key-input")
+                    .and_then(|input| input.dyn_into::<HtmlInputElement>().map_err(Into::into))
+                {
+                    input.set_value("");
+                }
+                app.setup.models = gateway::models(&state);
+                app.setup.model = browser::get(&state, "model")
+                    .ok()
+                    .and_then(|model| model.as_string())
+                    .filter(|model| app.setup.models.contains(model))
+                    .or_else(|| app.setup.models.first().cloned())
+                    .unwrap_or_default();
+                app.setup.status = if app.setup.models.is_empty() {
+                    Status::Unavailable
+                } else {
+                    Status::Ready
+                };
+                app.setup.detail = if app.setup.models.is_empty() {
+                    "The key works, but the service listed no models for it."
+                } else {
+                    "Key accepted and kept encrypted in this browser. Choose a model, then save."
+                }
+                .into();
+                let _ = dom::models(&app.document, &app.setup.models, &app.setup.model);
+            }
+            Err(error) => {
+                app.setup.status = Status::Error;
+                app.setup.detail = error;
             }
         }
         app.paint();
     });
 }
 
-fn finish(app: Shared, connected: bool) {
-    let settings = {
+/// Makes the checked choice the route metldr uses, then closes the tab.
+fn finish(app: Shared) {
+    let (route, model, gateway) = {
         let mut app = app.borrow_mut();
-        if app.setup.loading
-            || app.setup.saving
-            || app.setup.theme_saving
-            || (connected && !app.setup.ready())
-        {
+        if app.setup.loading || app.setup.saving || app.setup.theme_saving || !app.setup.ready() {
             return;
         }
-        let mut fields = vec![
-            ("onboardingComplete", true.into()),
-            ("theme", app.setup.theme.clone().into()),
-        ];
-        if let Some(time) = app.setup.downloaded_at {
-            fields.push(("chromeAIDownloadComplete", time.into()));
-            fields.push(("chromeAIStatus", "available".into()));
-        }
-        if connected {
-            fields.push((
-                "preferredProvider",
-                match app.setup.choice {
-                    Choice::Chrome => "chrome-ai",
-                    _ => "ollama",
-                }
-                .into(),
-            ));
-            if app.setup.choice == Choice::Ollama {
-                fields.push(("selectedModel", app.setup.model.clone().into()));
-            }
-        }
-        let settings = browser::object(&fields);
+        let route = match app.setup.choice {
+            Choice::Chrome => "chrome-ai",
+            Choice::Local(server) => server.route(),
+            Choice::Provider => app.setup.service.route(),
+            Choice::Agent => return,
+        };
+        let model = if app.setup.choice == Choice::Chrome {
+            String::new()
+        } else {
+            app.setup.model.clone()
+        };
+        let Some(gateway) = app.gateway.clone() else {
+            return;
+        };
         app.cancel();
         app.setup.saving = true;
         app.paint();
-        settings
+        (route, model, gateway)
     };
     spawn_local(async move {
-        let result = match settings {
-            Ok(settings) => browser::save_settings(&settings).await,
-            Err(error) => Err(error),
-        };
+        let result = gateway.prefer(route, &model).await;
         let mut app = app.borrow_mut();
         if !app.alive {
             return;
@@ -514,14 +595,10 @@ fn finish(app: Shared, connected: bool) {
                     let _ = window.close();
                 }
             }
-            Err(_) => {
-                app.notice("Setup could not be saved. This tab will stay open. Try saving again.")
-            }
+            Err(error) => app.notice(&format!(
+                "Setup could not be saved: {error} This tab stays open. Try saving again."
+            )),
         }
         app.paint();
     });
-}
-
-fn valid_theme(value: &str) -> bool {
-    matches!(value, "catppuccin" | "gruvbox" | "cyberpunk" | "light")
 }

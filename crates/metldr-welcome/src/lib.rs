@@ -13,6 +13,8 @@ mod dom;
 #[cfg(target_arch = "wasm32")]
 mod download;
 #[cfg(target_arch = "wasm32")]
+mod gateway;
+#[cfg(target_arch = "wasm32")]
 mod guide_view;
 #[cfg(target_arch = "wasm32")]
 mod backdrop;

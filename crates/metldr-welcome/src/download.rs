@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use js_sys::{Date, Promise};
+use js_sys::Promise;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::AbortController;
@@ -96,7 +96,6 @@ pub fn start(app: Shared) -> Result<(), JsValue> {
                 Ok(()) => {
                     app.setup.status = Status::Ready;
                     app.setup.progress = Some(1.0);
-                    app.setup.downloaded_at = Some(Date::now());
                     app.setup.detail =
                         "Chrome AI is ready. The setup session has been released.".into();
                 }
@@ -109,17 +108,6 @@ pub fn start(app: Shared) -> Result<(), JsValue> {
                 }
             }
             app.paint();
-        }
-        let result = match browser::object(&[
-            ("chromeAIDownloadComplete", Date::now().into()),
-            ("chromeAIStatus", "available".into()),
-        ]) {
-            Ok(settings) => browser::save_settings(&settings).await,
-            Err(error) => Err(error),
-        };
-        let app = app.borrow();
-        if result.is_err() && app.alive && app.setup.current(generation) {
-            app.notice("The model is ready, but metldr could not save its status. Reopen the panel to check availability again.");
         }
     });
     Ok(())

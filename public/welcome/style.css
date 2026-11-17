@@ -43,7 +43,7 @@ svg, img { display: block; }
 a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 0.25em; }
 button, select, input { font: inherit; color: inherit; }
 button { cursor: pointer; user-select: none; touch-action: manipulation; }
-button:disabled, select:disabled { opacity: 0.45; cursor: not-allowed; }
+button:disabled, select:disabled, input:disabled { opacity: 0.45; cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 ::selection { color: var(--bg); background: var(--ink); }
 .skip { position: fixed; inset-block-start: 0.5rem; inset-inline-start: 1rem; z-index: 5; padding-block: 0.5rem; padding-inline: 0.85rem; color: var(--bg); background: var(--ink); translate: 0 -200%; }
@@ -109,6 +109,7 @@ select { min-block-size: 40px; padding-block: 0.35rem; padding-inline: 0.65rem; 
 .segmented button[aria-pressed="true"] { color: var(--bg); background: var(--ink); }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; }
 .controls > p:not(.note) { font-size: 0.8125rem; color: var(--muted); }
+#key-controls { align-items: end; }
 #download-progress { inline-size: min(100%, 20rem); accent-color: var(--ink); }
 .finish { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.25rem; padding-block-start: 0.85rem; border-block-start: 1px solid var(--line-soft); }
 .theme-field { display: inline-flex; align-items: center; gap: 0.5rem; margin-inline-start: auto; font-family: var(--mono); font-size: 0.75rem; color: var(--faint); }
