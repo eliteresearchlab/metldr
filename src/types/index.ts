@@ -275,39 +275,6 @@ export interface WordLookupResult {
   source?: string
 }
 
-export interface LookupContext {
-  languages?: string[]
-  fullSentence?: string
-  contextBefore?: string
-  contextAfter?: string
-}
-
-export interface ApiMeaning {
-  partOfSpeech: string
-  definitions: Array<{
-    definition: string
-    example?: string
-    synonyms?: string[]
-  }>
-}
-
-export interface ApiEntry {
-  word: string
-  meanings: ApiMeaning[]
-}
-
-export interface DictionaryEntry {
-  definitions: Array<{
-    definition: string
-    partOfSpeech: string
-    example: string | null
-    synonyms: string[]
-  }>
-  synonyms: string[]
-  language: string
-  source?: string
-}
-
 export interface DictEntry {
   word: string
   pos?: string

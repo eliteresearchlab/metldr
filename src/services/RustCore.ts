@@ -1,6 +1,7 @@
 import initCore, {
-  gateway_complete, gateway_detect_language, gateway_preferred, gateway_summarize
+  gateway_complete, gateway_preferred, gateway_summarize, gateway_word_lookup
 } from '../../crates/metldr-core/pkg/metldr_core'
+import type { WordLookupResult } from '../types'
 import coreWasmUrl from '../../crates/metldr-core/pkg/metldr_core_bg.wasm?url'
 
 const LEADING_SLASH_PATTERN = /^\//
@@ -38,12 +39,20 @@ export async function summarize(request: SummaryRequest): Promise<ModelAnswer> {
   return gateway_summarize(request)
 }
 
-export async function detectLanguage(text: string): Promise<string> {
-  await loadRustCore()
-  return gateway_detect_language(text)
-}
-
 export async function preferredRoute(): Promise<{ route: string; model?: string } | null> {
   await loadRustCore()
   return gateway_preferred()
+}
+
+export interface WordContext {
+  fullSentence?: string
+  contextBefore?: string
+  contextAfter?: string
+  pageLang?: string
+}
+
+// The word popup's lookup: the dictionary API, the page tools' model, then downloaded dictionaries.
+export async function lookupWord(word: string, context: WordContext): Promise<WordLookupResult> {
+  await loadRustCore()
+  return gateway_word_lookup(word, context)
 }

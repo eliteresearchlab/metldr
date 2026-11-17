@@ -124,6 +124,8 @@ fn saved<'a>(settings: &'a Value, route: &str, field: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
+mod word;
+
 // ---------- the key store ----------
 
 mod keys {
@@ -134,7 +136,7 @@ mod keys {
     const STORE: &str = "crypto";
     const KEY: &str = "aes";
 
-    async fn done(request: &IdbRequest) -> Result<JsValue, Error> {
+    pub(super) async fn done(request: &IdbRequest) -> Result<JsValue, Error> {
         let promise = js_sys::Promise::new(&mut |resolve, reject| {
             let ok = request.clone();
             let success = Closure::once_into_js(move || {
@@ -1317,8 +1319,7 @@ async fn chrome_summary(request: &Summarize, kind: &str, length: &str) -> Option
 
 /// The language of `text` as a two letter code. Chrome's own detector answers first since it
 /// costs no model call.
-#[wasm_bindgen]
-pub async fn gateway_detect_language(text: String) -> Result<String, JsValue> {
+async fn detect_language(text: String) -> Result<String, JsValue> {
     if let Some(found) = chrome_language(&text).await {
         return Ok(found);
     }
