@@ -1,5 +1,5 @@
-//! The word popup's lookup in the service worker: the free dictionary API, then the model the
-//! reader chose for page tools, then the dictionaries they downloaded.
+//! The word popup's lookup in the service worker: the dictionaries the reader downloaded, then
+//! the free dictionary API, then the model the reader chose for page tools.
 
 use super::*;
 use crate::word::{self, Context, Lookup};
@@ -22,6 +22,16 @@ pub async fn gateway_word_lookup(word: String, context: JsValue) -> Result<JsVal
             .await
             .unwrap_or(JsValue::NULL),
     );
+    let chosen = word::chosen(&stored["selectedLanguages"]);
+    // Downloaded dictionaries first: they answer offline and at once, before any detection.
+    let first = if context.page_lang.is_empty() {
+        &chosen[0]
+    } else {
+        &context.page_lang
+    };
+    if let Some(found) = local(&word, &word::priority(first, &chosen)).await {
+        return Ok(to_js(&json!(found)));
+    }
     let detected = if context.page_lang.is_empty() {
         detect_language(word::detection_text(&word, &context))
             .await
@@ -29,13 +39,10 @@ pub async fn gateway_word_lookup(word: String, context: JsValue) -> Result<JsVal
     } else {
         context.page_lang.clone()
     };
-    let languages = word::priority(&detected, &word::chosen(&stored["selectedLanguages"]));
+    let languages = word::priority(&detected, &chosen);
     let found = match api(&word, &languages).await {
         Some(found) => Some(found),
-        None => match model(&word, &languages[0], &context).await {
-            Some(found) => Some(found),
-            None => local(&word, &languages).await,
-        },
+        None => model(&word, &languages[0], &context).await,
     };
     found
         .map(|found| to_js(&json!(found)))
