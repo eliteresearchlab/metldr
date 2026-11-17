@@ -18,7 +18,8 @@ web-sys = { version = "=0.3.105", features = [
   "AbortController", "AbortSignal", "Document", "Element", "Event",
   "EventTarget", "HtmlSelectElement", "HtmlInputElement", "HtmlElement", "Node", "NodeList",
   "Request", "RequestInit", "Response", "ReadableStream", "IntersectionObserver", "IntersectionObserverEntry",
-  "ReadableStreamDefaultReader", "Location", "Window",
+  "ReadableStreamDefaultReader", "Location", "Window", "HtmlCanvasElement",
+  "WebGl2RenderingContext", "WebGlProgram", "WebGlShader", "WebGlUniformLocation", "MediaQueryList",
 ] }
 
 [profile.release]

@@ -5,7 +5,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{AbortController, Document, Element, Event, HtmlSelectElement};
 
 use crate::{
-    browser, dom, download, guide_view, scene, setup_view,
+    backdrop, browser, dom, download, guide_view, setup_view,
     state::{Choice, Panel, Setup, Status},
 };
 
@@ -49,7 +49,8 @@ pub fn mount() -> Result<(), JsValue> {
     let preview = window.location().protocol()? != "chrome-extension:";
     guide_view::mount(&document)?;
     setup_view::mount(&document, preview)?;
-    scene::mount(&document)?;
+    // The hero keeps its CSS gradient when WebGL2 is missing or the shader fails.
+    let _ = backdrop::mount(&document);
     let app = Rc::new(RefCell::new(App {
         document: document.clone(),
         setup: Setup {
