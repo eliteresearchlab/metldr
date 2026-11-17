@@ -1,13 +1,14 @@
 import { databaseService, DB_CONFIGS } from '../DatabaseService'
 import { localModels } from '../ai/LocalModelProvider'
-import type { SearchResult, VectorEntry } from '../../types'
+import type { VectorEntry } from '../../types'
 import { KeywordIndex } from '../../../crates/metldr-core/pkg/metldr_core'
 import { loadRustCore } from '../RustCore'
 
-// one chunk in the Rust keyword index: summary chunks are lifted and repeated sources spread out
+// one chunk in the Rust index, which keeps its text for page chat context and search sources
 function indexEntry(index: KeywordIndex, entry: VectorEntry): void {
   const meta = entry.metadata ?? {}
-  index.add(entry.id, entry.content, String(meta.sourceUrl ?? ''), String(meta.sourceId ?? ''), meta.isSummary === true)
+  index.add(entry.id, entry.type, String(meta.title ?? ''), entry.content, String(meta.sourceUrl ?? ''),
+    String(meta.sourceId ?? ''), meta.isSummary === true)
 }
 
 export class VectorStore {
@@ -17,7 +18,6 @@ export class VectorStore {
   private loaded = false
   private loadingPromise: Promise<void> | null = null
   private keywordIndex: KeywordIndex | null = null
-  private entries = new Map<string, VectorEntry>()
   private pendingAdds = 0
   
   // sandbox lifecycle tracking
@@ -40,17 +40,19 @@ export class VectorStore {
     return this.operationQueue
   }
 
-  // dense neighbours from Voy (nearest first, no similarity value) fused in Rust with the BM25 hits:
-  // rank-only reciprocal rank fusion, then the summary lift and the repeated-source penalty
-  async rank(query: string, queryEmbedding: number[], limit: number): Promise<SearchResult[]> {
+  // Voy's nearest chunk ids for an embedding, nearest first
+  async dense(queryEmbedding: number[], limit: number): Promise<string[]> {
     await this.ensureIndexLoaded()
-    const dense = await localModels.voySearch(queryEmbedding, limit)
-    const hits = JSON.parse(this.keywordIndex!.rank(query, dense, limit)) as Array<[string, number, SearchResult['matchType']]>
-    return hits.map(([id, score, matchType]) => ({ entry: this.entries.get(id)!, score, matchType }))
+    return localModels.voySearch(queryEmbedding, limit)
+  }
+
+  // the loaded Rust index, which ranks, filters and assembles search results
+  async keywords(): Promise<KeywordIndex> {
+    await this.ensureIndexLoaded()
+    return this.keywordIndex!
   }
 
   private remember(entry: VectorEntry): void {
-    this.entries.set(entry.id, entry)
     indexEntry(this.keywordIndex!, entry)
   }
 
@@ -151,7 +153,7 @@ export class VectorStore {
     
     this.loaded = true
     this.lastSandboxId = localModels.getSandboxId()
-    console.log(`[VectorStore] Index ready. ${this.entries.size} docs in keyword index. (${Date.now() - startTime}ms total)`)
+    console.log(`[VectorStore] Index ready. ${this.getDocCount()} docs in keyword index. (${Date.now() - startTime}ms total)`)
   }
 
   async hasDocument(sourceId: string): Promise<boolean> {
@@ -169,7 +171,7 @@ export class VectorStore {
 
   // get doc count for verification
   getDocCount(): number {
-    return this.entries.size
+    return this.keywordIndex?.size ?? 0
   }
 
   private async rebuildInvertedIndex(): Promise<void> {
@@ -177,7 +179,6 @@ export class VectorStore {
     await loadRustCore()
     this.keywordIndex ??= new KeywordIndex()
     this.keywordIndex.clear()
-    this.entries.clear()
     const db = await databaseService.getDatabase(DB_CONFIGS.cache)
     const tx = db.transaction('page_cache', 'readonly')
     const store = tx.objectStore('page_cache')

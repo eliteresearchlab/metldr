@@ -4,7 +4,9 @@ import { chunkingService } from './ChunkingService'
 import { databaseService, DB_CONFIGS } from '../DatabaseService'
 import { aiGateway } from '../ai/AIGateway'
 import { LRUCache } from 'lru-cache'
-import type { VectorEntry, SearchResult } from '../../types'
+import type { VectorEntry } from '../../types'
+import { expand_query_locally, focus_query, suggested_terms } from '../../../crates/metldr-core/pkg/metldr_core'
+import { loadRustCore } from '../RustCore'
 
 interface ChunkMetadata {
   sourceId: string
@@ -30,36 +32,32 @@ interface IndexingStats {
   skipReason?: 'unchanged' | 'duplicate' | 'no_chunks' | 'backfilled'
 }
 
+interface Candidates {
+  focused: string
+  dense: string[]
+}
+
+interface SearchSource {
+  index: number
+  title: string
+  url: string
+  type: 'email' | 'page' | 'pdf'
+  score: number
+  snippet: string
+}
+
 const EMBEDDING_CONCURRENCY = 8
 const STORE_RAG_METADATA = 'rag_metadata'
 const QUERY_CACHE_MAX = 100
 const QUERY_CACHE_TTL = 5 * 60 * 1000
-const WHITESPACE_PATTERN = /\s+/
-const COLLAPSED_WHITESPACE_PATTERN = /\s+/g
-const LLM_TERM_QUOTES_PATTERN = /[\"\'\n]/g
-const LLM_TERM_SEPARATOR_PATTERN = /[,;]/
-const TRAILING_SLASH_PATTERN = /\/$/
-const MEMORY_PHRASE_PATTERNS = [
-  /\bwhat was (the|that|a)?\s*/gi,
-  /\bwhere did i (read|see|find)\s*(about)?\s*/gi,
-  /\bi (read|saw|found|remember|recall|forgot)\s*(about|that)?\s*/gi,
-  /\bcan you (find|remind|tell me)\s*(about)?\s*/gi,
-  /\bdo you (remember|know)\s*(about)?\s*/gi,
-  /\bthat i (read|saw|found)\s*(about)?\s*/gi,
-  /\bi forgot (about|what)?\s*/gi,
-  /\bremind me (about|of|what)?\s*/gi,
-  /\bwhat did i\s*/gi,
-  /\bshow me (the|that|a)?\s*/gi,
-  /\bfind (the|that|a|my)?\s*/gi
-]
 
 export class RagService {
   private contentHashes = new Map<string, string>()
   private metadataLoaded = false
   private loadingPromise: Promise<void> | null = null
   private activeIndexing = new Map<string, Promise<void>>()
-  // LRU cache for query results (instant repeat queries)
-  private queryCache = new LRUCache<string, SearchResult[]>({
+  // the slow half of a search (model expansion, embedding, dense neighbours), kept for repeats
+  private queryCache = new LRUCache<string, Candidates>({
     max: QUERY_CACHE_MAX,
     ttl: QUERY_CACHE_TTL
   })
@@ -300,58 +298,22 @@ export class RagService {
     }
   }
 
-  async search(query: string, limit = 5): Promise<SearchResult[]> {
-    // check LRU cache first (instant repeat queries)
-    const cacheKey = `${query}:${limit}`
+  // expansion and embedding for `query`, then the dense neighbours of `5 × candidates` hits
+  private async candidates(query: string, candidates: number): Promise<Candidates> {
+    const cacheKey = `${query}:${candidates}`
     const cached = this.queryCache.get(cacheKey)
-    if (cached) {
-      console.log('[RagService] Query cache hit')
-      return cached
-    }
+    if (cached) return cached
 
-    try {
-      // 1. expand query with LLM (for global search - adds related terms)
-      const expanded = await this.expandQueryWithLLM(query)
-      const processed = this.preprocessQuery(expanded)
-      
-      // 2. dense neighbours and BM25 hits, fused by rank in Rust
-      const queryEmbedding = await embeddingProvider.embedQuery(processed)
-      const results = (await vectorStore.rank(processed, Array.from(queryEmbedding), limit * 5))
-        .slice(0, limit)
-        .map(hit => ({ ...hit, score: Math.round(hit.score) }))
-      
-      // cache results
-      this.queryCache.set(cacheKey, results)
-      
-      return results
-    } catch (err) {
-      console.error('[RagService] Search failed:', err)
-      return []
-    }
+    await loadRustCore()
+    const focused = focus_query(await this.expandQueryWithLLM(query))
+    const queryEmbedding = await embeddingProvider.embedQuery(focused)
+    const found = { focused, dense: await vectorStore.dense(Array.from(queryEmbedding), candidates * 5) }
+    this.queryCache.set(cacheKey, found)
+    return found
   }
 
-  // llm-based query expansion for global search with fallback
+  // llm-based query expansion for global search, with a local synonym expansion as fallback
   private async expandQueryWithLLM(query: string): Promise<string> {
-    // fallback: simple keyword expansion without LLM
-    const fallbackExpand = (q: string): string => {
-      const synonyms: Record<string, string[]> = {
-        'order': ['purchase', 'bought', 'confirmation', 'shipping'],
-        'orders': ['purchases', 'bought', 'confirmations', 'shipping'],
-        'invoice': ['bill', 'receipt', 'payment', 'statement'],
-        'invoices': ['bills', 'receipts', 'payments', 'statements'],
-        'email': ['mail', 'message', 'notification'],
-        'emails': ['mails', 'messages', 'notifications'],
-        'article': ['post', 'blog', 'news', 'story'],
-        'articles': ['posts', 'blogs', 'news', 'stories']
-      }
-      const words = q.toLowerCase().split(WHITESPACE_PATTERN)
-      const extras: string[] = []
-      for (const w of words) {
-        if (synonyms[w]) extras.push(...synonyms[w])
-      }
-      return extras.length > 0 ? `${q} ${extras.join(' ')}` : q
-    }
-
     try {
       const response = await aiGateway.complete({
         systemPrompt: `You are a search query optimizer. Output ONLY comma-separated search terms, no explanation.
@@ -363,150 +325,30 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
         userPrompt: `Query: "${query}"`,
         maxTokens: 100
       })
-      
-      if (response.ok && response.content) {
-        const expanded = response.content
-          .replace(LLM_TERM_QUOTES_PATTERN, '')
-          .split(LLM_TERM_SEPARATOR_PATTERN)
-          .map((t: string) => t.trim().toLowerCase())
-          .filter((t: string) => t.length > 2 && t.length < 40 && !t.includes(':'))
-          .slice(0, 12)
-        
-        if (expanded.length > 0) {
-          const result = `${query} ${expanded.join(' ')}`
-          console.log(`[RagService] LLM expanded: "${query}" → +${expanded.length} terms`)
-          return result
-        }
-      }
+      const terms = response.ok && response.content ? suggested_terms(response.content) : ''
+      if (terms) return `${query} ${terms}`
     } catch (err) {
       console.log('[RagService] LLM expansion failed, using fallback:', err)
     }
-    
-    // use fallback expansion
-    return fallbackExpand(query)
+    return expand_query_locally(query)
   }
 
+  // page chat context: the best chunks for `query`, only from `sourceUrl` when given
   async searchWithContext(query: string, limit = 3, sourceUrl?: string): Promise<string> {
     try {
-      const results = await this.search(query, limit * 4)
-      if (results.length === 0) return ''
-      
-      let filtered = results
-      if (sourceUrl) {
-        const sourceBase = sourceUrl.split('?')[0]
-        filtered = results.filter((r, i) => {
-          const entrySourceUrl = r.entry.metadata?.sourceUrl as string | undefined
-          if (!entrySourceUrl || typeof entrySourceUrl !== 'string') return false
-          const entryBase = entrySourceUrl.split('?')[0]
-          
-          const match = entrySourceUrl === sourceUrl || 
-                 entryBase === sourceBase ||
-                 entryBase.startsWith(sourceBase) ||
-                 sourceBase.startsWith(entryBase)
-          
-          if (i < 3 && !match) {
-            console.log(`[RagService] URL mismatch: query="${sourceBase.slice(0, 60)}" vs entry="${entryBase.slice(0, 60)}"`)
-          }
-          return match
-        })
-        
-        console.log(`[RagService] searchWithContext: ${results.length} total -> ${filtered.length} filtered for ${sourceUrl.slice(0, 50)}`)
-        
-        if (filtered.length === 0) {
-          console.log('[RagService] No RAG results for current page, using raw content instead')
-          return ''
-        }
-      }
-      
-      const contextParts = filtered.slice(0, limit).map((r, i) => {
-        const meta = r.entry.metadata || {}
-        const source = meta.title || meta.sourceUrl || r.entry.id
-        return `[Source ${i + 1}: ${source}]\n${r.entry.content}`
-      })
-      
-      return contextParts.join('\n\n---\n\n')
+      const { focused, dense } = await this.candidates(query, limit * 4)
+      return (await vectorStore.keywords()).context(focused, dense, limit, sourceUrl ?? '')
     } catch (err) {
       console.error('[RagService] searchWithContext failed:', err)
       return ''
     }
   }
 
-  async searchWithSources(query: string, limit = 5): Promise<{
-    context: string
-    sources: Array<{
-      index: number
-      title: string
-      url: string
-      type: 'email' | 'page' | 'pdf'
-      score: number
-      snippet: string
-    }>
-  }> {
+  // global search: one chunk per page with numbered sources, scored up by the question's keywords
+  async searchWithSources(query: string, limit = 5): Promise<{ context: string; sources: SearchSource[] }> {
     try {
-      // fetch more results for comprehensive coverage
-      const results = await this.search(query, limit * 4)
-      console.log('[RagService.searchWithSources] search results:', results.length)
-      if (results.length === 0) return { context: '', sources: [] }
-      
-      // extract significant query terms
-      const queryTerms = this.extractQueryKeywords(query)
-      
-      // score results with keyword boost
-      const scored = results.map(r => {
-        const content = r.entry.content.toLowerCase()
-        const title = ((r.entry.metadata?.title as string) || '').toLowerCase()
-        const text = content + ' ' + title
-        
-        let matchedTerms = 0
-        for (const term of queryTerms) {
-          if (text.includes(term)) matchedTerms++
-        }
-        const keywordScore = queryTerms.length > 0 ? matchedTerms / queryTerms.length : 0.5
-        const boost = 1 + keywordScore
-        const adjustedScore = Math.min(100, Math.round(r.score * boost))
-        
-        return { ...r, score: adjustedScore, keywordScore, matchedTerms }
-      })
-      
-      scored.sort((a, b) => b.score - a.score)
-      
-      // dedupe by source URL (keep highest-scored chunk per source)
-      const seenUrls = new Set<string>()
-      const deduped = scored.filter(r => {
-        const url = (r.entry.metadata?.sourceUrl as string) || r.entry.id
-        const baseUrl = url.split(':chunk:')[0].split('?')[0].replace(TRAILING_SLASH_PATTERN, '')
-        if (seenUrls.has(baseUrl)) return false
-        seenUrls.add(baseUrl)
-        return true
-      })
-      
-      // take top results without aggressive score filtering
-      // just use the limit directly - let the LLM decide relevance
-      const top = deduped.slice(0, limit)
-      
-      const sources = top.map((r, i) => {
-        const meta = r.entry.metadata || {}
-        return {
-          index: i + 1,
-          title: (meta.title as string) || (meta.sourceUrl as string) || r.entry.id,
-          url: (meta.sourceUrl as string) || '',
-          type: (r.entry.type === 'email' ? 'email' : r.entry.type === 'pdf' ? 'pdf' : 'page') as 'email' | 'page' | 'pdf',
-          score: r.score,
-          snippet: r.entry.content.slice(0, 200)
-        }
-      })
-      
-      const contextParts = top.map((r, i) => {
-        const meta = r.entry.metadata || {}
-        const title = meta.title || meta.sourceUrl || r.entry.id
-        return `[${i + 1}] ${title}:\n${r.entry.content}`
-      })
-      
-      console.log('[RagService.searchWithSources] returning sources:', sources.length, 'context length:', contextParts.join('').length)
-      return {
-        context: contextParts.join('\n\n'),
-        sources
-      }
+      const { focused, dense } = await this.candidates(query, limit * 4)
+      return JSON.parse((await vectorStore.keywords()).sources(query, focused, dense, limit))
     } catch (err) {
       console.error('[RagService] searchWithSources failed:', err)
       return { context: '', sources: [] }
@@ -528,44 +370,6 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
 
     // fallback: direct document check (more reliable than keyword search)
     return await vectorStore.hasDocument(sourceUrl)
-  }
-
-  // query preprocessing: strips personal/memory phrases, focuses on topic keywords
-  private preprocessQuery(query: string): string {
-    let q = query.toLowerCase().trim()
-    
-    // strip personal/memory phrases that don't help search
-    for (const phrase of MEMORY_PHRASE_PATTERNS) {
-      q = q.replace(phrase, ' ')
-    }
-    
-    // collapse multiple spaces
-    q = q.replace(COLLAPSED_WHITESPACE_PATTERN, ' ').trim()
-    
-    return q
-  }
-
-  // extract significant keywords for strict matching
-  private extractQueryKeywords(query: string): string[] {
-    const stopwords = new Set([
-      // standard stopwords
-      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-      'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
-      'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-      'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those',
-      'i', 'me', 'my', 'you', 'your', 'we', 'our', 'they', 'their', 'it', 'its',
-      'what', 'which', 'who', 'whom', 'where', 'when', 'why', 'how',
-      'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some',
-      'any', 'no', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
-      'just', 'also', 'now', 'here', 'there', 'then', 'once', 'again',
-      // memory/personal terms (user asking about their history)
-      'read', 'saw', 'found', 'remember', 'recall', 'forgot', 'remind',
-      'show', 'find', 'tell', 'know', 'about', 'thing'
-    ])
-    
-    return query.toLowerCase()
-      .split(WHITESPACE_PATTERN)
-      .filter(t => t.length > 2 && !stopwords.has(t))
   }
 
   async indexSummary(summaryText: string, metadata: ChunkMetadata): Promise<void> {

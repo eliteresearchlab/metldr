@@ -144,11 +144,6 @@ export class BackgroundBootstrap {
         return true
       }
 
-      if (msg.type === 'RAG_SEARCH') {
-        this._onRagSearch(msg as { type: string; query: string; limit?: number }, respond)
-        return true
-      }
-
       if (msg.type === 'RAG_HAS_INDEXED_CONTENT') {
         this._onRagHasIndexedContent(msg as { type: string; sourceUrl: string }, respond)
         return true
@@ -685,18 +680,6 @@ export class BackgroundBootstrap {
           log.error('onRagIndexChunks', errMsg)
         }
         respond({ success: false, error: errMsg })
-      }
-    })()
-  }
-
-  static _onRagSearch(msg: { type: string; query: string; limit?: number }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const results = await ragService.search(msg.query, msg.limit || 10)
-        respond({ success: true, results })
-      } catch (err) {
-        log.error('onRagSearch', (err as Error).message)
-        respond({ success: false, error: (err as Error).message, results: [] })
       }
     })()
   }

@@ -1,5 +1,6 @@
 mod chunking;
 mod decoder;
+pub mod query;
 pub mod retrieval;
 mod thinking;
 
@@ -9,6 +10,7 @@ pub use decoder::Decoder;
 #[cfg(target_arch = "wasm32")]
 mod wasm {
     use super::Decoder;
+    use super::retrieval::Chunk;
     use wasm_bindgen::prelude::*;
 
     #[wasm_bindgen]
@@ -29,15 +31,27 @@ mod wasm {
             Self(super::retrieval::Index::default())
         }
 
+        #[allow(clippy::too_many_arguments)]
         pub fn add(
             &mut self,
             id: &str,
-            text: &str,
+            kind: &str,
+            title: &str,
+            content: &str,
             source_url: &str,
             source_id: &str,
             summary: bool,
         ) {
-            self.0.add(id, text, source_url, source_id, summary);
+            let chunk = Chunk {
+                id,
+                kind,
+                title,
+                content,
+                source_url,
+                source_id,
+                summary,
+            };
+            self.0.add(&chunk);
         }
 
         pub fn remove(&mut self, id: &str) {
@@ -57,21 +71,39 @@ mod wasm {
             self.0.has_source(source)
         }
 
-        /// `[[id, score, kind], ...]` as JSON, best first; the score is a whole number from 0 to 100.
-        pub fn rank(
-            &self,
-            query: &str,
-            dense: Vec<String>,
-            keyword_limit: u32,
-        ) -> Result<String, JsError> {
-            let hits: Vec<_> = self
-                .0
-                .rank(query, &dense, keyword_limit as usize)
-                .into_iter()
-                .map(|hit| (hit.id, (hit.score + 0.5).floor() as u32, hit.kind.as_str()))
-                .collect();
-            serde_json::to_string(&hits).map_err(|_| JsError::new("could not encode hits"))
+        /// Page chat context for `focused` (see `Index::context`); `page` may be empty.
+        pub fn context(&self, focused: &str, dense: Vec<String>, limit: u32, page: &str) -> String {
+            self.0.context(focused, &dense, limit as usize, page)
         }
+
+        /// `{context, sources: [{index, title, url, type, score, snippet}]}` as JSON.
+        pub fn sources(
+            &self,
+            question: &str,
+            focused: &str,
+            dense: Vec<String>,
+            limit: u32,
+        ) -> Result<String, JsError> {
+            let sources = self.0.sources(question, focused, &dense, limit as usize);
+            serde_json::to_string(&sources).map_err(|_| JsError::new("could not encode sources"))
+        }
+    }
+
+    /// The topic words of a search question (see `query::focus`).
+    #[wasm_bindgen]
+    pub fn focus_query(query: &str) -> String {
+        super::query::focus(query)
+    }
+
+    #[wasm_bindgen]
+    pub fn expand_query_locally(query: &str) -> String {
+        super::query::expand_locally(query)
+    }
+
+    /// A model's suggested search terms, space separated (see `query::suggested_terms`).
+    #[wasm_bindgen]
+    pub fn suggested_terms(answer: &str) -> String {
+        super::query::suggested_terms(answer).join(" ")
     }
 
     #[wasm_bindgen]

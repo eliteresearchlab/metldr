@@ -68,8 +68,23 @@ pub struct Hit<'a> {
     pub kind: Match,
 }
 
+/// One stored chunk as the extension keeps it.
+pub struct Chunk<'a> {
+    pub id: &'a str,
+    /// "article", "page", "email" or "pdf".
+    pub kind: &'a str,
+    pub title: &'a str,
+    pub content: &'a str,
+    pub source_url: &'a str,
+    pub source_id: &'a str,
+    pub summary: bool,
+}
+
 struct Doc {
     id: Box<str>,
+    kind: Box<str>,
+    title: Box<str>,
+    content: Box<str>,
     len: u32,
     terms: Box<[u32]>,
     summary: bool,
@@ -86,6 +101,9 @@ pub struct Index {
     terms: HashMap<Box<str>, u32>,
     postings: Vec<Vec<(u32, u32)>>,
     docs: Vec<Option<Doc>>,
+    /// Token counts by slot, apart from `docs`: the BM25 loop then reads 4 bytes per posting,
+    /// not a whole chunk record.
+    lens: Vec<u32>,
     slots: HashMap<Box<str>, u32>,
     free: Vec<u32>,
     sources: HashMap<Box<str>, u32>,
@@ -122,6 +140,52 @@ pub fn tokenize(text: &str, each: &mut dyn FnMut(&str)) {
     flush(&mut word, &mut chars);
 }
 
+const SNIPPET: usize = 200;
+
+/// Global search sources and the context the answer reads.
+#[derive(serde::Serialize)]
+pub struct Sources<'a> {
+    pub context: String,
+    pub sources: Vec<Source<'a>>,
+}
+
+#[derive(serde::Serialize)]
+pub struct Source<'a> {
+    pub index: usize,
+    pub title: &'a str,
+    pub url: &'a str,
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub score: u32,
+    pub snippet: &'a str,
+}
+
+impl Doc {
+    /// The chunk's title, else its page address, else its id.
+    fn label(&self) -> &str {
+        [&self.title, &self.source_url]
+            .into_iter()
+            .find(|s| !s.is_empty())
+            .map_or(&self.id, |s| s)
+    }
+}
+
+/// JavaScript's Math.round for the non-negative scores here.
+fn whole(score: f64) -> u32 {
+    (score + 0.5).floor() as u32
+}
+
+fn before_query(url: &str) -> &str {
+    url.split('?').next().unwrap_or(url)
+}
+
+/// One page per source: the address without chunk suffix, query or trailing slash.
+fn page_key(url: &str) -> &str {
+    let url = url.split(":chunk:").next().unwrap_or(url);
+    let url = before_query(url);
+    url.strip_suffix('/').unwrap_or(url)
+}
+
 fn source_base(url: &str) -> &str {
     let end = url.find(['?', '#']).unwrap_or(url.len());
     &url[..end]
@@ -140,12 +204,18 @@ impl Index {
         *self = Self::default();
     }
 
-    pub fn add(&mut self, id: &str, text: &str, source_url: &str, source_id: &str, summary: bool) {
+    pub fn add(&mut self, chunk: &Chunk) {
+        let Chunk {
+            id,
+            source_url,
+            source_id,
+            ..
+        } = *chunk;
         self.remove(id);
         let mut counts: Vec<(u32, u32)> = Vec::new();
         let mut len = 0u32;
         let (terms, postings) = (&mut self.terms, &mut self.postings);
-        tokenize(text, &mut |word| {
+        tokenize(chunk.content, &mut |word| {
             len += 1;
             let term = match terms.get(word) {
                 Some(&term) => term,
@@ -163,8 +233,10 @@ impl Index {
         });
         let slot = self.free.pop().unwrap_or_else(|| {
             self.docs.push(None);
+            self.lens.push(0);
             self.docs.len() as u32 - 1
         });
+        self.lens[slot as usize] = len;
         for &(term, count) in &counts {
             self.postings[term as usize].push((slot, count));
         }
@@ -177,9 +249,12 @@ impl Index {
         self.slots.insert(id.into(), slot);
         self.docs[slot as usize] = Some(Doc {
             id: id.into(),
+            kind: chunk.kind.into(),
+            title: chunk.title.into(),
+            content: chunk.content.into(),
             len,
             terms: counts.into_iter().map(|(term, _)| term).collect(),
-            summary,
+            summary: chunk.summary,
             source: source_base(source_url).into(),
             source_url: source_url.into(),
             source_id: source_id.into(),
@@ -235,7 +310,7 @@ impl Index {
             let df = posting.len() as f64;
             let idf = (1.0 + (n as f64 - df + 0.5) / (df + 0.5)).ln();
             for &(slot, tf) in posting {
-                let len = self.docs[slot as usize].as_ref().map_or(0, |doc| doc.len);
+                let len = self.lens[slot as usize];
                 let norm = K1 * (1.0 - B + B * (f64::from(len) / average));
                 let tf = f64::from(tf);
                 let score = &mut scores[slot as usize];
@@ -271,6 +346,22 @@ impl Index {
         dense: &[impl AsRef<str>],
         keyword_limit: usize,
     ) -> Vec<Hit<'a>> {
+        let ranked = self.ranked(query, dense, keyword_limit);
+        let hits = ranked.into_iter().map(|h| Hit {
+            id: &self.doc(h.slot).id,
+            score: h.score,
+            kind: h.kind,
+        });
+        hits.collect()
+    }
+
+    fn doc(&self, slot: u32) -> &Doc {
+        self.docs[slot as usize]
+            .as_ref()
+            .expect("a ranked slot holds a chunk")
+    }
+
+    fn ranked(&self, query: &str, dense: &[impl AsRef<str>], keyword_limit: usize) -> Vec<Ranked> {
         let mut fused = Fusion {
             hits: Vec::new(),
             at: vec![NONE; self.docs.len()],
@@ -284,11 +375,7 @@ impl Index {
         fused.add(self.keyword(query, keyword_limit), false);
 
         let scale = TOP_SCORE * (RRF_K + 1.0) / 2.0;
-        let doc = |slot: u32| {
-            self.docs[slot as usize]
-                .as_ref()
-                .expect("a ranked slot holds a chunk")
-        };
+        let doc = |slot: u32| self.doc(slot);
         let mut hits: Vec<Ranked> = fused
             .hits
             .into_iter()
@@ -334,13 +421,141 @@ impl Index {
         }
         order(&mut hits);
         hits.truncate(CANDIDATE_CAP);
-        hits.into_iter()
-            .map(|h| Hit {
-                id: &doc(h.slot).id,
-                score: h.score,
-                kind: h.kind,
+        hits
+    }
+
+    /// The fused hits for a search, each with its score rounded to a whole number: `candidates`
+    /// of them, from `5 × candidates` keyword hits and the dense neighbours.
+    fn search(
+        &self,
+        focused: &str,
+        dense: &[impl AsRef<str>],
+        candidates: usize,
+    ) -> Vec<(u32, u32)> {
+        let mut hits = self.ranked(focused, dense, candidates * 5);
+        hits.truncate(candidates);
+        hits.into_iter().map(|h| (h.slot, whole(h.score))).collect()
+    }
+
+    /// Page chat context: the best `limit` chunks, only from `page` when one is given (same
+    /// address up to its query, or one address a prefix of the other), each under a numbered
+    /// source line. Empty when nothing matches.
+    pub fn context(
+        &self,
+        focused: &str,
+        dense: &[impl AsRef<str>],
+        limit: usize,
+        page: &str,
+    ) -> String {
+        let page_base = before_query(page);
+        let from_page = |doc: &Doc| {
+            let base = before_query(&doc.source_url);
+            page.is_empty()
+                || (!doc.source_url.is_empty()
+                    && (&*doc.source_url == page
+                        || base.starts_with(page_base)
+                        || page_base.starts_with(base)))
+        };
+        let mut out = String::new();
+        let hits = self
+            .search(focused, dense, limit * 4)
+            .into_iter()
+            .map(|(slot, _)| self.doc(slot));
+        for (i, doc) in hits.filter(|doc| from_page(doc)).take(limit).enumerate() {
+            if i > 0 {
+                out.push_str("\n\n---\n\n");
+            }
+            out.push_str(&format!(
+                "[Source {}: {}]\n{}",
+                i + 1,
+                doc.label(),
+                doc.content
+            ));
+        }
+        out
+    }
+
+    /// Global search answer material: the best `limit` sources, one chunk per page, scored up
+    /// by how many of the question's keywords they contain, and the numbered context built from
+    /// them.
+    pub fn sources(
+        &self,
+        question: &str,
+        focused: &str,
+        dense: &[impl AsRef<str>],
+        limit: usize,
+    ) -> Sources<'_> {
+        let terms = crate::query::keywords(question);
+        let mut hits: Vec<Ranked> = self
+            .search(focused, dense, limit * 4)
+            .into_iter()
+            .enumerate()
+            .map(|(at, (slot, score))| {
+                let doc = self.doc(slot);
+                // terms hold no spaces, so content and title are searched apart, never joined
+                let (content, title) = (doc.content.to_lowercase(), doc.title.to_lowercase());
+                let found = terms
+                    .iter()
+                    .filter(|term| content.contains(term.as_str()) || title.contains(term.as_str()))
+                    .count();
+                let share = if terms.is_empty() {
+                    0.5
+                } else {
+                    found as f64 / terms.len() as f64
+                };
+                let score = f64::from(whole(f64::from(score) * (1.0 + share)).min(100));
+                Ranked {
+                    slot,
+                    score,
+                    kind: Match::Keyword,
+                    at: at as u32,
+                }
             })
-            .collect()
+            .collect();
+        order(&mut hits);
+        let mut pages: Vec<&str> = Vec::new();
+        let mut out = Sources {
+            context: String::new(),
+            sources: Vec::new(),
+        };
+        for hit in hits {
+            let doc = self.doc(hit.slot);
+            let page = page_key(if doc.source_url.is_empty() {
+                &doc.id
+            } else {
+                &doc.source_url
+            });
+            if pages.contains(&page) {
+                continue;
+            }
+            pages.push(page);
+            let index = out.sources.len() + 1;
+            if index > 1 {
+                out.context.push_str("\n\n");
+            }
+            out.context
+                .push_str(&format!("[{index}] {}:\n{}", doc.label(), doc.content));
+            out.sources.push(Source {
+                index,
+                title: doc.label(),
+                url: &doc.source_url,
+                kind: match &*doc.kind {
+                    "email" => "email",
+                    "pdf" => "pdf",
+                    _ => "page",
+                },
+                score: hit.score as u32,
+                snippet: doc
+                    .content
+                    .char_indices()
+                    .nth(SNIPPET)
+                    .map_or(&doc.content, |(end, _)| &doc.content[..end]),
+            });
+            if index == limit {
+                break;
+            }
+        }
+        out
     }
 }
 
@@ -411,6 +626,19 @@ fn order(hits: &mut [Ranked]) {
 mod tests {
     use super::*;
 
+    fn put(index: &mut Index, id: &str, content: &str, url: &str, source_id: &str, summary: bool) {
+        let chunk = Chunk {
+            id,
+            kind: "article",
+            title: "",
+            content,
+            source_url: url,
+            source_id,
+            summary,
+        };
+        index.add(&chunk);
+    }
+
     fn words(text: &str) -> Vec<String> {
         let mut out = Vec::new();
         tokenize(text, &mut |w| out.push(w.to_owned()));
@@ -432,15 +660,23 @@ mod tests {
     #[test]
     fn keyword_ranking_prefers_term_frequency_and_short_chunks() {
         let mut index = Index::default();
-        index.add("a", "rust ownership rules", "https://a", "a", false);
-        index.add(
+        put(
+            &mut index,
+            "a",
+            "rust ownership rules",
+            "https://a",
+            "a",
+            false,
+        );
+        put(
+            &mut index,
             "b",
             "rust rust rust ownership borrowing lifetimes and many other words",
             "https://b",
             "b",
             false,
         );
-        index.add("c", "gardening tips", "https://c", "c", false);
+        put(&mut index, "c", "gardening tips", "https://c", "c", false);
         let hits = index.rank("rust ownership", &[] as &[&str], 10);
         assert_eq!(hits.iter().map(|h| h.id).collect::<Vec<_>>(), ["a", "b"]);
         assert!(hits.iter().all(|h| h.kind == Match::Keyword));
@@ -452,9 +688,30 @@ mod tests {
     #[test]
     fn fusion_scores_a_double_first_place_100_and_penalises_repeated_sources() {
         let mut index = Index::default();
-        index.add("p:1", "alpha beta", "https://x/page?a=1", "x", false);
-        index.add("p:2", "alpha gamma", "https://x/page#two", "x", false);
-        index.add("s", "summary of alpha", "https://y", "y:summary", true);
+        put(
+            &mut index,
+            "p:1",
+            "alpha beta",
+            "https://x/page?a=1",
+            "x",
+            false,
+        );
+        put(
+            &mut index,
+            "p:2",
+            "alpha gamma",
+            "https://x/page#two",
+            "x",
+            false,
+        );
+        put(
+            &mut index,
+            "s",
+            "summary of alpha",
+            "https://y",
+            "y:summary",
+            true,
+        );
         let hits = index.rank("alpha beta", &["p:1", "s", "missing"], 10);
         assert_eq!(hits[0].id, "p:1");
         assert_eq!(hits[0].kind, Match::Hybrid);
@@ -464,5 +721,64 @@ mod tests {
         let raw: f64 = (1.0 / 62.0) * 100.0 * 61.0 / 2.0;
         assert!((second.score - (raw - 15.0).max(0.0)).abs() < 1e-9);
         assert!(index.has_source("y:summary") && index.has_source("https://y"));
+    }
+
+    #[test]
+    fn context_keeps_the_current_page_and_sources_keep_one_chunk_per_page() {
+        let mut index = Index::default();
+        put(
+            &mut index,
+            "a:0",
+            "tides follow the moon",
+            "https://sea.test/tides?x=1",
+            "a",
+            false,
+        );
+        put(
+            &mut index,
+            "a:1",
+            "spring tides and neap tides",
+            "https://sea.test/tides/",
+            "a",
+            false,
+        );
+        put(
+            &mut index,
+            "b:0",
+            "moon landing history",
+            "https://space.test/moon",
+            "b",
+            false,
+        );
+        let context = index.context("tides moon", &["a:0"], 3, "https://sea.test/tides");
+        assert_eq!(context.matches("[Source ").count(), 2);
+        assert!(!context.contains("landing"));
+        assert!(
+            context.starts_with("[Source 1: https://sea.test/tides?x=1]\ntides follow the moon")
+        );
+        assert_eq!(
+            index.context("tides", &[] as &[&str], 3, "https://other.test"),
+            ""
+        );
+
+        let found = index.sources("what about tides and the moon", "tides moon", &["a:0"], 5);
+        let urls: Vec<_> = found.sources.iter().map(|s| s.url).collect();
+        assert_eq!(
+            urls,
+            ["https://sea.test/tides?x=1", "https://space.test/moon"]
+        );
+        assert_eq!(
+            (
+                found.sources[0].index,
+                found.sources[0].kind,
+                found.sources[0].score
+            ),
+            (1, "page", 100)
+        );
+        assert!(
+            found
+                .context
+                .starts_with("[1] https://sea.test/tides?x=1:\ntides follow the moon\n\n[2] ")
+        );
     }
 }
