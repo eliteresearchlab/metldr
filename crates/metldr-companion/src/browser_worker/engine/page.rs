@@ -3,7 +3,10 @@
 
 use super::{Job, Kind, Request, TIMEOUT};
 use async_trait::async_trait;
-use browse_core::{Browser, Cdp, CdpError, CdpEvent, HandoffResult, TabId, TabInfo, TabOptions, TabState, ToolContext};
+use browse_core::{
+    Browser, Cdp, CdpError, CdpEvent, HandoffResult, TabId, TabInfo, TabOptions, TabState,
+    ToolContext,
+};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::{
@@ -56,7 +59,12 @@ struct ActorCdp {
 
 #[async_trait]
 impl Cdp for ActorCdp {
-    async fn send(&self, method: &str, params: Value, session_id: Option<&str>) -> Result<Value, CdpError> {
+    async fn send(
+        &self,
+        method: &str,
+        params: Value,
+        session_id: Option<&str>,
+    ) -> Result<Value, CdpError> {
         let deadline = Instant::now() + TIMEOUT;
         let (reply, rx) = oneshot::channel();
         let kind = Kind::Page {
@@ -126,7 +134,11 @@ pub(super) struct Page {
 }
 
 impl Page {
-    pub(super) fn new(tab: i32, requests: mpsc::Sender<Request>, events: broadcast::Sender<CdpEvent>) -> Self {
+    pub(super) fn new(
+        tab: i32,
+        requests: mpsc::Sender<Request>,
+        events: broadcast::Sender<CdpEvent>,
+    ) -> Self {
         let tab = TabId::from(tab);
         let browser = AttachedTab {
             tab,

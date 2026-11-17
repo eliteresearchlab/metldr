@@ -9,8 +9,8 @@ use crate::{
     browser_action::{Action, Binding, Intent, Outcome, Phase, Proposal},
     browser_io::{Client, Notice},
 };
-use runtime::CallId;
 use futures::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
+use runtime::CallId;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{

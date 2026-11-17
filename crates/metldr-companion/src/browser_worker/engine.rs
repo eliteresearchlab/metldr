@@ -157,7 +157,9 @@ impl Engine {
                 return Err("invalid browser grant revision".into());
             }
             let target = &attached["targetInfo"];
-            let target_id = target["targetId"].as_str().ok_or("invalid browser target")?;
+            let target_id = target["targetId"]
+                .as_str()
+                .ok_or("invalid browser target")?;
             if target["url"].as_str() != Some(source.url.as_str()) || target["type"] != "page" {
                 return Err("browser target changed during attachment".into());
             }

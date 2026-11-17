@@ -290,7 +290,9 @@ impl Actor {
                 Ok(())
             }
             super::super::page::Route::Refused => {
-                let _ = job.reply.send(Err(format!("{method} is not available in metldr")));
+                let _ = job
+                    .reply
+                    .send(Err(format!("{method} is not available in metldr")));
                 Ok(())
             }
             super::super::page::Route::Send => {
