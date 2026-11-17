@@ -58,7 +58,6 @@ export class RagService {
   private metadataLoaded = false
   private loadingPromise: Promise<void> | null = null
   private activeIndexing = new Map<string, Promise<void>>()
-  private lastStats: IndexingStats | null = null
   // LRU cache for query results (instant repeat queries)
   private queryCache = new LRUCache<string, SearchResult[]>({
     max: QUERY_CACHE_MAX,
@@ -164,7 +163,6 @@ export class RagService {
           stats.skipped = true
           stats.skipReason = 'unchanged'
           stats.wallClockMs = Date.now() - wallClockStart
-          this.lastStats = stats
           report(100) // done (cached)
           console.log(`[RagService] SKIPPED: ${metadata.sourceId.slice(0, 50)} (content unchanged, VOY verified) [${stats.wallClockMs}ms]`)
           return
@@ -181,7 +179,6 @@ export class RagService {
           stats.skipped = true
           stats.skipReason = 'backfilled'
           stats.wallClockMs = Date.now() - wallClockStart
-          this.lastStats = stats
           report(100)
           console.log(`[RagService] SKIPPED: ${metadata.sourceId.slice(0, 50)} (VOY has data, backfilled metadata) [${stats.wallClockMs}ms]`)
           return
@@ -198,7 +195,6 @@ export class RagService {
         stats.skipped = true
         stats.skipReason = 'no_chunks'
         stats.wallClockMs = Date.now() - wallClockStart
-        this.lastStats = stats
         report(100)
         console.log(`[RagService] SKIPPED: No chunks to index [${stats.wallClockMs}ms]`)
         return
@@ -241,7 +237,6 @@ export class RagService {
       stats.storageMs = Date.now() - persistStart
       
       stats.wallClockMs = Date.now() - wallClockStart
-      this.lastStats = stats
       
       // invalidate query cache (new content indexed)
       this.queryCache.clear()
@@ -251,7 +246,6 @@ export class RagService {
       console.log(`[RagService] Timing: total=${stats.wallClockMs}ms, embed=${stats.embeddingMs}ms, persist=${stats.storageMs}ms`)
     } catch (err) {
       stats.wallClockMs = Date.now() - wallClockStart
-      this.lastStats = stats
       report(100) // end on error too
       console.error(`[RagService] Chunk indexing FAILED after ${stats.wallClockMs}ms:`, err)
     }
@@ -423,9 +417,6 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
           return ''
         }
       }
-      
-      // sort by score
-      filtered.sort((a, b) => b.score - a.score)
       
       const contextParts = filtered.slice(0, limit).map((r, i) => {
         const meta = r.entry.metadata || {}
@@ -623,18 +614,6 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
 
   isIndexing(sourceId: string): boolean {
     return this.activeIndexing.has(sourceId)
-  }
-
-  getActiveIndexingCount(): number {
-    return this.activeIndexing.size
-  }
-
-  getLastStats(): IndexingStats | null {
-    return this.lastStats
-  }
-  
-  getMetadataCount(): number {
-    return this.contentHashes.size
   }
 
   // unified entry point: check if indexed, wait if in-progress, or index if needed

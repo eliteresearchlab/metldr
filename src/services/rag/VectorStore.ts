@@ -154,14 +154,6 @@ export class VectorStore {
     console.log(`[VectorStore] Index ready. ${this.entries.size} docs in keyword index. (${Date.now() - startTime}ms total)`)
   }
 
-  // force reload from IDB - call when index seems stale
-  async forceReload(): Promise<void> {
-    console.log('[VectorStore] Force reloading index...')
-    this.loaded = false
-    this.loadingPromise = null
-    await this.ensureIndexLoaded()
-  }
-
   async hasDocument(sourceId: string): Promise<boolean> {
     await this.ensureIndexLoaded()
     
