@@ -59,45 +59,6 @@ const MEMORY_PHRASE_PATTERNS = [
   /\bfind (the|that|a|my)?\s*/gi
 ]
 
-function simHash(text: string): bigint {
-  const tokens = text.toLowerCase().split(WHITESPACE_PATTERN).filter(t => t.length > 2)
-  const v = new Int32Array(64).fill(0)
-  
-  for (const token of tokens) {
-    let h = 0n
-    for (let i = 0; i < token.length; i++) {
-      h = ((h << 5n) - h + BigInt(token.charCodeAt(i))) & 0xFFFFFFFFFFFFFFFFn
-    }
-    for (let i = 0; i < 64; i++) {
-      v[i] += (h & (1n << BigInt(i))) ? 1 : -1
-    }
-  }
-  
-  let fingerprint = 0n
-  for (let i = 0; i < 64; i++) {
-    if (v[i] > 0) fingerprint |= (1n << BigInt(i))
-  }
-  return fingerprint
-}
-
-function hammingDistance(a: bigint, b: bigint): number {
-  let xor = a ^ b
-  let count = 0
-  while (xor) {
-    count += Number(xor & 1n)
-    xor >>= 1n
-  }
-  return count
-}
-
-function bigintToHex(n: bigint): string {
-  return n.toString(16).padStart(16, '0')
-}
-
-function hexToBigint(hex: string): bigint {
-  return BigInt('0x' + hex)
-}
-
 export class RagService {
   private contentHashes = new Map<string, string>()
   private metadataLoaded = false
@@ -324,11 +285,6 @@ export class RagService {
     const first = text.slice(0, 200)
     const last = text.slice(-200)
     return `${text.length}:${first}:${last}`
-  }
-
-  // batch embed and store - uses GPU-level batching for 3x speedup
-  private async embedAndStoreBatched(entries: VectorEntry[], batchSize: number): Promise<void> {
-    await this.embedAndStoreBatchedWithProgress(entries, batchSize)
   }
 
   // batch embed with progress callback for UI updates

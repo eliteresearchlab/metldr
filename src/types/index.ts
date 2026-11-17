@@ -488,19 +488,6 @@ export interface SetEmailCacheMessage {
   summary: EmailSummary
 }
 
-export interface DevSeedDataMessage {
-  type: 'DEV_SEED_DATA'
-  days?: number
-}
-
-export interface DevClearDataMessage {
-  type: 'DEV_CLEAR_DATA'
-}
-
-export interface DevGetCountsMessage {
-  type: 'DEV_GET_COUNTS'
-}
-
 export type BackgroundMessage =
   | EmailSummaryMessage
   | GetReplySuggestionsMessage
@@ -511,9 +498,6 @@ export type BackgroundMessage =
   | CheckHealthMessage
   | GetEmailCacheMessage
   | SetEmailCacheMessage
-  | DevSeedDataMessage
-  | DevClearDataMessage
-  | DevGetCountsMessage
   | { type: 'EXTRACT_ONLY'; tabId: number }
   | { type: 'RAG_INDEX'; entry: VectorEntry }
   | { type: 'RAG_INDEX_CHUNKS'; text: string; metadata: Record<string, unknown> }
