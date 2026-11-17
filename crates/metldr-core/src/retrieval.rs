@@ -6,9 +6,13 @@
 //! Reciprocal Rank Fusion (Cormack, Clarke and Buettcher, 2009) with k = 60: it reads only each
 //! hit's position, because the dense leg returns no similarity and BM25 scores are not
 //! comparable with cosine similarity.
+//!
+//! A query word the index has never seen is read as a typo: the closest indexed word within one
+//! or two edits (Smith-Waterman with affine gaps, SIMD where the target has it) answers for it.
 
 use std::collections::HashMap as StdMap;
 use std::hash::{BuildHasherDefault, Hasher};
+use std::rc::Rc;
 
 /// FNV-1a: the keys are short words and ids from our own index, so a keyed hash buys nothing
 /// and SipHash costs several times the cycles per lookup and more wasm.
@@ -98,8 +102,14 @@ struct Doc {
 /// into one flat array instead of a hash map per query.
 #[derive(Default)]
 pub struct Index {
-    terms: HashMap<Box<str>, u32>,
+    terms: HashMap<Rc<str>, u32>,
+    /// The terms by their length in characters, the haystacks for typo matching: a typo search
+    /// reads only the words whose length it can reach.
+    lengths: Vec<Lengths>,
     postings: Vec<Vec<(u32, u32)>>,
+    /// Scratch for `add`, flat by term: one more than the term's place in the chunk's counts,
+    /// or 0. Counting a chunk's terms is then one array read per word, not a scan of the counts.
+    seen: Vec<u32>,
     docs: Vec<Option<Doc>>,
     /// Token counts by slot, apart from `docs`: the BM25 loop then reads 4 bytes per posting,
     /// not a whole chunk record.
@@ -108,6 +118,13 @@ pub struct Index {
     free: Vec<u32>,
     sources: HashMap<Box<str>, u32>,
     total_len: u64,
+}
+
+/// The indexed words of one length, each beside its term (shared with `Index::terms`).
+#[derive(Default)]
+struct Lengths {
+    words: Vec<Rc<str>>,
+    terms: Vec<u32>,
 }
 
 /// Lowercase words of three or more characters; anything that is not a letter, digit or
@@ -214,23 +231,42 @@ impl Index {
         self.remove(id);
         let mut counts: Vec<(u32, u32)> = Vec::new();
         let mut len = 0u32;
-        let (terms, postings) = (&mut self.terms, &mut self.postings);
+        let (terms, lengths, postings, seen) = (
+            &mut self.terms,
+            &mut self.lengths,
+            &mut self.postings,
+            &mut self.seen,
+        );
         tokenize(chunk.content, &mut |word| {
             len += 1;
             let term = match terms.get(word) {
                 Some(&term) => term,
                 None => {
                     let term = postings.len() as u32;
+                    let chars = word.chars().count();
+                    if lengths.len() <= chars {
+                        lengths.resize_with(chars + 1, Lengths::default);
+                    }
+                    let word: Rc<str> = word.into();
                     postings.push(Vec::new());
-                    terms.insert(word.into(), term);
+                    seen.push(0);
+                    lengths[chars].words.push(word.clone());
+                    lengths[chars].terms.push(term);
+                    terms.insert(word, term);
                     term
                 }
             };
-            match counts.iter_mut().find(|(t, _)| *t == term) {
-                Some((_, count)) => *count += 1,
-                None => counts.push((term, 1)),
+            let at = &mut seen[term as usize];
+            if *at == 0 {
+                counts.push((term, 1));
+                *at = counts.len() as u32;
+            } else {
+                counts[*at as usize - 1].1 += 1;
             }
         });
+        for &(term, _) in &counts {
+            self.seen[term as usize] = 0;
+        }
         let slot = self.free.pop().unwrap_or_else(|| {
             self.docs.push(None);
             self.lens.push(0);
@@ -296,7 +332,7 @@ impl Index {
         }
         let mut terms: Vec<u32> = Vec::new();
         tokenize(query, &mut |word| {
-            if let Some(&term) = self.terms.get(word)
+            if let Some(term) = self.terms.get(word).copied().or_else(|| self.closest(word))
                 && !terms.contains(&term)
             {
                 terms.push(term);
@@ -336,6 +372,38 @@ impl Index {
         }
         order(&mut hits);
         hits.into_iter().map(|hit| hit.slot).collect()
+    }
+
+    /// The indexed word `word` most likely misspells: within one edit up to seven characters and
+    /// two beyond, its length within that many of the word's, best alignment first, then the
+    /// word in more chunks. Words under four characters are too short to tell a typo from another
+    /// word.
+    fn closest(&self, word: &str) -> Option<u32> {
+        let chars = word.chars().count();
+        if chars < 4 {
+            return None;
+        }
+        let typos = if chars <= 7 { 1 } else { 2 };
+        let config = neo_frizbee::Config {
+            max_typos: Some(typos as u16),
+            sort: neo_frizbee::SortStrategy::Unsorted,
+            ..Default::default()
+        };
+        let mut matcher = neo_frizbee::Matcher::new(word, &config);
+        let reach = chars - typos..=(chars + typos).min(self.lengths.len().saturating_sub(1));
+        let mut best: Option<(u16, usize, u32)> = None;
+        for same in self.lengths.get(reach).into_iter().flatten() {
+            for found in matcher.match_list(&same.words) {
+                let term = same.terms[found.index as usize];
+                let common = self.postings[term as usize].len();
+                if common > 0
+                    && best.is_none_or(|(score, most, _)| (found.score, common) > (score, most))
+                {
+                    best = Some((found.score, common, term));
+                }
+            }
+        }
+        best.map(|(_, _, term)| term)
     }
 
     /// Fuses the dense neighbours (ids, nearest first) with the keyword hits for `query`, then
@@ -683,6 +751,24 @@ mod tests {
         index.remove("a");
         assert!(!index.has_source("https://a"));
         assert_eq!(index.rank("ownership", &[] as &[&str], 10)[0].id, "b");
+    }
+
+    #[test]
+    fn finds_the_word_a_typo_misspells() {
+        let mut index = Index::default();
+        put(
+            &mut index,
+            "a",
+            "schema migrations run first",
+            "",
+            "",
+            false,
+        );
+        put(&mut index, "b", "the scheme of things", "", "", false);
+        put(&mut index, "c", "reading about receiving", "", "", false);
+        assert_eq!(index.keyword("shcema", 5), [0]);
+        assert_eq!(index.keyword("recieving", 5), [2]);
+        assert!(index.keyword("xyz qqqq", 5).is_empty());
     }
 
     #[test]
