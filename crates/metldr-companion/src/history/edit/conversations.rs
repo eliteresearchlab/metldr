@@ -222,51 +222,35 @@ impl Edit<'_> {
                 conversations: Vec::new(),
                 next: None,
             };
-            let mut end = cursor.map_or(anchor, |cursor| cursor.before.0 - 1);
-            let mut last = None;
-            loop {
-                let entry = storage(|| {
-                    let table = self.write.open_table(CONVERSATION_ORDER)?;
-                    Ok(table
-                        .range(..=end)?
-                        .next_back()
-                        .transpose()?
-                        .map(|(number, id)| (number.value(), id.value().to_owned())))
-                })?;
-                let Some((number, id)) = entry else { break };
-                if page.conversations.len() == 16 {
-                    page.next = Some(Cursor {
-                        anchor: Counter(anchor),
-                        before: Counter(last.ok_or("conversation cursor absent")?),
-                    });
-                    break;
-                }
-                let conversation = self.saved_conversation(&id)?;
-                if storage(|| conversation_number(&self.profile, &id))? != number {
+            let end = cursor.map_or(anchor, |cursor| cursor.before.0 - 1);
+            let order = storage(|| {
+                let table = self.write.open_table(CONVERSATION_ORDER)?;
+                table
+                    .range(..=end)?
+                    .rev()
+                    .take(PAGE + 1)
+                    .map(|entry| {
+                        entry
+                            .map(|(number, id)| (number.value(), id.value().to_owned()))
+                            .map_err(Into::into)
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })?;
+            for (number, id) in order.iter().take(PAGE) {
+                let conversation = self.saved_conversation(id)?;
+                if storage(|| conversation_number(&self.profile, id))? != *number {
                     return storage(|| Err("conversation order differs".into()));
                 }
                 page.conversations.push(ConversationSummary {
-                    id,
-                    title: Preview::text(&conversation.title, 256),
+                    id: id.clone(),
+                    title: Preview::text(&conversation.title, TITLE),
                 });
+            }
+            if order.len() > PAGE {
                 page.next = Some(Cursor {
                     anchor: Counter(anchor),
-                    before: Counter(number),
+                    before: Counter(order[PAGE - 1].0),
                 });
-                if serde_json::to_vec(&page)?.len() > 32_768 {
-                    page.conversations.pop();
-                    if page.conversations.is_empty() {
-                        return Err("conversation summary exceeds capacity".into());
-                    }
-                    page.next = Some(Cursor {
-                        anchor: Counter(anchor),
-                        before: Counter(last.ok_or("conversation cursor absent")?),
-                    });
-                    break;
-                }
-                page.next = None;
-                last = Some(number);
-                end = number - 1;
             }
             Ok(page)
         })())
