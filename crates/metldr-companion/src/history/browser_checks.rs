@@ -417,7 +417,7 @@ fn native_browser_actions_keep_the_workflow_source_and_block_uncertain_recovery(
                 retargeted.binding.tab = 8;
                 retargeted.binding.document = "another-document".into();
                 retargeted.url = "http://127.0.0.1:1/other".into();
-                let (ack, reply) = mpsc::sync_channel(1);
+                let (ack, reply) = tokio::sync::oneshot::channel();
                 owner
                     .browser_event(Event::Proposed {
                         proposal: retargeted,
@@ -425,16 +425,16 @@ fn native_browser_actions_keep_the_workflow_source_and_block_uncertain_recovery(
                         budget: None,
                     })
                     .unwrap();
-                assert!(reply.recv().unwrap().is_err());
+                assert!(reply.blocking_recv().unwrap().is_err());
                 let (action, reply) = propose(owner, proposal);
                 assert_eq!(action.proposal.binding.tab, 7);
                 assert_eq!(action.proposal.binding.document, "document-1");
                 owner
                     .browser_decide(&action.id, action.revision, true)
                     .unwrap();
-                let approved = reply.recv().unwrap().unwrap();
+                let approved = reply.blocking_recv().unwrap().unwrap();
                 let dispatched = dispatch(owner, &approved).unwrap();
-                let (ack, reply) = mpsc::sync_channel(1);
+                let (ack, reply) = tokio::sync::oneshot::channel();
                 owner
                     .browser_event(Event::Observed {
                         action: action.id,
@@ -445,7 +445,7 @@ fn native_browser_actions_keep_the_workflow_source_and_block_uncertain_recovery(
                         ack,
                     })
                     .unwrap();
-                reply.recv().unwrap().unwrap();
+                reply.blocking_recv().unwrap().unwrap();
                 owner
                     .agent_settled(
                         &action.proposal.run,
@@ -801,8 +801,8 @@ fn saved_fixture_start_replays_but_cannot_retarget_https() {
 fn propose(
     owner: &mut Owner,
     p: Proposal,
-) -> (Action, mpsc::Receiver<std::result::Result<Action, String>>) {
-    let (ack, rx) = mpsc::sync_channel(1);
+) -> (Action, tokio::sync::oneshot::Receiver<std::result::Result<Action, String>>) {
+    let (ack, mut rx) = tokio::sync::oneshot::channel();
     owner
         .browser_event(Event::Proposed {
             proposal: p,
@@ -810,14 +810,14 @@ fn propose(
             budget: None,
         })
         .unwrap();
-    assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
     let action = owner.browser_view.values().next().unwrap().clone();
     assert_eq!(saved(owner).browser_actions[&action.id], action);
     (action, rx)
 }
 
 fn dispatch(owner: &mut Owner, action: &Action) -> std::result::Result<Action, String> {
-    let (ack, rx) = mpsc::sync_channel(1);
+    let (ack, rx) = tokio::sync::oneshot::channel();
     owner
         .browser_event(Event::Dispatch {
             action: action.id.clone(),
@@ -825,12 +825,12 @@ fn dispatch(owner: &mut Owner, action: &Action) -> std::result::Result<Action, S
             ack,
         })
         .unwrap();
-    rx.recv().unwrap()
+    rx.blocking_recv().unwrap()
 }
 
 fn cached(owner: &mut Owner, proposal: Proposal, expected: &Action) {
     let before = fs::read(owner.disk.directory.join("history.redb")).unwrap();
-    let (ack, rx) = mpsc::sync_channel(1);
+    let (ack, rx) = tokio::sync::oneshot::channel();
     owner
         .browser_event(Event::Proposed {
             proposal,
@@ -838,7 +838,7 @@ fn cached(owner: &mut Owner, proposal: Proposal, expected: &Action) {
             budget: None,
         })
         .unwrap();
-    assert_eq!(rx.recv().unwrap().unwrap(), *expected);
+    assert_eq!(rx.blocking_recv().unwrap().unwrap(), *expected);
     assert_eq!(
         fs::read(owner.disk.directory.join("history.redb")).unwrap(),
         before
@@ -851,7 +851,7 @@ fn browser_review_budget_tracks_only_the_saved_pending_approval() {
     for decision in [Some(true), Some(false), None] {
         with_owner(false, |owner, proposal| {
             let budget = crate::browser_owner::Budget::new(std::time::Duration::from_secs(30));
-            let (ack, rx) = mpsc::sync_channel(1);
+            let (ack, mut rx) = tokio::sync::oneshot::channel();
             owner
                 .browser_event(Event::Proposed {
                     proposal: proposal.clone(),
@@ -870,7 +870,7 @@ fn browser_review_budget_tracks_only_the_saved_pending_approval() {
             assert!(rx.try_recv().is_err());
 
             let repeated = crate::browser_owner::Budget::new(std::time::Duration::from_secs(30));
-            let (ack, cached) = mpsc::sync_channel(1);
+            let (ack, cached) = tokio::sync::oneshot::channel();
             owner
                 .browser_event(Event::Proposed {
                     proposal,
@@ -878,23 +878,23 @@ fn browser_review_budget_tracks_only_the_saved_pending_approval() {
                     budget: Some(repeated.clone()),
                 })
                 .unwrap();
-            assert_eq!(cached.recv().unwrap().unwrap(), action);
+            assert_eq!(cached.blocking_recv().unwrap().unwrap(), action);
             assert!(repeated.review_elapsed().is_none());
             if let Some(approve) = decision {
                 owner
                     .browser_decide(&action.id, action.revision, approve)
                     .unwrap();
-                assert!(rx.recv().unwrap().is_ok());
+                assert!(rx.blocking_recv().unwrap().is_ok());
             } else {
                 owner.stop_run("stop", &action.proposal.run).unwrap();
-                assert!(rx.recv().unwrap().is_err());
+                assert!(rx.blocking_recv().unwrap().is_err());
             }
             assert!(budget.review_elapsed().is_none());
         });
     }
     with_owner(false, |owner, proposal| {
         let budget = crate::browser_owner::Budget::new(std::time::Duration::ZERO);
-        let (ack, rx) = mpsc::sync_channel(1);
+        let (ack, rx) = tokio::sync::oneshot::channel();
         owner
             .browser_event(Event::Proposed {
                 proposal,
@@ -902,7 +902,7 @@ fn browser_review_budget_tracks_only_the_saved_pending_approval() {
                 budget: Some(budget),
             })
             .unwrap();
-        assert!(rx.recv().unwrap().is_err());
+        assert!(rx.blocking_recv().unwrap().is_err());
         assert!(owner.browser_approval.is_none());
         assert!(saved(owner).browser_actions.is_empty());
     });
@@ -911,12 +911,12 @@ fn browser_review_budget_tracks_only_the_saved_pending_approval() {
 #[test]
 fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() {
     with_owner(false, |owner, proposal| {
-        let (pending, rx) = propose(owner, proposal.clone());
+        let (pending, mut rx) = propose(owner, proposal.clone());
         cached(owner, proposal.clone(), &pending);
         assert!(owner.browser_decide(&pending.id, 2, true).is_err());
-        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(matches!(rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
         owner.browser_decide(&pending.id, 1, true).unwrap();
-        let approved = rx.recv().unwrap().unwrap();
+        let approved = rx.blocking_recv().unwrap().unwrap();
         assert_eq!(approved.state, Phase::Approved);
         assert_eq!(saved(owner).browser_actions[&approved.id], approved);
         cached(owner, proposal.clone(), &approved);
@@ -925,7 +925,7 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
         assert_eq!(saved(owner).browser_actions[&approved.id], dispatched);
         cached(owner, proposal.clone(), &dispatched);
         assert!(dispatch(owner, &approved).is_err());
-        let (ack, rx) = mpsc::sync_channel(1);
+        let (ack, rx) = tokio::sync::oneshot::channel();
         owner
             .browser_event(Event::Observed {
                 action: dispatched.id.clone(),
@@ -936,12 +936,12 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
                 ack,
             })
             .unwrap();
-        assert!(rx.recv().unwrap().is_err());
+        assert!(rx.blocking_recv().unwrap().is_err());
         assert_eq!(
             saved(owner).browser_actions[&approved.id].state,
             Phase::Dispatching
         );
-        let (ack, rx) = mpsc::sync_channel(1);
+        let (ack, rx) = tokio::sync::oneshot::channel();
         owner
             .browser_event(Event::Observed {
                 action: dispatched.id.clone(),
@@ -952,7 +952,7 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
                 ack,
             })
             .unwrap();
-        let verified = rx.recv().unwrap().unwrap();
+        let verified = rx.blocking_recv().unwrap().unwrap();
         assert_eq!(saved(owner).browser_actions[&approved.id], verified);
         assert!(matches!(
             verified.state,
@@ -1011,7 +1011,7 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
     with_owner(false, |owner, proposal| {
         let (pending, rx) = propose(owner, proposal);
         owner.browser_decide(&pending.id, 1, true).unwrap();
-        let approved = rx.recv().unwrap().unwrap();
+        let approved = rx.blocking_recv().unwrap().unwrap();
         let number = approved
             .id
             .rsplit(':')
@@ -1031,7 +1031,7 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
             );
             write.commit().unwrap();
         }
-        let (ack, rx) = mpsc::sync_channel(1);
+        let (ack, rx) = tokio::sync::oneshot::channel();
         assert!(
             owner
                 .browser_event(Event::Dispatch {
@@ -1041,7 +1041,7 @@ fn browser_owner_saves_approval_dispatch_and_observation_before_acknowledging() 
                 })
                 .is_err()
         );
-        assert!(rx.recv().unwrap().is_err());
+        assert!(rx.blocking_recv().unwrap().is_err());
         let read = owner.record_history.db.begin_read().unwrap();
         let actions = read.open_table(crate::history::schema::ACTIONS).unwrap();
         let durable: crate::history::schema::Record<Action> = crate::history::schema::decode(
@@ -1089,7 +1089,7 @@ fn navigation_requires_durable_destination_before_a_new_field_proposal() {
         owner
             .browser_decide(&pending.id, pending.revision, true)
             .unwrap();
-        let approved = rx.recv().unwrap().unwrap();
+        let approved = rx.blocking_recv().unwrap().unwrap();
         let dispatched = dispatch(owner, &approved).unwrap();
         let mut target = field.binding.clone();
         target.document = "destination-document".into();
@@ -1112,7 +1112,7 @@ fn navigation_requires_durable_destination_before_a_new_field_proposal() {
                 )
                 .is_err()
         );
-        let (ack, rx) = mpsc::sync_channel(1);
+        let (ack, rx) = tokio::sync::oneshot::channel();
         owner
             .browser_event(Event::Observed {
                 action: dispatched.id.clone(),
@@ -1126,7 +1126,7 @@ fn navigation_requires_durable_destination_before_a_new_field_proposal() {
                 ack,
             })
             .unwrap();
-        let settled = rx.recv().unwrap().unwrap();
+        let settled = rx.blocking_recv().unwrap().unwrap();
         assert_eq!(saved(owner).browser_actions[&settled.id], settled);
         let mut state = saved(owner);
         field.tool_use_id = "destination-field".into();
@@ -1155,7 +1155,7 @@ fn browser_owner_stop_prevents_dispatch_and_preserves_uncertainty_after_dispatch
     with_owner(false, |owner, proposal| {
         let (pending, rx) = propose(owner, proposal);
         owner.browser_decide(&pending.id, 1, false).unwrap();
-        let declined = rx.recv().unwrap().unwrap();
+        let declined = rx.blocking_recv().unwrap().unwrap();
         assert!(matches!(
             declined.state,
             Phase::Settled {
@@ -1168,16 +1168,16 @@ fn browser_owner_stop_prevents_dispatch_and_preserves_uncertainty_after_dispatch
     for after_approval in [false, true] {
         with_owner(false, |owner, proposal| {
             let run = proposal.run.clone();
-            let (pending, rx) = propose(owner, proposal);
+            let (pending, mut rx) = propose(owner, proposal);
             let candidate = if after_approval {
                 owner.browser_decide(&pending.id, 1, true).unwrap();
-                rx.recv().unwrap().unwrap()
+                rx.try_recv().unwrap().unwrap()
             } else {
                 pending.clone()
             };
             owner.stop_run("stop", &run).unwrap();
             if !after_approval {
-                assert!(rx.recv().unwrap().is_err());
+                assert!(rx.try_recv().unwrap().is_err());
             }
             assert!(dispatch(owner, &candidate).is_err());
             assert!(matches!(
@@ -1192,7 +1192,7 @@ fn browser_owner_stop_prevents_dispatch_and_preserves_uncertainty_after_dispatch
         let run = proposal.run.clone();
         let (pending, rx) = propose(owner, proposal);
         owner.browser_decide(&pending.id, 1, true).unwrap();
-        let approved = rx.recv().unwrap().unwrap();
+        let approved = rx.blocking_recv().unwrap().unwrap();
         dispatch(owner, &approved).unwrap();
         owner.stop_run("stop", &run).unwrap();
         assert_eq!(
@@ -1219,7 +1219,7 @@ fn browser_restart_never_replays_approved_or_dispatched_actions() {
             let (pending, rx) = propose(owner, proposal);
             if phase > 0 {
                 owner.browser_decide(&pending.id, 1, true).unwrap();
-                let approved = rx.recv().unwrap().unwrap();
+                let approved = rx.blocking_recv().unwrap().unwrap();
                 if phase == 2 {
                     dispatch(owner, &approved).unwrap();
                 }

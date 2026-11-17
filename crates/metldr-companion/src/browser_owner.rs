@@ -1,11 +1,11 @@
 use crate::{
     Result,
     browser_action::{Action, Outcome, Proposal},
-    flow::{Owner, acknowledge},
+    flow::{Owner, OwnerReply, acknowledge},
 };
-use std::sync::{atomic::Ordering, mpsc::SyncSender};
+use std::sync::atomic::Ordering;
 
-type Reply = SyncSender<std::result::Result<Action, String>>;
+type Reply = OwnerReply<Action>;
 
 mod grants;
 mod review;
@@ -22,7 +22,7 @@ pub(super) enum Event {
         goal: String,
         intended_effects: Vec<String>,
         scope: String,
-        ack: SyncSender<std::result::Result<u32, String>>,
+        ack: OwnerReply<u32>,
     },
     Proposed {
         proposal: Proposal,

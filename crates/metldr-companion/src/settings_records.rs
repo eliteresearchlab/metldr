@@ -89,7 +89,7 @@ impl Owner {
     pub(super) fn browser_settings_read(
         &self,
         run: &str,
-        ack: std::sync::mpsc::SyncSender<std::result::Result<Value, String>>,
+        ack: crate::flow::OwnerReply<Value>,
     ) -> Result<()> {
         let result = if self.operations.get(run).is_some_and(|operation| {
             operation.browser_io.is_some()

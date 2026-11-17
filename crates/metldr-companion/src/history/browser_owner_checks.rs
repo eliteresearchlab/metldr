@@ -186,7 +186,7 @@ fn approve_dispatch_settle(
     proposal: Proposal,
     outcome: Outcome,
 ) -> crate::Result<crate::browser_action::Action> {
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal,
         ack,
@@ -194,14 +194,14 @@ fn approve_dispatch_settle(
     })?;
     let action = owner.browser_approval.as_ref().unwrap().action.clone();
     owner.browser_decide(&action, 1, true)?;
-    let approved = reply.recv()?.map_err(std::io::Error::other)?;
-    let (ack, reply) = mpsc::sync_channel(1);
+    let approved = reply.blocking_recv()?.map_err(std::io::Error::other)?;
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Dispatch {
         action: action.clone(),
         revision: approved.revision,
         ack,
     })?;
-    let dispatched = reply.recv()?.map_err(std::io::Error::other)?;
+    let dispatched = reply.blocking_recv()?.map_err(std::io::Error::other)?;
     if let Intent::Navigate { destination } = &dispatched.proposal.intent {
         let (slot, _events) = crate::browser_io::Slot::new(dispatched.proposal.binding.tab);
         owner
@@ -236,14 +236,14 @@ fn approve_dispatch_settle(
         );
         assert!(rpc_reply.try_recv()?.is_ok());
     }
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Observed {
         action,
         revision: dispatched.revision,
         outcome,
         ack,
     })?;
-    let settled = reply.recv()?.map_err(std::io::Error::other)?;
+    let settled = reply.blocking_recv()?.map_err(std::io::Error::other)?;
     Ok(settled)
 }
 
@@ -280,7 +280,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
         "https://example.test:0/",
         "https:///report",
     ] {
-        let (ack, reply) = mpsc::sync_channel(1);
+        let (ack, reply) = tokio::sync::oneshot::channel();
         owner.browser_event(Event::Proposed {
             proposal: proposal(
                 &run,
@@ -294,7 +294,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
             ack,
             budget: None,
         })?;
-        assert!(reply.recv()?.is_err(), "admitted {refused}");
+        assert!(reply.blocking_recv()?.is_err(), "admitted {refused}");
         assert!(owner.browser_approval.is_none());
     }
     assert!(
@@ -388,16 +388,16 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
 
     navigation.tool_use_id = "stale-grant".into();
     navigation.intent = field();
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal: navigation.clone(),
         ack,
         budget: None,
     })?;
-    assert!(reply.recv()?.is_err());
+    assert!(reply.blocking_recv()?.is_err());
 
     let pending = proposal(&run, "pending-stop", &binding, destination, field());
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal: pending,
         ack,
@@ -412,7 +412,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
             action: crate::model::ConversationAction::Stop { run: run.clone() },
         },
     })?;
-    assert!(reply.recv()?.is_err());
+    assert!(reply.blocking_recv()?.is_err());
     let prevented = saved_action(&mut owner, &pending_id)?;
     assert!(matches!(
         prevented.state,
@@ -428,7 +428,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
             .stop
             .load(std::sync::atomic::Ordering::Acquire)
     );
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal: {
             let mut retry = navigation.clone();
@@ -441,7 +441,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
         ack,
         budget: None,
     })?;
-    assert_eq!(reply.recv()?.unwrap(), nav);
+    assert_eq!(reply.blocking_recv()?.unwrap(), nav);
     assert!(owner.browser_approval.is_none());
     owner.agent_settled(&run, AgentOutcome::Cancelled, false, true)?;
     assert!(matches!(
@@ -458,7 +458,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
         source_url,
         field(),
     );
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     stopped.browser_event(Event::Proposed {
         proposal: pending,
         ack,
@@ -466,14 +466,14 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
     })?;
     let action = stopped.browser_approval.as_ref().unwrap().action.clone();
     stopped.browser_decide(&action, 1, true)?;
-    let approved = reply.recv()?.unwrap();
-    let (ack, reply) = mpsc::sync_channel(1);
+    let approved = reply.blocking_recv()?.unwrap();
+    let (ack, reply) = tokio::sync::oneshot::channel();
     stopped.browser_event(Event::Dispatch {
         action: action.clone(),
         revision: approved.revision,
         ack,
     })?;
-    let _dispatched = reply.recv()?.unwrap();
+    let _dispatched = reply.blocking_recv()?.unwrap();
     stopped.request(Request {
         v: crate::WIRE_VERSION,
         request: "stop-dispatched".into(),
@@ -512,7 +512,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
         source_url,
         field(),
     );
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     failed_owner.transport.fail_next_emit();
     assert!(
         failed_owner
@@ -523,7 +523,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
             })
             .is_err()
     );
-    assert!(reply.recv()?.is_err());
+    assert!(reply.blocking_recv()?.is_err());
     assert!(failed_owner.browser_approval.is_none());
     failed_owner.browser_io_finish(&failed_run);
     failed_owner
@@ -549,7 +549,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
 
     let corrupt_dir = Directory::new()?;
     let (mut corrupt, corrupt_run) = make_owner(&corrupt_dir)?;
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     corrupt.browser_event(Event::Proposed {
         proposal: proposal(
             &corrupt_run,
@@ -563,7 +563,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
     })?;
     let action = corrupt.browser_approval.as_ref().unwrap().action.clone();
     corrupt.browser_decide(&action, 1, true)?;
-    let approved = reply.recv()?.unwrap();
+    let approved = reply.blocking_recv()?.unwrap();
     let number = action.rsplit(':').next().unwrap().parse::<u64>()?;
     {
         let history = &corrupt.record_history;
@@ -578,7 +578,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
     }
     let (transport, frames) = Transport::captured();
     corrupt.transport = transport;
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     let error = corrupt
         .browser_event(Event::Dispatch {
             action,
@@ -587,7 +587,7 @@ fn actual_owner_browser_lifecycle_is_record_durable_and_fails_closed() -> crate:
         })
         .unwrap_err();
     assert!(super::is_failure(error.as_ref()));
-    assert!(reply.recv()?.is_err());
+    assert!(reply.blocking_recv()?.is_err());
     assert!(frames.lock().unwrap().is_empty());
     corrupt.browser_io_finish(&corrupt_run);
     corrupt
@@ -716,7 +716,7 @@ fn effect_without_plan_is_refused() -> crate::Result<()> {
         unique_context: "context-1".into(),
         grant_revision: 1,
     };
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal: proposal(
             &run,
@@ -728,7 +728,7 @@ fn effect_without_plan_is_refused() -> crate::Result<()> {
         ack,
         budget: None,
     })?;
-    assert!(reply.recv()?.unwrap_err().contains("propose_task_plan"));
+    assert!(reply.blocking_recv()?.unwrap_err().contains("propose_task_plan"));
     assert!(owner.browser_approval.is_none());
     Ok(())
 }
@@ -737,7 +737,7 @@ fn effect_without_plan_is_refused() -> crate::Result<()> {
 fn effect_is_held_until_plan_approval() -> crate::Result<()> {
     let directory = Directory::new()?;
     let (mut owner, run) = make_owner_without_plan(&directory)?;
-    let (ack, plan_reply) = mpsc::sync_channel(1);
+    let (ack, plan_reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Plan {
         run: run.clone(),
         goal: "Update a field".into(),
@@ -745,7 +745,7 @@ fn effect_is_held_until_plan_approval() -> crate::Result<()> {
         scope: "Current page".into(),
         ack,
     })?;
-    let revision = plan_reply.recv()?.map_err(std::io::Error::other)?;
+    let revision = plan_reply.blocking_recv()?.map_err(std::io::Error::other)?;
     let binding = Binding {
         tab: 17,
         document: "document-1".into(),
@@ -755,7 +755,7 @@ fn effect_is_held_until_plan_approval() -> crate::Result<()> {
         unique_context: "context-1".into(),
         grant_revision: 1,
     };
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, mut reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal: proposal(
             &run,
@@ -768,19 +768,19 @@ fn effect_is_held_until_plan_approval() -> crate::Result<()> {
         budget: None,
     })?;
     assert!(owner.browser_approval.is_none());
-    assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(reply.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
     panel_plan_reply(&mut owner, &run, revision, "panel-1")?;
     let action = owner.browser_approval.as_ref().unwrap().action.clone();
     owner.browser_decide(&action, 1, true)?;
-    let approved = reply.recv()?.map_err(std::io::Error::other)?;
-    let (ack, reply) = mpsc::sync_channel(1);
+    let approved = reply.blocking_recv()?.map_err(std::io::Error::other)?;
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Dispatch {
         action,
         revision: approved.revision,
         ack,
     })?;
     assert_eq!(
-        reply.recv()?.map_err(std::io::Error::other)?.state,
+        reply.blocking_recv()?.map_err(std::io::Error::other)?.state,
         Phase::Dispatching
     );
     Ok(())
@@ -800,7 +800,7 @@ fn declining_plan_releases_held_action_and_allows_replanning() -> crate::Result<
         unique_context: "context-1".into(),
         grant_revision: 1,
     };
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, mut reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal: proposal(
             &run,
@@ -813,7 +813,7 @@ fn declining_plan_releases_held_action_and_allows_replanning() -> crate::Result<
         budget: None,
     })?;
     assert!(owner.browser_approval.is_none());
-    assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(reply.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
     let scope = crate::history_io::Scope::from(&owner.record_history.selection()?);
     owner.command(
         "panel-decline",
@@ -831,7 +831,7 @@ fn declining_plan_releases_held_action_and_allows_replanning() -> crate::Result<
     let next = propose_plan(&mut owner, &run)?;
     assert_eq!(next.revision, plan.revision + 1);
     panel_plan_reply(&mut owner, &run, next.revision, "panel-approve")?;
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal: proposal(
             &run,
@@ -845,15 +845,15 @@ fn declining_plan_releases_held_action_and_allows_replanning() -> crate::Result<
     })?;
     let action = owner.browser_approval.as_ref().unwrap().action.clone();
     owner.browser_decide(&action, 1, true)?;
-    let approved = reply.recv()?.map_err(std::io::Error::other)?;
-    let (ack, reply) = mpsc::sync_channel(1);
+    let approved = reply.blocking_recv()?.map_err(std::io::Error::other)?;
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Dispatch {
         action,
         revision: approved.revision,
         ack,
     })?;
     assert_eq!(
-        reply.recv()?.map_err(std::io::Error::other)?.state,
+        reply.blocking_recv()?.map_err(std::io::Error::other)?.state,
         Phase::Dispatching
     );
     Ok(())
@@ -871,8 +871,8 @@ fn session_command(
 fn propose_only(
     owner: &mut Owner,
     proposal: Proposal,
-) -> crate::Result<mpsc::Receiver<std::result::Result<crate::browser_action::Action, String>>> {
-    let (ack, reply) = mpsc::sync_channel(1);
+) -> crate::Result<tokio::sync::oneshot::Receiver<std::result::Result<crate::browser_action::Action, String>>> {
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Proposed {
         proposal,
         ack,
@@ -931,32 +931,32 @@ fn session_grant_auto_approves_bound_tier_one_steps_only() -> crate::Result<()> 
         proposal(&run, "grant-2", &binding, url, field()),
     )?;
     assert!(owner.browser_approval.is_none());
-    let auto = reply.recv()?.map_err(std::io::Error::other)?;
+    let auto = reply.blocking_recv()?.map_err(std::io::Error::other)?;
     assert_eq!(auto.state, Phase::Approved);
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Dispatch {
         action: auto.id.clone(),
         revision: auto.revision,
         ack,
     })?;
-    let dispatched = reply.recv()?.map_err(std::io::Error::other)?;
-    let (ack, reply) = mpsc::sync_channel(1);
+    let dispatched = reply.blocking_recv()?.map_err(std::io::Error::other)?;
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Observed {
         action: auto.id,
         revision: dispatched.revision,
         outcome: verified(),
         ack,
     })?;
-    reply.recv()?.map_err(std::io::Error::other)?;
+    reply.blocking_recv()?.map_err(std::io::Error::other)?;
     // A button is Tier 2 and always asks.
     let button = Intent::act(
         "click",
         serde_json::json!({"ref":"e3"}),
         &[("e3", "button", "Send")],
     );
-    let reply = propose_only(&mut owner, proposal(&run, "grant-3", &binding, url, button))?;
+    let mut reply = propose_only(&mut owner, proposal(&run, "grant-3", &binding, url, button))?;
     assert!(owner.browser_approval.is_some());
-    assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(reply.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
     owner.cancel_browser_approval(&run);
     // Stop ended the grant, so a later Tier 1 step asks again.
     assert!(!owner.session_grants.contains_key(&run));
@@ -1034,25 +1034,25 @@ fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Resu
     )?;
     // An approved plan and a bound grant still leave the secret waiting for the user.
     let reference = "0123456789abcdef0123456789abcdef";
-    let reply = propose_only(
+    let mut reply = propose_only(
         &mut owner,
         proposal(&run, "secret-1", &binding, url, secret_intent(reference)),
     )?;
     let action = owner.browser_approval.as_ref().unwrap().action.clone();
-    assert!(matches!(reply.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(reply.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
     assert!(owner.browser_decide(&action, 1, true).is_err());
     let (slot, _events) = crate::browser_io::Slot::new(17);
     owner.operations.get_mut(&run).unwrap().browser_io = Some(Box::new(slot));
     secret_entry(&mut owner, "panel-secret", &action, SECRET)?;
-    let approved = reply.recv()?.map_err(std::io::Error::other)?;
+    let approved = reply.blocking_recv()?.map_err(std::io::Error::other)?;
     assert_eq!(approved.state, Phase::Approved);
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Dispatch {
         action: action.clone(),
         revision: approved.revision,
         ack,
     })?;
-    let dispatched = reply.recv()?.map_err(std::io::Error::other)?;
+    let dispatched = reply.blocking_recv()?.map_err(std::io::Error::other)?;
     let enter = |owner: &mut Owner| {
         let (ack, rpc) = tokio::sync::oneshot::channel();
         owner
@@ -1092,7 +1092,7 @@ fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Resu
     assert!(sent.contains(r#""op":"command""#) && !sent.contains("metldr-secret"));
     // The secret is single use: a replayed entry finds nothing to send.
     assert!(enter(&mut owner)?.blocking_recv()?.is_err());
-    let (ack, reply) = mpsc::sync_channel(1);
+    let (ack, reply) = tokio::sync::oneshot::channel();
     owner.browser_event(Event::Observed {
         action: action.clone(),
         revision: dispatched.revision,
@@ -1101,7 +1101,7 @@ fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Resu
         },
         ack,
     })?;
-    let settled = reply.recv()?.map_err(std::io::Error::other)?;
+    let settled = reply.blocking_recv()?.map_err(std::io::Error::other)?;
     let Phase::Settled { outcome } = settled.state else {
         panic!("secret entry did not settle");
     };
@@ -1147,7 +1147,7 @@ fn stop_prevents_a_pending_secret_entry_and_drops_a_held_secret() -> crate::Resu
     )?;
     owner.cancel_browser_approval(&run);
     assert!(
-        reply.recv()?.is_err(),
+        reply.blocking_recv()?.is_err(),
         "a stopped entry must not be approved"
     );
     assert!(owner.browser_approval.is_none());
@@ -1168,7 +1168,7 @@ fn stop_prevents_a_pending_secret_entry_and_drops_a_held_secret() -> crate::Resu
     )?;
     let action = owner.browser_approval.as_ref().unwrap().action.clone();
     secret_entry(&mut owner, "panel-secret", &action, "synthetic-held")?;
-    reply.recv()?.map_err(std::io::Error::other)?;
+    reply.blocking_recv()?.map_err(std::io::Error::other)?;
     owner.cancel_browser_approval(&run);
     let slot = owner
         .operations
