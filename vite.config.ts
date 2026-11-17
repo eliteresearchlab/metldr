@@ -72,8 +72,6 @@ const copyWasmAssets = (): Plugin => ({
   },
   writeBundle() {
     copySandboxAssets('dist/assets')
-    copyFileSync(resolve('node_modules/pdfjs-dist/build/pdf.worker.min.mjs'),
-      resolve('dist/assets/pdf.worker.min.js'))
   }
 })
 

@@ -208,39 +208,6 @@ export class BackgroundBootstrap {
       }
 
 
-      // dev: seed test data for stats visualization
-      if (import.meta.env.DEV) {
-        if (msg.type === 'DEV_SEED_DATA') {
-          import('./DevSeedService').then(({ devSeedService }) => {
-            const { days } = msg as { type: 'DEV_SEED_DATA'; days?: number }
-            devSeedService.seedAllData(days || 60)
-              .then(result => respond({ success: true, ...result }))
-              .catch(err => respond({ success: false, error: (err as Error).message }))
-          }).catch(err => respond({ success: false, error: (err as Error).message }))
-          return true
-        }
-
-        // dev: clear all seeded data
-        if (msg.type === 'DEV_CLEAR_DATA') {
-          import('./DevSeedService').then(({ devSeedService }) => {
-            devSeedService.clearAllSeededData()
-              .then(() => respond({ success: true }))
-              .catch(err => respond({ success: false, error: (err as Error).message }))
-          }).catch(err => respond({ success: false, error: (err as Error).message }))
-          return true
-        }
-
-        // dev: get data counts
-        if (msg.type === 'DEV_GET_COUNTS') {
-          import('./DevSeedService').then(({ devSeedService }) => {
-            devSeedService.getDataCounts()
-              .then(counts => respond({ success: true, ...counts }))
-              .catch(err => respond({ success: false, error: (err as Error).message }))
-          }).catch(err => respond({ success: false, error: (err as Error).message }))
-          return true
-        }
-      }
-
       return false
     })
 

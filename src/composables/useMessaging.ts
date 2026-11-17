@@ -34,8 +34,3 @@ export async function withTiming<T>(
   const result = await fn()
   return { result, timing: Math.round(performance.now() - start) }
 }
-
-/**
- * Format timing for display
- */
-export { formatTime } from '@/utils/text'

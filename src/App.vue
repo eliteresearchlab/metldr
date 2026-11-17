@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useThemeStore } from '@/stores/theme'
-import { chromeAILogger } from '@/utils/chromeAILogger'
 import { analyticsService } from '@/services/AnalyticsService'
 
 import { 
@@ -31,7 +30,6 @@ import { ScrollArea } from '@/components/ui'
 import { Loader2, RefreshCw, X, FileText, BarChart3, Settings, Search } from 'lucide-vue-next'
 
 const themeStore = useThemeStore()
-chromeAILogger.info('Side panel loaded - run chromeAILogger.runDiagnostic() for Chrome AI debug')
 
 const { 
   ollamaStatus, 
