@@ -7,7 +7,7 @@ use super::theme::ThemeCaret;
 use super::{State, Tx, browser_actions, preferences};
 use crate::browser_action_display::origin;
 use crate::model::{BrowserActionId, BrowserActionIntent, BrowserActionPhase};
-use ::rune::{El, TextEdit, TextStyle, col};
+use ::rune::{El, TextEdit, col};
 use wasm_bindgen_futures::spawn_local;
 
 pub(super) struct SecretEntry {
@@ -125,7 +125,7 @@ pub(super) fn card(
         && !state.secret.edit.text.is_empty();
     let field = ::rune::el::text_input(
         &state.secret.edit,
-        TextStyle::new((16.0 * typography.scale).max(16.0), 400.0),
+        typography.input(),
     )
     .key("secret-entry-field")
     .label(format!("{} for {site}", secret.label()))

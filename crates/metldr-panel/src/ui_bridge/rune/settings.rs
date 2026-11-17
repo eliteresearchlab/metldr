@@ -639,7 +639,7 @@ fn text_field(
     extra: impl FnOnce(El) -> El,
 ) -> El {
     let ink = palette.ink;
-    let input = ::rune::el::text_input(edit, TextStyle::new((16.0 * typography.scale).max(16.0), 400.0))
+    let input = ::rune::el::text_input(edit, typography.input())
         .key(key)
         .w_full()
         .min_h(36.0)

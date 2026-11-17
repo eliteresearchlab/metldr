@@ -602,6 +602,11 @@ impl Typography {
         if self.neon.is_some() { style.tracking(0.3) } else { style }
     }
 
+    /// A text field's style: 16 points or more, so mobile browsers never zoom into it.
+    pub(super) fn input(self) -> TextStyle {
+        TextStyle::new((16.0 * self.scale).max(16.0), 400.0)
+    }
+
     pub(super) fn text(self, value: impl Into<String>) -> El {
         text(value).font(self.font(13.0, 400.0)).color(self.ink)
     }

@@ -4,7 +4,7 @@ use crate::model::{CodexInputPrompt, RunId};
 use crate::ui_bridge::codex_input::{
     UiCodexAnswer, UiCodexFieldAnswer, UiCodexQuestionAnswer, rune_reply_key,
 };
-use ::rune::{El, TextEdit, TextStyle, col};
+use ::rune::{El, TextEdit, col};
 use std::collections::{HashMap, HashSet};
 use wasm_bindgen_futures::spawn_local;
 
@@ -117,7 +117,7 @@ fn input(
     let ink = palette.ink;
     ::rune::el::text_input(
         edit,
-        TextStyle::new((16.0 * typography.scale).max(16.0), 400.0),
+        typography.input(),
     )
     .w_full()
     .min_h(36.0)

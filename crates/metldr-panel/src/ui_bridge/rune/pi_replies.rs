@@ -2,7 +2,7 @@ use super::theme::ThemeCaret;
 use super::{Core, FlowError, State, Tx};
 use crate::model::{PiUiDialog, RunId};
 use crate::ui_bridge::pi_ui::{Answer, pi_reply_key, pi_suggestion_key};
-use ::rune::{El, TextEdit, TextStyle, col};
+use ::rune::{El, TextEdit, col};
 use std::collections::{HashMap, HashSet};
 use wasm_bindgen_futures::spawn_local;
 
@@ -285,7 +285,7 @@ pub(super) fn view(state: &State, core: &Core) -> Vec<El> {
                     let ink = palette.ink;
                     let mut field = ::rune::el::text_input(
                         edit,
-                        TextStyle::new((16.0 * typography.scale).max(16.0), 400.0),
+                        typography.input(),
                     )
                     .key(format!("pi-input:{key}"))
                     .w_full()
