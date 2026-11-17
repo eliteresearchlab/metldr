@@ -77,7 +77,6 @@ export class WordPopup {
 
     if (!selectedText) return
 
-
     const hasSpaces = WHITESPACE_REGEX.test(selectedText)
     const isTooLong = selectedText.length > 30
     const isTooShort = selectedText.length < 2
@@ -87,9 +86,8 @@ export class WordPopup {
       return
     }
 
-    const sel = window.getSelection()
-    if (sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0)
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0)
       const rect = range.getBoundingClientRect()
 
       const node = range.commonAncestorContainer
