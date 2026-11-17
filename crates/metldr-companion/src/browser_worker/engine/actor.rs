@@ -9,8 +9,8 @@ use crate::{
     browser_action::{Action, Binding, Intent, Outcome, Phase, Proposal},
     browser_io::{Client, Notice},
 };
-use runtime::CallId;
 use futures::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
+use runtime::CallId;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
@@ -21,7 +21,7 @@ use std::{
     },
 };
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{broadcast, mpsc, oneshot},
     time::Instant,
 };
 
@@ -160,6 +160,8 @@ enum Work {
     },
     FrameTree(Navigation),
     Cleanup,
+    /// A command from Browse's page layer; it answers its caller and leaves the actor free.
+    Page(Job),
 }
 struct Navigation {
     action: Action,
@@ -205,6 +207,7 @@ pub(super) struct Actor {
     subscriptions: Subscriptions,
     page_logs: PageLogs,
     network: super::network::NetworkLog,
+    page_events: broadcast::Sender<browse_core::CdpEvent>,
 }
 impl Actor {
     pub(super) fn new(
@@ -218,6 +221,7 @@ impl Actor {
         shutdown: Arc<AtomicBool>,
         ready: oneshot::Sender<runtime::Result<()>>,
         deadline: Instant,
+        page_events: broadcast::Sender<browse_core::CdpEvent>,
     ) -> Self {
         let page_logs = PageLogs::default();
         let mut subscriptions = Subscriptions::default();
@@ -256,6 +260,7 @@ impl Actor {
             subscriptions,
             page_logs,
             network,
+            page_events,
         }
     }
     /// Requests own execution outcomes, so the drive result ends here with the transport.
@@ -338,6 +343,13 @@ impl Actor {
             return Ok(());
         }
         self.documents.event(&event);
+        if self.page_events.receiver_count() != 0 && self.contexts.owns(event.session.as_deref()) {
+            let _ = self.page_events.send(browse_core::CdpEvent {
+                method: event.method.clone(),
+                params: event.params.clone(),
+                session_id: event.session.clone(),
+            });
+        }
         let change = self.contexts.event(&event)?;
         if event.method == "Target.detachedFromTarget" {
             self.page_logs
@@ -384,7 +396,7 @@ impl Actor {
     }
     fn queue(
         &mut self,
-        method: &'static str,
+        method: impl Into<String>,
         session: Option<String>,
         params: Value,
         work: Work,
@@ -604,6 +616,7 @@ impl Work {
             | Self::Verify { job, .. }
             | Self::Navigate { job, .. } => Some(job),
             Self::FrameTree(nav) => Some(&nav.job),
+            Self::Page(job) => Some(job),
             _ => None,
         }
     }

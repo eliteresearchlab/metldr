@@ -931,6 +931,7 @@ mod tests {
                             ("network_requests", true, false, true),
                             ("enter_secret", false, true, false),
                             ("press_key", false, true, false),
+                            ("snapshot_page", true, false, true),
                         ];
                         assert_eq!(
                             tools.len(),

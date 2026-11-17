@@ -58,7 +58,12 @@ impl Transport {
         }
     }
 
-    pub fn submit(&mut self, method: String, session: Option<String>, params: Value) -> Result<CallId> {
+    pub fn submit(
+        &mut self,
+        method: String,
+        session: Option<String>,
+        params: Value,
+    ) -> Result<CallId> {
         self.live()?;
         if self.pending.len() >= CAPACITY || self.admitted == 1_000_000 {
             return Err("browser command capacity reached".into());
@@ -70,7 +75,11 @@ impl Transport {
             params,
         };
         command.validate()?;
-        if command.method.len() + command.session.as_ref().map_or(0, String::len) + json_len(&command.params)? > MAX_MESSAGE {
+        if command.method.len()
+            + command.session.as_ref().map_or(0, String::len)
+            + json_len(&command.params)?
+            > MAX_MESSAGE
+        {
             return Err("browser command exceeds message limit".into());
         }
         let id = command.id;
@@ -157,7 +166,7 @@ impl Transport {
                 Ok(value)
             }
             Ok(_) => return self.fail("browser result must be an object"),
-            Err(_) => Err("browser command failed".into()),
+            Err(error) => Err(error.chars().take(300).collect()),
         };
         self.answer(id, result);
         Ok(())

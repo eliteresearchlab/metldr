@@ -23,6 +23,7 @@ mod admission;
 mod events;
 mod network;
 mod observation;
+mod page;
 mod runtime;
 mod scripts;
 
@@ -38,6 +39,12 @@ struct Request {
     job: Job,
 }
 enum Kind {
+    /// A command from Browse's page layer; see `page::route`.
+    Page {
+        method: String,
+        session: Option<String>,
+        params: Value,
+    },
     ActionScope {
         handle: String,
     },
@@ -107,6 +114,7 @@ pub(super) struct Engine {
     task: JoinHandle<()>,
     client: Client,
     tab: i32,
+    page: page::Page,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -149,7 +157,9 @@ impl Engine {
                 return Err("invalid browser grant revision".into());
             }
             let target = &attached["targetInfo"];
-            let target_id = target["targetId"].as_str().ok_or("invalid browser target")?;
+            let target_id = target["targetId"]
+                .as_str()
+                .ok_or("invalid browser target")?;
             if target["url"].as_str() != Some(source.url.as_str()) || target["type"] != "page" {
                 return Err("browser target changed during attachment".into());
             }
@@ -177,6 +187,8 @@ impl Engine {
             }
         };
         let (requests, rx) = mpsc::channel(64);
+        let (page_events, _) = tokio::sync::broadcast::channel(256);
+        let page = page::Page::new(source.tab, requests.clone(), page_events.clone());
         let (ready, readiness) = oneshot::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
         let mut task = tokio::spawn(
@@ -191,6 +203,7 @@ impl Engine {
                 shutdown.clone(),
                 ready,
                 deadline,
+                page_events,
             )
             .run(),
         );
@@ -202,6 +215,7 @@ impl Engine {
                 task,
                 client,
                 tab: source.tab,
+                page,
             }),
             _ => {
                 shutdown.store(true, Ordering::Release);
@@ -244,6 +258,9 @@ impl Engine {
     }
     pub(super) async fn observe(&self, generation: u64, within: Option<String>) -> Result<Value> {
         self.request(Kind::Observe { generation, within }).await
+    }
+    pub(super) async fn snapshot(&self) -> Result<Value> {
+        self.page.snapshot().await
     }
     pub(super) async fn child_action(&self, handle: &str) -> Result<bool> {
         self.request(Kind::ActionScope {

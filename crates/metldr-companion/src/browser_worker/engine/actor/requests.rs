@@ -1,7 +1,16 @@
 use super::*;
+use crate::browser_worker::engine::page::{Route, route};
 impl Actor {
     pub(super) fn request(&mut self, request: Request) -> Result<()> {
         let Request { kind, job } = request;
+        if let Kind::Page {
+            method,
+            session,
+            params,
+        } = kind
+        {
+            return self.page_command(method, session, params, job);
+        }
         if self.busy {
             let _ = job
                 .reply
@@ -43,6 +52,7 @@ impl Actor {
             }
         }
         match kind {
+            Kind::Page { .. } => Err("browser page command took the action path".into()),
             Kind::ActionScope { handle } => match if self
                 .snapshot
                 .as_ref()
@@ -259,5 +269,36 @@ impl Actor {
         job: Job,
     ) -> Result<()> {
         self.queue("Runtime.evaluate",session(&context),json!({"expression":format!("({})()",scripts::capture(None)),"returnByValue":false,"awaitPromise":true,"uniqueContextId":context.unique_context_id()}),Work::Capture{generation,job},Some(context),None)
+    }
+}
+
+impl Actor {
+    /// Sends one command from Browse's page layer for a session the actor owns, without taking the actor.
+    fn page_command(
+        &mut self,
+        method: String,
+        session: Option<String>,
+        params: Value,
+        job: Job,
+    ) -> Result<()> {
+        if !self.contexts.owns(session.as_deref()) {
+            let _ = job.reply.send(Err("the session is not this tab's".into()));
+            return Ok(());
+        }
+        match route(&method) {
+            Route::Done => {
+                let _ = job.reply.send(Ok(json!({})));
+                Ok(())
+            }
+            Route::Refused => {
+                let _ = job
+                    .reply
+                    .send(Err(format!("{method} is not available in metldr")));
+                Ok(())
+            }
+            Route::Send => {
+                self.queue(method, session, params, Work::Page(job), None, None)
+            }
+        }
     }
 }

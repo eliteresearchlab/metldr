@@ -283,7 +283,8 @@ fn decodes_the_shared_browser_calls_and_bounds_untrusted_arguments() {
             "propose_task_plan",
             "network_requests",
             "enter_secret",
-            "press_key"
+            "press_key",
+            "snapshot_page"
         ]
     );
     assert!(
