@@ -58,8 +58,10 @@ impl FlowClient {
         &self,
         context: &Context,
         cursor: Option<Cursor>,
+        query: Option<&str>,
     ) -> Result<ConversationPage> {
-        match self.history_request(json!({"op":"history_conversations","scope":context.scope,"generation":context.generation,"cursor":cursor}), Expected::Conversations {context:context.clone(),cursor}).await? {
+        let search = query.is_some();
+        match self.history_request(json!({"op":"history_conversations","scope":context.scope,"generation":context.generation,"cursor":cursor,"query":query}), Expected::Conversations {context:context.clone(),cursor,search}).await? {
             Response::Conversations(page) => Ok(page),
             _ => Err(FlowError::Protocol("Expected saved conversations.".into())),
         }

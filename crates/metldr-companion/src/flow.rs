@@ -391,7 +391,8 @@ impl Owner {
                 scope,
                 generation,
                 cursor,
-            } => self.history_conversations(id, scope, &generation, cursor),
+                query,
+            } => self.history_conversations(id, scope, &generation, cursor, query),
             Command::HistoryRuns {
                 scope,
                 generation,

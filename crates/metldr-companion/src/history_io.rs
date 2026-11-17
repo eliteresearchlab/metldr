@@ -119,10 +119,15 @@ impl Owner {
         scope: Scope,
         generation: &str,
         cursor: Option<Cursor>,
+        query: Option<String>,
     ) -> Result<()> {
         let scope = self.check_history(&scope, generation)?;
-        let (page, _) = self.persist_records(|edit, _| {
-            Ok((edit.conversations_page(&scope, cursor.as_ref())?, None))
+        let (page, _) = self.persist_records(|edit, _| match &query {
+            Some(query) if cursor.is_none() => {
+                Ok((edit.search_conversations(&scope, query)?, None))
+            }
+            Some(_) => Err("a saved chat search has no pages".into()),
+            None => Ok((edit.conversations_page(&scope, cursor.as_ref())?, None)),
         })?;
         self.emit(json!({"v":crate::WIRE_VERSION,"request":request,"kind":"history_conversations","generation":generation,"page":page}))
     }

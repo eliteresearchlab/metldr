@@ -260,6 +260,33 @@ fn actual_conversations_keep_receipts_scopes_settings_and_native_history() -> Re
         .map(|row| row.id)
         .collect();
     assert_eq!(listed, ids);
+    for query in ["work in b", "wrok in b"] {
+        let found = history.edit(|tx| tx.search_conversations(&current, query))?;
+        assert_eq!(found.conversations[0].id, b.conversation);
+        assert!(found.next.is_none());
+    }
+    let fresh = history.edit(|tx| tx.search_conversations(&current, "new conversation"))?;
+    assert_eq!(fresh.conversations.len(), 16);
+    let others = history.edit(|tx| tx.search_conversations(&current, "!new"))?;
+    assert!(
+        others
+            .conversations
+            .iter()
+            .all(|row| row.id != current.conversation)
+    );
+    assert!(
+        others
+            .conversations
+            .iter()
+            .any(|row| row.id == b.conversation)
+    );
+    for query in ["", "   ", "a\nb"] {
+        assert!(
+            history
+                .edit(|tx| tx.search_conversations(&current, query))
+                .is_err()
+        );
+    }
     let before_recovery = profile(&history)?;
     history.edit(|tx| tx.recover(&current))?;
     assert_eq!(profile(&history)?, before_recovery);

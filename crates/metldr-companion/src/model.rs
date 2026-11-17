@@ -189,6 +189,9 @@ pub(super) enum Command {
         scope: crate::history_io::Scope,
         generation: String,
         cursor: Option<crate::history::Cursor>,
+        /// Saved chats whose titles match this search, best first, instead of a page by date.
+        #[serde(default)]
+        query: Option<String>,
     },
     HistoryRuns {
         scope: crate::history_io::Scope,

@@ -161,6 +161,8 @@ pub(crate) enum Expected {
     Conversations {
         context: Context,
         cursor: Option<Cursor>,
+        /// A title search: best match first, one page, no date order.
+        search: bool,
     },
     Change {
         scope: Scope,
@@ -257,7 +259,7 @@ impl Expected {
                 validate_page(&frame.page, context, cursor.as_ref())?;
                 Ok(Response::Runs(frame.page))
             }
-            (Self::Conversations { context, cursor }, "history_conversations") => {
+            (Self::Conversations { context, cursor, search }, "history_conversations") => {
                 let page_bytes = value
                     .get("page")
                     .and_then(|page| serde_json::to_vec(page).ok())
@@ -270,7 +272,7 @@ impl Expected {
                 if frame.generation != context.generation {
                     return Err(protocol("history generation changed"));
                 }
-                validate_conversation_page(&frame.page, context, cursor.as_ref())?;
+                validate_conversation_page(&frame.page, context, cursor.as_ref(), *search)?;
                 Ok(Response::Conversations(frame.page))
             }
             (Self::Change { scope, change }, "conversation_changed") => {
@@ -532,8 +534,10 @@ fn validate_conversation_page(
     page: &ConversationPage,
     context: &Context,
     cursor: Option<&Cursor>,
+    search: bool,
 ) -> Result<(), FlowError> {
     if page.conversations.len() > MAX_CONVERSATIONS
+        || (search && (cursor.is_some() || page.next.is_some()))
         || page.store != context.scope.store
         || page.conversation != context.scope.conversation
         || page.epoch != context.scope.epoch
@@ -546,7 +550,7 @@ fn validate_conversation_page(
     for conversation in &page.conversations {
         let number = validate_conversation_id(&conversation.id, &page.store)?;
         if !ids.insert(conversation.id.as_str())
-            || last.is_some_and(|previous| number >= previous)
+            || (!search && last.is_some_and(|previous| number >= previous))
             || number > page.anchor.0
             || cursor.is_some_and(|cursor| number >= cursor.before.0)
             || conversation.title.text.len() > 256
@@ -730,6 +734,31 @@ fn protocol(message: &str) -> FlowError {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_saved_chat_search_page_is_ranked_and_never_continues() {
+        let store = "0123456789abcdef0123456789abcdef";
+        let context = Context {
+            scope: Scope {
+                store: store.into(),
+                conversation: format!("{store}:1"),
+                epoch: Counter(1),
+            },
+            generation: "g1".into(),
+        };
+        let row = |n: u64| json!({"id": format!("{store}:{n}"), "title": {"text": "North report", "truncated": false}});
+        let frame = |rows: Vec<serde_json::Value>, next: serde_json::Value| json!({
+            "v": VERSION, "request": "r1", "kind": "history_conversations", "generation": "g1",
+            "page": {"store": store, "conversation": format!("{store}:1"), "epoch": "1", "sequence": "4",
+                     "anchor": "9", "conversations": rows, "next": next}
+        });
+        let expect = |search| Expected::Conversations { context: context.clone(), cursor: None, search };
+        let ranked = frame(vec![row(2), row(7), row(5)], json!(null));
+        assert!(matches!(expect(true).decode(ranked.clone()), Ok(Response::Conversations(_))));
+        assert!(expect(false).decode(ranked).is_err());
+        assert!(expect(true).decode(frame(vec![row(2), row(2)], json!(null))).is_err());
+        assert!(expect(true).decode(frame(vec![row(2)], json!({"anchor": "9", "before": "2"}))).is_err());
+    }
 
     #[test]
     fn decodes_conversation_change_receipts_and_rejects_mismatches() {

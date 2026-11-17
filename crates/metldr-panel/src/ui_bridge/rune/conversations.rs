@@ -1,3 +1,4 @@
+use super::theme::ThemeCaret;
 use super::*;
 use crate::history::Change;
 use ::rune::Icon;
@@ -87,6 +88,8 @@ enum ResultPage {
 pub(super) enum Completion {
     Archive(super::super::history::Page),
     Navigation(Rc<Core>),
+    /// The search text changed while a list was loading: load it again for the new text.
+    Search,
 }
 
 #[derive(Default)]
@@ -94,6 +97,10 @@ pub(super) struct Conversations {
     open: bool,
     pub(super) busy: bool,
     page: Option<super::super::conversations::Page>,
+    /// The title search; empty lists chats by date.
+    search: TextEdit,
+    /// The search text changed while a list was loading.
+    search_stale: bool,
     older_cursor: Option<String>,
     pub(super) error: Option<String>,
     archive_generation: Rc<Cell<u64>>,
@@ -103,18 +110,19 @@ pub(super) struct Conversations {
 impl Conversations {
     pub(super) fn open(&mut self, core: &Rc<Core>, updates: &Rc<Updates>, tx: &mut Tx) {
         self.open = true;
-        tx.focus("saved-chats-close");
+        tx.focus("saved-chats-search");
         self.load_chats(core, updates, None);
     }
 
     pub(super) fn close(&mut self, tx: &mut Tx) {
-        self.open = false;
+        self.dismiss();
         tx.focus("saved-chats-open");
     }
 
     /// Closes the dialog from Escape or its backdrop; the dialog returns focus to its trigger.
     pub(super) fn dismiss(&mut self) {
         self.open = false;
+        self.search = TextEdit::default();
     }
 
     pub(super) fn is_open(&self) -> bool {
@@ -261,8 +269,13 @@ impl Conversations {
         }
         let owner = Rc::clone(core);
         let work = Rc::clone(core);
+        let query = cursor
+            .is_none()
+            .then(|| self.search.text.trim().to_owned())
+            .filter(|query| !query.is_empty());
+        self.search_stale = false;
         self.complete(owner, updates, async move {
-            ResultPage::Chats(work.conversation_page(cursor.as_deref()).await)
+            ResultPage::Chats(work.conversation_page(cursor.as_deref(), query.as_deref()).await)
         });
     }
 
@@ -302,6 +315,9 @@ impl Conversations {
         self.busy = false;
         if !Rc::ptr_eq(&owner, current) {
             return None;
+        }
+        if matches!(&result, ResultPage::Chats(_)) && self.search_stale {
+            return Some(Completion::Search);
         }
         if !matches!(&result, ResultPage::Navigation(_))
             && let Err(error) = current.ensure_current()
@@ -353,8 +369,31 @@ impl Conversations {
                 true,
                 |state, tx| state.conversations.close(tx),
             ));
+        let search = ::rune::el::text_input(&self.search, typography.input())
+            .key("saved-chats-search")
+            .label("Search saved chats")
+            .w_full()
+            .min_h(44.0)
+            .px(12.0)
+            .py(8.0)
+            .single_line()
+            .color(p.ink)
+            .placeholder("Search", p.ink_3)
+            .caret(p.ink, p.selection)
+            .theme_caret(p)
+            .on_edit(|state: &mut State| &mut state.conversations.search)
+            .on_input_change(|state: &mut State, _| {
+                if state.conversations.busy {
+                    state.conversations.search_stale = true;
+                } else {
+                    action(state, Action::Recent);
+                }
+            });
+        // The same field surface as the rows and buttons below it, in every theme.
+        let search = super::theme::keycap(search, p);
         let mut list = chat_list();
-        if self.busy {
+        // A list on screen stays while the next one loads, so typing a search never shifts it.
+        if self.busy && self.page.is_none() {
             list = list.child(typography.text("Loading chats").role("status"));
         }
         if let Some(error) = &self.error {
@@ -372,7 +411,11 @@ impl Conversations {
         }
         if let Some(page) = &self.page {
             if page.conversations.is_empty() {
-                list = list.child(typography.text("No saved chats"));
+                list = list.child(typography.text(if self.search.text.trim().is_empty() {
+                    "No saved chats"
+                } else {
+                    "No matching chats"
+                }));
             }
             for item in &page.conversations {
                 let id = item.id.clone();
@@ -410,7 +453,10 @@ impl Conversations {
                 "Recent chats",
                 "saved-chats-recent".into(),
                 !self.busy && !retry,
-                |state, _| action(state, Action::Recent),
+                |state, _| {
+                    state.conversations.search = TextEdit::default();
+                    action(state, Action::Recent)
+                },
             ))
             .child(sheet_button(
                 p,
@@ -432,6 +478,7 @@ impl Conversations {
             .fill(p.page)
             .transition(super::theme::sheet(p))
             .child(header)
+            .child(search)
             .child(list.shrink().min_h(0.0).scroll(ScrollSpec {
                 stick_bottom: false,
             }))
