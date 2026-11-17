@@ -4,6 +4,7 @@ type Result<T> = std::result::Result<T, String>;
 
 #[cfg(test)]
 mod checks;
+pub mod http;
 
 pub struct Sse {
     provider: &'static str,

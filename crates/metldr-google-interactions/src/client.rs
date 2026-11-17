@@ -7,10 +7,8 @@ use metldr_conversation::TextEvent;
 use stream::Turn;
 
 pub struct Client {
-    client: reqwest::Client,
-    endpoint: String,
+    http: sse::http::Http,
     model: String,
-    key: reqwest::header::HeaderValue,
 }
 
 impl Client {
@@ -42,33 +40,18 @@ impl Client {
         {
             return Err("invalid Google Interactions credential".into());
         }
-        let mut key = reqwest::header::HeaderValue::from_str(api_key)
-            .map_err(|_| "invalid Google Interactions credential")?;
-        key.set_sensitive(true);
-        let mut client = reqwest::Client::builder()
-            .tls_backend_rustls()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .timeout(std::time::Duration::from_secs(45));
-        if let Some(pem) = trust_ca_pem {
-            if pem.len() > 16_384 {
-                return Err("Google Interactions trust certificate exceeds bound".into());
-            }
-            let certificates = reqwest::Certificate::from_pem_bundle(pem)
-                .map_err(|_| "invalid Google Interactions trust certificate")?;
-            if certificates.is_empty() {
-                return Err("empty Google Interactions trust certificate".into());
-            }
-            client = client.tls_certs_only(certificates);
-        }
+        let http = sse::http::Http::new(sse::http::Options {
+            provider: "Google Interactions",
+            url: url.as_str(),
+            timeout_secs: 45,
+            localhost_port: None,
+            trust_ca_pem,
+            headers: &[],
+            secret: Some(("x-goog-api-key", api_key)),
+        })?;
         Ok(Self {
-            client: client
-                .build()
-                .map_err(|_| "Google Interactions client unavailable")?,
-            endpoint: url.to_string(),
+            http,
             model: model.into(),
-            key,
         })
     }
 
@@ -120,59 +103,21 @@ impl Client {
         if body.len() > 131_072 {
             return Err("Google Interactions request exceeds bound".into());
         }
-        let sending = self
-            .client
-            .post(&self.endpoint)
-            .header("x-goog-api-key", self.key.clone())
-            .header("content-type", "application/json")
-            .header("accept", "text/event-stream")
-            .body(body)
-            .send();
-        let mut response = tokio::select! {
-            biased;
-            _ = wait_for_stop(stop) => return Err("Google Interactions request cancelled".into()),
-            response = sending => response.map_err(|_| "Google Interactions transport failed")?,
-        };
-        if response.status() != reqwest::StatusCode::OK {
-            return Err("Google Interactions endpoint returned an error".into());
-        }
-        if response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(';').next())
-            .is_none_or(|v| !v.trim().eq_ignore_ascii_case("text/event-stream"))
-        {
-            return Err("Google Interactions endpoint did not return an event stream".into());
-        }
-        let mut sse = sse::Sse::new("Google");
+        let events = self.http.events(body, stop).await?;
+        let sse = sse::Sse::new("Google");
         let mut state = stream::State::default();
-        let mut bytes = 0usize;
         let mut rendered = String::new();
-        loop {
-            let chunk = tokio::select! {
-                biased;
-                _ = wait_for_stop(stop) => return Err("Google Interactions request cancelled".into()),
-                chunk = response.chunk() => chunk.map_err(|_| "Google Interactions stream transport failed")?,
-            };
-            let Some(chunk) = chunk else { break };
-            bytes = bytes.saturating_add(chunk.len());
-            if bytes > 524_288 {
-                return Err("Google Interactions stream exceeds bound".into());
-            }
-            let mut rest = &chunk[..];
-            while let Some((event, data)) = sse.next(&mut rest)? {
-                cancelled(stop)?;
-                for text_event in state.frame(&event, &data)? {
+        events
+            .frames(stop, sse, 524_288, |event, data| -> Result<()> {
+                for text_event in state.frame(event, data)? {
                     if let TextEvent::Delta(text) = &text_event {
                         rendered.push_str(text);
                     }
                     emit(text_event)?;
                 }
-            }
-        }
-        cancelled(stop)?;
-        sse.finish()?;
+                Ok(())
+            })
+            .await?;
         let turn = state.finish()?;
         if rendered != turn.text {
             return Err("Google Interactions streamed text differs from completed output".into());
@@ -186,11 +131,5 @@ fn cancelled(stop: &AtomicBool) -> Result<()> {
         Err("Google Interactions request cancelled".into())
     } else {
         Ok(())
-    }
-}
-
-async fn wait_for_stop(stop: &AtomicBool) {
-    while !stop.load(Ordering::Acquire) {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 }

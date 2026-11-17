@@ -884,7 +884,6 @@ dependencies = [
  "metldr-sse",
  "reqwest",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -960,7 +959,6 @@ dependencies = [
  "metldr-sse",
  "reqwest",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -984,7 +982,6 @@ dependencies = [
  "metldr-sse",
  "reqwest",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -1026,14 +1023,19 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
 name = "metldr-sse"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "memchr",
+ "reqwest",
+ "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
