@@ -233,3 +233,14 @@ fn encrypted_reasoning_allows_tool_calls_with_stop() {
         "Chat stop with tool calls lacks encrypted reasoning"
     );
 }
+
+#[test]
+fn page_tool_replies_may_exceed_the_browser_step_bound() {
+    let long = "x".repeat(10_000);
+    let part = chunk(json!({"role":"assistant","content":long}), Some("stop"));
+    let mut step = State::default();
+    assert!(step.frame("", &part.to_string()).is_err());
+    let mut reply = State::default();
+    reply.text_max = Some(65_536);
+    assert!(reply.frame("", &part.to_string()).is_ok());
+}

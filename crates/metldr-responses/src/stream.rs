@@ -36,6 +36,8 @@ struct Item {
 
 #[derive(Default)]
 pub(super) struct State {
+    /// Longest reply text; `None` keeps the browser step bound.
+    pub(super) text_max: Option<usize>,
     identity: Option<(String, String)>,
     sequence: Option<u64>,
     items: BTreeMap<u64, Item>,
@@ -212,7 +214,7 @@ impl State {
                 if kind.ends_with(".delta") {
                     let delta = string(&value, "delta")?;
                     self.text_bytes = self.text_bytes.saturating_add(delta.len());
-                    if self.text_bytes > crate::TEXT_MAX {
+                    if self.text_bytes > self.text_max.unwrap_or(crate::TEXT_MAX) {
                         return Err("Responses text exceeds bound".into());
                     }
                     let text = self.item(&value, "message")?.text.entry(at).or_default();

@@ -9,8 +9,9 @@ Each route sends content only to the destination listed for it.
 | Route | Destination |
 | --- | --- |
 | Chrome built-in AI and the bundled local models | Your computer |
-| Ollama | The Ollama server on your computer, at 127.0.0.1:11434. Ollama can also offer cloud models, so check the model you select. |
-| Provider connections (Messages, Responses, Google Interactions, Chat Completions) | The endpoint you configure. It receives task instructions, page content, browser observations and relevant prior answers. |
+| Local model servers | The server on your computer: Ollama at 127.0.0.1:11434, LM Studio at 127.0.0.1:1234, llama.cpp at 127.0.0.1:8080, or the local address you set. Ollama can also offer cloud models, so check the model you select. |
+| Your own API key in the extension | The service the key belongs to: OpenAI (api.openai.com), Anthropic (api.anthropic.com), Google (generativelanguage.googleapis.com), OpenRouter (openrouter.ai), or the OpenAI compatible endpoint you set. It receives your question, the page content you ask about and the conversation so far. |
+| Provider connections in the companion (Messages, Responses, Google Interactions, Chat Completions) | The endpoint you configure. It receives task instructions, page content, browser observations and relevant prior answers. |
 | Installed agents (Codex, Claude Code, OpenCode, Pi) | The agent on your computer, which sends what it needs to the account and model you configured for it |
 | Dictionary lookups | The selected word goes to api.dictionaryapi.dev. Dictionary data files come from media.githubusercontent.com. |
 | Gmail features | The InboxSDK library runs on mail.google.com. It sends its own error reports and usage events to inboxsdk.com. |
@@ -23,7 +24,7 @@ The extension saves settings, cached summaries and page context in your browser.
 
 The extension also saves usage records in your browser, including page addresses, domains, session activity, model use and feature events. Automatic deletion after a set period is not currently enabled. Remove the extension's browser data to delete those records.
 
-Provider keys are managed by the companion's credential store, outside page scripts. Installed agents keep their own authentication.
+API keys you add in the extension are encrypted with a key that cannot leave this browser profile, and only the encrypted form is saved, locally and never synced. Keys you add in the companion stay in its credential store, outside page scripts. Installed agents keep their own authentication.
 
 Clearing the extension's cache or browser data does not remove companion records or agent files. Remove those separately using their storage locations and tools. The companion keeps its data in `~/.local/share/metldr`, or in `$XDG_DATA_HOME/metldr` when that is set.
 

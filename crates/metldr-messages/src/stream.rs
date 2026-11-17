@@ -17,6 +17,8 @@ struct Block {
 }
 
 pub(super) struct State {
+    /// Longest reply text; `None` keeps the browser step bound.
+    pub(super) text_max: Option<usize>,
     model: String,
     started: bool,
     blocks: Vec<Block>,
@@ -73,6 +75,7 @@ impl State {
             events: 0,
             text_bytes: 0,
             cursor: 0,
+            text_max: None,
         }
     }
 
@@ -142,7 +145,7 @@ impl State {
                     "text" => {
                         let text = string(&block, "text")?;
                         self.text_bytes = self.text_bytes.saturating_add(text.len());
-                        if self.text_bytes > crate::TEXT_MAX {
+                        if self.text_bytes > self.text_max.unwrap_or(crate::TEXT_MAX) {
                             return Err("Messages text exceeds bound".into());
                         }
                     }
@@ -201,7 +204,7 @@ impl State {
                     ("text", "text_delta") => {
                         let text = string(delta, "text")?;
                         self.text_bytes = self.text_bytes.saturating_add(text.len());
-                        if self.text_bytes > crate::TEXT_MAX {
+                        if self.text_bytes > self.text_max.unwrap_or(crate::TEXT_MAX) {
                             return Err("Messages text exceeds bound".into());
                         }
                         append(&mut block.value, "text", text)?;

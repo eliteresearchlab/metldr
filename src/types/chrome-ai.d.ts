@@ -30,24 +30,6 @@ declare global {
 
   var Summarizer: SummarizerConstructor | undefined
 
-  // translator api
-  interface TranslatorInstance {
-    translate(text: string): Promise<string>
-    translateStreaming(text: string): ReadableStream<string>
-    destroy(): void
-  }
-
-  interface TranslatorConstructor {
-    availability(options: { sourceLanguage: string; targetLanguage: string }): Promise<'available' | 'downloadable' | 'downloading' | 'unavailable'>
-    create(options: {
-      sourceLanguage: string
-      targetLanguage: string
-      monitor?: (m: { addEventListener: (event: string, cb: (e: { loaded: number }) => void) => void }) => void
-    }): Promise<TranslatorInstance>
-  }
-
-  var Translator: TranslatorConstructor | undefined
-
   // language detector api
   interface LanguageDetectorResult {
     detectedLanguage: string
@@ -90,28 +72,6 @@ declare global {
   }
 
   var Writer: WriterConstructor | undefined
-
-  interface RewriterInstance {
-    rewrite(text: string, options?: { context?: string; signal?: AbortSignal }): Promise<string>
-    rewriteStreaming(text: string, options?: { context?: string }): ReadableStream<string>
-    destroy(): void
-  }
-
-  interface RewriterConstructor {
-    availability(): Promise<'available' | 'downloadable' | 'downloading' | 'unavailable'>
-    create(options?: {
-      tone?: 'as-is' | 'more-formal' | 'more-casual'
-      format?: 'as-is' | 'plain-text' | 'markdown'
-      length?: 'as-is' | 'shorter' | 'longer'
-      sharedContext?: string
-      expectedInputLanguages?: string[]
-      expectedContextLanguages?: string[]
-      outputLanguage?: string
-      monitor?: (m: { addEventListener: (event: string, cb: (e: { loaded: number }) => void) => void }) => void
-    }): Promise<RewriterInstance>
-  }
-
-  var Rewriter: RewriterConstructor | undefined
 
   // language model (prompt) api
   interface LanguageModelSession {

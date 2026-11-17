@@ -11,6 +11,7 @@ pub use client::Client;
 pub use metldr_browser_tools::{Invocation, Prompt};
 use metldr_conversation::TextEvent;
 pub use metldr_conversation::Usage;
+pub use metldr_sse::Turn;
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 

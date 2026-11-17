@@ -14,6 +14,7 @@ pub use client::{Client, DEFAULT_TIMEOUT_SECS, TIMEOUT_SECS, loopback_host};
 use metldr_browser_tools::Call;
 pub use metldr_browser_tools::{Invocation, Prompt};
 pub use metldr_conversation::{TextEvent, Usage};
+pub use metldr_sse::Turn;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, VecDeque},

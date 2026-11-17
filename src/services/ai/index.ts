@@ -11,14 +11,10 @@ export type {
   AICompleteResponse,
   AISummarizeRequest,
   AISummarizeResponse,
-  AITranslateRequest,
-  AITranslateResponse,
   AIDetectLanguageRequest,
   AIDetectLanguageResponse,
   AIWriteRequest,
   AIWriteResponse,
-  AIRewriteRequest,
-  AIRewriteResponse,
   ChromeAIAvailability,
   ChromeAICapabilities
 } from '../../types/chrome-ai'

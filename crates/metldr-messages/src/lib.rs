@@ -10,6 +10,7 @@ mod stream;
 pub use client::Client;
 pub use metldr_browser_tools::{Invocation, Prompt};
 pub use metldr_conversation::{TextEvent, Usage};
+pub use metldr_sse::Turn;
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 

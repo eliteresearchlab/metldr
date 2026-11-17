@@ -11,6 +11,8 @@ const TEXT_MAX: usize = 8_192;
 
 #[derive(Default)]
 pub(super) struct State {
+    /// Longest reply text; `None` keeps the browser step bound.
+    pub(super) text_max: Option<usize>,
     response_id: Option<String>,
     role_seen: bool,
     assistant: Map<String, Value>,
@@ -117,7 +119,7 @@ impl State {
                     .len()
                     .checked_add(fragment.len())
                     .ok_or("Chat text exceeds bound")?;
-                if new_len > TEXT_MAX {
+                if new_len > self.text_max.unwrap_or(TEXT_MAX) {
                     return Err("Chat text exceeds bound".into());
                 }
                 self.text.push_str(fragment);

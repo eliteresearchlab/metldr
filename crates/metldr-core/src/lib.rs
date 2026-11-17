@@ -1,5 +1,6 @@
 mod chunking;
 mod decoder;
+pub mod gateway;
 pub mod query;
 pub mod retrieval;
 mod thinking;
