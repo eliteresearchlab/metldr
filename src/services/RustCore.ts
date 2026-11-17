@@ -1,5 +1,6 @@
 import initCore, {
-  gateway_complete, gateway_preferred, gateway_summarize, gateway_word_lookup
+  gateway_complete, gateway_preferred, gateway_summarize, gateway_word_lookup,
+  summary_gate, summary_prefs_load, summary_prefs_save
 } from '../../crates/metldr-core/pkg/metldr_core'
 import type { WordLookupResult } from '../types'
 import coreWasmUrl from '../../crates/metldr-core/pkg/metldr_core_bg.wasm?url'
@@ -55,4 +56,40 @@ export interface WordContext {
 export async function lookupWord(word: string, context: WordContext): Promise<WordLookupResult> {
   await loadRustCore()
   return gateway_word_lookup(word, context)
+}
+
+export interface SummaryPrefs {
+  mode: string
+  allowlist: string[]
+  denylist: string[]
+  minAutoWords: number
+  minPromptWords: number
+}
+
+export interface SummaryPrefsForm {
+  mode: string
+  allowlist: string
+  denylist: string
+  minAutoWords: number
+}
+
+export interface SummaryDecision {
+  action: 'skip' | 'auto' | 'prompt' | 'wait'
+  reason: string
+}
+
+// Whether an extracted page summarizes now, asks, waits or is skipped, from the saved settings.
+export async function summaryGate(page: object, manual: boolean): Promise<SummaryDecision> {
+  await loadRustCore()
+  return summary_gate(page, manual)
+}
+
+export async function loadSummaryPrefs(): Promise<SummaryPrefs> {
+  await loadRustCore()
+  return summary_prefs_load()
+}
+
+export async function saveSummaryPrefs(form: SummaryPrefsForm): Promise<SummaryPrefs> {
+  await loadRustCore()
+  return summary_prefs_save(form)
 }

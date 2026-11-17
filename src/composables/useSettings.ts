@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue'
-import { SummaryPrefs } from '@/utils/summaryPrefs'
+import { loadSummaryPrefs as readSummaryPrefs, saveSummaryPrefs as writeSummaryPrefs } from '@/services/RustCore'
 import { storageService } from '@/services/StorageService'
 import { logger } from '@/services/LoggerService'
 
@@ -8,40 +8,33 @@ const log = logger.createScoped('useSettings')
 export type FontSizePreference = 'small' | 'medium' | 'large'
 
 const summaryMode = ref<'manual' | 'auto'>('manual')
-const allowlistInput = ref<string>(SummaryPrefs.ALLOWLIST.join('\n'))
-const denylistInput = ref<string>(SummaryPrefs.DENYLIST.join('\n'))
-const minAutoWords = ref<number>(SummaryPrefs.DEFAULT_PREFS.minAutoWords)
+const allowlistInput = ref<string>('')
+const denylistInput = ref<string>('')
+const minAutoWords = ref<number>(500)
 const wordPopupEnabled = ref<boolean>(true)
 const fontSize = ref<FontSizePreference>('medium')
 
 export function useSettings() {
   async function loadSummaryPrefs(): Promise<void> {
     try {
-      const stored = await storageService.get('summaryPrefs', {})
-      const prefs = SummaryPrefs.buildPrefs(stored || {})
+      const prefs = await readSummaryPrefs()
       summaryMode.value = prefs.mode === 'auto' ? 'auto' : 'manual'
       allowlistInput.value = prefs.allowlist.join('\n')
       denylistInput.value = prefs.denylist.join('\n')
       minAutoWords.value = prefs.minAutoWords
     } catch (err) {
       log.warn('failed to load summary prefs', (err as Error).message)
-      summaryMode.value = 'manual'
-      allowlistInput.value = SummaryPrefs.ALLOWLIST.join('\n')
-      denylistInput.value = SummaryPrefs.DENYLIST.join('\n')
-      minAutoWords.value = SummaryPrefs.DEFAULT_PREFS.minAutoWords
     }
   }
 
   async function saveSummaryPrefs(): Promise<void> {
     try {
-      const prefs = {
+      await writeSummaryPrefs({
         mode: summaryMode.value,
-        allowlist: SummaryPrefs.parseListInput(allowlistInput.value, SummaryPrefs.ALLOWLIST),
-        denylist: SummaryPrefs.parseListInput(denylistInput.value, SummaryPrefs.DENYLIST),
-        minAutoWords: Number.isFinite(Number(minAutoWords.value)) ? Number(minAutoWords.value) : SummaryPrefs.DEFAULT_PREFS.minAutoWords,
-        minPromptWords: SummaryPrefs.DEFAULT_PREFS.minPromptWords
-      }
-      await storageService.set('summaryPrefs', prefs)
+        allowlist: allowlistInput.value,
+        denylist: denylistInput.value,
+        minAutoWords: Number(minAutoWords.value)
+      })
     } catch (err) {
       log.warn('failed to save summary prefs', (err as Error).message)
     }
