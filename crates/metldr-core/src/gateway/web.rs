@@ -333,6 +333,7 @@ mod keys {
 // ---------- reaching a route ----------
 
 /// A route with what it needs to answer: base address, model and key.
+#[derive(Clone)]
 struct Target {
     route: &'static Route,
     base: String,
@@ -586,12 +587,24 @@ async fn prefer(id: &str, model: String) -> Result<(), Error> {
     write(SETTINGS, settings).await
 }
 
+/// With nothing chosen yet, whatever already works: Chrome's built-in AI, then a local server.
+async fn first_ready(settings: &Value) -> Option<&'static Route> {
+    for route in ROUTES.iter().filter(|route| route.kind != Kind::Key) {
+        if state(route, settings).await.state == "ready" {
+            return Some(route);
+        }
+    }
+    None
+}
+
 async fn target(id: Option<&str>, model: Option<String>) -> Result<Target, Error> {
     let settings = settings().await;
-    let id = id
-        .or_else(|| settings["preferred"]["route"].as_str())
-        .ok_or("Choose where metldr's AI runs first.")?;
-    let route = super::route(id).ok_or("Unknown route.")?;
+    let route = match id.or_else(|| settings["preferred"]["route"].as_str()) {
+        Some(id) => super::route(id).ok_or("Unknown route.")?,
+        None => first_ready(&settings)
+            .await
+            .ok_or("Set up where metldr's AI runs first.")?,
+    };
     let model = model
         .or_else(|| saved(&settings, route.id, "model").map(str::to_owned))
         .or_else(|| {
@@ -628,13 +641,31 @@ async fn target(id: Option<&str>, model: Option<String>) -> Result<Target, Error
 }
 
 /// Streams one reply, calling `emit` with each piece of text; returns the full text and usage.
+/// A JSON `schema` constrains Chrome's model directly and is stated in the instructions for
+/// every other route.
 async fn reply(
     target: Target,
     system: &str,
     messages: &[Message],
+    schema: Option<&Value>,
     stop: &AtomicBool,
     emit: &mut dyn FnMut(&str),
 ) -> Result<(String, Value), Error> {
+    let stated;
+    let system = match schema {
+        Some(schema) if target.route.protocol != Protocol::ChromeAi => {
+            stated = format!(
+                "{system}\n\nRespond with only JSON that matches this JSON schema:\n{schema}"
+            );
+            stated.as_str()
+        }
+        _ => system,
+    };
+    // A trimmed history can open with a reply; providers such as Anthropic refuse that.
+    let messages = &messages[messages
+        .iter()
+        .position(|m| m.role == Role::User)
+        .unwrap_or(0)..];
     let turns: Vec<Turn<'_>> = messages
         .iter()
         .map(|m| Turn {
@@ -662,7 +693,7 @@ async fn reply(
     let url = format!("{base}{}", route.stream);
     let usage = match route.protocol {
         Protocol::ChromeAi => {
-            chrome_ai(system, messages, stop, &mut on_event).await?;
+            chrome_ai(system, messages, schema, stop, &mut on_event).await?;
             None
         }
         Protocol::Chat => {
@@ -736,6 +767,7 @@ async fn reply(
 async fn chrome_ai(
     system: &str,
     messages: &[Message],
+    schema: Option<&Value>,
     stop: &AtomicBool,
     emit: &mut impl FnMut(TextEvent) -> metldr_chat_completions::Result<()>,
 ) -> Result<(), Error> {
@@ -766,8 +798,10 @@ async fn chrome_ai(
     .map_err(|_| "Chrome's built-in AI could not start.")?;
     let result = async {
         let stream: js_sys::Function = get(&session, "promptStreaming").unchecked_into();
+        let options =
+            to_js(&schema.map_or(json!({}), |schema| json!({"responseConstraint": schema})));
         let readable: web_sys::ReadableStream = stream
-            .call1(&session, &last.content.as_str().into())
+            .call2(&session, &last.content.as_str().into(), &options)
             .map_err(err)?
             .unchecked_into();
         let reader: web_sys::ReadableStreamDefaultReader = readable.get_reader().unchecked_into();
@@ -917,6 +951,7 @@ async fn test(route: &str, model: Option<String>) -> Result<Value, Error> {
         target,
         "You answer in one word.",
         &ask,
+        None,
         &AtomicBool::new(false),
         &mut |_| {},
     )
@@ -956,7 +991,7 @@ async fn stream(
     let result = async {
         super::check_conversation(&system, &messages).map_err(str::to_owned)?;
         let target = target(route.as_deref(), model).await?;
-        reply(target, &system, &messages, &stop, &mut |delta| {
+        reply(target, &system, &messages, None, &stop, &mut |delta| {
             let first = pending.borrow().is_empty();
             pending.borrow_mut().push_str(delta);
             if first {
@@ -977,4 +1012,358 @@ async fn stream(
         Err(message) => json!({"id": id, "type": "error", "message": message}),
     };
     send(connection, end);
+}
+
+// ---------- calls from the service worker's own page tools ----------
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Complete {
+    system: String,
+    messages: Vec<Message>,
+    route: Option<String>,
+    model: Option<String>,
+    schema: Option<Value>,
+}
+
+fn answer(text: String, route: &str, model: &str, started: f64) -> JsValue {
+    let ms = (js_sys::Date::now() - started).round();
+    let model = if model.is_empty() {
+        "gemini-nano"
+    } else {
+        model
+    };
+    to_js(&json!({"text": text, "route": route, "model": model, "ms": ms}))
+}
+
+fn js_error(message: impl AsRef<str>) -> JsValue {
+    js_sys::Error::new(message.as_ref()).into()
+}
+
+/// One whole reply on the preferred route (or the one named): `{system, messages, route?,
+/// model?, schema?}` to `{text, route, model, ms}`.
+#[wasm_bindgen]
+pub async fn gateway_complete(request: JsValue) -> Result<JsValue, JsValue> {
+    let request: Complete = serde_json::from_value(from_js(&request))
+        .map_err(|_| js_error("That model request is not valid."))?;
+    super::check_conversation(&request.system, &request.messages).map_err(js_error)?;
+    let target = target(request.route.as_deref(), request.model)
+        .await
+        .map_err(js_error)?;
+    let (route, model) = (target.route.id, target.model.clone());
+    let started = js_sys::Date::now();
+    let stop = AtomicBool::new(false);
+    let (text, _) = reply(
+        target,
+        &request.system,
+        &request.messages,
+        request.schema.as_ref(),
+        &stop,
+        &mut |_| {},
+    )
+    .await
+    .map_err(js_error)?;
+    Ok(answer(text, route, &model, started))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Summarize {
+    content: String,
+    /// key-points, tldr, teaser or headline.
+    kind: Option<String>,
+    /// short, medium or long.
+    length: Option<String>,
+    context: Option<String>,
+}
+
+/// A summary of content of any length on the preferred route: Chrome's Summarizer there when
+/// the content fits, a summarizing prompt elsewhere, and sections first for long content.
+/// `{content, kind?, length?, context?}` to `{text, route, model, ms}`.
+#[wasm_bindgen]
+pub async fn gateway_summarize(request: JsValue) -> Result<JsValue, JsValue> {
+    let request: Summarize = serde_json::from_value(from_js(&request))
+        .map_err(|_| js_error("That summary request is not valid."))?;
+    let kind = request.kind.as_deref().unwrap_or("key-points");
+    let length = request.length.as_deref().unwrap_or("medium");
+    let target = target(None, None).await.map_err(js_error)?;
+    let (route, model) = (target.route.id, target.model.clone());
+    let started = js_sys::Date::now();
+    let long = request.content.chars().count() > DIRECT_MAX;
+    if target.route.protocol == Protocol::ChromeAi
+        && !long
+        && let Some(text) = chrome_summary(&request, kind, length).await
+    {
+        return Ok(answer(text, route, &model, started));
+    }
+    let text = if long {
+        map_reduce(&target, &request, kind, length).await
+    } else {
+        summary(
+            target,
+            &request.content,
+            request.context.as_deref(),
+            kind,
+            length,
+        )
+        .await
+    }
+    .map_err(js_error)?;
+    Ok(answer(text, route, &model, started))
+}
+
+/// Longest content summarized in one request; longer content is summarized in sections first.
+const DIRECT_MAX: usize = 12_000;
+const SECTION_TARGET: usize = 2_500;
+
+async fn ask(target: Target, system: &str, input: String) -> Result<String, Error> {
+    let messages = [Message {
+        role: Role::User,
+        content: input,
+    }];
+    super::check_conversation(system, &messages).map_err(str::to_owned)?;
+    let stop = AtomicBool::new(false);
+    Ok(reply(target, system, &messages, None, &stop, &mut |_| {})
+        .await?
+        .0)
+}
+
+async fn summary(
+    target: Target,
+    content: &str,
+    context: Option<&str>,
+    kind: &str,
+    length: &str,
+) -> Result<String, Error> {
+    let shape = match kind {
+        "tldr" => "Give a short, concise summary in one or two sentences",
+        "teaser" => "Write an intriguing teaser that makes the reader want to learn more",
+        "headline" => "Write one headline that captures the main point",
+        _ => "Extract the most important points as a bullet list, each line starting with \"-\"",
+    };
+    let size = match length {
+        "short" => "Be very brief: one to three bullets or one or two sentences",
+        "long" => "Be thorough: five to seven bullets or five or six sentences",
+        _ => "Use a moderate length: three to five bullets or three or four sentences",
+    };
+    let system = format!(
+        "You are a factual summarizer. {shape}. {size}.\nRules:\n\
+         1. Only use information the content states\n\
+         2. Never infer or add information\n\
+         3. Be specific, not vague"
+    );
+    let input = match context {
+        Some(context) => format!("Context: {context}\n\nContent to summarize:\n{content}"),
+        None => format!("Summarize this content:\n{content}"),
+    };
+    ask(target, &system, input).await
+}
+
+/// Paragraph groups of about `SECTION_TARGET` characters, cut inside a paragraph only when one
+/// paragraph is longer than that.
+fn sections(content: &str) -> Vec<String> {
+    let mut sections = Vec::new();
+    let mut current = String::new();
+    let paragraphs = content
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| !p.is_empty());
+    // A wall of text without blank lines still splits, at character boundaries.
+    let pieces = paragraphs.flat_map(|p| {
+        let chars: Vec<char> = p.chars().collect();
+        chars
+            .chunks(SECTION_TARGET * 2)
+            .map(|c| c.iter().collect::<String>())
+            .collect::<Vec<_>>()
+    });
+    for paragraph in pieces {
+        let paragraph = paragraph.as_str();
+        if !current.is_empty() && current.len() + paragraph.len() > SECTION_TARGET {
+            sections.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push_str("\n\n");
+        }
+        current.push_str(paragraph);
+    }
+    if !current.is_empty() {
+        sections.push(current);
+    }
+    sections
+}
+
+/// Summarizes each section, two at a time, then merges the section summaries; a failed merge
+/// falls back to the section summaries themselves.
+async fn map_reduce(
+    target: &Target,
+    request: &Summarize,
+    kind: &str,
+    length: &str,
+) -> Result<String, Error> {
+    let sections = sections(&request.content);
+    let total = sections.len();
+    let about = request
+        .context
+        .as_deref()
+        .map_or(String::new(), |c| format!(" Context: {c}"));
+    let section = |index: usize, text: &str| {
+        let input = format!(
+            "This is section {index} of {total} of a longer document.{about}\n\n\
+             Summarize its key points in 150 words or less, facts and main ideas only.\n\n\
+             SECTION {index}:\n{text}"
+        );
+        let target = target.clone();
+        async move {
+            let summary = ask(
+                target,
+                "You summarize text sections concisely. Output only the summary, no preamble.",
+                input,
+            )
+            .await;
+            format!(
+                "[Section {index}/{total}] {}",
+                summary.as_deref().map_or("(not summarized)", str::trim)
+            )
+        }
+    };
+    let mut summaries = Vec::with_capacity(total);
+    for (pair, texts) in sections.chunks(2).enumerate() {
+        let first = section(pair * 2 + 1, &texts[0]);
+        match texts.get(1) {
+            Some(second) => {
+                let (a, b) = join(first, section(pair * 2 + 2, second)).await;
+                summaries.extend([a, b]);
+            }
+            None => summaries.push(first.await),
+        }
+    }
+    let combined = summaries.join("\n\n");
+    let input = format!(
+        "These are summaries of the sections of one document.{about}\n\n\
+         Write one summary of the whole document.\n\nSECTION SUMMARIES:\n{combined}"
+    );
+    let merged = summary(target.clone(), &input, None, kind, length).await;
+    Ok(merged.unwrap_or(combined))
+}
+
+/// Runs two futures together on this thread and returns both results.
+async fn join<A: std::future::Future, B: std::future::Future>(
+    a: A,
+    b: B,
+) -> (A::Output, B::Output) {
+    let (mut a, mut b) = (std::pin::pin!(a), std::pin::pin!(b));
+    let (mut left, mut right) = (None, None);
+    std::future::poll_fn(|cx| {
+        if left.is_none()
+            && let std::task::Poll::Ready(out) = a.as_mut().poll(cx)
+        {
+            left = Some(out);
+        }
+        if right.is_none()
+            && let std::task::Poll::Ready(out) = b.as_mut().poll(cx)
+        {
+            right = Some(out);
+        }
+        if left.is_some() && right.is_some() {
+            std::task::Poll::Ready(())
+        } else {
+            std::task::Poll::Pending
+        }
+    })
+    .await;
+    (left.expect("joined"), right.expect("joined"))
+}
+
+/// Chrome's Summarizer, when this browser offers it; `None` lets the prompt path answer.
+async fn chrome_summary(request: &Summarize, kind: &str, length: &str) -> Option<String> {
+    let summarizer = Some(get(&js_sys::global(), "Summarizer")).filter(JsValue::is_function)?;
+    let options = to_js(
+        &json!({"type": kind, "length": length, "format": "markdown", "outputLanguage": "en"}),
+    );
+    let create: js_sys::Function = get(&summarizer, "create").dyn_into().ok()?;
+    let session = JsFuture::from(
+        create
+            .call1(&summarizer, &options)
+            .ok()?
+            .dyn_into::<js_sys::Promise>()
+            .ok()?,
+    )
+    .await
+    .ok()?;
+    let summarize: js_sys::Function = get(&session, "summarize").dyn_into().ok()?;
+    let context = to_js(&json!({"context": request.context}));
+    let done = summarize
+        .call2(&session, &request.content.as_str().into(), &context)
+        .ok()?;
+    let text = JsFuture::from(done.dyn_into::<js_sys::Promise>().ok()?)
+        .await
+        .ok()
+        .and_then(|v| v.as_string());
+    if let Ok(destroy) = get(&session, "destroy").dyn_into::<js_sys::Function>() {
+        let _ = destroy.call0(&session);
+    }
+    text
+}
+
+/// The language of `text` as a two letter code. Chrome's own detector answers first since it
+/// costs no model call.
+#[wasm_bindgen]
+pub async fn gateway_detect_language(text: String) -> Result<String, JsValue> {
+    if let Some(found) = chrome_language(&text).await {
+        return Ok(found);
+    }
+    let target = target(None, None).await.map_err(js_error)?;
+    let system = "Detect the language of the text. \
+                  Reply with only its ISO 639-1 two letter code, such as en, de or ja.";
+    let messages = [Message {
+        role: Role::User,
+        content: text.chars().take(2000).collect(),
+    }];
+    let stop = AtomicBool::new(false);
+    let (code, _) = reply(target, system, &messages, None, &stop, &mut |_| {})
+        .await
+        .map_err(js_error)?;
+    let code: String = code
+        .trim()
+        .chars()
+        .take(2)
+        .flat_map(char::to_lowercase)
+        .collect();
+    if code.len() == 2 && code.bytes().all(|b| b.is_ascii_lowercase()) {
+        Ok(code)
+    } else {
+        Err(js_error("The language could not be told."))
+    }
+}
+
+async fn chrome_language(text: &str) -> Option<String> {
+    let detector = Some(get(&js_sys::global(), "LanguageDetector")).filter(JsValue::is_function)?;
+    let create: js_sys::Function = get(&detector, "create").dyn_into().ok()?;
+    let session = JsFuture::from(
+        create
+            .call0(&detector)
+            .ok()?
+            .dyn_into::<js_sys::Promise>()
+            .ok()?,
+    )
+    .await
+    .ok()?;
+    let detect: js_sys::Function = get(&session, "detect").dyn_into().ok()?;
+    let found = detect
+        .call1(&session, &text.into())
+        .ok()?
+        .dyn_into::<js_sys::Promise>()
+        .ok()?;
+    let found = JsFuture::from(found).await.ok();
+    if let Ok(destroy) = get(&session, "destroy").dyn_into::<js_sys::Function>() {
+        let _ = destroy.call0(&session);
+    }
+    let top = js_sys::Reflect::get(&found?, &0.into()).ok()?;
+    get(&top, "detectedLanguage").as_string()
+}
+
+/// The route and model page tools use, or `null` before any is chosen.
+#[wasm_bindgen]
+pub async fn gateway_preferred() -> JsValue {
+    to_js(&settings().await["preferred"])
 }

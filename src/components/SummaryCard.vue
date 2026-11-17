@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ROUTE_NAMES } from '@/composables/useGateway'
 import { computed } from 'vue'
 import { formatTime, stripThinking } from '@/utils/text'
 import { marked } from 'marked'
@@ -149,7 +150,7 @@ const hasContent = computed(() => props.pageSummary || props.summaryLoading || p
                                 pageSummary.timing.provider === 'chrome-ai' ? 'text-blue-400' : 'text-green-400'
                               ]"
                             >
-                              {{ pageSummary.timing.provider === 'chrome-ai' ? 'Chrome AI' : 'Ollama' }}
+                              {{ ROUTE_NAMES[pageSummary.timing.provider] ?? pageSummary.timing.provider }}
                             </span>
                           </div>
                           <div v-if="pageSummary.timing.model" class="pt-1 text-foreground/60 truncate">

@@ -174,7 +174,7 @@ export interface SummaryTiming {
   total: number
   cached?: boolean
   model?: string
-  provider?: 'chrome-ai' | 'ollama'
+  provider?: string
 }
 
 export interface PageSummary {
@@ -296,13 +296,6 @@ export interface ApiEntry {
   meanings: ApiMeaning[]
 }
 
-export interface LLMParsedResult {
-  definition?: string
-  partOfSpeech?: string
-  example?: string
-  synonyms?: string[]
-}
-
 export interface DictionaryEntry {
   definitions: Array<{
     definition: string
@@ -355,30 +348,10 @@ export interface LookupResponse {
   }
 }
 
-// ollama/llm
-export interface OllamaModel {
-  name: string
-}
-
-export interface OllamaTagsResponse {
-  models?: OllamaModel[]
-}
-
 export interface ChatMessage {
   role: string
   content: string
   timing?: { total: number; model?: string }
-}
-
-export interface CompleteOptions {
-  temperature?: number
-  maxTokens?: number
-}
-
-export interface CompleteResult {
-  ok: boolean
-  content?: string
-  error?: string
 }
 
 export interface ChatResult {
@@ -387,8 +360,6 @@ export interface ChatResult {
   error?: string
   timing?: { total: number; model: string }
 }
-
-export type TaskType = 'word_lookup' | 'page_summary' | 'email_summary'
 
 // storage
 export interface SupportedLanguage {
@@ -466,10 +437,6 @@ export interface WordLookupMessage {
   }
 }
 
-export interface CheckHealthMessage {
-  type: 'CHECK_OLLAMA_HEALTH'
-}
-
 export interface GetEmailCacheMessage {
   type: 'GET_EMAIL_CACHE'
   emailId: string
@@ -487,7 +454,6 @@ export type BackgroundMessage =
   | GenerateReplySuggestionsMessage
   | ExtractAndSummarizeMessage
   | WordLookupMessage
-  | CheckHealthMessage
   | GetEmailCacheMessage
   | SetEmailCacheMessage
   | { type: 'EXTRACT_ONLY'; tabId: number }
@@ -610,15 +576,6 @@ export interface SummaryResponse {
   cached?: boolean
   model?: string
   error?: string
-  needsOllama?: boolean
-}
-
-export interface HealthResponse {
-  healthy?: boolean
-  models?: string[]
-  error?: string
-  success?: boolean
-  connected?: boolean
 }
 
 // app state
@@ -668,14 +625,6 @@ export interface DownloadProgressItem {
   progress: number
   entriesProcessed?: number
   entries?: number
-}
-
-export interface OllamaHealthResponse {
-  healthy?: boolean
-  models?: string[]
-  error?: string
-  success?: boolean
-  connected?: boolean
 }
 
 export interface AppSummaryResponse {

@@ -1,3 +1,4 @@
+/// <reference path="../types/chrome-ai.d.ts" />
 const SUPPORTED_LANGUAGES = ['en', 'es', 'ja'] as const
 type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number]
 

@@ -2,11 +2,10 @@ import { vectorStore } from './VectorStore'
 import { embeddingProvider } from './EmbeddingProvider'
 import { chunkingService } from './ChunkingService'
 import { databaseService, DB_CONFIGS } from '../DatabaseService'
-import { aiGateway } from '../ai/AIGateway'
 import { LRUCache } from 'lru-cache'
 import type { VectorEntry } from '../../types'
 import { expand_query_locally, focus_query, suggested_terms } from '../../../crates/metldr-core/pkg/metldr_core'
-import { loadRustCore } from '../RustCore'
+import { complete, loadRustCore } from '../RustCore'
 
 interface ChunkMetadata {
   sourceId: string
@@ -303,17 +302,16 @@ export class RagService {
   // llm-based query expansion for global search, with a local synonym expansion as fallback
   private async expandQueryWithLLM(query: string): Promise<string> {
     try {
-      const response = await aiGateway.complete({
-        systemPrompt: `You are a search query optimizer. Output ONLY comma-separated search terms, no explanation.
+      const response = await complete({
+        system: `You are a search query optimizer. Output ONLY comma-separated search terms, no explanation.
 RULES:
 1. If user asks about what they "read", "saw", "forgot" - extract the TOPIC keywords only
 2. Ignore personal phrases like "what was the pdf i read about" - focus on the subject
 3. Generate 8-12 diverse terms: synonyms, related concepts, different phrasings
 Example: "what was the pdf i read about islam and ummah" → "islam, ummah, muslim, islamic, community, faith, prophetic, religion"`,
-        userPrompt: `Query: "${query}"`,
-        maxTokens: 100
+        messages: [{ role: 'user', content: `Query: "${query}"` }]
       })
-      const terms = response.ok && response.content ? suggested_terms(response.content) : ''
+      const terms = suggested_terms(response.text)
       if (terms) return `${query} ${terms}`
     } catch (err) {
       console.log('[RagService] LLM expansion failed, using fallback:', err)

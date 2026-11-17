@@ -5,7 +5,6 @@ import { logger } from '@/services/LoggerService'
 
 const log = logger.createScoped('useSettings')
 
-export type AIProviderPreference = 'chrome-ai' | 'ollama'
 export type FontSizePreference = 'small' | 'medium' | 'large'
 
 const summaryMode = ref<'manual' | 'auto'>('manual')
@@ -13,7 +12,6 @@ const allowlistInput = ref<string>(SummaryPrefs.ALLOWLIST.join('\n'))
 const denylistInput = ref<string>(SummaryPrefs.DENYLIST.join('\n'))
 const minAutoWords = ref<number>(SummaryPrefs.DEFAULT_PREFS.minAutoWords)
 const wordPopupEnabled = ref<boolean>(true)
-const preferredProvider = ref<AIProviderPreference>('chrome-ai')
 const fontSize = ref<FontSizePreference>('medium')
 
 export function useSettings() {
@@ -55,26 +53,6 @@ export function useSettings() {
       wordPopupEnabled.value = enabled
     } catch (error) {
       log.error('failed to load word popup settings', error)
-    }
-  }
-
-  async function loadProviderPreference(): Promise<void> {
-    try {
-      const provider = await storageService.get<AIProviderPreference>('preferredProvider', 'chrome-ai')
-      if (provider === 'chrome-ai' || provider === 'ollama') {
-        preferredProvider.value = provider
-      }
-    } catch (error) {
-      log.error('failed to load provider preference', error)
-    }
-  }
-
-  async function setProviderPreference(provider: AIProviderPreference): Promise<void> {
-    preferredProvider.value = provider
-    try {
-      await storageService.set('preferredProvider', provider)
-    } catch (error) {
-      log.error('failed to save provider preference', error)
     }
   }
 
@@ -136,7 +114,6 @@ export function useSettings() {
   }
 
   function setupStorageListener(
-    onSelectedModelChange?: (model: string) => void,
     onSelectedLanguagesChange?: (langs: string[]) => void
   ): void {
     storageService.onChange((changes) => {
@@ -152,19 +129,8 @@ export function useSettings() {
         wordPopupEnabled.value = (changes.wordPopupEnabled.newValue as boolean) ?? true
       }
       
-      if (changes.selectedModel?.newValue && onSelectedModelChange) {
-        onSelectedModelChange(changes.selectedModel.newValue as string)
-      }
-      
       if (changes.selectedLanguages?.newValue && onSelectedLanguagesChange) {
         onSelectedLanguagesChange(changes.selectedLanguages.newValue as string[])
-      }
-
-      if (changes.preferredProvider?.newValue) {
-        const pref = changes.preferredProvider.newValue as string
-        if (pref === 'chrome-ai' || pref === 'ollama') {
-          preferredProvider.value = pref
-        }
       }
 
       if (changes.fontSize?.newValue) {
@@ -183,15 +149,12 @@ export function useSettings() {
     denylistInput,
     minAutoWords,
     wordPopupEnabled,
-    preferredProvider,
     fontSize,
     
     loadSummaryPrefs,
     saveSummaryPrefs,
     loadWordPopupSetting,
     toggleWordPopup,
-    loadProviderPreference,
-    setProviderPreference,
     loadFontSize,
     setFontSize,
     setupSettingsWatcher,

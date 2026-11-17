@@ -1,5 +1,5 @@
 import { cacheService } from './CacheService'
-import { aiGateway, mapReduceService } from './ai'
+import { complete, summarize } from './RustCore'
 import { analyticsService } from './AnalyticsService'
 import type { ExtractedData, SummaryTiming, PageSummary, ChatMessage, ChatResult } from '../types'
 
@@ -55,27 +55,13 @@ export class PageService {
 
     console.log('[PageService] summarizing, length:', fullContent.length)
 
-    let summaryText: string
-    let usedMapReduce = false
-
-    if (mapReduceService.needsMapReduce(fullContent)) {
-      console.log('[PageService] using map-reduce for long content')
-      const mrResult = await mapReduceService.summarize(content, `Article titled "${title}"`)
-      summaryText = mrResult.summary
-      usedMapReduce = true
-      console.log('[PageService] map-reduce complete:', { chunks: mrResult.chunkCount, timing: mrResult.timing })
-    } else {
-      const result = await aiGateway.summarize({
-        content: fullContent,
-        context: `This article is titled "${title}"`,
-        type: 'key-points',
-        length: 'medium'
-      })
-      
-      if (!result.ok) throw new Error(result.error || 'summarization failed')
-      summaryText = result.summary || ''
-      console.log('[PageService] direct summarization result:', { ok: result.ok, provider: result.provider, len: summaryText.length })
-    }
+    const result = await summarize({
+      content: fullContent,
+      context: `This article is titled "${title}"`,
+      kind: 'key-points',
+      length: 'medium'
+    })
+    const summaryText = result.text
 
     timing.llm = Math.round(performance.now() - llmStart)
 
@@ -83,7 +69,7 @@ export class PageService {
 
     timing.total = Math.round(performance.now() - startTotal)
     timing.cached = false
-    timing.model = usedMapReduce ? 'map-reduce' : 'gemini-nano'
+    timing.model = result.model
 
     const summary: PageSummary = {
       title, author, publishDate, publication,
@@ -219,26 +205,20 @@ RULES:
       .slice(-6)
       .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
-    const result = await aiGateway.complete({
-      systemPrompt,
-      userPrompt: lastUserMsg,
-      messages: chatHistory,
-      temperature: 0.3
-    })
-    
-    if (result.ok) {
+    try {
+      const result = await complete({
+        system: systemPrompt,
+        messages: [...chatHistory, { role: 'user', content: lastUserMsg }]
+      })
       return {
         ok: true,
-        content: result.content,
+        content: result.text,
         sources,
-        timing: { 
-          total: Math.round(performance.now() - startTime), 
-          model: result.model || (aiGateway.getPreference() === 'chrome-ai' ? 'gemini-nano' : 'ollama')
-        }
+        timing: { total: Math.round(performance.now() - startTime), model: result.model }
       }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
     }
-    
-    return { ok: false, error: result.error || 'ai generation failed', sources }
   }
 }
 

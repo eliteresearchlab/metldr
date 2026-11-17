@@ -1,9 +1,9 @@
 import { ref, computed } from 'vue'
-import { sendToBackground, withTiming } from './useMessaging'
+import { sendToBackground } from './useMessaging'
 import type { AppPageSummary, SummaryPromptData, AppSummaryResponse, ExtractedData } from '@/types'
 import { logger } from '@/services/LoggerService'
 import { cacheService } from '@/services/CacheService'
-import { storageService } from '@/services/StorageService'
+import { preferredRoute } from '@/services/RustCore'
 import { pdfService } from '@/services/pdf/PdfService'
 
 const gmailThreadPattern = /#[^/]+\/(?:[^/]+\/)?([A-Za-z0-9_-]{16,})$/
@@ -14,21 +14,6 @@ const summaryWhitespacePattern = /\s+/
 
 
 const log = logger.createScoped('PageSummary')
-
-declare const Summarizer: {
-  availability: () => Promise<string>
-  create: (opts: {
-    type?: string
-    length?: string
-    format?: string
-    expectedInputLanguages?: string[]
-    expectedContextLanguages?: string[]
-    outputLanguage?: string
-  }) => Promise<{
-    summarize: (content: string, opts?: { context?: string }) => Promise<string>
-    destroy: () => void
-  }>
-} | undefined
 
 const pageSummary = ref<AppPageSummary | null>(null)
 const pageMetadata = ref<{ title: string; url: string } | null>(null)
@@ -65,18 +50,10 @@ const isLocalPdfPending = computed(() => {
   return isPdf && isLocal && !pageSummary.value?.fullContent
 })
 
-// get active AI provider and model from storage (same pattern as useSettings)
-async function getActiveAIInfo(): Promise<{ provider: 'chrome-ai' | 'ollama', model: string }> {
-  try {
-    const [provider, selectedModel] = await Promise.all([
-      storageService.get<'chrome-ai' | 'ollama'>('preferredProvider', 'chrome-ai'),
-      storageService.get<string>('selectedModel', 'llama3.2')
-    ])
-    const model = provider === 'chrome-ai' ? 'gemini-nano' : selectedModel
-    return { provider, model }
-  } catch {
-    return { provider: 'chrome-ai', model: 'gemini-nano' }
-  }
+// the route and model the gateway answers on, for the summary label
+async function getActiveAIInfo(): Promise<{ provider: string, model: string }> {
+  const preferred = await preferredRoute().catch(() => null)
+  return { provider: preferred?.route ?? 'chrome-ai', model: preferred?.model || 'gemini-nano' }
 }
 
 // system urls where AI features should be disabled
@@ -130,38 +107,6 @@ async function indexToRag(text: string, metadata: { sourceId: string; sourceUrl:
     if (msg !== 'Indexing aborted' && msg !== 'Operation cancelled') {
       log.warn('RAG indexing failed', msg)
     }
-  }
-}
-
-async function trySidePanelSummarize(content: string, context: string): Promise<{ ok: boolean; summary?: string; timing?: number }> {
-  try {
-    if (typeof Summarizer === 'undefined') return { ok: false }
-    
-    const avail = await Summarizer.availability()
-    if (avail !== 'available' && avail !== 'downloadable') return { ok: false }
-    
-    log.log('using Chrome AI Summarizer in side panel')
-    
-    const { result, timing } = await withTiming(async () => {
-      const summarizer = await Summarizer.create({
-        type: 'key-points',
-        length: 'medium',
-        format: 'markdown',
-        expectedInputLanguages: ['en', 'es', 'ja'],
-        expectedContextLanguages: ['en'],
-        outputLanguage: 'en'
-      })
-      try {
-        return await summarizer.summarize(content, { context })
-      } finally {
-        summarizer.destroy()
-      }
-    })
-    
-    return { ok: true, summary: result, timing }
-  } catch (err) {
-    log.log('side panel summarize failed', (err as Error).message)
-    return { ok: false }
   }
 }
 
@@ -308,44 +253,6 @@ export function usePageSummary() {
         return
       }
       
-      const extracted = extractResponse.data
-      let metadata = `ARTICLE METADATA:\n- Title: "${extracted.title}"\n`
-      if (extracted.author) metadata += `- Author: ${extracted.author}\n`
-      if (extracted.publication) metadata += `- Publication: ${extracted.publication}\n`
-      metadata += '\n---\nARTICLE CONTENT:\n\n'
-      const fullContent = metadata + extracted.content
-      
-      const sidePanelResult = await trySidePanelSummarize(fullContent, `Article: "${extracted.title}"`)
-      
-      if (sidePanelResult.ok && sidePanelResult.summary) {
-        const bullets = parseBullets(sidePanelResult.summary)
-        const summaryData: AppPageSummary = {
-          title: extracted.title,
-          author: extracted.author,
-          publishDate: extracted.publishDate,
-          publication: extracted.publication,
-          bullets: bullets.length ? bullets : ['could not generate summary'],
-          readTime: extracted.readTime,
-          fullContent,
-          wordCount: extracted.wordCount,
-          timestamp: Date.now(),
-          timing: { llm: sidePanelResult.timing || 0, total: sidePanelResult.timing || 0, cached: false, model: 'gemini-nano', provider: 'chrome-ai' }
-        }
-        pageSummary.value = summaryData
-        pageMetadata.value = { title: extracted.title || 'untitled', url: tab.url }
-        summaryError.value = null
-        
-        await cacheService.setPageSummary(tab.url, summaryData, 3600)
-        log.log('cached summary for', tab.url.slice(0, 50))
-        
-        indexToRag(fullContent, { sourceId: tab.url, sourceUrl: tab.url, sourceType: 'article', title: extracted.title })
-        
-        if (saveTabSession) await saveTabSession()
-        summaryLoading.value = false
-        return
-      }
-      
-      log.log('side panel Chrome AI failed, falling back to background')
       const response = await sendToBackground({
         type: 'EXTRACT_AND_SUMMARIZE',
         tabId: tab.id,

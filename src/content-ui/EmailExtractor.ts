@@ -7,7 +7,6 @@ import type {
   Contact, 
   EmailMetadata as BaseEmailMetadata,
   SummaryResponse,
-  HealthResponse,
   EmailProcessCallback 
 } from '../types'
 
@@ -758,7 +757,7 @@ export class EmailExtractor {
     }
   }
 
-  async getSummaryFromBackground(emailText: string, emailId: string, metadata: EmailMetadata | null = null, forceRegenerate = false, allowRetry = true): Promise<unknown> {
+  async getSummaryFromBackground(emailText: string, emailId: string, metadata: EmailMetadata | null = null, forceRegenerate = false): Promise<unknown> {
     if (!chrome?.runtime?.sendMessage) return null
 
     const maxRetries = 3
@@ -786,13 +785,6 @@ export class EmailExtractor {
           })
         })
 
-        if (response?.needsOllama && allowRetry) {
-          const ready = await this.waitForOllamaReady()
-          if (ready) {
-            return await this.getSummaryFromBackground(emailText, emailId, metadata, forceRegenerate, false)
-          }
-        }
-
         return response?.summary || null
       } catch (err) {
         console.warn(`metldr: email summary attempt ${attempt + 1}/${maxRetries} failed:`, (err as Error).message)
@@ -804,32 +796,6 @@ export class EmailExtractor {
     }
 
     return null
-  }
-
-  async waitForOllamaReady(maxAttempts = 12, delayMs = 1000): Promise<boolean> {
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        const response = await new Promise<HealthResponse>((resolve, reject) => {
-          chrome.runtime.sendMessage({ type: 'CHECK_OLLAMA_HEALTH' }, (resp) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message))
-            } else {
-              resolve(resp as HealthResponse)
-            }
-          })
-        })
-
-        if (response?.success && response.connected) {
-          return true
-        }
-      } catch (err) {
-        if (attempt === maxAttempts - 1) {
-          console.warn('metldr: ollama still unavailable after wait:', (err as Error).message)
-        }
-      }
-      await new Promise(r => setTimeout(r, delayMs))
-    }
-    return false
   }
 
   async autoRegenerateSummary(

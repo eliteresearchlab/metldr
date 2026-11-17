@@ -1,3 +1,4 @@
+/// <reference path="../types/chrome-ai.d.ts" />
 import { gsap } from 'gsap'
 import { UIService } from './UIService'
 import { emailExtractor } from './EmailExtractor'
