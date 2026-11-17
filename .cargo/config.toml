@@ -8,3 +8,8 @@
 # is the same from any working directory.
 [build]
 target-dir = "target"
+
+# Wasm SIMD (Chrome 91 and later) for every wasm crate: LLVM vectorizes their loops and
+# libraries such as memchr take their simd128 paths.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

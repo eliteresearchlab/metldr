@@ -12,11 +12,7 @@ const crates = [
   { name: 'metldr-panel', module: 'metldr_panel', pkg: 'crates/metldr-panel/pkg' },
   { name: 'metldr-panel', variant: 'rune', module: 'metldr_panel', pkg: 'target/wasm/metldr-panel-rune/pkg', features: 'rune-ui' },
   { name: 'metldr-welcome', module: 'welcome_runtime', pkg: 'public/welcome/pkg' },
-  // Wasm SIMD (Chrome 91 and later) for the search index's typo matcher.
-  {
-    name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg',
-    rustflags: '-C target-feature=+simd128',
-  },
+  { name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg' },
   { name: 'metldr-answer-codec', artifact: 'metldr_answer_codec', module: 'answer_codec', pkg: 'crates/metldr-answer-codec/pkg', features: 'guest' },
 ];
 const isCheck = process.argv.includes('--check');
