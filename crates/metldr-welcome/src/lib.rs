@@ -1,6 +1,7 @@
 pub mod guide;
 pub mod setup_guide;
-#[cfg(target_arch = "wasm32")]
+// Plain Rust, so its checks run natively; only the wasm page uses it.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 mod state;
 
 #[cfg(target_arch = "wasm32")]

@@ -145,6 +145,7 @@ h2 { font-size: var(--heading-size); line-height: 1.12; font-weight: 500; letter
 .choice-title { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; font-size: var(--step-1); font-weight: 600; }
 .choice-title svg { block-size: 1.6cap; }
 .choice-meta { font-size: var(--step--1); color: var(--muted); }
+.choice-pick { justify-self: start; padding-block: 0.4rem; padding-inline: 0.6rem; border-radius: 99rem; font-size: var(--step--1); font-weight: 600; color: var(--ink); background: color-mix(in oklch, var(--orange) 24%, var(--paper)); text-box: trim-both cap alphabetic; }
 .connection-panel { display: flex; flex-wrap: wrap; align-items: start; gap: 1rem; padding-block: 1.5rem; border-block-start: 1px solid var(--line); }
 .connection-panel > :not(.local-options):not(#check-button) { flex-basis: 100%; }
 #check-button { align-self: center; }

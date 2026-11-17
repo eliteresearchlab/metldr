@@ -38,19 +38,23 @@ pub fn models(document: &Document, names: &[String], selected: &str) -> Result<(
 
 pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(), JsValue> {
     let local = matches!(setup.choice, Choice::Chrome | Choice::Ollama);
+    let have = matches!(setup.choice, Choice::Ollama | Choice::Agent);
     for (id, selected) in [
-        ("choose-local", local),
+        ("choose-local", setup.choice == Choice::Chrome),
+        ("choose-agent", have),
         ("choose-provider", setup.choice == Choice::Provider),
-        ("choose-agent", setup.choice == Choice::Agent),
-        ("choose-chrome", setup.choice == Choice::Chrome),
         ("choose-ollama", setup.choice == Choice::Ollama),
+        ("choose-installed", setup.choice == Choice::Agent),
     ] {
         element(document, id)?
             .set_attribute("aria-pressed", if selected { "true" } else { "false" })?;
         flag(document, id, "disabled", setup.saving)?;
     }
     for (id, visible) in [
-        ("local-options", local),
+        ("pick-local", setup.recommended == Some(Choice::Chrome)),
+        ("pick-agent", setup.recommended == Some(Choice::Ollama)),
+        ("pick-provider", setup.recommended == Some(Choice::Provider)),
+        ("local-options", have),
         ("chrome-controls", setup.choice == Choice::Chrome),
         ("ollama-controls", setup.choice == Choice::Ollama),
         ("check-button", local),
@@ -97,12 +101,12 @@ pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(
     } else {
         match setup.status {
             Status::Idle => match setup.choice {
-                Choice::Chrome => "Chrome AI selected",
-                Choice::Ollama => "Ollama selected",
-                Choice::Provider => "Set up a provider",
+                Choice::Chrome => "Chrome's built-in AI",
+                Choice::Ollama => "Ollama on this computer",
+                Choice::Provider => "Bring a key",
                 Choice::Agent => "Set up an installed agent",
             },
-            Status::Checking => "Checking connection",
+            Status::Checking => "Checking this computer",
             Status::Ready => "Connection ready",
             Status::Downloadable => "Model download available",
             Status::Downloading => "Model download in progress",

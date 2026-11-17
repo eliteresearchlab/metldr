@@ -142,6 +142,15 @@ pub fn object(fields: &[(&str, JsValue)]) -> Result<JsValue, JsValue> {
     Ok(result.into())
 }
 
+/// `promise`, or `undefined` once `ms` pass without an answer.
+pub fn within(promise: &JsValue, ms: f64) -> Result<Promise, JsValue> {
+    let set_timeout = get(&js_sys::global(), "setTimeout")?.dyn_into::<Function>()?;
+    let timeout = Promise::new(&mut |resolve, _| {
+        let _ = set_timeout.call2(&js_sys::global(), &resolve, &JsValue::from_f64(ms));
+    });
+    Ok(Promise::race(&Array::of2(&Promise::resolve(promise), &timeout)))
+}
+
 pub fn summarizer() -> Option<JsValue> {
     get(&js_sys::global(), "Summarizer")
         .ok()

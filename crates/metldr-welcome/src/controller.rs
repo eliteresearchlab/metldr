@@ -182,10 +182,11 @@ fn open_panel(app: Shared) {
     });
 }
 
-async fn load(app: Shared) {
+async fn load(shared: Shared) {
     let destination = browser::saved_destination();
     let result = browser::load_settings().await;
-    let mut app = app.borrow_mut();
+    let mut fresh = false;
+    let mut app = shared.borrow_mut();
     if !app.alive {
         return;
     }
@@ -203,6 +204,7 @@ async fn load(app: Shared) {
         {
             app.setup.model = model;
         }
+        fresh = matches!(destination, Ok(None)) && local.is_none();
         match destination {
             Ok(destination) => app
                 .setup
@@ -232,15 +234,71 @@ async fn load(app: Shared) {
         ),
     }
     app.setup.loading = false;
+    if fresh {
+        app.setup.status = Status::Checking;
+        let generation = app.setup.generation;
+        spawn_local(detect(shared.clone(), generation));
+    }
+    app.paint();
+}
+
+/// Checks Chrome's built-in AI and a local Ollama together, then recommends the easiest choice
+/// that works and selects it unless the user already chose. Sends no prompt or page content.
+async fn detect(app: Shared, generation: u64) {
+    // Chrome's check starts before Ollama's request, so the two run at the same time.
+    let chrome = browser::summarizer()
+        .and_then(|api| browser::call(&api, "availability", &[]).ok())
+        .and_then(|value| browser::within(&value, 3_000.0).ok())
+        .map(wasm_bindgen_futures::JsFuture::from);
+    let models = browser::check_ollama().await.unwrap_or_default();
+    let availability = match chrome {
+        Some(future) => future.await.ok().and_then(|value| value.as_string()),
+        None => Some("missing-api".into()),
+    };
+    let mut app = app.borrow_mut();
+    if !app.alive {
+        return;
+    }
+    let pick = Setup::recommend(availability.as_deref(), &models);
+    app.setup.recommended = Some(pick);
+    if !models.is_empty() {
+        app.setup.models = models;
+        if !app.setup.models.contains(&app.setup.model) {
+            app.setup.model = app.setup.models.first().cloned().unwrap_or_default();
+        }
+        let _ = dom::models(&app.document, &app.setup.models, &app.setup.model);
+    }
+    if app.setup.current(generation) && !app.setup.saving {
+        app.setup.choose(pick);
+        match pick {
+            Choice::Chrome => app
+                .setup
+                .availability(availability.as_deref().unwrap_or("unknown")),
+            Choice::Ollama => {
+                app.setup.status = Status::Ready;
+                app.setup.detail =
+                    "Ollama is running here. Choose a model, then continue.".into();
+            }
+            Choice::Provider | Choice::Agent => {
+                app.setup.detail = "Chrome's built-in AI and Ollama were not found here. Paste a key from a service you use, or set up Ollama with the guide below.".into();
+            }
+        }
+    }
     app.paint();
 }
 
 fn handle_click(app: Shared, id: &str) {
+    let have = if app.borrow().setup.models.is_empty() {
+        Choice::Agent
+    } else {
+        Choice::Ollama
+    };
     let choice = match id {
-        "choose-local" | "choose-chrome" => Some(Choice::Chrome),
+        "choose-local" => Some(Choice::Chrome),
+        "choose-agent" => Some(have),
         "choose-ollama" => Some(Choice::Ollama),
+        "choose-installed" => Some(Choice::Agent),
         "choose-provider" => Some(Choice::Provider),
-        "choose-agent" => Some(Choice::Agent),
         _ => None,
     };
     if let Some(choice) = choice {
