@@ -49,6 +49,9 @@ pub(crate) struct Tools {
 }
 
 impl Tools {
+    fn attached(&self) -> Result<&Engine> {
+        Ok(self.engine.as_ref().ok_or("browser is not attached")?)
+    }
     pub(crate) fn new(
         client: Client,
         source: Target,
@@ -153,12 +156,7 @@ impl Tools {
             _ => None,
         };
         if let Some(handle) = handle
-            && self
-                .engine
-                .as_ref()
-                .ok_or("browser is not attached")?
-                .child_action(handle)
-                .await?
+            && self.attached()?.child_action(handle).await?
         {
             let result = serde_json::to_value(Outcome::Prevented {
                 reason: "actions inside frames are not supported yet".into(),
@@ -168,9 +166,7 @@ impl Tools {
         let result = match &call {
             Call::SetNativeControl { handle, checked } => {
                 let prepared = self
-                    .engine
-                    .as_ref()
-                    .ok_or("browser is not attached")?
+                    .attached()?
                     .prepare_control(call_id, handle, *checked)
                     .await?;
                 match prepared {
@@ -217,37 +213,23 @@ impl Tools {
                 self.change(call_id, handle, value, stop, budget).await?
             }
             Call::PressKey { handle, key } => {
-                let proposal = self
-                    .engine
-                    .as_ref()
-                    .ok_or("browser is not attached")?
-                    .prepare_key(call_id, handle, *key)
-                    .await?;
+                let proposal = self.attached()?.prepare_key(call_id, handle, *key).await?;
                 self.perform(proposal, stop, budget).await?
             }
             Call::EnterSecret { handle, kind } => {
                 let proposal = self
-                    .engine
-                    .as_ref()
-                    .ok_or("browser is not attached")?
+                    .attached()?
                     .prepare_secret(call_id, handle, (*kind).into())
                     .await?;
                 self.perform(proposal, stop, budget).await?
             }
             Call::ActivateButton { handle } => {
-                let proposal = self
-                    .engine
-                    .as_ref()
-                    .ok_or("browser is not attached")?
-                    .prepare_button(call_id, handle)
-                    .await?;
+                let proposal = self.attached()?.prepare_button(call_id, handle).await?;
                 self.perform(proposal, stop, budget).await?
             }
             Call::SelectOption { handle, option } => {
                 let proposal = self
-                    .engine
-                    .as_ref()
-                    .ok_or("browser is not attached")?
+                    .attached()?
                     .prepare_selection(call_id, handle, option)
                     .await?;
                 self.perform(proposal, stop, budget).await?
@@ -258,35 +240,15 @@ impl Tools {
                 pixels,
             } => {
                 let proposal = self
-                    .engine
-                    .as_ref()
-                    .ok_or("browser is not attached")?
+                    .attached()?
                     .prepare_scroll(call_id, handle, *direction, *pixels)
                     .await?;
                 self.perform(proposal, stop, budget).await?
             }
             // Read-only: the captured output is returned as data and triggers no effect.
-            Call::PageLogs => {
-                self.engine
-                    .as_ref()
-                    .ok_or("browser is not attached")?
-                    .page_logs()
-                    .await?
-            }
-            Call::NetworkRequests => {
-                self.engine
-                    .as_ref()
-                    .ok_or("browser is not attached")?
-                    .network_requests()
-                    .await?
-            }
-            Call::Snapshot => {
-                self.engine
-                    .as_ref()
-                    .ok_or("browser is not attached")?
-                    .snapshot()
-                    .await?
-            }
+            Call::PageLogs => self.attached()?.page_logs().await?,
+            Call::NetworkRequests => self.attached()?.network_requests().await?,
+            Call::Snapshot => self.attached()?.snapshot().await?,
             Call::Status | Call::Settings | Call::ProposeTaskPlan { .. } => {
                 return Err("read-only browser call reached the attached path".into());
             }
@@ -377,9 +339,7 @@ impl Tools {
             .observation_generation
             .checked_add(1)
             .ok_or("browser observation capacity reached")?;
-        self.engine
-            .as_ref()
-            .ok_or("browser is not attached")?
+        self.attached()?
             .observe(self.observation_generation, within)
             .await
     }
@@ -393,9 +353,7 @@ impl Tools {
         budget: Option<&browser_owner::Budget>,
     ) -> Result<Value> {
         let proposal = self
-            .engine
-            .as_ref()
-            .ok_or("browser is not attached")?
+            .attached()?
             .prepare_change(tool_use_id, handle, value)
             .await?;
         self.perform(proposal, stop, budget).await
@@ -425,7 +383,7 @@ impl Tools {
                     }
                 })
                 .await?;
-                let engine = self.engine.as_ref().ok_or("browser is not attached")?;
+                let engine = self.attached()?;
                 let outcome = match &dispatched.proposal.intent {
                     Intent::Field { .. } => engine.change(&dispatched).await,
                     Intent::Secret { .. } => engine.enter_secret(&dispatched).await,
@@ -809,4 +767,3 @@ mod failed_attach_check {
         );
     }
 }
-
