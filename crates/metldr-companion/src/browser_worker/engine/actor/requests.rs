@@ -1,4 +1,5 @@
 use super::*;
+use crate::browser_worker::engine::page::{Route, route};
 impl Actor {
     pub(super) fn request(&mut self, request: Request) -> Result<()> {
         let Request { kind, job } = request;
@@ -284,18 +285,18 @@ impl Actor {
             let _ = job.reply.send(Err("the session is not this tab's".into()));
             return Ok(());
         }
-        match super::super::page::route(&method) {
-            super::super::page::Route::Done => {
+        match route(&method) {
+            Route::Done => {
                 let _ = job.reply.send(Ok(json!({})));
                 Ok(())
             }
-            super::super::page::Route::Refused => {
+            Route::Refused => {
                 let _ = job
                     .reply
                     .send(Err(format!("{method} is not available in metldr")));
                 Ok(())
             }
-            super::super::page::Route::Send => {
+            Route::Send => {
                 self.queue(method, session, params, Work::Page(job), None, None)
             }
         }
