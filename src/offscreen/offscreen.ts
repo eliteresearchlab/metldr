@@ -100,10 +100,8 @@ async function handleChromeAI(msg: any): Promise<any> {
         const caps = {
           complete: typeof LanguageModel !== 'undefined',
           summarize: typeof Summarizer !== 'undefined',
-          translate: typeof Translator !== 'undefined',
           detectLanguage: typeof LanguageDetector !== 'undefined',
-          write: typeof Writer !== 'undefined',
-          rewrite: typeof Rewriter !== 'undefined'
+          write: typeof Writer !== 'undefined'
         }
         return { ok: true, capabilities: caps }
       }

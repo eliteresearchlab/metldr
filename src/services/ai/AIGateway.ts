@@ -5,15 +5,14 @@ import { localModels } from './LocalModelProvider'
 import { storageService } from '../StorageService'
 import { logger } from '../LoggerService'
 import type {
-  AICompleteRequest, AICompleteResponse, AISummarizeRequest, AISummarizeResponse,
-  AITranslateRequest, AITranslateResponse, AIDetectLanguageRequest, AIDetectLanguageResponse,
-  AIWriteRequest, AIWriteResponse, AIRewriteRequest, AIRewriteResponse
+  AICompleteRequest, AICompleteResponse, AISummarizeRequest, AISummarizeResponse, AIDetectLanguageRequest, AIDetectLanguageResponse,
+  AIWriteRequest, AIWriteResponse
 } from '../../types/chrome-ai'
 import type { LocalTask } from '../../types/local-models'
 
 const log = logger.createScoped('AIGateway')
 
-type OperationType = 'complete' | 'summarize' | 'translate' | 'detectLanguage' | 'write' | 'rewrite'
+type OperationType = 'complete' | 'summarize' | 'detectLanguage' | 'write'
 export type AIProviderPreference = 'chrome-ai' | 'ollama'
 
 interface GatewayConfig {
@@ -132,21 +131,6 @@ class AIGatewayService {
     return this.executeWithFallback('summarize', request, (provider, req) => provider.summarize(req))
   }
 
-  async translate(request: AITranslateRequest): Promise<AITranslateResponse> {
-    try {
-      const chromeAvail = await chromeAIProvider.getCapabilities()
-      if (chromeAvail.translate) {
-        const result = await chromeAIProvider.translate(request)
-        if (result.ok) return result
-      }
-    } catch { /* fall through */ }
-
-    if (this.config.fallbackEnabled) {
-      return ollamaProvider.translate(request)
-    }
-    return { ok: false, error: 'translation not available' }
-  }
-
   async detectLanguage(request: AIDetectLanguageRequest): Promise<AIDetectLanguageResponse> {
     try {
       const chromeAvail = await chromeAIProvider.getCapabilities()
@@ -164,10 +148,6 @@ class AIGatewayService {
 
   async write(request: AIWriteRequest): Promise<AIWriteResponse> {
     return this.executeWithFallback('write', request, (provider, req) => provider.write(req))
-  }
-
-  async rewrite(request: AIRewriteRequest): Promise<AIRewriteResponse> {
-    return this.executeWithFallback('rewrite', request, (provider, req) => provider.rewrite(req))
   }
 
   get chrome(): typeof chromeAIProvider { return chromeAIProvider }

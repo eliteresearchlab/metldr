@@ -17,18 +17,6 @@ export interface SummarizerSession {
   destroy(): void
 }
 
-// translator api
-export interface TranslatorOptions {
-  sourceLanguage: string
-  targetLanguage: string
-}
-
-export interface TranslatorSession {
-  translate(text: string): Promise<string>
-  translateStreaming(text: string): ReadableStream<string>
-  destroy(): void
-}
-
 // language detector api
 export interface LanguageDetection {
   detectedLanguage: string
@@ -54,20 +42,6 @@ export interface WriterSession {
   destroy(): void
 }
 
-// rewriter api
-export interface RewriterOptions {
-  tone?: 'as-is' | 'more-formal' | 'more-casual'
-  format?: 'as-is' | 'plain-text' | 'markdown'
-  length?: 'as-is' | 'shorter' | 'longer'
-  sharedContext?: string
-}
-
-export interface RewriterSession {
-  rewrite(text: string, options?: { context?: string; signal?: AbortSignal }): Promise<string>
-  rewriteStreaming(text: string, options?: { context?: string }): ReadableStream<string>
-  destroy(): void
-}
-
 // prompt api (language model)
 export interface PromptOptions {
   initialPrompts?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
@@ -88,10 +62,8 @@ export interface LanguageModelSession {
 // capabilities report
 export interface ChromeAICapabilities {
   summarizer: ChromeAIAvailability
-  translator: ChromeAIAvailability
   languageDetector: ChromeAIAvailability
   writer: ChromeAIAvailability
-  rewriter: ChromeAIAvailability
   promptAPI: ChromeAIAvailability
 }
 
@@ -141,20 +113,6 @@ export interface AISummarizeResponse {
   timing?: number
 }
 
-export interface AITranslateRequest {
-  text: string
-  sourceLanguage: string
-  targetLanguage: string
-}
-
-export interface AITranslateResponse {
-  ok: boolean
-  translation?: string
-  error?: string
-  provider?: 'chrome-ai' | 'ollama'
-  timing?: number
-}
-
 export interface AIDetectLanguageRequest {
   text: string
 }
@@ -183,17 +141,3 @@ export interface AIWriteResponse {
   timing?: number
 }
 
-export interface AIRewriteRequest {
-  text: string
-  tone?: 'as-is' | 'more-formal' | 'more-casual'
-  length?: 'as-is' | 'shorter' | 'longer'
-  context?: string
-}
-
-export interface AIRewriteResponse {
-  ok: boolean
-  content?: string
-  error?: string
-  provider?: 'chrome-ai' | 'ollama'
-  timing?: number
-}

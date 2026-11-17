@@ -12,14 +12,10 @@ import type {
   AICompleteResponse,
   AISummarizeRequest,
   AISummarizeResponse,
-  AITranslateRequest,
-  AITranslateResponse,
   AIDetectLanguageRequest,
   AIDetectLanguageResponse,
   AIWriteRequest,
-  AIWriteResponse,
-  AIRewriteRequest,
-  AIRewriteResponse
+  AIWriteResponse
 } from '../../types/chrome-ai'
 
 export class OllamaProvider extends AIProvider {
@@ -59,10 +55,8 @@ export class OllamaProvider extends AIProvider {
     return {
       complete: available,
       summarize: available,
-      translate: available,
       detectLanguage: available,
       write: available,
-      rewrite: available
     }
   }
 
@@ -168,39 +162,6 @@ Rules:
     }
   }
 
-  async translate(request: AITranslateRequest): Promise<AITranslateResponse> {
-    const start = performance.now()
-
-    try {
-      const model = await OllamaService.getUserSelected() || await OllamaService.selectBest('word_lookup')
-      if (!model) {
-        return { ok: false, error: 'no ollama model available' }
-      }
-
-      const systemPrompt = `You are a professional translator. Translate text accurately from ${request.sourceLanguage} to ${request.targetLanguage}. 
-Only output the translation, nothing else.`
-
-      const result = await OllamaService.complete(model, [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: request.text }
-      ], { temperature: 0.1 })
-
-      if (!result.ok) {
-        return { ok: false, error: result.error, provider: 'ollama' }
-      }
-
-      return {
-        ok: true,
-        translation: result.content?.trim(),
-        provider: 'ollama' as const,
-        timing: Math.round(performance.now() - start)
-      }
-    } catch (err) {
-      console.error('[OllamaProvider.translate] error:', err)
-      return { ok: false, error: (err as Error).message }
-    }
-  }
-
   async detectLanguage(request: AIDetectLanguageRequest): Promise<AIDetectLanguageResponse> {
     const start = performance.now()
 
@@ -282,55 +243,6 @@ Write clear, well-structured content.`
       }
     } catch (err) {
       console.error('[OllamaProvider.write] error:', err)
-      return { ok: false, error: (err as Error).message, provider: 'ollama' }
-    }
-  }
-
-  async rewrite(request: AIRewriteRequest): Promise<AIRewriteResponse> {
-    const start = performance.now()
-
-    try {
-      const model = await OllamaService.getUserSelected() || await OllamaService.selectBest('email_summary')
-      if (!model) {
-        return { ok: false, error: 'no ollama model available' }
-      }
-
-      const toneInstructions: Record<string, string> = {
-        'as-is': 'Maintain the same tone',
-        'more-formal': 'Make the tone more formal and professional',
-        'more-casual': 'Make the tone more casual and friendly'
-      }
-
-      const lengthInstructions: Record<string, string> = {
-        'as-is': 'Maintain similar length',
-        'shorter': 'Make it more concise',
-        'longer': 'Expand with more detail'
-      }
-
-      const systemPrompt = `You are an expert editor.
-Rewrite the following text.
-${toneInstructions[request.tone || 'as-is']}.
-${lengthInstructions[request.length || 'as-is']}.
-${request.context ? `Context: ${request.context}` : ''}
-Only output the rewritten text.`
-
-      const result = await OllamaService.complete(model, [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: request.text }
-      ], { temperature: 0.5 })
-
-      if (!result.ok) {
-        return { ok: false, error: result.error, provider: 'ollama' }
-      }
-
-      return {
-        ok: true,
-        content: result.content,
-        provider: 'ollama',
-        timing: Math.round(performance.now() - start)
-      }
-    } catch (err) {
-      console.error('[OllamaProvider.rewrite] error:', err)
       return { ok: false, error: (err as Error).message, provider: 'ollama' }
     }
   }

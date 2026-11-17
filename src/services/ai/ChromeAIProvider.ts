@@ -2,9 +2,8 @@
 import { AIProvider, type ProviderCapabilities, type ProviderName } from './AIProvider'
 import { languageService } from '../LanguageService'
 import type {
-  AICompleteRequest, AICompleteResponse, AISummarizeRequest, AISummarizeResponse,
-  AITranslateRequest, AITranslateResponse, AIDetectLanguageRequest, AIDetectLanguageResponse,
-  AIWriteRequest, AIWriteResponse, AIRewriteRequest, AIRewriteResponse
+  AICompleteRequest, AICompleteResponse, AISummarizeRequest, AISummarizeResponse, AIDetectLanguageRequest, AIDetectLanguageResponse,
+  AIWriteRequest, AIWriteResponse
 } from '../../types/chrome-ai'
 
 export class ChromeAIProvider extends AIProvider {
@@ -76,10 +75,8 @@ export class ChromeAIProvider extends AIProvider {
       const apis = {
         Summarizer: typeof Summarizer !== 'undefined',
         LanguageModel: typeof LanguageModel !== 'undefined',
-        Translator: typeof Translator !== 'undefined',
         Writer: typeof Writer !== 'undefined',
-        LanguageDetector: typeof LanguageDetector !== 'undefined',
-        Rewriter: typeof Rewriter !== 'undefined'
+        LanguageDetector: typeof LanguageDetector !== 'undefined'
       }
       return Object.values(apis).some(v => v)
     } catch {
@@ -94,8 +91,6 @@ export class ChromeAIProvider extends AIProvider {
           if (typeof Summarizer === 'undefined') return false
           const sumAvail = await Summarizer.availability()
           return sumAvail === 'available' || sumAvail === 'downloadable'
-        case 'translator':
-          return typeof Translator !== 'undefined'
         case 'languageDetector':
           if (typeof LanguageDetector === 'undefined') return false
           const ldAvail = await LanguageDetector.availability()
@@ -104,10 +99,6 @@ export class ChromeAIProvider extends AIProvider {
           if (typeof Writer === 'undefined') return false
           const wrAvail = await Writer.availability()
           return wrAvail === 'available' || wrAvail === 'downloadable'
-        case 'rewriter':
-          if (typeof Rewriter === 'undefined') return false
-          const rwAvail = await Rewriter.availability()
-          return rwAvail === 'available' || rwAvail === 'downloadable'
         case 'prompt':
           if (typeof LanguageModel === 'undefined') return false
           const lmAvail = await LanguageModel.availability({ languages: ['en', 'es', 'ja'] })
@@ -128,7 +119,7 @@ export class ChromeAIProvider extends AIProvider {
       if (result?.ok && result.capabilities) {
         return result.capabilities
       }
-      return { complete: false, summarize: false, translate: false, detectLanguage: false, write: false, rewrite: false }
+      return { complete: false, summarize: false, detectLanguage: false, write: false }
     }
 
     const now = Date.now()
@@ -136,16 +127,14 @@ export class ChromeAIProvider extends AIProvider {
       return this.capabilitiesCache
     }
 
-    const [complete, summarize, translate, detectLanguage, write, rewrite] = await Promise.all([
+    const [complete, summarize, detectLanguage, write] = await Promise.all([
       this.checkAPIAvailability('prompt'),
       this.checkAPIAvailability('summarizer'),
-      this.checkAPIAvailability('translator'),
       this.checkAPIAvailability('languageDetector'),
-      this.checkAPIAvailability('writer'),
-      this.checkAPIAvailability('rewriter')
+      this.checkAPIAvailability('writer')
     ])
 
-    this.capabilitiesCache = { complete, summarize, translate, detectLanguage, write, rewrite }
+    this.capabilitiesCache = { complete, summarize, detectLanguage, write }
     this.cacheTimestamp = now
     return this.capabilitiesCache
   }
@@ -264,39 +253,6 @@ export class ChromeAIProvider extends AIProvider {
     }
   }
 
-  async translate(request: AITranslateRequest): Promise<AITranslateResponse> {
-    const start = performance.now()
-
-    try {
-      if (typeof Translator === 'undefined') {
-        return { ok: false, error: 'Translator API not available' }
-      }
-
-      const avail = await Translator.availability({
-        sourceLanguage: request.sourceLanguage,
-        targetLanguage: request.targetLanguage
-      })
-
-      if (avail === 'unavailable') {
-        return { ok: false, error: `Translation ${request.sourceLanguage}→${request.targetLanguage} not available` }
-      }
-
-      const translator = await Translator.create({
-        sourceLanguage: request.sourceLanguage,
-        targetLanguage: request.targetLanguage
-      })
-
-      try {
-        const translation = await translator.translate(request.text)
-        return { ok: true, translation, provider: 'chrome-ai', timing: Math.round(performance.now() - start) }
-      } finally {
-        translator.destroy()
-      }
-    } catch (err) {
-      return { ok: false, error: (err as Error).message, provider: 'chrome-ai' }
-    }
-  }
-
   async detectLanguage(request: AIDetectLanguageRequest): Promise<AIDetectLanguageResponse> {
     const start = performance.now()
 
@@ -362,42 +318,6 @@ export class ChromeAIProvider extends AIProvider {
         return { ok: true, content, provider: 'chrome-ai', timing: Math.round(performance.now() - start) }
       } finally {
         writer.destroy()
-      }
-    } catch (err) {
-      return { ok: false, error: (err as Error).message, provider: 'chrome-ai' }
-    }
-  }
-
-  async rewrite(request: AIRewriteRequest): Promise<AIRewriteResponse> {
-    const start = performance.now()
-
-    try {
-      if (typeof Rewriter === 'undefined') {
-        return { ok: false, error: 'Rewriter API not available' }
-      }
-
-      const avail = await Rewriter.availability()
-      if (avail === 'unavailable') {
-        return { ok: false, error: 'Rewriter not available' }
-      }
-
-      const detectedLang = await languageService.detect(request.text.substring(0, 500))
-      const supportedLanguages = languageService.getSupportedLanguages()
-
-      const rewriter = await Rewriter.create({
-        tone: request.tone || 'as-is',
-        length: request.length || 'as-is',
-        sharedContext: request.context,
-        expectedInputLanguages: supportedLanguages,
-        expectedContextLanguages: supportedLanguages,
-        outputLanguage: detectedLang
-      })
-
-      try {
-        const content = await rewriter.rewrite(request.text)
-        return { ok: true, content, provider: 'chrome-ai', timing: Math.round(performance.now() - start) }
-      } finally {
-        rewriter.destroy()
       }
     } catch (err) {
       return { ok: false, error: (err as Error).message, provider: 'chrome-ai' }
