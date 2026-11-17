@@ -21,6 +21,9 @@ use wasm_bindgen_futures::{JsFuture, spawn_local};
 const SETTINGS: &str = "metldr.gateway";
 const KEYS: &str = "metldr.gateway.keys";
 const PROBE_MS: u32 = 600;
+/// Chrome's on-device model check can stay unresolved (headless Chrome, a model component that
+/// is still registering); past this it counts as absent so `detect` always answers.
+const CHROME_PROBE_MS: i32 = 3_000;
 const CONNECT_MS: u32 = 10_000;
 const LOCAL_TIMEOUT_SECS: u16 = 300;
 const MODELS_BOUND: usize = 4 << 20;
@@ -415,7 +418,14 @@ async fn chrome_ai_state() -> &'static str {
     else {
         return "absent";
     };
-    match JsFuture::from(check.unchecked_into::<js_sys::Promise>())
+    let timer = js_sys::Promise::new(&mut |resolve, _| {
+        if let Ok(set_timeout) = get(&js_sys::global(), "setTimeout").dyn_into::<js_sys::Function>()
+        {
+            let _ = set_timeout.call2(&JsValue::UNDEFINED, &resolve, &CHROME_PROBE_MS.into());
+        }
+    });
+    let check = js_sys::Promise::race(&js_sys::Array::of2(&check, &timer));
+    match JsFuture::from(check)
         .await
         .ok()
         .and_then(|v| v.as_string())
