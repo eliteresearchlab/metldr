@@ -8,5 +8,7 @@ Each other Browse crate comes in with the change that first uses it.
 Changes from upstream:
 - `browse-page/src/page.rs`: Browse's isolated world is created without universal access, which
   the metldr extension refuses.
+- `Cargo.toml`: tokio builds only the features the two crates use (rt, sync, time, macros, fs)
+  instead of `full`.
 - Left out: the Chromium integration tests and the `js/generate.sh` script that rebuilds the page
   scripts from Playwright.
