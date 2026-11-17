@@ -93,7 +93,7 @@ impl Command {
 
 pub fn render_html() -> String {
     let mut html = String::from(
-        "<details id=\"ollama-setup\" class=\"setup-guide\"><summary>Set up Ollama</summary>\
+        "<details id=\"ollama-setup\" class=\"setup-guide\"><summary>Set up Ollama<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m9 6 6 6-6 6\"/></svg></summary>\
         <p><a href=\"https://ollama.com/download\" target=\"_blank\" rel=\"noreferrer\">Install Ollama</a> from its official download page. The extension checks the model list at 127.0.0.1:11434. Ollama supports local and cloud models. A cloud model can send content to its provider.</p>\
         <h4>Allow this extension</h4><p>The origin below updates to match this extension when setup loads. If it stays a placeholder, find your extension ID at chrome://extensions. Enable Developer mode to see it, then replace YOUR_EXTENSION_ID manually.</p>",
     );

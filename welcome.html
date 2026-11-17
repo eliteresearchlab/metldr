@@ -1,11 +1,13 @@
 <!doctype html>
-<html lang="en" data-theme="catppuccin">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#121212">
   <title>Welcome to metldr</title>
   <link rel="preload" href="/fonts/AlloVariable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/fonts/fonts.css">
   <link rel="stylesheet" href="/welcome/style.css">
   <script type="module" src="/welcome/loader.js"></script>
@@ -13,101 +15,167 @@
 <body>
 <noscript>Enable JavaScript to use metldr setup.</noscript>
 <a class="skip" href="#setup">Skip to setup</a>
-<header class="site-header">
-  <a class="brand" href="#top" aria-label="metldr welcome"><img src="/assets/logo/metldr-mark-small.svg" width="28" height="28" alt="">metldr</a>
-  <nav aria-label="Welcome"><label for="theme-choice">Theme</label><select id="theme-choice" disabled><option value="catppuccin">Catppuccin</option><option value="gruvbox">Gruvbox</option><option value="cyberpunk">Cyberpunk</option><option value="light">Light</option></select><a href="#help">Help</a></nav>
+<header class="top">
+  <a class="mark" href="#top" aria-label="metldr home"><img src="/assets/logo/metldr-mark-small.svg" width="22" height="22" alt="">metldr</a>
+  <a class="icon-link" href="https://github.com/eliteresearchlab/metldr" target="_blank" rel="noreferrer" aria-label="metldr on GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg></a>
 </header>
+<nav class="index" aria-label="Sections">
+  <a href="#setup">[1] Get started</a>
+  <a href="#what">[2] What it does</a>
+  <a href="#models">[3] Models</a>
+  <a href="#open">[4] Open source</a>
+  <a href="#help">[5] Help</a>
+  <a href="https://github.com/eliteresearchlab/metldr" target="_blank" rel="noreferrer">[6] GitHub<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
+</nav>
 <main id="top">
   <section class="hero" aria-labelledby="welcome-title">
-    <div class="hero-copy">
-      <h1 id="welcome-title">Welcome to metldr.</h1>
-      <p>Read pages, ask questions and complete tasks in your browser.</p>
-      <a class="button hero-action" href="#setup"><span>Set up metldr</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></a>
-      <p class="hero-note">Use the AI you choose.</p>
-    </div>
-    <figure class="hero-figure">
-      <svg id="scene" viewBox="0 0 560 430" aria-hidden="true" data-active="false">
-        <defs><linearGradient id="result-light" x1="0" y1="0" x2="1" y2="1"><stop offset="0"/><stop offset="1"/></linearGradient></defs>
-        <ellipse class="ground-shadow" cx="295" cy="340" rx="180" ry="28"/>
-        <path class="ground" d="M70 290 280 170 490 290 280 410Z"/>
-        <g class="scene-grid"><path d="m112 266 210 120m-168-144 210 120m-168-144 210 120m-168-144 210 120M112 314l210-120M154 338l210-120M196 362l210-120M238 386l210-120"/></g>
-        <g class="source-plane">
-          <path class="side-face" d="M83 229 205 158 307 218 185 289 83 229v13l102 60 122-71v-13M185 289v13"/>
-          <path class="page-face" d="M83 229 205 158 307 218 185 289Z"/>
-          <path class="page-line" d="m115 229 81-47m-61 59 81-47m-61 59 50-29"/>
-          <path class="page-mark" d="m211 229 37-21 26 15-37 22Z"/>
-        </g>
-        <g class="process-plane">
-          <path class="side-face" d="m196 221 111-64 101 59v26l-111 64-101-59Z"/>
-          <path class="process-face" d="m196 221 111-64 101 59-111 64Z"/>
-          <path class="crease" d="m196 221 101 59 111-64m-111 64v26"/>
-          <path class="chip" d="m255 219 51-29 47 27-51 30Z"/>
-          <path class="chip-line" d="m277 216 25 14 29-17m-19-11-24 14"/>
-          <path class="chip-glow" d="m255 219 51-29 47 27-51 30Z"/>
-        </g>
-        <g class="result-plane">
-          <path class="side-face" d="m267 149 113-65 98 57v15l-113 65-98-57Z"/>
-          <path class="result-face" d="m267 149 113-65 98 57-113 65Z"/>
-          <path class="result-line" d="m298 147 75-43m-55 55 75-43m-55 55 43-25"/>
-          <path class="citation" d="m394 159 32-18 15 9-32 18Z"/>
-          <path class="crease" d="m267 149 98 57 113-65m-113 65v15"/>
-        </g>
-        <path class="connector" d="m180 303 0 26 85 49m151-150 32 18v33"/>
-        <circle class="signal signal-in" cx="180" cy="303" r="4"/>
-        <circle class="signal signal-out" cx="416" cy="228" r="4"/>
-        <circle class="connector-dot" cx="265" cy="378" r="4"/>
-      </svg>
-      <figcaption>A page, an answer, and a way back to the source.<span>Illustrated example</span></figcaption>
-      <label class="scene-control"><input id="scene-motion" type="checkbox" checked>Animate diagram</label>
-    </figure>
-  </section>
-  <section id="setup" class="setup content-grid" aria-labelledby="setup-title">
-    <div class="setup-heading"><h2 id="setup-title">Choose your AI.</h2><p>metldr checks what works on this computer and picks the easiest option.</p></div>
-    <div class="connection-layout">
+    <h1 id="welcome-title">The open source AI agent for your browser</h1>
+    <p class="lead">Start with Chrome's free built-in AI, or bring your own: Ollama, Claude Code, Codex or any key. metldr works in its own tab while you keep browsing, and asks before it changes anything.</p>
+    <section id="setup" class="console" aria-labelledby="setup-title">
+      <div class="console-head">
+        <h2 id="setup-title">Choose your AI</h2>
+        <p id="boot-status" role="status">Loading setup.</p>
+      </div>
       <div class="choices" role="group" aria-label="AI connection">
-        <button disabled class="choice" id="choose-local" aria-pressed="false" type="button"><span class="choice-title"><span>Free in this browser</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v12H4zm4 16h8m-4-4v4"/></svg></span><span>Chrome's built-in AI. No key or account.</span><span class="choice-meta">Runs on this computer.</span><span id="pick-local" class="choice-pick" hidden>Recommended</span></button>
-        <button disabled class="choice" id="choose-agent" aria-pressed="false" type="button"><span class="choice-title"><span>Use what you have</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 5 5-5 5m8 0h6M3 3h18v18H3z"/></svg></span><span>Ollama, or Claude Code, Codex, OpenCode and Pi.</span><span class="choice-meta">Uses the app or plan you already have.</span><span id="pick-agent" class="choice-pick" hidden>Recommended</span></button>
-        <button disabled class="choice" id="choose-provider" aria-pressed="false" type="button"><span class="choice-title"><span>Bring a key</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 16H6a4 4 0 0 1 0-8 6 6 0 0 1 11-1 4.5 4.5 0 1 1 1 9h-1m-5-4v9m-3-3 3 3 3-3"/></svg></span><span>OpenAI, Anthropic, Google, OpenRouter or a compatible service.</span><span class="choice-meta">That service may charge you.</span><span id="pick-provider" class="choice-pick" hidden>Recommended</span></button>
+        <button disabled class="choice" id="choose-local" aria-pressed="false" type="button"><span class="choice-text"><span class="choice-title">Free in this browser</span><span class="choice-meta">Chrome's built-in AI. No key, no account, runs here.</span></span><span id="pick-local" class="choice-pick" hidden>Recommended</span><span class="radio" aria-hidden="true"></span></button>
+        <button disabled class="choice" id="choose-agent" aria-pressed="false" type="button"><span class="choice-text"><span class="choice-title">Use what you have</span><span class="choice-meta">Ollama, Claude Code, Codex, OpenCode or Pi.</span></span><span id="pick-agent" class="choice-pick" hidden>Recommended</span><span class="radio" aria-hidden="true"></span></button>
+        <button disabled class="choice" id="choose-provider" aria-pressed="false" type="button"><span class="choice-text"><span class="choice-title">Bring a key</span><span class="choice-meta">OpenAI, Anthropic, Google, OpenRouter or any compatible service.</span></span><span id="pick-provider" class="choice-pick" hidden>Recommended</span><span class="radio" aria-hidden="true"></span></button>
       </div>
-      <div class="connection-panel">
-        <p id="boot-status" class="boot-status" role="status">Loading setup. Help is available while it loads.</p>
+      <div class="status">
         <div class="status-heading"><span id="status-indicator" data-status="idle" aria-hidden="true"></span><h3 id="status-text">Setup is loading</h3></div>
-        <div id="connection-status" role="status" aria-live="polite"><p id="connection-detail">Choose your provider, an installed agent or local AI after setup loads.</p></div>
-        <div id="local-options" hidden class="local-options" role="group" aria-label="What you have"><button disabled id="choose-ollama" class="text-button" type="button" aria-pressed="false">Ollama</button><button disabled id="choose-installed" class="text-button" type="button" aria-pressed="false">Installed agent</button></div>
-        <button disabled id="check-button" hidden class="button primary" type="button">Check</button>
-        <section id="panel-setup" class="backend-controls" aria-label="Browser agent setup" hidden><button disabled id="open-agent-panel" class="button primary" type="button" aria-describedby="panel-setup-status panel-companion-note">Open browser agent</button><p id="panel-setup-status" role="status">Preparing the panel.</p><p id="panel-companion-note">Keys and installed agents need the metldr companion for now. If the panel says Disconnected or Unavailable, <a href="https://github.com/WhiteHades/metldr/tree/main/crates/metldr-companion#metldr-companion" target="_blank" rel="noreferrer">set up the companion</a>, then reconnect. Opening the panel sends no prompt and saves no connection.</p></section>
-        <section id="chrome-controls" class="backend-controls" aria-label="Chrome AI controls" hidden><p>Use Check to read Chrome AI availability. Choose Download model to start a download.</p><button disabled id="download-button" class="button" type="button">Download model</button><button disabled id="cancel-button" class="text-button" type="button">Cancel</button><progress id="download-progress" hidden max="100" aria-label="Model download progress"></progress></section>
-        <section id="ollama-controls" class="backend-controls" aria-label="Ollama controls" hidden><label id="model-choice-label" for="model-choice" hidden>Ollama model</label><select id="model-choice" hidden disabled></select><p>Check whether Ollama is available at 127.0.0.1:11434. Start Ollama separately. <a href="#ollama-setup">Read the Ollama setup guide in Help.</a></p></section>
-        <div class="completion-actions"><button disabled id="continue-button" hidden class="button primary" type="button">Save and close</button><button disabled id="explore-button" class="text-button" type="button">Continue without connecting</button><a id="preview-panel" href="./panel.html" class="button primary" hidden>View panel preview</a></div>
+        <div id="connection-status" role="status" aria-live="polite"><p id="connection-detail">Checking what works on this computer.</p></div>
+        <div id="local-options" hidden class="segmented" role="group" aria-label="What you have"><button disabled id="choose-ollama" type="button" aria-pressed="false">Ollama</button><button disabled id="choose-installed" type="button" aria-pressed="false">Installed agent</button></div>
+        <button disabled id="check-button" hidden class="button" type="button">Check again</button>
+        <section id="panel-setup" class="controls" aria-label="Browser agent setup" hidden><button disabled id="open-agent-panel" class="button solid" type="button" aria-describedby="panel-setup-status panel-companion-note">Open metldr</button><p id="panel-setup-status" role="status">Preparing the panel.</p><p id="panel-companion-note" class="note">Keys and installed agents use the free metldr companion for now. <a href="https://github.com/eliteresearchlab/metldr/tree/main/crates/metldr-companion#metldr-companion" target="_blank" rel="noreferrer">Set it up</a></p></section>
+        <section id="chrome-controls" class="controls" aria-label="Chrome AI controls" hidden><button disabled id="download-button" class="button" type="button">Download the model</button><button disabled id="cancel-button" class="link" type="button">Cancel</button><progress id="download-progress" hidden max="100" aria-label="Model download progress"></progress></section>
+        <section id="ollama-controls" class="controls" aria-label="Ollama controls" hidden><label id="model-choice-label" for="model-choice" hidden>Model</label><select id="model-choice" hidden disabled></select><a class="link" href="#ollama-setup">Ollama setup guide</a></section>
+      </div>
+      <div class="finish"><button disabled id="continue-button" hidden class="button solid" type="button">Save and close</button><button disabled id="explore-button" class="link" type="button">Skip for now</button><a id="preview-panel" href="./panel.html" class="button solid" hidden>View panel preview</a><label class="theme-field" for="theme-choice">Panel theme<select id="theme-choice" disabled><option value="catppuccin">Catppuccin</option><option value="gruvbox">Gruvbox</option><option value="cyberpunk">Cyberpunk</option><option value="light">Light</option></select></label></div>
+    </section>
+  </section>
+
+  <figure class="stage" aria-labelledby="stage-caption">
+    <canvas id="backdrop" aria-hidden="true"></canvas>
+    <div class="browser" aria-hidden="true">
+      <div class="browser-bar"><span class="dots"><i></i><i></i><i></i></span><span class="address">shop.example/laptops</span></div>
+      <div class="browser-body">
+        <div class="page">
+          <p class="page-title">Laptops</p>
+          <ul class="products">
+            <li><span class="thumb"></span><span><b>Aero 14</b><small>1.3 kg, 16 GB</small></span><span class="price">$899</span></li>
+            <li><span class="thumb"></span><span><b>Swift 16</b><small>1.8 kg, 32 GB</small></span><span class="price">$1,049</span></li>
+            <li><span class="thumb"></span><span><b>Zen 13</b><small>1.1 kg, 16 GB</small></span><span class="price">$1,129</span></li>
+          </ul>
+        </div>
+        <div class="panel">
+          <p class="panel-name">metldr</p>
+          <p class="ask">Find the cheapest laptop under 1.5 kg and add it to my cart.</p>
+          <ol class="steps-live">
+            <li data-state="done">Read 3 product pages</li>
+            <li data-state="done">Compared weight and price</li>
+            <li data-state="wait">Add the Aero 14 to your cart?</li>
+          </ol>
+          <div class="approve"><span>Approve</span><span>Stop</span></div>
+        </div>
+      </div>
+    </div>
+    <figcaption id="stage-caption">An illustrated example: metldr works in a shop tab and waits for your OK before it adds anything to the cart.</figcaption>
+  </figure>
+
+  <section id="what" class="row" aria-labelledby="what-title">
+    <h2 id="what-title" class="label">What is metldr?</h2>
+    <div class="body">
+      <p class="intro">metldr is a free, open source agent that lives in your browser. It reads pages, pulls out data and does the clicking for you. Everything it changes waits for your approval.</p>
+      <ul class="features">
+        <li><h3>Works beside you</h3><p>Fills forms, clicks through pages and finishes tasks in its own tab.</p></li>
+        <li><h3>Asks first</h3><p>Nothing on a page changes until you approve it. Stop always works.</p></li>
+        <li><h3>Pulls out data</h3><p>Turns any page into a table or list you can sort, edit and copy.</p></li>
+        <li><h3>Answers you can use</h3><p>Charts, tables and checklists right in the chat.</p></li>
+        <li><h3>Reads with sources</h3><p>Summaries of pages, PDFs and Gmail threads, linked to where they came from.</p></li>
+        <li><h3>One shortcut</h3><p>Open it from the toolbar or with <span class="keys"><kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>M</kbd></span>.</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="start" class="row" aria-labelledby="start-title">
+    <h2 id="start-title" class="label">Get started</h2>
+    <div class="body">
+      <p class="intro">The easiest way is Chrome's free built-in AI. No account needed. Already use Ollama, Claude Code or Codex? metldr finds them.</p>
+      <ol class="steps">
+        <li><span class="n">01</span><div><h3>Choose your AI</h3><p>metldr checks this computer and recommends what works.</p></div><a class="button" href="#setup">Choose</a></li>
+        <li><span class="n">02</span><div><h3>Open metldr</h3><p>Toolbar button, or <span class="keys"><kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>M</kbd></span>.</p></div></li>
+        <li><span class="n">03</span><div><h3>Ask, or hand it a task</h3><p>Answers with sources, or tasks done in their own tab.</p></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="models" class="row" aria-labelledby="models-title">
+    <h2 id="models-title" class="label">Bring any AI</h2>
+    <div class="body">
+      <p class="intro">Use the free AI in Chrome, a model on your own computer, a key you already have, or the coding agent you already pay for.</p>
+      <ul class="grid" aria-label="Supported AI">
+        <li><b>Chrome AI</b><small>this computer</small></li>
+        <li><b>Ollama</b><small>this computer</small></li>
+        <li><b>Claude Code</b><small>your plan</small></li>
+        <li><b>Codex</b><small>your plan</small></li>
+        <li><b>OpenCode</b><small>your plan</small></li>
+        <li><b>Pi</b><small>your plan</small></li>
+        <li><b>OpenAI</b><small>your key</small></li>
+        <li><b>Anthropic</b><small>your key</small></li>
+        <li><b>Google</b><small>your key</small></li>
+        <li><b>OpenRouter</b><small>your key</small></li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="open" class="row" aria-labelledby="open-title">
+    <h2 id="open-title" class="label">Open source</h2>
+    <div class="body">
+      <p class="intro">No subscription, no credits, no account and no card. The code is public, and contributions are welcome.</p>
+      <div class="actions">
+        <a class="button solid" href="https://github.com/eliteresearchlab/metldr" target="_blank" rel="noreferrer"><span>View on GitHub</span></a>
+        <a class="button" href="https://github.com/eliteresearchlab/metldr/issues" target="_blank" rel="noreferrer"><span>Contribute</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
       </div>
     </div>
   </section>
-  <section id="help" class="help content-grid" aria-labelledby="help-title">
-    <div><h2 id="help-title">Choose what you share.</h2><p>Local models run on your computer. Providers and installed agents may send content to their configured service.</p></div>
+
+  <section id="help" class="row" aria-labelledby="help-title">
+    <h2 id="help-title" class="label">Help</h2>
+    <div class="body">
 <!--WELCOME_SETUP-->
-    <section class="feature-overview" aria-labelledby="feature-title">
-      <h3 id="feature-title">What you can do</h3>
-      <ul>
-        <li><h4>Read and ask</h4><p>Summarize webpages and PDFs, then ask questions.</p></li>
-        <li><h4>Work in Gmail</h4><p>Summarize threads and draft replies.</p></li>
-        <li><h4>Complete browser tasks</h4><p>Approve changes, stop work and return to saved chats.</p></li>
-        <li><h4>Look up and search</h4><p>Find word meanings and search page content.</p></li>
-      </ul>
-      <p>Reusable workflows, skills, schedules, file tools and editable memory are in development.</p>
-    </section>
-    <section class="faq-guide" aria-label="Help topics">
-      <div id="faq-filters" class="faq-filters" hidden>
-        <label class="faq-field" for="faq-search">Search answers<input id="faq-search" type="search" maxlength="256" disabled></label>
-        <label class="faq-field" for="faq-category">Filter by category<select id="faq-category" disabled></select></label>
-        <button id="faq-clear" type="button" disabled>Clear filters</button>
-      </div>
-      <div id="faq-results">
+      <details class="fold">
+        <summary>Browse all answers<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></summary>
+        <section class="faq" aria-label="Help topics">
+          <div id="faq-filters" class="faq-filters" hidden>
+            <label class="field" for="faq-search">Search answers<input id="faq-search" type="search" maxlength="256" disabled></label>
+            <label class="field" for="faq-category">Topic<select id="faq-category" disabled></select></label>
+            <button id="faq-clear" class="button" type="button" disabled>Clear</button>
+          </div>
+          <div id="faq-results">
 <!--WELCOME_FAQS-->
-      </div>
-      <p id="faq-empty" hidden>No answers match these filters. Clear the filters or try another search.</p>
-    </section>
+          </div>
+          <p id="faq-empty" hidden>No answers match. Clear the search or try other words.</p>
+        </section>
+      </details>
+    </div>
   </section>
 </main>
-<footer class="footer"><span>metldr</span><a href="#setup">Return to setup</a></footer>
+<footer class="footer">
+  <div class="footer-links">
+    <ul aria-label="metldr">
+      <li><a href="#setup">[ ] Setup</a></li>
+      <li><a href="#what">[ ] What it does</a></li>
+      <li><a href="#help">[ ] Help</a></li>
+    </ul>
+    <ul aria-label="Project">
+      <li><a href="https://github.com/eliteresearchlab/metldr" target="_blank" rel="noreferrer">[ ] GitHub<svg class="ext" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a></li>
+      <li><a href="https://github.com/eliteresearchlab/metldr/issues" target="_blank" rel="noreferrer">[ ] Issues<svg class="ext" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a></li>
+      <li><a href="https://github.com/eliteresearchlab/metldr/pulls" target="_blank" rel="noreferrer">[ ] Contribute<svg class="ext" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a></li>
+    </ul>
+    <a class="status-link" href="https://github.com/eliteresearchlab/metldr/releases" target="_blank" rel="noreferrer"><span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>Releases<svg class="ext" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
+  </div>
+  <a class="footer-mark" href="https://github.com/eliteresearchlab/metldr" target="_blank" rel="noreferrer" aria-label="metldr on GitHub"><svg viewBox="-6 -6 492 92" aria-hidden="true"><path d="M0 80V20H60V80M30 20V80M144 80H84V20H144V50H84M198 0V80H224M172 20H224M276 0V80H304M396 0V80H336V20H396M420 80V20H476V40"/><circle cx="0" cy="20" r="2.5"/><circle cx="0" cy="80" r="2.5"/><circle cx="30" cy="20" r="2.5"/><circle cx="30" cy="80" r="2.5"/><circle cx="60" cy="20" r="2.5"/><circle cx="60" cy="80" r="2.5"/><circle cx="84" cy="20" r="2.5"/><circle cx="84" cy="50" r="2.5"/><circle cx="84" cy="80" r="2.5"/><circle cx="144" cy="20" r="2.5"/><circle cx="144" cy="50" r="2.5"/><circle cx="144" cy="80" r="2.5"/><circle cx="172" cy="20" r="2.5"/><circle cx="198" cy="0" r="2.5"/><circle cx="198" cy="80" r="2.5"/><circle cx="224" cy="20" r="2.5"/><circle cx="224" cy="80" r="2.5"/><circle cx="276" cy="0" r="2.5"/><circle cx="276" cy="80" r="2.5"/><circle cx="304" cy="80" r="2.5"/><circle cx="336" cy="20" r="2.5"/><circle cx="336" cy="80" r="2.5"/><circle cx="396" cy="0" r="2.5"/><circle cx="396" cy="20" r="2.5"/><circle cx="396" cy="80" r="2.5"/><circle cx="420" cy="20" r="2.5"/><circle cx="420" cy="80" r="2.5"/><circle cx="476" cy="20" r="2.5"/><circle cx="476" cy="40" r="2.5"/></svg></a>
+  <p class="legal">Open source. Free for everyone.</p>
+</footer>
 </body>
 </html>

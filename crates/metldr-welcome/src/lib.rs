@@ -15,7 +15,7 @@ mod download;
 #[cfg(target_arch = "wasm32")]
 mod guide_view;
 #[cfg(target_arch = "wasm32")]
-mod scene;
+mod backdrop;
 #[cfg(target_arch = "wasm32")]
 mod setup_view;
 
