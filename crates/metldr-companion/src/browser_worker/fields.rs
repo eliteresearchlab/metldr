@@ -131,7 +131,7 @@ impl Tools {
                     }
                 }
             };
-            let result = json!({"revision":revision,"status":"awaiting user approval"});
+            let result = json!({"revision":revision,"status":"proposed","next":"call the first step now; it waits for the user's approval"});
             return Ok(self.remember(call_id, call, result));
         }
         // Reads run before attachment, so reporting state never attaches the browser.

@@ -6,7 +6,7 @@ pub const NAME: &str = "propose_task_plan";
 pub fn definition() -> Definition {
     Definition {
         name: NAME,
-        description: "Call before any effectful browser step and again when scope changes materially. Await user approval before proceeding.",
+        description: "Call before the first effectful browser step and again when scope changes materially, then call that step right away: it waits for the user to approve the plan.",
         input_schema: json!({"type":"object","properties":{"goal":{"type":"string","minLength":1,"maxLength":1024},"intended_effects":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1,"maxLength":512}},"scope":{"type":"string","minLength":1,"maxLength":1024}},"required":["goal","intended_effects","scope"],"additionalProperties":false}),
     }
 }
