@@ -1,9 +1,83 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Choice {
     Chrome,
-    Ollama,
+    Local(Server),
     Provider,
     Agent,
+}
+
+/// A model server on this computer that the extension's gateway reaches on loopback.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Server {
+    Ollama,
+    LmStudio,
+    LlamaCpp,
+}
+
+impl Server {
+    pub const ALL: [Self; 3] = [Self::Ollama, Self::LmStudio, Self::LlamaCpp];
+
+    /// The gateway route that reaches this server.
+    pub fn route(self) -> &'static str {
+        match self {
+            Self::Ollama => "ollama",
+            Self::LmStudio => "lmstudio",
+            Self::LlamaCpp => "llamacpp",
+        }
+    }
+
+    pub fn from_route(route: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|server| server.route() == route)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Ollama => "Ollama",
+            Self::LmStudio => "LM Studio",
+            Self::LlamaCpp => "llama.cpp",
+        }
+    }
+
+    pub fn address(self) -> &'static str {
+        match self {
+            Self::Ollama => "127.0.0.1:11434",
+            Self::LmStudio => "127.0.0.1:1234",
+            Self::LlamaCpp => "127.0.0.1:8080",
+        }
+    }
+}
+
+/// A service the user brings a key for; the gateway checks and stores the key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Service {
+    OpenAi,
+    Anthropic,
+    Google,
+    OpenRouter,
+}
+
+impl Service {
+    pub const ALL: [Self; 4] = [
+        Self::OpenAi,
+        Self::Anthropic,
+        Self::Google,
+        Self::OpenRouter,
+    ];
+
+    pub fn route(self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Google => "google",
+            Self::OpenRouter => "openrouter",
+        }
+    }
+
+    pub fn from_route(route: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|service| service.route() == route)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,9 +113,11 @@ pub struct Setup {
     pub saving: bool,
     pub theme: String,
     pub theme_saving: bool,
-    pub downloaded_at: Option<f64>,
     /// The easiest working choice found on this computer, marked for the user.
     pub recommended: Option<Choice>,
+    /// The local servers that answered, with their models.
+    pub servers: Vec<(Server, Vec<String>)>,
+    pub service: Service,
 }
 
 impl Default for Setup {
@@ -55,19 +131,22 @@ impl Default for Setup {
             models: Vec::new(),
             model: String::new(),
             progress: None,
-            detail: "Checking what works on this computer. No prompt or page content is sent.".into(),
+            detail: "Checking what works on this computer. No prompt or page content is sent."
+                .into(),
             loading: true,
             saving: false,
             theme: "catppuccin".into(),
             theme_saving: false,
-            downloaded_at: None,
             recommended: None,
+            servers: Vec::new(),
+            service: Service::OpenAi,
         }
     }
 }
 
 impl Setup {
-    pub fn restore_choice(&mut self, destination: Option<&str>, local: Option<&str>) {
+    /// The choice saved earlier: the chat's destination first, then the gateway's preferred route.
+    pub fn restore_choice(&mut self, destination: Option<&str>, preferred: Option<&str>) {
         let choice = match destination {
             Some(
                 "browser"
@@ -93,9 +172,16 @@ impl Setup {
                     "Review your saved destination in the panel before connecting.".into();
                 return;
             }
-            None => match local {
-                Some("ollama") => Choice::Ollama,
-                _ => Choice::Chrome,
+            None => match (
+                preferred.and_then(Server::from_route),
+                preferred.and_then(Service::from_route),
+            ) {
+                (Some(server), _) => Choice::Local(server),
+                (None, Some(service)) => {
+                    self.service = service;
+                    Choice::Provider
+                }
+                (None, None) => Choice::Chrome,
             },
         };
         self.choose(choice);
@@ -106,21 +192,54 @@ impl Setup {
         self.choice = choice;
         self.status = Status::Idle;
         self.progress = None;
+        self.models.clear();
         self.detail = match choice {
-            Choice::Chrome => "Check whether Chrome AI is ready on this device.",
-            Choice::Ollama => "Check the Ollama service at 127.0.0.1:11434. The check lists installed models and sends no prompt.",
-            Choice::Provider => "In the panel, choose Settings, then Providers, and paste your key.",
-            Choice::Agent => "In the panel, choose Settings, then Installed agents.",
-        }.into();
+            Choice::Chrome => "Check whether Chrome AI is ready on this device.".into(),
+            Choice::Local(server) => match self.found(server) {
+                Some(models) => {
+                    self.models = models.to_vec();
+                    self.status = if self.models.is_empty() {
+                        Status::Unavailable
+                    } else {
+                        Status::Ready
+                    };
+                    if self.models.is_empty() {
+                        format!("{} is running here but has no models yet. Add one, then check again.", server.name())
+                    } else {
+                        format!("{} is running here. Choose a model, then save.", server.name())
+                    }
+                }
+                None => format!(
+                    "Start {} at {}, then check again. The check lists models and sends no prompt.",
+                    server.name(),
+                    server.address()
+                ),
+            },
+            Choice::Provider => "Paste your key. metldr checks it with the service and keeps it encrypted in this browser.".into(),
+            Choice::Agent => "In the panel, choose Settings, then Installed agents.".into(),
+        };
+        if !self.models.contains(&self.model) {
+            self.model = self.models.first().cloned().unwrap_or_default();
+        }
     }
 
-    /// The easiest choice that works here: Chrome's built-in AI when Chrome offers it, then a
-    /// local Ollama with a model, then the user's own key.
-    pub fn recommend(chrome: Option<&str>, ollama_models: &[String]) -> Choice {
+    /// The models of `server` when it answered the last check.
+    pub fn found(&self, server: Server) -> Option<&[String]> {
+        self.servers
+            .iter()
+            .find(|(found, _)| *found == server)
+            .map(|(_, models)| models.as_slice())
+    }
+
+    /// The easiest choice that works here: Chrome's built-in AI when Chrome offers it, then the
+    /// first local server with a model, then the user's own key.
+    pub fn recommend(chrome: Option<&str>, servers: &[(Server, Vec<String>)]) -> Choice {
         match chrome {
             Some("available" | "downloadable" | "downloading") => Choice::Chrome,
-            _ if !ollama_models.is_empty() => Choice::Ollama,
-            _ => Choice::Provider,
+            _ => servers
+                .iter()
+                .find(|(_, models)| !models.is_empty())
+                .map_or(Choice::Provider, |(server, _)| Choice::Local(*server)),
         }
     }
 
@@ -140,8 +259,8 @@ impl Setup {
             && self.status == Status::Ready
             && match self.choice {
                 Choice::Chrome => true,
-                Choice::Ollama => self.models.contains(&self.model),
-                Choice::Provider | Choice::Agent => false,
+                Choice::Local(_) | Choice::Provider => self.models.contains(&self.model),
+                Choice::Agent => false,
             }
     }
 
@@ -149,7 +268,7 @@ impl Setup {
         let (status, detail) = match value {
             "missing-api" => (
                 Status::Unavailable,
-                "Chrome does not expose the Summarizer API on this page. Check browser and device support in Help, or choose Ollama.",
+                "Chrome does not expose the Summarizer API on this page. Check browser and device support in Help, or use what you have.",
             ),
             "available" => (Status::Ready, "Chrome AI is ready on this device."),
             "downloadable" => (
@@ -162,7 +281,7 @@ impl Setup {
             ),
             "unavailable" => (
                 Status::Unavailable,
-                "Chrome AI is unavailable on this device. You can use Ollama or continue without connecting.",
+                "Chrome AI is unavailable on this device. Use what you have, bring a key, or continue without connecting.",
             ),
             _ => (
                 Status::Error,
@@ -188,21 +307,29 @@ mod tests {
     fn choices_invalidate_checks_and_require_a_current_model() {
         let mut setup = Setup::default();
         let first = setup.begin(Status::Checking);
-        setup.choose(Choice::Ollama);
+        setup.servers = vec![(Server::LmStudio, vec!["qwen3-4b".into()])];
+        setup.choose(Choice::Local(Server::LmStudio));
         assert!(!setup.current(first));
-        setup.status = Status::Ready;
-        setup.models = vec!["model:latest".into()];
+        assert_eq!(setup.status, Status::Ready);
+        assert_eq!(setup.model, "qwen3-4b");
+        assert!(setup.ready());
         setup.model = "deleted:latest".into();
         assert!(!setup.ready());
-        setup.model = "model:latest".into();
-        assert!(setup.ready());
         setup.preview = true;
+        setup.model = "qwen3-4b".into();
         assert!(!setup.ready());
         setup.preview = false;
+        setup.choose(Choice::Local(Server::LlamaCpp));
+        assert_eq!(setup.status, Status::Idle);
+        assert!(setup.detail.contains("127.0.0.1:8080"));
+        assert!(!setup.ready());
         setup.choose(Choice::Provider);
         setup.panel = Panel::Ready(7);
         setup.status = Status::Ready;
         assert!(!setup.ready());
+        setup.models = vec!["gpt-5-mini".into()];
+        setup.model = "gpt-5-mini".into();
+        assert!(setup.ready());
         setup.choose(Choice::Agent);
         assert!(!setup.ready());
         assert_eq!(setup.panel, Panel::Ready(7));
@@ -229,46 +356,55 @@ mod tests {
     }
 
     #[test]
-    fn saved_destinations_take_precedence_over_legacy_local_choices() {
+    fn saved_destinations_take_precedence_over_the_preferred_route() {
         assert_eq!(Setup::default().choice, Choice::Chrome);
-        for (destination, local, expected) in [
+        for (destination, preferred, expected) in [
             (None, None, Choice::Chrome),
             (None, Some("chrome-ai"), Choice::Chrome),
-            (None, Some("ollama"), Choice::Ollama),
+            (None, Some("ollama"), Choice::Local(Server::Ollama)),
+            (None, Some("lmstudio"), Choice::Local(Server::LmStudio)),
+            (None, Some("llamacpp"), Choice::Local(Server::LlamaCpp)),
+            (None, Some("anthropic"), Choice::Provider),
             (Some("browser"), Some("ollama"), Choice::Provider),
             (Some("chat"), None, Choice::Provider),
-            (Some("responses"), None, Choice::Provider),
-            (Some("google"), None, Choice::Provider),
-            (Some("page:messages"), None, Choice::Provider),
-            (Some("page:responses"), None, Choice::Provider),
-            (Some("page:google_interactions"), None, Choice::Provider),
             (Some("page:chat_completions"), None, Choice::Provider),
             (Some("codex"), None, Choice::Agent),
-            (Some("opencode"), None, Choice::Agent),
-            (Some("pi"), None, Choice::Agent),
-            (Some("codex:missing"), Some("ollama"), Choice::Agent),
-            (Some("opencode:missing"), None, Choice::Agent),
             (Some("pi:missing"), None, Choice::Agent),
+            (Some("codex:missing"), Some("ollama"), Choice::Agent),
             (Some("unknown"), Some("ollama"), Choice::Provider),
             (Some("codex:"), Some("chrome-ai"), Choice::Provider),
         ] {
             let mut setup = Setup::default();
-            setup.restore_choice(destination, local);
-            assert_eq!(setup.choice, expected, "{destination:?} / {local:?}");
+            setup.restore_choice(destination, preferred);
+            assert_eq!(setup.choice, expected, "{destination:?} / {preferred:?}");
             assert!(!setup.ready());
         }
         let mut setup = Setup::default();
+        setup.restore_choice(None, Some("anthropic"));
+        assert_eq!(setup.service, Service::Anthropic);
         setup.restore_choice(Some("unknown"), Some("ollama"));
         assert!(setup.detail.contains("Review your saved destination"));
     }
 
     #[test]
     fn the_easiest_working_choice_is_recommended() {
-        let model = vec!["llama3.2:latest".to_string()];
-        assert_eq!(Setup::recommend(Some("available"), &model), Choice::Chrome);
+        let found = vec![
+            (Server::Ollama, Vec::new()),
+            (Server::LlamaCpp, vec!["gemma-3-1b".to_string()]),
+        ];
+        assert_eq!(Setup::recommend(Some("available"), &found), Choice::Chrome);
         assert_eq!(Setup::recommend(Some("downloadable"), &[]), Choice::Chrome);
-        assert_eq!(Setup::recommend(Some("unavailable"), &model), Choice::Ollama);
-        assert_eq!(Setup::recommend(None, &model), Choice::Ollama);
+        assert_eq!(
+            Setup::recommend(Some("unavailable"), &found),
+            Choice::Local(Server::LlamaCpp)
+        );
+        assert_eq!(Setup::recommend(None, &found[..1]), Choice::Provider);
         assert_eq!(Setup::recommend(Some("missing-api"), &[]), Choice::Provider);
+        for server in Server::ALL {
+            assert_eq!(Server::from_route(server.route()), Some(server));
+        }
+        for service in Service::ALL {
+            assert_eq!(Service::from_route(service.route()), Some(service));
+        }
     }
 }

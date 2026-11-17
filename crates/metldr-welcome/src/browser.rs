@@ -1,17 +1,6 @@
-use js_sys::{Array, Function, Object, Promise, Reflect, Uint8Array};
-use wasm_bindgen::{JsCast, JsValue, closure::Closure};
+use js_sys::{Array, Function, Object, Promise, Reflect};
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-
-const SETTINGS_KEYS: [&str; 6] = [
-    "theme",
-    "preferredProvider",
-    "selectedModel",
-    "onboardingComplete",
-    "chromeAIDownloadComplete",
-    "chromeAIStatus",
-];
-const OLLAMA_TAGS_URL: &str = "http://127.0.0.1:11434/api/tags";
-const MAX_TAGS_BODY: usize = 256 * 1024;
 
 pub fn runtime_id() -> Result<String, JsValue> {
     let chrome = get(&js_sys::global(), "chrome")?;
@@ -76,14 +65,17 @@ pub async fn await_call(
     JsFuture::from(Promise::resolve(&call(object, method, args)?)).await
 }
 
-pub async fn load_settings() -> Result<JsValue, JsValue> {
+/// The panel theme saved in `chrome.storage.local`, when it is one of the four.
+pub async fn load_theme() -> Result<Option<String>, JsValue> {
     let storage = get(&get(&js_sys::global(), "chrome")?, "storage")?;
-    let local = get(&storage, "local")?;
-    let keys = Array::new();
-    for key in SETTINGS_KEYS {
-        keys.push(&JsValue::from_str(key));
-    }
-    await_call(&local, "get", &[keys.into()]).await
+    let saved = await_call(&get(&storage, "local")?, "get", &["theme".into()]).await?;
+    Ok(get(&saved, "theme")?
+        .as_string()
+        .filter(|theme| valid_theme(theme)))
+}
+
+pub fn valid_theme(value: &str) -> bool {
+    matches!(value, "catppuccin" | "gruvbox" | "cyberpunk" | "light")
 }
 
 pub fn saved_destination() -> Result<Option<String>, JsValue> {
@@ -99,38 +91,13 @@ pub fn saved_destination() -> Result<Option<String>, JsValue> {
         .ok_or_else(|| JsValue::from_str("Saved destination is invalid"))
 }
 
-pub async fn save_settings(value: &JsValue) -> Result<(), JsValue> {
-    let settings = Object::new();
-    for key in SETTINGS_KEYS {
-        let field = get(value, key)?;
-        if !field.is_undefined() {
-            let valid = match key {
-                "theme" => matches!(
-                    field.as_string().as_deref(),
-                    Some("catppuccin" | "gruvbox" | "cyberpunk" | "light")
-                ),
-                "preferredProvider" => {
-                    matches!(field.as_string().as_deref(), Some("chrome-ai" | "ollama"))
-                }
-                "selectedModel" => field
-                    .as_string()
-                    .is_some_and(|name| !name.is_empty() && name.len() <= 512),
-                "onboardingComplete" => field.as_bool().is_some(),
-                "chromeAIDownloadComplete" => field
-                    .as_f64()
-                    .is_some_and(|time| time.is_finite() && time > 0.0),
-                "chromeAIStatus" => field.as_string().as_deref() == Some("available"),
-                _ => false,
-            };
-            if !valid {
-                return Err(JsValue::from_str("Invalid settings value"));
-            }
-            Reflect::set(&settings, &JsValue::from_str(key), &field)?;
-        }
+pub async fn save_theme(theme: &str) -> Result<(), JsValue> {
+    if !valid_theme(theme) {
+        return Err(JsValue::from_str("Invalid theme"));
     }
     let storage = get(&get(&js_sys::global(), "chrome")?, "storage")?;
-    let local = get(&storage, "local")?;
-    await_call(&local, "set", &[settings.into()]).await?;
+    let settings = object(&[("theme", theme.into())])?;
+    await_call(&get(&storage, "local")?, "set", &[settings]).await?;
     Ok(())
 }
 
@@ -148,116 +115,14 @@ pub fn within(promise: &JsValue, ms: f64) -> Result<Promise, JsValue> {
     let timeout = Promise::new(&mut |resolve, _| {
         let _ = set_timeout.call2(&js_sys::global(), &resolve, &JsValue::from_f64(ms));
     });
-    Ok(Promise::race(&Array::of2(&Promise::resolve(promise), &timeout)))
+    Ok(Promise::race(&Array::of2(
+        &Promise::resolve(promise),
+        &timeout,
+    )))
 }
 
 pub fn summarizer() -> Option<JsValue> {
     get(&js_sys::global(), "Summarizer")
         .ok()
         .filter(|value| !value.is_null() && !value.is_undefined())
-}
-
-struct FetchTimeout {
-    controller: JsValue,
-    timer: JsValue,
-    callback: Closure<dyn FnMut()>,
-}
-
-impl Drop for FetchTimeout {
-    fn drop(&mut self) {
-        let global = js_sys::global();
-        if let Ok(clear_timeout) = get(&global, "clearTimeout") {
-            if let Ok(clear_timeout) = clear_timeout.dyn_into::<Function>() {
-                let _ = clear_timeout.call1(&global, &self.timer);
-            }
-        }
-        let _ = call(&self.controller, "abort", &[]);
-        let _ = &self.callback;
-    }
-}
-
-pub async fn check_ollama() -> Result<Vec<String>, JsValue> {
-    let global = js_sys::global();
-    let constructor = get(&global, "AbortController")?;
-    let controller = Reflect::construct(&constructor.dyn_into::<Function>()?, &Array::new())?;
-    let abort_controller = controller.clone();
-    let callback = Closure::<dyn FnMut()>::new(move || {
-        let _ = call(&abort_controller, "abort", &[]);
-    });
-    let set_timeout = get(&global, "setTimeout")?.dyn_into::<Function>()?;
-    let timer = set_timeout.call2(&global, callback.as_ref(), &JsValue::from_f64(3_000.0))?;
-    let _timeout = FetchTimeout {
-        controller: controller.clone(),
-        timer,
-        callback,
-    };
-
-    let options = Object::new();
-    Reflect::set(
-        &options,
-        &JsValue::from_str("signal"),
-        &get(&controller, "signal")?,
-    )?;
-    let response = JsFuture::from(Promise::resolve(&call(
-        &global,
-        "fetch",
-        &[JsValue::from_str(OLLAMA_TAGS_URL), options.into()],
-    )?))
-    .await?;
-    if !get(&response, "ok")?.as_bool().unwrap_or(false) {
-        return Err(JsValue::from_str("Ollama tags request failed"));
-    }
-    let body = read_limited_json(&response).await?;
-    let models = get(&body, "models")?
-        .dyn_into::<Array>()
-        .map_err(|_| JsValue::from_str("Ollama response has no models array"))?;
-    if models.length() > 512 {
-        return Err(JsValue::from_str("Ollama returned too many models"));
-    }
-    models
-        .iter()
-        .map(|model| {
-            let name = get(&model, "name")?
-                .as_string()
-                .ok_or_else(|| JsValue::from_str("Ollama model name is invalid"))?;
-            if name.is_empty() || name.len() > 512 {
-                return Err(JsValue::from_str("Ollama model name is invalid"));
-            }
-            Ok(name)
-        })
-        .collect()
-}
-
-async fn read_limited_json(response: &JsValue) -> Result<JsValue, JsValue> {
-    let body = get(response, "body")?;
-    if body.is_null() || body.is_undefined() {
-        return Err(JsValue::from_str("Ollama response has no body"));
-    }
-    let reader = call(&body, "getReader", &[])?;
-    let result = read_stream(&reader).await;
-    let _ = await_call(&reader, "cancel", &[]).await;
-    let _ = call(&reader, "releaseLock", &[]);
-    result
-}
-
-async fn read_stream(reader: &JsValue) -> Result<JsValue, JsValue> {
-    let mut bytes = Vec::new();
-    loop {
-        let chunk = await_call(reader, "read", &[]).await?;
-        if get(&chunk, "done")?.as_bool().unwrap_or(false) {
-            break;
-        }
-        let value = get(&chunk, "value")?;
-        let array = value.dyn_into::<Uint8Array>()?;
-        let length = array.length() as usize;
-        if bytes.len().saturating_add(length) > MAX_TAGS_BODY {
-            return Err(JsValue::from_str("Ollama response is too large"));
-        }
-        let start = bytes.len();
-        bytes.resize(start + length, 0);
-        array.copy_to(&mut bytes[start..]);
-    }
-    let text =
-        String::from_utf8(bytes).map_err(|_| JsValue::from_str("Ollama returned invalid UTF8"))?;
-    js_sys::JSON::parse(&text)
 }

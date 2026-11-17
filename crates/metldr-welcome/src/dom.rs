@@ -1,7 +1,7 @@
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Document, Element, HtmlSelectElement};
 
-use crate::state::{Choice, Panel, Setup, Status};
+use crate::state::{Choice, Panel, Server, Setup, Status};
 
 pub fn element(document: &Document, id: &str) -> Result<Element, JsValue> {
     document
@@ -37,13 +37,25 @@ pub fn models(document: &Document, names: &[String], selected: &str) -> Result<(
 }
 
 pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(), JsValue> {
-    let local = matches!(setup.choice, Choice::Chrome | Choice::Ollama);
-    let have = matches!(setup.choice, Choice::Ollama | Choice::Agent);
+    let local = matches!(setup.choice, Choice::Chrome | Choice::Local(_));
+    let have = matches!(setup.choice, Choice::Local(_) | Choice::Agent);
+    let checking = setup.status == Status::Checking;
     for (id, selected) in [
         ("choose-local", setup.choice == Choice::Chrome),
         ("choose-agent", have),
         ("choose-provider", setup.choice == Choice::Provider),
-        ("choose-ollama", setup.choice == Choice::Ollama),
+        (
+            "choose-ollama",
+            setup.choice == Choice::Local(Server::Ollama),
+        ),
+        (
+            "choose-lmstudio",
+            setup.choice == Choice::Local(Server::LmStudio),
+        ),
+        (
+            "choose-llamacpp",
+            setup.choice == Choice::Local(Server::LlamaCpp),
+        ),
         ("choose-installed", setup.choice == Choice::Agent),
     ] {
         element(document, id)?
@@ -52,19 +64,28 @@ pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(
     }
     for (id, visible) in [
         ("pick-local", setup.recommended == Some(Choice::Chrome)),
-        ("pick-agent", setup.recommended == Some(Choice::Ollama)),
+        (
+            "pick-agent",
+            matches!(setup.recommended, Some(Choice::Local(_))),
+        ),
         ("pick-provider", setup.recommended == Some(Choice::Provider)),
         ("local-options", have),
         ("chrome-controls", setup.choice == Choice::Chrome),
-        ("ollama-controls", setup.choice == Choice::Ollama),
+        (
+            "ollama-guide",
+            setup.choice == Choice::Local(Server::Ollama),
+        ),
+        ("key-controls", setup.choice == Choice::Provider),
+        (
+            "model-controls",
+            !setup.models.is_empty() && matches!(setup.choice, Choice::Local(_) | Choice::Provider),
+        ),
         ("check-button", local),
-        ("panel-setup", !local),
-        ("continue-button", local),
+        ("panel-setup", setup.choice == Choice::Agent),
+        ("continue-button", setup.choice != Choice::Agent),
         ("download-button", setup.status == Status::Downloadable),
         ("cancel-button", downloading),
         ("download-progress", setup.status == Status::Downloading),
-        ("model-choice", !setup.models.is_empty()),
-        ("model-choice-label", !setup.models.is_empty()),
         ("preview-panel", setup.preview),
     ] {
         flag(document, id, "hidden", !visible)?;
@@ -72,13 +93,16 @@ pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(
     for (id, disabled) in [
         (
             "check-button",
-            setup.preview || setup.saving || setup.status == Status::Checking || downloading,
+            setup.preview || setup.saving || checking || downloading,
         ),
         (
             "download-button",
             setup.preview || setup.saving || downloading || setup.status != Status::Downloadable,
         ),
         ("cancel-button", setup.preview || !downloading),
+        ("key-service", setup.preview || setup.saving || checking),
+        ("key-input", setup.preview || setup.saving || checking),
+        ("key-connect", setup.preview || setup.saving || checking),
         (
             "open-agent-panel",
             setup.preview || setup.saving || !matches!(setup.panel, Panel::Ready(_)),
@@ -97,24 +121,27 @@ pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(
         flag(document, id, "disabled", disabled)?;
     }
     let heading = if setup.saving {
-        "Saving setup"
+        "Saving setup".to_owned()
     } else {
         match setup.status {
             Status::Idle => match setup.choice {
-                Choice::Chrome => "Chrome's built-in AI",
-                Choice::Ollama => "Ollama on this computer",
-                Choice::Provider => "Bring a key",
-                Choice::Agent => "Set up an installed agent",
+                Choice::Chrome => "Chrome's built-in AI".to_owned(),
+                Choice::Local(server) => format!("{} on this computer", server.name()),
+                Choice::Provider => "Bring a key".to_owned(),
+                Choice::Agent => "Set up an installed agent".to_owned(),
             },
-            Status::Checking => "Checking this computer",
-            Status::Ready => "Connection ready",
-            Status::Downloadable => "Model download available",
-            Status::Downloading => "Model download in progress",
-            Status::Unavailable => "Connection unavailable",
-            Status::Error => "Connection check failed",
+            Status::Checking => "Checking".to_owned(),
+            Status::Ready => "Connection ready".to_owned(),
+            Status::Downloadable => "Model download available".to_owned(),
+            Status::Downloading => "Model download in progress".to_owned(),
+            Status::Unavailable => "Connection unavailable".to_owned(),
+            Status::Error => "Connection check failed".to_owned(),
         }
     };
-    text(document, "status-text", heading)?;
+    element(document, "key-service")?
+        .dyn_into::<HtmlSelectElement>()?
+        .set_value(setup.service.route());
+    text(document, "status-text", &heading)?;
     text(document, "connection-detail", &setup.detail)?;
     text(
         document,
