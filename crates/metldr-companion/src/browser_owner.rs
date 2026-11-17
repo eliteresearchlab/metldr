@@ -1,11 +1,11 @@
 use crate::{
     Result,
     browser_action::{Action, Outcome, Proposal},
-    flow::{Owner, acknowledge},
+    flow::{Owner, OwnerReply, acknowledge},
 };
-use std::sync::{atomic::Ordering, mpsc::SyncSender};
+use std::sync::atomic::Ordering;
 
-type Reply = SyncSender<std::result::Result<Action, String>>;
+type Reply = OwnerReply<Action>;
 
 mod grants;
 mod review;
@@ -22,7 +22,7 @@ pub(super) enum Event {
         goal: String,
         intended_effects: Vec<String>,
         scope: String,
-        ack: SyncSender<std::result::Result<u32, String>>,
+        ack: OwnerReply<u32>,
     },
     Proposed {
         proposal: Proposal,
@@ -42,27 +42,12 @@ pub(super) enum Event {
     },
 }
 
-pub(super) enum PlanHold {
-    Action {
-        proposal: Proposal,
-        ack: Reply,
-        budget: Option<Budget>,
-        review: Option<review::Review>,
-    },
-}
-impl PlanHold {
-    fn run(&self) -> &str {
-        match self {
-            Self::Action { proposal, .. } => &proposal.run,
-        }
-    }
-    fn reject(self, error: &str) {
-        match self {
-            Self::Action { ack, .. } => {
-                let _ = ack.send(Err(error.into()));
-            }
-        }
-    }
+/// The first action after a proposed plan, held until the user decides on the plan.
+pub(super) struct PlanHold {
+    proposal: Proposal,
+    ack: Reply,
+    budget: Option<Budget>,
+    review: Option<review::Review>,
 }
 
 pub(super) struct PendingApproval {
@@ -166,7 +151,7 @@ impl Owner {
                             Ok(review) => review,
                             Err(error) => return acknowledge(ack, Err(error)),
                         };
-                        self.plan_hold = Some(PlanHold::Action {
+                        self.plan_hold = Some(PlanHold {
                             proposal,
                             ack,
                             budget,
@@ -335,43 +320,29 @@ impl Owner {
     pub(super) fn cancel_browser_approval(&mut self, run: &str) {
         self.session_grants.remove(run);
         self.drop_secret(run);
-        if self.plan_hold.as_ref().is_some_and(|p| p.run() == run) {
-            if let Some(pending) = self.plan_hold.take() {
-                pending.reject("browser action stopped before dispatch");
-            }
+        if let Some(held) = self.plan_hold.take_if(|p| p.proposal.run == run) {
+            let _ = held
+                .ack
+                .send(Err("browser action stopped before dispatch".into()));
         }
-        if self.browser_approval.as_ref().is_some_and(|p| p.run == run)
-            && let Some(pending) = self.browser_approval.take()
-        {
+        if let Some(pending) = self.browser_approval.take_if(|p| p.run == run) {
             pending.reply(Err("browser action stopped before dispatch".into()));
         }
     }
 
     pub(super) fn release_plan_dispatch(&mut self, run: &str) -> Result<()> {
-        if self.plan_hold.as_ref().is_some_and(|p| p.run() == run) {
-            let pending = self.plan_hold.take().unwrap();
-            match pending {
-                PlanHold::Action {
-                    proposal,
-                    ack,
-                    budget,
-                    review,
-                } => {
-                    drop(review);
-                    self.browser_event(Event::Proposed {
-                        proposal,
-                        ack,
-                        budget,
-                    })?;
-                }
-            }
+        if let Some(held) = self.plan_hold.take_if(|p| p.proposal.run == run) {
+            drop(held.review);
+            self.browser_event(Event::Proposed {
+                proposal: held.proposal,
+                ack: held.ack,
+                budget: held.budget,
+            })?;
         }
-        if self
+        if let Some(pending) = self
             .browser_approval
-            .as_ref()
-            .is_some_and(|p| p.run == run && p.dispatch_revision.is_some())
+            .take_if(|p| p.run == run && p.dispatch_revision.is_some())
         {
-            let pending = self.browser_approval.take().unwrap();
             self.browser_event(Event::Dispatch {
                 action: pending.action,
                 revision: pending.dispatch_revision.unwrap(),
@@ -382,10 +353,8 @@ impl Owner {
     }
 
     pub(super) fn fail_plan_dispatch(&mut self, run: &str) -> Result<()> {
-        if self.plan_hold.as_ref().is_some_and(|p| p.run() == run) {
-            if let Some(pending) = self.plan_hold.take() {
-                pending.reject("task plan declined");
-            }
+        if let Some(held) = self.plan_hold.take_if(|p| p.proposal.run == run) {
+            let _ = held.ack.send(Err("task plan declined".into()));
         }
         if self
             .browser_approval

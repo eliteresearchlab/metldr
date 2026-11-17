@@ -105,15 +105,13 @@ mod tests {
             browser_owner::Event,
             history::browser_checks::{saved, with_owner},
         };
-        use std::sync::mpsc;
-
         with_owner(false, |owner, proposal| {
             let budget = Budget::new(Duration::from_secs(30));
             // Holding the review passes the early expiry check and fails the pause.
             let held = budget.pause().unwrap();
             assert!(!budget.expired());
             let before = saved(owner);
-            let (ack, rx) = mpsc::sync_channel(1);
+            let (ack, rx) = tokio::sync::oneshot::channel();
             owner
                 .browser_event(Event::Proposed {
                     proposal: proposal.clone(),
@@ -121,7 +119,7 @@ mod tests {
                     budget: Some(budget.clone()),
                 })
                 .unwrap();
-            let error = rx.recv().unwrap().unwrap_err();
+            let error = rx.blocking_recv().unwrap().unwrap_err();
             assert!(
                 error.contains("browser execution budget unavailable"),
                 "unexpected rejection: {error}"
@@ -135,7 +133,7 @@ mod tests {
             drop(held);
             let mut fresh = proposal;
             fresh.tool_use_id = "tool-2".into();
-            let (ack, rx) = mpsc::sync_channel(1);
+            let (ack, mut rx) = tokio::sync::oneshot::channel();
             owner
                 .browser_event(Event::Proposed {
                     proposal: fresh,
@@ -143,7 +141,10 @@ mod tests {
                     budget: Some(budget.clone()),
                 })
                 .unwrap();
-            assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            assert!(matches!(
+                rx.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ));
             assert!(owner.browser_approval.is_some());
             assert_eq!(saved(owner).browser_actions.len(), 1);
             assert!(budget.review_elapsed().is_some());

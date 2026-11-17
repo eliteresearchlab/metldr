@@ -20,17 +20,32 @@ pub(super) fn fatal(error: &(dyn std::error::Error + Send + Sync + 'static)) -> 
     error.downcast_ref::<io::Error>().is_some() || crate::history::is_failure(error)
 }
 
-pub(super) fn acknowledge<T>(
-    ack: SyncSender<std::result::Result<T, String>>,
-    result: Result<T>,
-) -> Result<()> {
+/// The owner's answer to a browser worker; awaiting it wakes the worker at once.
+pub(super) type OwnerReply<T> = tokio::sync::oneshot::Sender<std::result::Result<T, String>>;
+
+/// A one-time answer channel: a blocking sender or an awaited oneshot.
+pub(super) trait Ack<T> {
+    fn ack(self, value: std::result::Result<T, String>);
+}
+impl<T> Ack<T> for SyncSender<std::result::Result<T, String>> {
+    fn ack(self, value: std::result::Result<T, String>) {
+        let _ = self.send(value);
+    }
+}
+impl<T> Ack<T> for OwnerReply<T> {
+    fn ack(self, value: std::result::Result<T, String>) {
+        let _ = self.send(value);
+    }
+}
+
+pub(super) fn acknowledge<T>(ack: impl Ack<T>, result: Result<T>) -> Result<()> {
     match result {
         Ok(value) => {
-            let _ = ack.send(Ok(value));
+            ack.ack(Ok(value));
             Ok(())
         }
         Err(error) => {
-            let _ = ack.send(Err(error.to_string()));
+            ack.ack(Err(error.to_string()));
             if fatal(error.as_ref()) {
                 Err(error)
             } else {
@@ -64,7 +79,7 @@ pub(super) enum Event {
     Browser(crate::browser_owner::Event),
     BrowserSettings {
         run: String,
-        ack: SyncSender<std::result::Result<serde_json::Value, String>>,
+        ack: OwnerReply<serde_json::Value>,
     },
     Input(crate::transport::Input),
     Text {

@@ -14,10 +14,10 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc,
     },
     time::Duration,
 };
+use tokio::sync::oneshot;
 
 #[derive(Debug)]
 pub(crate) struct PlanRefusal(&'static str);
@@ -104,7 +104,7 @@ impl Tools {
             scope,
         } = &call
         {
-            let (ack, rx) = mpsc::sync_channel(1);
+            let (ack, rx) = oneshot::channel();
             self.client
                 .tx
                 .try_send(Event::Browser(browser_owner::Event::Plan {
@@ -115,23 +115,16 @@ impl Tools {
                     ack,
                 }))
                 .map_err(|_| "browser owner channel unavailable")?;
-            let revision = loop {
-                if stop.load(Ordering::Acquire) {
-                    return Err("browser task stopped".into());
-                }
-                match rx.try_recv() {
-                    Ok(result) => {
-                        break result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                            e.into()
-                        })?;
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => return Err("plan owner ended".into()),
-                    Err(mpsc::TryRecvError::Empty) => {
-                        tokio::time::sleep(Duration::from_millis(20)).await
-                    }
-                }
-            };
-            let result = json!({"revision":revision,"status":"awaiting user approval"});
+            let revision =
+                owner_reply(rx, Some(stop), "browser task stopped", "plan owner ended").await?;
+            if stop.load(Ordering::Acquire) {
+                return Err("browser task stopped".into());
+            }
+            let result = json!({
+                "revision": revision?,
+                "status": "proposed",
+                "next": "call the first step now; it waits for the user's approval",
+            });
             return Ok(self.remember(call_id, call, result));
         }
         // Reads run before attachment, so reporting state never attaches the browser.
@@ -195,7 +188,7 @@ impl Tools {
 
     // The owner holds the saved settings, so the read waits for its answer.
     async fn settings(&self, stop: &AtomicBool) -> Result<Value> {
-        let (ack, rx) = mpsc::sync_channel(1);
+        let (ack, rx) = oneshot::channel();
         self.client
             .tx
             .try_send(Event::BrowserSettings {
@@ -203,24 +196,17 @@ impl Tools {
                 ack,
             })
             .map_err(|_| "settings owner channel unavailable")?;
-        loop {
-            if stop.load(Ordering::Acquire) {
-                return Err("browser task stopped".into());
-            }
-            match rx.try_recv() {
-                Ok(value) => {
-                    if stop.load(Ordering::Acquire) {
-                        return Err("browser task stopped".into());
-                    }
-                    return value.map_err(Into::into);
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err("settings owner ended".into());
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+        let value = owner_reply(
+            rx,
+            Some(stop),
+            "browser task stopped",
+            "settings owner ended",
+        )
+        .await?;
+        if stop.load(Ordering::Acquire) {
+            return Err("browser task stopped".into());
         }
+        value.map_err(Into::into)
     }
 
     async fn attach(&mut self) -> Result<()> {
@@ -328,25 +314,43 @@ fn validate_call(call_id: &str, call: &Call) -> Result<()> {
 async fn action(
     client: &Client,
     stop: Option<&AtomicBool>,
-    event: impl FnOnce(mpsc::SyncSender<std::result::Result<Action, String>>) -> browser_owner::Event,
+    event: impl FnOnce(crate::flow::OwnerReply<Action>) -> browser_owner::Event,
 ) -> Result<Action> {
-    let (ack, rx) = mpsc::sync_channel(1);
+    let (ack, rx) = oneshot::channel();
     client
         .tx
         .try_send(Event::Browser(event(ack)))
         .map_err(|_| "browser owner channel unavailable")?;
+    owner_reply(
+        rx,
+        stop,
+        "browser action cancelled",
+        "browser approval owner ended",
+    )
+    .await?
+    .map_err(owner_error)
+}
+
+/// Awaits the owner's answer, which wakes the worker as soon as it is sent. An answer that has
+/// arrived wins over Stop; Stop is a flag with no wakeup of its own, so it is read every 20 ms.
+async fn owner_reply<T>(
+    mut rx: oneshot::Receiver<T>,
+    stop: Option<&AtomicBool>,
+    stopped: &'static str,
+    ended: &'static str,
+) -> Result<T> {
     loop {
         match rx.try_recv() {
-            Ok(value) => return value.map_err(owner_error),
-            Err(mpsc::TryRecvError::Disconnected) => {
-                return Err("browser approval owner ended".into());
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
+            Ok(value) => return Ok(value),
+            Err(oneshot::error::TryRecvError::Closed) => return Err(ended.into()),
+            Err(oneshot::error::TryRecvError::Empty) => {}
         }
         if stop.is_some_and(|stop| stop.load(Ordering::Acquire)) {
-            return Err("browser action cancelled".into());
+            return Err(stopped.into());
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        if let Ok(answer) = tokio::time::timeout(Duration::from_millis(20), &mut rx).await {
+            return answer.map_err(|_| ended.into());
+        }
     }
 }
 
