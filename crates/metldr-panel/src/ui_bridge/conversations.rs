@@ -26,7 +26,11 @@ pub(super) async fn page(
     flow: &FlowClient,
     scope: &Scope,
     cursor: Option<&str>,
+    query: Option<&str>,
 ) -> Result<Page, FlowError> {
+    if query.is_some() && cursor.is_some() {
+        return Err(protocol("a saved chat search has no pages"));
+    }
     let (context, position) = if let Some(cursor) = cursor {
         let continuation = decode_cursor(cursor)?;
         if &continuation.context.scope != scope {
@@ -43,7 +47,7 @@ pub(super) async fn page(
         return Err(FlowError::HistoryStale);
     }
 
-    let native = flow.history_conversations(&context, position).await?;
+    let native = flow.history_conversations(&context, position, query).await?;
     let older_cursor = if let Some(position) = native.next {
         validate_read_position(&context, &position)?;
         let bytes = serde_json::to_vec(&Continuation { context, position })
@@ -105,9 +109,14 @@ mod tests {
 }
 
 impl super::Core {
-    pub(super) async fn conversation_page(&self, cursor: Option<&str>) -> Result<Page, FlowError> {
+    /// One page of saved chats by date from `cursor`, or the best title matches for `query`.
+    pub(super) async fn conversation_page(
+        &self,
+        cursor: Option<&str>,
+        query: Option<&str>,
+    ) -> Result<Page, FlowError> {
         let _read = self.begin_read()?;
-        page(&self.flow(), &self.scope, cursor).await
+        page(&self.flow(), &self.scope, cursor, query).await
     }
 
     pub(super) fn start_conversation_navigation(

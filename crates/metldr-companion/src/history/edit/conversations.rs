@@ -40,6 +40,16 @@ pub(crate) struct ConversationSummary {
     pub title: Preview,
 }
 
+/// The most saved chats one search reads, newest first.
+const SEARCHED: usize = 20_000;
+/// Saved chats on one page.
+const PAGE: usize = 16;
+/// Title bytes kept per saved chat.
+const TITLE: usize = 256;
+// A full page stays under the panel's 32 KB page bound even when JSON escapes every title byte
+// to six, so no page needs measuring.
+const _: () = assert!(PAGE * (TITLE * 6 + 128) + 512 < 32_768);
+
 #[derive(Serialize)]
 pub(crate) struct ConversationPage {
     pub store: String,
@@ -212,51 +222,102 @@ impl Edit<'_> {
                 conversations: Vec::new(),
                 next: None,
             };
-            let mut end = cursor.map_or(anchor, |cursor| cursor.before.0 - 1);
-            let mut last = None;
-            loop {
-                let entry = storage(|| {
-                    let table = self.write.open_table(CONVERSATION_ORDER)?;
-                    Ok(table
-                        .range(..=end)?
-                        .next_back()
-                        .transpose()?
-                        .map(|(number, id)| (number.value(), id.value().to_owned())))
-                })?;
-                let Some((number, id)) = entry else { break };
-                if page.conversations.len() == 16 {
-                    page.next = Some(Cursor {
-                        anchor: Counter(anchor),
-                        before: Counter(last.ok_or("conversation cursor absent")?),
-                    });
-                    break;
-                }
-                let conversation = self.saved_conversation(&id)?;
-                if storage(|| conversation_number(&self.profile, &id))? != number {
+            let end = cursor.map_or(anchor, |cursor| cursor.before.0 - 1);
+            let order = storage(|| {
+                let table = self.write.open_table(CONVERSATION_ORDER)?;
+                table
+                    .range(..=end)?
+                    .rev()
+                    .take(PAGE + 1)
+                    .map(|entry| {
+                        entry
+                            .map(|(number, id)| (number.value(), id.value().to_owned()))
+                            .map_err(Into::into)
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })?;
+            for (number, id) in order.iter().take(PAGE) {
+                let conversation = self.saved_conversation(id)?;
+                if storage(|| conversation_number(&self.profile, id))? != *number {
                     return storage(|| Err("conversation order differs".into()));
                 }
                 page.conversations.push(ConversationSummary {
-                    id,
-                    title: Preview::text(&conversation.title, 256),
+                    id: id.clone(),
+                    title: Preview::text(&conversation.title, TITLE),
                 });
+            }
+            if order.len() > PAGE {
                 page.next = Some(Cursor {
                     anchor: Counter(anchor),
-                    before: Counter(number),
+                    before: Counter(order[PAGE - 1].0),
                 });
-                if serde_json::to_vec(&page)?.len() > 32_768 {
-                    page.conversations.pop();
-                    if page.conversations.is_empty() {
-                        return Err("conversation summary exceeds capacity".into());
-                    }
-                    page.next = Some(Cursor {
-                        anchor: Counter(anchor),
-                        before: Counter(last.ok_or("conversation cursor absent")?),
-                    });
-                    break;
-                }
-                page.next = None;
-                last = Some(number);
-                end = number - 1;
+            }
+            Ok(page)
+        })())
+    }
+
+    /// The saved chats whose titles match `query`, best first: frizbee's typo tolerant Smith
+    /// Waterman match (one typo per four characters of each word), with newer chats first among
+    /// equal scores. Fuzzy, 'substring, ^prefix, suffix$ and !negated words follow its syntax.
+    pub(crate) fn search_conversations(
+        &self,
+        scope: &Selection,
+        query: &str,
+    ) -> Result<ConversationPage> {
+        self.checked((|| {
+            self.require_selection(scope)?;
+            let query = query.trim();
+            if query.is_empty() || query.len() > 128 || query.chars().any(char::is_control) {
+                return Err("invalid saved chat search".into());
+            }
+            let anchor = self.profile.next - 1;
+            let order = storage(|| {
+                let table = self.write.open_table(CONVERSATION_ORDER)?;
+                table
+                    .range(..=anchor)?
+                    .rev()
+                    .take(SEARCHED)
+                    .map(|entry| {
+                        entry
+                            .map(|(_, id)| id.value().to_owned())
+                            .map_err(Into::into)
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })?;
+            let mut chats = Vec::with_capacity(order.len());
+            for id in order {
+                let title = self.saved_conversation(&id)?.title;
+                chats.push((id, title));
+            }
+            let patterns = neo_frizbee::Pattern::parse_query(query)
+                .into_iter()
+                .map(|pattern| {
+                    let typos = (pattern.needle.chars().count() / 4) as u16;
+                    pattern.max_typos(Some(typos))
+                })
+                .collect::<Vec<_>>();
+            let titles = chats
+                .iter()
+                .map(|(_, title)| title.as_str())
+                .collect::<Vec<_>>();
+            let matches =
+                neo_frizbee::Matcher::from_patterns(&patterns, &neo_frizbee::Config::default())
+                    .match_list(&titles);
+            let mut page = ConversationPage {
+                store: scope.store.clone(),
+                conversation: scope.conversation.clone(),
+                epoch: Counter(scope.epoch),
+                sequence: self.sequence()?,
+                anchor: Counter(anchor),
+                conversations: Vec::new(),
+                next: None,
+            };
+            for found in matches.iter().take(PAGE) {
+                let (id, title) = &chats[found.index as usize];
+                page.conversations.push(ConversationSummary {
+                    id: id.clone(),
+                    title: Preview::text(title, TITLE),
+                });
             }
             Ok(page)
         })())

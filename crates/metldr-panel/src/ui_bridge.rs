@@ -429,7 +429,7 @@ impl UiBridge {
 
     pub async fn conversations(&self, cursor: Option<String>) -> Result<String, JsValue> {
         let _read = self.core.begin_read().map_err(js_error)?;
-        let page = conversations::page(&self.core.flow(), &self.core.scope, cursor.as_deref())
+        let page = conversations::page(&self.core.flow(), &self.core.scope, cursor.as_deref(), None)
             .await
             .map_err(js_error)?;
         bounded_json(&page).map_err(js_error)

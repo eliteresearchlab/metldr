@@ -864,6 +864,9 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
                 state.switch_core(core, &updates);
                 return true;
             }
+            Some(conversations::Completion::Search) => {
+                state.conversations.refresh_titles(&core, &updates);
+            }
             Some(conversations::Completion::Archive(page)) => {
                 let replaced = updates
                     .presentation
