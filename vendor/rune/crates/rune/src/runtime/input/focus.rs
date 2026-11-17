@@ -60,6 +60,292 @@ fn takes_focus(n: &Node) -> bool {
 }
 
 impl<S: 'static> Runtime<S> {
+    /// Return with no modifiers presses the window's default button (`El::default_button`)
+    /// unless the focused element takes Return itself. Text fields decide in `with_focused`.
+    pub(super) fn default_button_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if ev.key != Key::Enter || ev.mods != crate::Mods::default() { return false; }
+        if self.core.focused_input().is_some() || self.core.focused_index().is_some_and(|i| self.core.takes_return(i)) { return false; }
+        self.press_default_button(tx)
+    }
+    /// Presses the default button, if one is in reach; a held Return presses it once.
+    pub(super) fn press_default_button(&mut self, tx: &mut Tx) -> bool {
+        let Some(i) = (0..self.nodes.len()).rev()
+            .find(|&i| self.core.nodes[i].focus.default && self.core.nodes[i].handlers.on_press.is_some() && self.core.reachable(i))
+        else { return false };
+        if tx.key_repeat { return true; }
+        let f = self.core.nodes[i].handlers.on_press.clone().unwrap();
+        log_event!(self, "default {}", self.core.nodes[i].path);
+        f(states!(self), tx);
+        true
+    }
+    pub(super) fn set_focus(&mut self, path: Option<String>, keyboard: bool) -> bool {
+        let path = path.filter(|p| !self.core.nodes.iter().any(|n| n.path == *p && n.a11y.disabled));
+        self.core.input_click.on_focus_change(path.as_deref());
+        if self.core.focused != path { self.core.ime_area = None; self.core.ime_reset = true; self.core.blur_links(); self.core.hover_focus = false; }
+        // Tabbing away or into a field takes the selection's keyboard; a hovered row doesn't.
+        if self.core.focused != path
+            && let Some(p) = path.as_deref()
+            && self.text_selection().is_some_and(|(held, _)| held != p)
+            && (keyboard || self.core.node(p).is_some_and(|n| n.input.is_some()) || self.core.virtual_inputs.contains_key(p))
+        {
+            self.clear_text_selection();
+        }
+        if self.core.focused != path {
+            for (p, gained) in [(self.core.focused.as_deref(), false), (path.as_deref(), true)] {
+                if let Some(p) = p && self.core.node(p).is_some_and(|n| n.handlers.get().is_some_and(|h| h.on_focus_change.is_some())) {
+                    self.core.queue.push(Action::FocusChange(p.to_owned(), gained, keyboard));
+                }
+            }
+        }
+        let mut changed = self.core.focused != path && self.physical_focus_lost();
+        for n in &mut self.core.nodes {
+            if let Some(input) = &mut n.input {
+                changed |= sync_input_focus(input, states!(self), path.as_deref() == Some(n.path.as_str()));
+            }
+        }
+        for (p, input) in &mut self.core.virtual_inputs {
+            changed |= sync_input_focus(input, states!(self), path.as_deref() == Some(p.as_str()));
+        }
+        self.core.focused = path;
+        if let Some(p) = self.core.focused.clone() {
+            if let Some(g) = self.core.focused_index().and_then(|i| self.core.group(i)) {
+                self.core.group_last.insert(self.core.nodes[g].path.clone(), p.clone());
+            }
+            self.core.last_focused = Some(p);
+        }
+        self.core.keyboard_focus = keyboard;
+        self.sync_side_focus();
+        if let Some(t) = self.core.focused_index() && let Some(l) = self.core.top_layer() && !self.core.inside_layer(l, t) {
+            self.core.queue.push(Action::LayerDismiss(self.core.nodes[l].path.clone(), crate::el::Dismiss::FocusOut));
+        }
+        changed
+    }
+    pub(super) fn sync_requested_focus(&mut self, nodes: &mut Vec<Node>) -> bool {
+        let explicit_key = self.core.requested_focus.take();
+        for old in &self.core.nodes {
+            if let Some(input) = &old.input
+                && input.edit.focused
+                && !nodes.iter().any(|n| n.path == old.path || n.input.as_ref().is_some_and(|i| i.edit.same_model(&input.edit)))
+                && !self.core.virtual_inputs.values().any(|i| i.edit.same_model(&input.edit))
+                && !self.core.unmounted_focused.iter().any(|w| input.edit.matches_history(w))
+            {
+                self.core.unmounted_focused.push(input.edit.weak_history());
+            }
+        }
+        let within = |path: &str, root: &str| {
+            path == root || (path.len() > root.len() && path.starts_with(root) && path.as_bytes()[root.len()] == b'/')
+        };
+        let shown = |idx: usize| {
+            let n = &nodes[idx];
+            !n.inert && !n.a11y.disabled && n.vis.opacity > 0.0 && n.local.w > 0.0 && n.local.h > 0.0
+                && std::iter::successors(n.parent, |&p| nodes[p].parent).all(|p| nodes[p].vis.opacity > 0.0)
+        };
+        let explicit = explicit_key.and_then(|key| {
+            nodes.iter().enumerate().find(|(j, n)| shown(*j)
+                && takes_focus(n)
+                && crate::flight::selects(&key, &n.path, n.key.as_deref()))
+                .map(|(_, n)| n.path.clone())
+        });
+        let restore = self.core.nodes.iter().enumerate().rev().find_map(|(i, old)| {
+            let key = old.focus.return_to.as_deref()?;
+            if self.core.subtree_exiting(i) || nodes.iter().any(|n| n.path == old.path) { return None; }
+            let focused = self.core.focused.as_deref().or(self.core.last_focused.as_deref())?;
+            let has_children = self.core.nodes.iter().any(|m| m.parent == Some(i));
+            let scope = if !has_children && !old.focus.enabled && old.input.is_none()
+                && old.local.w == 0.0 && old.local.h == 0.0 {
+                let p = self.core.nodes.get(old.parent?)?;
+                if p.is_moved_stub() || p.path.is_empty() {
+                    nodes.get(*self.core.node_index.get(&p.id)?)?.path.as_str()
+                } else {
+                    p.path.as_str()
+                }
+            } else {
+                old.path.as_str()
+            };
+            if !within(focused, scope) { return None; }
+            let anchor = nodes.iter().find(|n| n.key.as_deref() == Some(key))?;
+            let candidates = (0..nodes.len()).filter(|&j| within(&nodes[j].path, &anchor.path) && shown(j)
+                && takes_focus(&nodes[j]));
+            candidates.clone().find(|&j| nodes[j].focus.selected)
+                .or_else(|| candidates.into_iter().next())
+                .map(|j| nodes[j].path.clone())
+        });
+        let input_focused = self.core.focused.as_deref().is_some_and(|p| {
+            nodes.iter().any(|n| n.path == p && !n.inert && n.input.as_ref().is_some_and(|i| i.edit.focused))
+                || self.core.virtual_inputs.get(p).is_some_and(|i| i.edit.focused)
+        });
+        let was_focused = |edit: &crate::edit::TextEdit, path: &str| {
+            self.core.nodes.iter().any(|old| {
+                old.input.as_ref().is_some_and(|i| i.edit.focused && (old.path == path || i.edit.same_model(edit)))
+            }) || (input_focused && self.core.unmounted_focused.iter().any(|w| edit.matches_history(w)))
+        };
+        let virtual_req = || self.core.virtual_inputs.iter()
+            .filter(|(_, i)| i.edit.focused)
+            .map(|(p, i)| (p.as_str(), &i.edit));
+        // A newly requested text field wins; a focused control otherwise retains focus. Nothing
+        // inside an `El::inert` subtree takes or keeps it.
+        let requested = (0..nodes.len())
+            .filter(|&j| shown(j) && nodes[j].input.as_ref().is_some_and(|i| i.edit.focused))
+            .map(|j| (nodes[j].path.as_str(), &nodes[j].input.as_ref().unwrap().edit));
+        // Hash iteration must not decide between simultaneous offscreen requests. Select
+        // only the winning path rather than allocating and sorting every focused field.
+        let newly_requested = |p: &str, edit: &crate::edit::TextEdit| {
+            self.core.focused.as_deref() != Some(p) && !was_focused(edit, p)
+        };
+        let next = explicit.or_else(|| requested.clone().find(|&(p, edit)| newly_requested(p, edit))
+            .or_else(|| virtual_req().filter(|&(p, edit)| newly_requested(p, edit)).min_by_key(|&(p, _)| p))
+            .map(|(p, _)| p.to_owned()))
+            .or(restore)
+            .or_else(|| self.core.focused.clone().filter(|p| (0..nodes.len()).any(|j| &nodes[j].path == p && shown(j)
+                && (nodes[j].focus.enabled || nodes[j].focus.scroll_stop || nodes[j].input.as_ref().is_some_and(|i| i.edit.focused)))
+                || self.core.virtual_inputs.get(p).is_some_and(|i| i.edit.focused)))
+            .or_else(|| requested.into_iter().next().or_else(|| virtual_req().min_by_key(|&(p, _)| p)).map(|(p, _)| p.to_owned()));
+        // State may have deleted a row. Only the new view's accessors are valid now.
+        // Use the same focus path as input events, then restore the old presentation
+        // tree so apply can retain its exit visuals.
+        std::mem::swap(&mut self.core.nodes, nodes);
+        self.core.nodes_replaced();
+        let changed = self.set_focus(next, self.core.keyboard_focus);
+        std::mem::swap(&mut self.core.nodes, nodes);
+        self.core.nodes_replaced();
+        if self.core.input_click.dragging_path().is_some_and(|p| !nodes.iter().any(|n| n.path == p && !n.inert && n.input.is_some())) {
+            self.core.input_click.drop_drag();
+        }
+        if self.core.capture.is_none() {
+            self.core.last_focused = self.core.focused.clone();
+        }
+        self.core.unmounted_focused.retain(|w| {
+            w.strong_count() > 0
+                && !nodes.iter().any(|n| n.input.as_ref().is_some_and(|i| i.edit.matches_history(w)))
+                && !self.core.virtual_inputs.values().any(|i| i.edit.matches_history(w))
+        });
+        changed
+    }
+    /// `shown`: the focus highlight was visible before this key arrived.
+    pub(super) fn focus_key(&mut self, ev: &KeyEvent, shown: bool, tx: &mut Tx) -> bool {
+        if ev.mods.cmd || ev.mods.ctrl || ev.mods.alt || ev.mods.logo { return false; }
+        // Activations (dismiss, press, open) fire once per press. Their repeats are consumed so
+        // they reach nothing else; navigation below keeps repeating.
+        let repeat = tx.key_repeat;
+        if ev.key == Key::Escape && let Some(l) = self.core.top_layer() {
+            if repeat { return true; }
+            let f = self.core.nodes[l].handlers.layer.clone().unwrap();
+            f(states!(self), crate::el::Dismiss::Escape, tx);
+            return true;
+        }
+        if ev.key == Key::Escape && let Some(i) = self.core.active_modal() {
+            if repeat { return true; }
+            let f = self.core.nodes[i].handlers.modal.as_ref().unwrap().dismiss.clone();
+            self.set_focus(None, self.core.keyboard_focus);
+            f(states!(self), tx);
+            return true;
+        }
+        if ev.key == Key::Tab {
+            if self.core.link_tab(ev.mods.shift) { return true; }
+            let mut order = self.core.tab_order();
+            if !self.core.full_keyboard_access && !self.core.tab_visits_controls {
+                // A control that owns its keyboard (`El::on_key`) is a list of its own.
+                order.retain(|&i| self.core.nodes[i].input.is_some() || self.core.nodes[i].focus.key.is_some()
+                    || self.core.group(i).is_some_and(|g| LIST_ROLES.contains(&self.core.nodes[g].role)));
+            }
+            if order.is_empty() { return self.core.active_modal().is_some(); }
+            let current = order.iter().position(|&i| self.core.focused.as_deref() == Some(&self.core.nodes[i].path));
+            let next = match current {
+                Some(i) if ev.mods.shift => (i + order.len() - 1) % order.len(),
+                Some(i) => (i + 1) % order.len(),
+                None if ev.mods.shift => order.len() - 1,
+                None => 0,
+            };
+            let path = self.core.nodes[order[next]].path.clone();
+            self.set_focus(Some(path.clone()), true);
+            tx.scroll_to.push(crate::runtime::ScrollReveal::into_view(None, path));
+            self.core.enter_links(order[next], ev.mods.shift);
+            return true;
+        }
+        let Some(i) = self.core.focused_index() else { return false; };
+        if !self.core.can_focus(i) { return false; }
+        // Past Tab, a Shift-modified key navigates and presses nothing: it goes on to the app.
+        // Typed text still type-selects (Shift-A is "A").
+        if ev.mods.shift && !matches!(&ev.key, Key::Text(t) if !t.trim().is_empty()) { return false; }
+        // A slider's keys come before its group's arrows.
+        if let Some(step) = self.core.nodes[i].focus.step.clone() {
+            let delta = match ev.key {
+                Key::Left | Key::Down => Some(-1), Key::Right | Key::Up => Some(1),
+                Key::PageDown => Some(-10), Key::PageUp => Some(10),
+                _ => None,
+            };
+            if let Some(delta) = delta { step(states!(self), delta, tx); return true; }
+            if matches!(ev.key, Key::Home | Key::End) {
+                let Some(f) = self.core.nodes[i].focus.step_limit.clone() else { return false };
+                f(states!(self), ev.key == Key::End, tx);
+                return true;
+            }
+        }
+        // A focused field inside a list row (an inline rename) keeps its letters and arrows.
+        if self.core.nodes[i].input.is_none() && let Some(g) = self.core.group(i) {
+            let axis = self.core.nodes[g].focus.axis.unwrap_or(if VERTICAL_ROLES.contains(&self.core.nodes[g].role) {
+                crate::FocusAxis::Vertical
+            } else {
+                crate::FocusAxis::Both
+            });
+            let (across, down) = (axis != crate::FocusAxis::Vertical, axis != crate::FocusAxis::Horizontal);
+            let backward = (down && ev.key == Key::Up) || (across && ev.key == Key::Left);
+            let forward = (down && ev.key == Key::Down) || (across && ev.key == Key::Right);
+            let items = self.core.group_items(g);
+            let pos = items.iter().position(|&j| j == i).unwrap();
+            let page = matches!(ev.key, Key::PageUp | Key::PageDown) && PAGED_ROLES.contains(&self.core.nodes[g].role);
+            let next = if backward || forward || page || matches!(ev.key, Key::Home | Key::End) {
+                self.core.typeahead.0.clear();
+                Some(match ev.key {
+                    Key::Home => 0, Key::End => items.len() - 1,
+                    Key::PageUp | Key::PageDown => self.core.page_item(&items, pos, ev.key == Key::PageDown),
+                    // A highlight the user cannot see yet appears where it is (a popup's checked
+                    // item, else the first) before arrows move it; Up from nothing is the last.
+                    _ if self.core.nodes[i].focus.highlight.is_some() && !shown =>
+                        if backward && !self.core.nodes[i].focus.selected { items.len() - 1 } else { pos },
+                    _ if !self.core.nodes[g].focus.wrap.unwrap_or(!CLAMPED_ROLES.contains(&self.core.nodes[g].role)) =>
+                        if backward { pos.saturating_sub(1) } else { (pos + 1).min(items.len() - 1) },
+                    _ if backward => (pos + items.len() - 1) % items.len(),
+                    _ => (pos + 1) % items.len(),
+                })
+            } else if let Key::Text(t) = &ev.key && TYPE_SELECT_ROLES.contains(&self.core.nodes[g].role) && !t.trim().is_empty() {
+                self.core.type_select(&items, pos, t)
+            } else { None };
+            if let Some(next) = next {
+                let n = &self.core.nodes[items[next]];
+                let follows = ((n.role == "radio" || n.role == "tab") && !self.core.nodes[g].focus.manual) || self.core.nodes[g].focus.follows;
+                let action = follows.then(|| n.handlers.on_press.clone()).flatten();
+                let path = n.path.clone();
+                self.set_focus(Some(path.clone()), true);
+                tx.scroll_to.push(crate::runtime::ScrollReveal::into_view(None, path));
+                if let Some(f) = action { f(states!(self), tx); }
+                return true;
+            }
+        } else if self.core.nodes[i].role == "combobox" && self.core.nodes[i].input.is_none() && matches!(ev.key, Key::Up | Key::Down) {
+            // A popup button opens on its arrows as well as Space (NSPopUpButton).
+            if repeat { return true; }
+            if let Some(f) = self.core.nodes[i].handlers.on_press.clone() { f(states!(self), tx); }
+            return true;
+        }
+        // Space presses the focused control. Return presses only rows and links; for a button
+        // it goes on to the default button (`default_button_key`, which ran first) or `on_key`.
+        let space = ev.key == Key::Text(" ".into());
+        if self.core.nodes[i].input.is_none() && (space || (ev.key == Key::Enter && self.core.takes_return(i))) {
+            // A row the user cannot see highlighted (the pointer left it) chooses nothing.
+            if self.core.nodes[i].focus.highlight.is_some() && !shown { self.core.keyboard_focus = false; return true; }
+            if repeat { return true; }
+            if self.link_key(i, tx) { return true; }
+            if let Some(f) = self.core.nodes[i].handlers.on_press.clone() { f(states!(self), tx); }
+            return true;
+        }
+        false
+    }
+
+
+
+}
+
+impl RuntimeCore {
     pub(super) fn active_modal(&self) -> Option<usize> {
         self.modal_index
     }
@@ -167,24 +453,6 @@ impl<S: 'static> Runtime<S> {
         self.link_focused(i) || self.nodes[i].focus.highlight.is_some()
             || self.group(i).is_some_and(|g| LIST_ROLES.contains(&self.nodes[g].role) || VERTICAL_ROLES.contains(&self.nodes[g].role))
     }
-    /// Return with no modifiers presses the window's default button (`El::default_button`)
-    /// unless the focused element takes Return itself. Text fields decide in `with_focused`.
-    pub(super) fn default_button_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
-        if ev.key != Key::Enter || ev.mods != crate::Mods::default() { return false; }
-        if self.focused_input().is_some() || self.focused_index().is_some_and(|i| self.takes_return(i)) { return false; }
-        self.press_default_button(tx)
-    }
-    /// Presses the default button, if one is in reach; a held Return presses it once.
-    pub(super) fn press_default_button(&mut self, tx: &mut Tx) -> bool {
-        let Some(i) = (0..self.nodes.len()).rev()
-            .find(|&i| self.nodes[i].focus.default && self.nodes[i].handlers.on_press.is_some() && self.reachable(i))
-        else { return false };
-        if tx.key_repeat { return true; }
-        let f = self.nodes[i].handlers.on_press.clone().unwrap();
-        log_event!(self, "default {}", self.nodes[i].path);
-        f(states!(self), tx);
-        true
-    }
     /// The items an arrow key moves between in group `g`, in tree order.
     pub(super) fn group_items(&self, g: usize) -> Vec<usize> {
         // Nodes are in tree order, so a group's items follow it until its subtree ends; the
@@ -243,149 +511,6 @@ impl<S: 'static> Runtime<S> {
             .find_map(|p| self.nodes[p].focus.ring_default)
             .unwrap_or(crate::el::Outline { width: 3.0, offset: 0.0, color: self.system_accent.focus(self.env.system_dark) })
     }
-    pub(super) fn set_focus(&mut self, path: Option<String>, keyboard: bool) -> bool {
-        let path = path.filter(|p| !self.nodes.iter().any(|n| n.path == *p && n.a11y.disabled));
-        self.input_click.on_focus_change(path.as_deref());
-        if self.focused != path { self.ime_area = None; self.ime_reset = true; self.blur_links(); self.hover_focus = false; }
-        // Tabbing away or into a field takes the selection's keyboard; a hovered row doesn't.
-        if self.focused != path
-            && let Some(p) = path.as_deref()
-            && self.text_selection().is_some_and(|(held, _)| held != p)
-            && (keyboard || self.node(p).is_some_and(|n| n.input.is_some()) || self.virtual_inputs.contains_key(p))
-        {
-            self.clear_text_selection();
-        }
-        if self.focused != path {
-            for (p, gained) in [(self.focused.as_deref(), false), (path.as_deref(), true)] {
-                if let Some(p) = p && self.node(p).is_some_and(|n| n.handlers.get().is_some_and(|h| h.on_focus_change.is_some())) {
-                    self.queue.push(Action::FocusChange(p.to_owned(), gained, keyboard));
-                }
-            }
-        }
-        let mut changed = self.focused != path && self.physical_focus_lost();
-        for n in &mut self.nodes {
-            if let Some(input) = &mut n.input {
-                changed |= sync_input_focus(input, states!(self), path.as_deref() == Some(n.path.as_str()));
-            }
-        }
-        for (p, input) in &mut self.virtual_inputs {
-            changed |= sync_input_focus(input, states!(self), path.as_deref() == Some(p.as_str()));
-        }
-        self.focused = path;
-        if let Some(p) = self.focused.clone() {
-            if let Some(g) = self.focused_index().and_then(|i| self.group(i)) {
-                self.group_last.insert(self.nodes[g].path.clone(), p.clone());
-            }
-            self.last_focused = Some(p);
-        }
-        self.keyboard_focus = keyboard;
-        self.sync_side_focus();
-        if let Some(t) = self.focused_index() && let Some(l) = self.top_layer() && !self.inside_layer(l, t) {
-            self.queue.push(Action::LayerDismiss(self.nodes[l].path.clone(), crate::el::Dismiss::FocusOut));
-        }
-        changed
-    }
-    pub(super) fn sync_requested_focus(&mut self, nodes: &mut Vec<Node>) -> bool {
-        let explicit_key = self.requested_focus.take();
-        for old in &self.nodes {
-            if let Some(input) = &old.input
-                && input.edit.focused
-                && !nodes.iter().any(|n| n.path == old.path || n.input.as_ref().is_some_and(|i| i.edit.same_model(&input.edit)))
-                && !self.virtual_inputs.values().any(|i| i.edit.same_model(&input.edit))
-                && !self.unmounted_focused.iter().any(|w| input.edit.matches_history(w))
-            {
-                self.unmounted_focused.push(input.edit.weak_history());
-            }
-        }
-        let within = |path: &str, root: &str| {
-            path == root || (path.len() > root.len() && path.starts_with(root) && path.as_bytes()[root.len()] == b'/')
-        };
-        let shown = |idx: usize| {
-            let n = &nodes[idx];
-            !n.inert && !n.a11y.disabled && n.vis.opacity > 0.0 && n.local.w > 0.0 && n.local.h > 0.0
-                && std::iter::successors(n.parent, |&p| nodes[p].parent).all(|p| nodes[p].vis.opacity > 0.0)
-        };
-        let explicit = explicit_key.and_then(|key| {
-            nodes.iter().enumerate().find(|(j, n)| shown(*j)
-                && takes_focus(n)
-                && crate::flight::selects(&key, &n.path, n.key.as_deref()))
-                .map(|(_, n)| n.path.clone())
-        });
-        let restore = self.nodes.iter().enumerate().rev().find_map(|(i, old)| {
-            let key = old.focus.return_to.as_deref()?;
-            if self.subtree_exiting(i) || nodes.iter().any(|n| n.path == old.path) { return None; }
-            let focused = self.focused.as_deref().or(self.last_focused.as_deref())?;
-            let has_children = self.nodes.iter().any(|m| m.parent == Some(i));
-            let scope = if !has_children && !old.focus.enabled && old.input.is_none()
-                && old.local.w == 0.0 && old.local.h == 0.0 {
-                let p = self.nodes.get(old.parent?)?;
-                if p.is_moved_stub() || p.path.is_empty() {
-                    nodes.get(*self.node_index.get(&p.id)?)?.path.as_str()
-                } else {
-                    p.path.as_str()
-                }
-            } else {
-                old.path.as_str()
-            };
-            if !within(focused, scope) { return None; }
-            let anchor = nodes.iter().find(|n| n.key.as_deref() == Some(key))?;
-            let candidates = (0..nodes.len()).filter(|&j| within(&nodes[j].path, &anchor.path) && shown(j)
-                && takes_focus(&nodes[j]));
-            candidates.clone().find(|&j| nodes[j].focus.selected)
-                .or_else(|| candidates.into_iter().next())
-                .map(|j| nodes[j].path.clone())
-        });
-        let input_focused = self.focused.as_deref().is_some_and(|p| {
-            nodes.iter().any(|n| n.path == p && !n.inert && n.input.as_ref().is_some_and(|i| i.edit.focused))
-                || self.virtual_inputs.get(p).is_some_and(|i| i.edit.focused)
-        });
-        let was_focused = |edit: &crate::edit::TextEdit, path: &str| {
-            self.nodes.iter().any(|old| {
-                old.input.as_ref().is_some_and(|i| i.edit.focused && (old.path == path || i.edit.same_model(edit)))
-            }) || (input_focused && self.unmounted_focused.iter().any(|w| edit.matches_history(w)))
-        };
-        let virtual_req = || self.virtual_inputs.iter()
-            .filter(|(_, i)| i.edit.focused)
-            .map(|(p, i)| (p.as_str(), &i.edit));
-        // A newly requested text field wins; a focused control otherwise retains focus. Nothing
-        // inside an `El::inert` subtree takes or keeps it.
-        let requested = (0..nodes.len())
-            .filter(|&j| shown(j) && nodes[j].input.as_ref().is_some_and(|i| i.edit.focused))
-            .map(|j| (nodes[j].path.as_str(), &nodes[j].input.as_ref().unwrap().edit));
-        // Hash iteration must not decide between simultaneous offscreen requests. Select
-        // only the winning path rather than allocating and sorting every focused field.
-        let newly_requested = |p: &str, edit: &crate::edit::TextEdit| {
-            self.focused.as_deref() != Some(p) && !was_focused(edit, p)
-        };
-        let next = explicit.or_else(|| requested.clone().find(|&(p, edit)| newly_requested(p, edit))
-            .or_else(|| virtual_req().filter(|&(p, edit)| newly_requested(p, edit)).min_by_key(|&(p, _)| p))
-            .map(|(p, _)| p.to_owned()))
-            .or(restore)
-            .or_else(|| self.focused.clone().filter(|p| (0..nodes.len()).any(|j| &nodes[j].path == p && shown(j)
-                && (nodes[j].focus.enabled || nodes[j].focus.scroll_stop || nodes[j].input.as_ref().is_some_and(|i| i.edit.focused)))
-                || self.virtual_inputs.get(p).is_some_and(|i| i.edit.focused)))
-            .or_else(|| requested.into_iter().next().or_else(|| virtual_req().min_by_key(|&(p, _)| p)).map(|(p, _)| p.to_owned()));
-        // State may have deleted a row. Only the new view's accessors are valid now.
-        // Use the same focus path as input events, then restore the old presentation
-        // tree so apply can retain its exit visuals.
-        std::mem::swap(&mut self.nodes, nodes);
-        self.nodes_replaced();
-        let changed = self.set_focus(next, self.keyboard_focus);
-        std::mem::swap(&mut self.nodes, nodes);
-        self.nodes_replaced();
-        if self.input_click.dragging_path().is_some_and(|p| !nodes.iter().any(|n| n.path == p && !n.inert && n.input.is_some())) {
-            self.input_click.drop_drag();
-        }
-        if self.capture.is_none() {
-            self.last_focused = self.focused.clone();
-        }
-        self.unmounted_focused.retain(|w| {
-            w.strong_count() > 0
-                && !nodes.iter().any(|n| n.input.as_ref().is_some_and(|i| i.edit.matches_history(w)))
-                && !self.virtual_inputs.values().any(|i| i.edit.matches_history(w))
-        });
-        changed
-    }
     fn tab_order(&self) -> Vec<usize> {
         let all: Vec<_> = (0..self.nodes.len()).filter(|&i| self.can_focus(i) && self.nodes[i].focus.order >= 0).collect();
         let mut order: Vec<_> = all.iter().copied().filter(|&i| {
@@ -416,153 +541,6 @@ impl<S: 'static> Runtime<S> {
         let prefix = if cycle { first.to_string() } else { buffer.clone() };
         order.into_iter().find(|&j| label(j).starts_with(&prefix))
     }
-    /// `shown`: the focus highlight was visible before this key arrived.
-    pub(super) fn focus_key(&mut self, ev: &KeyEvent, shown: bool, tx: &mut Tx) -> bool {
-        if ev.mods.cmd || ev.mods.ctrl || ev.mods.alt || ev.mods.logo { return false; }
-        // Activations (dismiss, press, open) fire once per press. Their repeats are consumed so
-        // they reach nothing else; navigation below keeps repeating.
-        let repeat = tx.key_repeat;
-        if ev.key == Key::Escape && let Some(l) = self.top_layer() {
-            if repeat { return true; }
-            let f = self.nodes[l].handlers.layer.clone().unwrap();
-            f(states!(self), crate::el::Dismiss::Escape, tx);
-            return true;
-        }
-        if ev.key == Key::Escape && let Some(i) = self.active_modal() {
-            if repeat { return true; }
-            let f = self.nodes[i].handlers.modal.as_ref().unwrap().dismiss.clone();
-            self.set_focus(None, self.keyboard_focus);
-            f(states!(self), tx);
-            return true;
-        }
-        if ev.key == Key::Tab {
-            if self.link_tab(ev.mods.shift) { return true; }
-            let mut order = self.tab_order();
-            if !self.full_keyboard_access && !self.tab_visits_controls {
-                // A control that owns its keyboard (`El::on_key`) is a list of its own.
-                order.retain(|&i| self.nodes[i].input.is_some() || self.nodes[i].focus.key.is_some()
-                    || self.group(i).is_some_and(|g| LIST_ROLES.contains(&self.nodes[g].role)));
-            }
-            if order.is_empty() { return self.active_modal().is_some(); }
-            let current = order.iter().position(|&i| self.focused.as_deref() == Some(&self.nodes[i].path));
-            let next = match current {
-                Some(i) if ev.mods.shift => (i + order.len() - 1) % order.len(),
-                Some(i) => (i + 1) % order.len(),
-                None if ev.mods.shift => order.len() - 1,
-                None => 0,
-            };
-            let path = self.nodes[order[next]].path.clone();
-            self.set_focus(Some(path.clone()), true);
-            tx.scroll_to.push(crate::runtime::ScrollReveal::into_view(None, path));
-            self.enter_links(order[next], ev.mods.shift);
-            return true;
-        }
-        let Some(i) = self.focused_index() else { return false; };
-        if !self.can_focus(i) { return false; }
-        // Past Tab, a Shift-modified key navigates and presses nothing: it goes on to the app.
-        // Typed text still type-selects (Shift-A is "A").
-        if ev.mods.shift && !matches!(&ev.key, Key::Text(t) if !t.trim().is_empty()) { return false; }
-        // A slider's keys come before its group's arrows.
-        if let Some(step) = self.nodes[i].focus.step.clone() {
-            let delta = match ev.key {
-                Key::Left | Key::Down => Some(-1), Key::Right | Key::Up => Some(1),
-                Key::PageDown => Some(-10), Key::PageUp => Some(10),
-                _ => None,
-            };
-            if let Some(delta) = delta { step(states!(self), delta, tx); return true; }
-            if matches!(ev.key, Key::Home | Key::End) {
-                let Some(f) = self.nodes[i].focus.step_limit.clone() else { return false };
-                f(states!(self), ev.key == Key::End, tx);
-                return true;
-            }
-        }
-        // A focused field inside a list row (an inline rename) keeps its letters and arrows.
-        if self.nodes[i].input.is_none() && let Some(g) = self.group(i) {
-            let axis = self.nodes[g].focus.axis.unwrap_or(if VERTICAL_ROLES.contains(&self.nodes[g].role) {
-                crate::FocusAxis::Vertical
-            } else {
-                crate::FocusAxis::Both
-            });
-            let (across, down) = (axis != crate::FocusAxis::Vertical, axis != crate::FocusAxis::Horizontal);
-            let backward = (down && ev.key == Key::Up) || (across && ev.key == Key::Left);
-            let forward = (down && ev.key == Key::Down) || (across && ev.key == Key::Right);
-            let items = self.group_items(g);
-            let pos = items.iter().position(|&j| j == i).unwrap();
-            let page = matches!(ev.key, Key::PageUp | Key::PageDown) && PAGED_ROLES.contains(&self.nodes[g].role);
-            let next = if backward || forward || page || matches!(ev.key, Key::Home | Key::End) {
-                self.typeahead.0.clear();
-                Some(match ev.key {
-                    Key::Home => 0, Key::End => items.len() - 1,
-                    Key::PageUp | Key::PageDown => self.page_item(&items, pos, ev.key == Key::PageDown),
-                    // A highlight the user cannot see yet appears where it is (a popup's checked
-                    // item, else the first) before arrows move it; Up from nothing is the last.
-                    _ if self.nodes[i].focus.highlight.is_some() && !shown =>
-                        if backward && !self.nodes[i].focus.selected { items.len() - 1 } else { pos },
-                    _ if !self.nodes[g].focus.wrap.unwrap_or(!CLAMPED_ROLES.contains(&self.nodes[g].role)) =>
-                        if backward { pos.saturating_sub(1) } else { (pos + 1).min(items.len() - 1) },
-                    _ if backward => (pos + items.len() - 1) % items.len(),
-                    _ => (pos + 1) % items.len(),
-                })
-            } else if let Key::Text(t) = &ev.key && TYPE_SELECT_ROLES.contains(&self.nodes[g].role) && !t.trim().is_empty() {
-                self.type_select(&items, pos, t)
-            } else { None };
-            if let Some(next) = next {
-                let n = &self.nodes[items[next]];
-                let follows = ((n.role == "radio" || n.role == "tab") && !self.nodes[g].focus.manual) || self.nodes[g].focus.follows;
-                let action = follows.then(|| n.handlers.on_press.clone()).flatten();
-                let path = n.path.clone();
-                self.set_focus(Some(path.clone()), true);
-                tx.scroll_to.push(crate::runtime::ScrollReveal::into_view(None, path));
-                if let Some(f) = action { f(states!(self), tx); }
-                return true;
-            }
-        } else if self.nodes[i].role == "combobox" && self.nodes[i].input.is_none() && matches!(ev.key, Key::Up | Key::Down) {
-            // A popup button opens on its arrows as well as Space (NSPopUpButton).
-            if repeat { return true; }
-            if let Some(f) = self.nodes[i].handlers.on_press.clone() { f(states!(self), tx); }
-            return true;
-        }
-        // Space presses the focused control. Return presses only rows and links; for a button
-        // it goes on to the default button (`default_button_key`, which ran first) or `on_key`.
-        let space = ev.key == Key::Text(" ".into());
-        if self.nodes[i].input.is_none() && (space || (ev.key == Key::Enter && self.takes_return(i))) {
-            // A row the user cannot see highlighted (the pointer left it) chooses nothing.
-            if self.nodes[i].focus.highlight.is_some() && !shown { self.keyboard_focus = false; return true; }
-            if repeat { return true; }
-            if self.link_key(i, tx) { return true; }
-            if let Some(f) = self.nodes[i].handlers.on_press.clone() { f(states!(self), tx); }
-            return true;
-        }
-        false
-    }
-    pub(super) fn sync_modals(&mut self) {
-        // Removed modals restore in reverse nesting order. Exiting visuals are already inert.
-        while self.modal_stack.last().is_some_and(|(p, _)| self.node(p).is_none()) {
-            let (modal, restore) = self.modal_stack.pop().unwrap();
-            // Focus the closing commit moved elsewhere (a field outside, say) stays there.
-            let inside = |f: &str| f.strip_prefix(modal.as_str()).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
-            if self.focused.as_deref().is_some_and(|f| !inside(f) && self.node(f).is_some()) { continue; }
-            let restore = restore.filter(|p| self.node(p).is_some());
-            self.set_focus(restore, self.keyboard_focus);
-        }
-        let Some(i) = self.active_modal() else { return };
-        let path = self.nodes[i].path.clone();
-        if !self.modal_stack.iter().any(|(p, _)| p == &path) {
-            // A field in the modal that asked for focus took it earlier in this commit; closing
-            // returns to what had focus before.
-            let inside = self.focused_index().is_some_and(|j| self.allowed(j));
-            let restore = if inside { self.focus_before_commit.clone() } else { self.focused.clone() };
-            self.modal_stack.push((path.clone(), restore));
-            // Cancel any gesture captured before the modal opened.
-            self.capture = None;
-            self.secondary_capture = None;
-            self.hovered = None;
-        }
-        if !self.focused_index().is_some_and(|j| self.allowed(j)) {
-            let target = self.tab_order().first().map(|&j| self.nodes[j].path.clone()).unwrap_or(path);
-            self.set_focus(Some(target), self.keyboard_focus);
-        }
-    }
 
     /// The item Page Down (or Up) moves to from `items[pos]`: the farthest one still inside a
     /// viewport's height of it, as a list's highlight pages in AppKit, at least one item on and
@@ -581,18 +559,6 @@ impl<S: 'static> Runtime<S> {
             None if down => (pos + 1).min(items.len() - 1),
             None => pos.saturating_sub(1),
         }
-    }
-
-    /// In a group whose selection follows focus, focus follows selection too: when the app
-    /// selects another item (a shortcut, say), focus in that group moves to it.
-    pub(super) fn sync_follows(&mut self) {
-        let Some(i) = self.focused_index() else { return };
-        if self.nodes[i].input.is_some() || self.nodes[i].focus.selected { return; }
-        let Some(g) = self.group(i).filter(|&g| self.nodes[g].focus.follows) else { return };
-        let Some(j) = (0..self.nodes.len())
-            .find(|&j| self.nodes[j].focus.selected && self.group(j) == Some(g) && self.can_focus(j)) else { return };
-        let path = self.nodes[j].path.clone();
-        self.set_focus(Some(path), self.keyboard_focus);
     }
 }
 
@@ -1556,6 +1522,48 @@ mod tests {
             for _ in 0..30 { rt.frame(1.0 / 60.0); }
             assert_eq!(focused(&rt), want, "after {key:?}");
             assert!(shown(&rt, want), "{want} scrolled into view");
+        }
+    }
+}
+
+impl<S: 'static> Runtime<S> {
+    /// In a group whose selection follows focus, focus follows selection too: when the app
+    /// selects another item (a shortcut, say), focus in that group moves to it.
+    pub(super) fn sync_follows(&mut self) {
+        let Some(i) = self.core.focused_index() else { return };
+        if self.nodes[i].input.is_some() || self.nodes[i].focus.selected { return; }
+        let Some(g) = self.core.group(i).filter(|&g| self.nodes[g].focus.follows) else { return };
+        let Some(j) = (0..self.nodes.len())
+            .find(|&j| self.nodes[j].focus.selected && self.core.group(j) == Some(g) && self.core.can_focus(j)) else { return };
+        let path = self.nodes[j].path.clone();
+        self.set_focus(Some(path), self.keyboard_focus);
+    }
+    pub(super) fn sync_modals(&mut self) {
+        // Removed modals restore in reverse nesting order. Exiting visuals are already inert.
+        while self.modal_stack.last().is_some_and(|(p, _)| self.core.node(p).is_none()) {
+            let (modal, restore) = self.modal_stack.pop().unwrap();
+            // Focus the closing commit moved elsewhere (a field outside, say) stays there.
+            let inside = |f: &str| f.strip_prefix(modal.as_str()).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
+            if self.focused.as_deref().is_some_and(|f| !inside(f) && self.core.node(f).is_some()) { continue; }
+            let restore = restore.filter(|p| self.core.node(p).is_some());
+            self.set_focus(restore, self.keyboard_focus);
+        }
+        let Some(i) = self.core.active_modal() else { return };
+        let path = self.nodes[i].path.clone();
+        if !self.modal_stack.iter().any(|(p, _)| p == &path) {
+            // A field in the modal that asked for focus took it earlier in this commit; closing
+            // returns to what had focus before.
+            let inside = self.core.focused_index().is_some_and(|j| self.core.allowed(j));
+            let restore = if inside { self.focus_before_commit.clone() } else { self.focused.clone() };
+            self.modal_stack.push((path.clone(), restore));
+            // Cancel any gesture captured before the modal opened.
+            self.capture = None;
+            self.secondary_capture = None;
+            self.hovered = None;
+        }
+        if !self.core.focused_index().is_some_and(|j| self.core.allowed(j)) {
+            let target = self.core.tab_order().first().map(|&j| self.nodes[j].path.clone()).unwrap_or(path);
+            self.set_focus(Some(target), self.keyboard_focus);
         }
     }
 }

@@ -21,7 +21,7 @@ fn render_rt<S: 'static>(gpu: &Gpu, rt: &mut Runtime<S>, size: (u32, u32)) -> Ve
     let target = Offscreen::with_format(&gpu.device, size.0, size.1, format);
     renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
     renderer.prepare_surfaces(&gpu.device, &gpu.queue, &rt.surfaces, size);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, size);
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, size);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
     renderer.draw(&mut encoder, &target.view, rt.clear_color());
     target.copy(&mut encoder);

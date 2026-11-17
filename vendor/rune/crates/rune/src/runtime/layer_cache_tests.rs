@@ -43,11 +43,11 @@ fn cache_matches_uncached_at_rest_and_skips_rerasterize_on_ancestor_live_offset(
     let mut rt_u = Runtime::new((false, Live::new([0.0, 0.0])), crisp_view, (64.0, 48.0), Env { scale: 1.0, system_dark: true });
     let mut ren_u = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
     rt_u.frame(0.0);
-    ren_u.prepare(&gpu.device, &gpu.queue, &mut rt_u.text.atlas, &rt_u.instances, (64, 48));
+    ren_u.prepare(&gpu.device, &gpu.queue, &mut rt_u.core.text.atlas, &rt_u.core.instances, (64, 48));
     let mut rt_c = Runtime::new((true, Live::new([0.0, 0.0])), crisp_view, (64.0, 48.0), Env { scale: 1.0, system_dark: true });
     let mut ren_c = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
     rt_c.frame(0.0);
-    ren_c.prepare(&gpu.device, &gpu.queue, &mut rt_c.text.atlas, &rt_c.instances, (64, 48));
+    ren_c.prepare(&gpu.device, &gpu.queue, &mut rt_c.core.text.atlas, &rt_c.core.instances, (64, 48));
     assert_eq!(pixels(&gpu, &ren_c, &target), pixels(&gpu, &ren_u, &target), "cached vs uncached must be pixel-for-pixel identical at rest");
 
     // 2. Rich card with text and antialiased rounded corners under ancestor live_offset pan.
@@ -55,14 +55,14 @@ fn cache_matches_uncached_at_rest_and_skips_rerasterize_on_ancestor_live_offset(
     let mut rt_uncached = Runtime::new((false, off_uncached.clone()), view, (64.0, 48.0), Env { scale: 1.0, system_dark: true });
     let mut ren_uncached = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
     rt_uncached.frame(0.0);
-    ren_uncached.prepare(&gpu.device, &gpu.queue, &mut rt_uncached.text.atlas, &rt_uncached.instances, (64, 48));
+    ren_uncached.prepare(&gpu.device, &gpu.queue, &mut rt_uncached.core.text.atlas, &rt_uncached.core.instances, (64, 48));
     let px_uncached = pixels(&gpu, &ren_uncached, &target);
 
     let off_cached = Live::new([0.0, 0.0]);
     let mut rt_cached = Runtime::new((true, off_cached.clone()), view, (64.0, 48.0), Env { scale: 1.0, system_dark: true });
     let mut ren_cached = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
     rt_cached.frame(0.0);
-    ren_cached.prepare(&gpu.device, &gpu.queue, &mut rt_cached.text.atlas, &rt_cached.instances, (64, 48));
+    ren_cached.prepare(&gpu.device, &gpu.queue, &mut rt_cached.core.text.atlas, &rt_cached.core.instances, (64, 48));
     assert_eq!(ren_cached.layer_stats().targets, 1);
     assert_eq!(ren_cached.layer_stats().extra_passes, 1, "initial frame rasterizes the cache");
     let px_cached = pixels(&gpu, &ren_cached, &target);
@@ -74,13 +74,13 @@ fn cache_matches_uncached_at_rest_and_skips_rerasterize_on_ancestor_live_offset(
     for delta in [[4.0, 2.0], [10.0, 6.0], [3.0, 8.0], [0.0, 0.0]] {
         off_uncached.set(delta);
         rt_uncached.frame(1.0 / 60.0);
-        ren_uncached.prepare(&gpu.device, &gpu.queue, &mut rt_uncached.text.atlas, &rt_uncached.instances, (64, 48));
+        ren_uncached.prepare(&gpu.device, &gpu.queue, &mut rt_uncached.core.text.atlas, &rt_uncached.core.instances, (64, 48));
         let want = pixels(&gpu, &ren_uncached, &target);
 
         off_cached.set(delta);
         rt_cached.frame(1.0 / 60.0);
         assert_eq!(rt_cached.instances.len(), 2, "cached subtree elides to [KIND_LAYER, KIND_LAYER_END]");
-        ren_cached.prepare(&gpu.device, &gpu.queue, &mut rt_cached.text.atlas, &rt_cached.instances, (64, 48));
+        ren_cached.prepare(&gpu.device, &gpu.queue, &mut rt_cached.core.text.atlas, &rt_cached.core.instances, (64, 48));
         assert_eq!(ren_cached.layer_stats().extra_passes, 0, "ancestor live_offset must not re-rasterize");
         assert_eq!(ren_cached.layer_stats().allocations, 1);
         let got = pixels(&gpu, &ren_cached, &target);
@@ -119,21 +119,21 @@ fn cache_invalidates_on_state_and_hover_changes() {
 
     // Frame 1: initial rasterize (red).
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 1);
     let out = pixels(&gpu, &renderer, &target);
     near(&out[(12 * 32 + 12) * 4..(12 * 32 + 13) * 4], rgba([0.8, 0.1, 0.2, 1.0]));
 
     // Frame 2: steady at rest (cache hit).
     rt.frame(1.0 / 60.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 0);
 
     // Frame 3: state change inside cached subtree invalidates and re-renders once settled (green).
     rt.state = true;
     rt.invalidate();
     rt.frame(1.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 1, "state change must invalidate cache");
     let out = pixels(&gpu, &renderer, &target);
     near(&out[(12 * 32 + 12) * 4..(12 * 32 + 13) * 4], rgba([0.1, 0.8, 0.2, 1.0]));
@@ -141,14 +141,14 @@ fn cache_invalidates_on_state_and_hover_changes() {
     // Frame 4: hover inside cached subtree invalidates immediately and re-renders (blue hover).
     rt.pointer_move(12.0, 12.0);
     rt.frame(1.0 / 60.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 1, "hover change must invalidate cache");
     let out = pixels(&gpu, &renderer, &target);
     near(&out[(12 * 32 + 12) * 4..(12 * 32 + 13) * 4], rgba([0.1, 0.2, 0.9, 1.0]));
 
     // Frame 5: settled while hovered hits the cache again.
     rt.frame(1.0 / 60.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 0, "settled hover must hit cache");
 }
 
@@ -175,11 +175,11 @@ fn cache_draws_live_while_subtree_animates_and_recaches_when_settled() {
 
     // Initial rest: cached.
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (48, 24));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (48, 24));
     assert_eq!(renderer.layer_stats().targets, 1);
     assert_eq!(renderer.layer_stats().extra_passes, 1);
     rt.frame(1.0 / 60.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (48, 24));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (48, 24));
     assert_eq!(renderer.layer_stats().extra_passes, 0);
 
     // Start animation inside cached subtree: must bypass cache and draw live without re-rasterizing offscreen targets.
@@ -189,20 +189,20 @@ fn cache_draws_live_while_subtree_animates_and_recaches_when_settled() {
     for _ in 0..3 {
         rt.frame(0.05);
         assert!(rt.instances.iter().all(|i| i.params[1] != KIND_LAYER), "must draw live while animating");
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (48, 24));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (48, 24));
         assert_eq!(renderer.layer_stats().extra_passes, 0, "no offscreen pass thrash while animating");
     }
 
     // Advance past animation duration so it settles: re-caches once at the new position, then hits cache.
     rt.frame(2.0);
     assert!(rt.instances.iter().any(|i| i.params[1] == KIND_LAYER && i.params[3] == 1.0), "re-cached once settled");
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (48, 24));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (48, 24));
     assert_eq!(renderer.layer_stats().extra_passes, 1, "rasterize once on settle");
     let out = pixels(&gpu, &renderer, &target);
     near(&out[(8 * 48 + 24) * 4..(8 * 48 + 25) * 4], rgba([1.0, 0.0, 0.0, 1.0]));
 
     rt.frame(1.0 / 60.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (48, 24));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (48, 24));
     assert_eq!(renderer.layer_stats().extra_passes, 0, "subsequent frame hits settled cache");
 }
 
@@ -227,7 +227,7 @@ fn cache_rerasterizes_at_new_resolution_after_ancestor_scale_settles() {
 
     // Frame 1: rasterize at 1.0x (48x48 -> 64x64 bucket).
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
     assert_eq!(renderer.layer_stats().extra_passes, 1);
     assert_eq!(renderer.layer_stats().bytes, 64 * 64 * 8);
     let _ = pixels(&gpu, &renderer, &target);
@@ -235,13 +235,13 @@ fn cache_rerasterizes_at_new_resolution_after_ancestor_scale_settles() {
     // Frame 2: during scale gesture to 2.0x (dt = 0.016 < STATIC_SCALE_SETTLE), composites scaled without re-rasterizing.
     scale.set(2.0);
     rt.frame(0.016);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
     assert_eq!(renderer.layer_stats().extra_passes, 0, "composite existing texture during scale gesture");
     assert_eq!(renderer.layer_stats().bytes, 64 * 64 * 8, "still 1x texture before settle");
 
     // Frame 3: after scale settles (dt = 0.15 >= STATIC_SCALE_SETTLE), re-rasterizes at 2.0x (96x96 -> 128x128 bucket).
     rt.frame(0.15);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
     assert_eq!(renderer.layer_stats().extra_passes, 1, "re-rasterize at new resolution once settled");
     assert_eq!(renderer.layer_stats().bytes, 128 * 128 * 8, "upgraded to 2x texture bucket");
     let out = pixels(&gpu, &renderer, &target);
@@ -249,7 +249,7 @@ fn cache_rerasterizes_at_new_resolution_after_ancestor_scale_settles() {
 
     // Frame 4: hits the new 2x cache.
     rt.frame(0.016);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
     assert_eq!(renderer.layer_stats().extra_passes, 0);
 }
 
@@ -284,7 +284,7 @@ fn cache_lru_eviction_under_small_budget_evicts_oldest_and_recaches_cleanly() {
 
     // Visit card A (y=0): caches A.
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 1);
     assert!(renderer.layer_stats().bytes <= one_bucket * 2);
     let out = pixels(&gpu, &renderer, &target);
@@ -293,7 +293,7 @@ fn cache_lru_eviction_under_small_budget_evicts_oldest_and_recaches_cleanly() {
     // Visit card B (y=-100): caches B, retains A (2 targets <= budget).
     offset.set([0.0, -100.0]);
     rt.frame(0.016);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 1);
     assert_eq!(renderer.layer_stats().targets, 2);
     assert!(renderer.layer_stats().bytes <= one_bucket * 2);
@@ -303,13 +303,13 @@ fn cache_lru_eviction_under_small_budget_evicts_oldest_and_recaches_cleanly() {
     // Return to card A (y=0): A is still resident in budget, so extra_passes == 0!
     offset.set([0.0, 0.0]);
     rt.frame(0.016);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 0, "A was retained in budget");
 
     // Now visit card C (y=-200): A was used most recently, so oldest (B) is evicted!
     offset.set([0.0, -200.0]);
     rt.frame(0.016);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 1, "C rasterizes and evicts LRU B");
     assert_eq!(renderer.layer_stats().targets, 2);
     assert!(renderer.layer_stats().bytes <= one_bucket * 2);
@@ -319,12 +319,12 @@ fn cache_lru_eviction_under_small_budget_evicts_oldest_and_recaches_cleanly() {
     // Card A (y=0) is still resident (extra_passes == 0), while card B (y=-100) was evicted and re-caches cleanly!
     offset.set([0.0, 0.0]);
     rt.frame(0.016);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 0, "MRU card A stayed resident");
 
     offset.set([0.0, -100.0]);
     rt.frame(0.016);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
     assert_eq!(renderer.layer_stats().extra_passes, 1, "evicted card B re-caches cleanly");
     let out = pixels(&gpu, &renderer, &target);
     near(&out[(16 * 32 + 16) * 4..(16 * 32 + 17) * 4], rgba([0.0, 1.0, 0.0, 1.0]));
@@ -350,7 +350,7 @@ fn same_as_uncached<T: Clone + 'static>(state: T, view: fn(&(bool, T), &mut Cx<(
         for f in 0..frames {
             for (rt, renderer) in &mut runs {
                 rt.frame(1.0 / 60.0);
-                renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, size);
+                renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, size);
                 out.push(pixels(&gpu, renderer, &target));
             }
             let (want, got) = (&out[out.len() - 2], &out[out.len() - 1]);
@@ -467,18 +467,18 @@ fn clicks_land_inside_a_cached_card_after_a_pan() {
     let mut rt = Runtime::new((0, pan.clone()), view, (96.0, 64.0), Env { scale: 1.0, system_dark: true });
     for _ in 0..2 {
         rt.frame(1.0 / 60.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (96, 64));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (96, 64));
     }
     pan.set([50.0, 30.0]);
     rt.frame(1.0 / 60.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (96, 64));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (96, 64));
     assert_eq!(rt.instances.len(), 2, "the panned card is elided to its cached quad");
     for (x, y) in [(8.0, 8.0), (58.0, 38.0)] {
         rt.pointer_move(x, y);
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
         rt.frame(1.0 / 60.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (96, 64));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (96, 64));
     }
     assert_eq!(rt.state.0, 1, "only the click on the button's panned position presses it");
     let b = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("button")).expect("button listed");
@@ -498,7 +498,7 @@ fn cache_updates_same_size_image_pixels_after_the_first_raster() {
     for color in [[255, 0, 0, 255], [0, 255, 0, 255]] {
         image.set(2, 2, color.repeat(4));
         rt.frame(1.0 / 60.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
         renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
         let out = pixels(&gpu, &renderer, &target);
         assert_eq!(&out[(12 * 32 + 12) * 4..][..4], &color, "same-size image publication must change the output");
@@ -527,7 +527,7 @@ fn cached_card_stays_elided_during_sixty_live_only_wheel_frames() {
     rt.check_live_only(false);
     for _ in 0..3 {
         rt.frame(1.0 / 60.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (160, 100));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (160, 100));
         pixels(&gpu, &renderer, &target);
     }
     let commits = rt.stats.commits;
@@ -536,7 +536,7 @@ fn cached_card_stays_elided_during_sixty_live_only_wheel_frames() {
         rt.frame(1.0 / 60.0);
         assert_eq!(rt.stats.commits, commits, "frame {frame} must not rebuild the view");
         assert_eq!(rt.instances.len(), 2, "frame {frame}: child emission stays elided");
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (160, 100));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (160, 100));
         let out = pixels(&gpu, &renderer, &target);
         if frame == 59 {
             near(&out[(38 * 160 + 68) * 4..(38 * 160 + 69) * 4], [255, 0, 0, 255]);
@@ -565,13 +565,13 @@ fn cache_does_not_hide_a_radius_change_during_scale_settling() {
     let scale = Live::new(1.0);
     let mut rt = Runtime::new((false, scale.clone()), view, (100.0, 100.0), Env::new(true, 1.0));
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (100, 100));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (100, 100));
     let _ = pixels(&gpu, &renderer, &target);
     scale.set(1.01);
     rt.state.0 = true;
     rt.invalidate();
     rt.frame(1.0 / 60.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (100, 100));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (100, 100));
     let out = pixels(&gpu, &renderer, &target);
     assert!(out[3] < 32, "the newly rounded corner must not show the stale square (alpha={})", out[3]);
 }
@@ -589,16 +589,16 @@ fn slow_pinch_composites_until_the_scale_holds_still() {
     let scale = Live::new(1.0);
     let mut rt = Runtime::new(scale.clone(), view, (200.0, 200.0), Env { scale: 1.0, system_dark: true });
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
     assert_eq!(renderer.layer_stats().extra_passes, 1);
     for step in 1..=60 {
         scale.set(1.0 + step as f32 * 0.01);
         rt.frame(1.0 / 60.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
         assert_eq!(renderer.layer_stats().extra_passes, 0, "pinch step {step} composites the old texture");
     }
     rt.frame(0.15);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
     assert_eq!(renderer.layer_stats().extra_passes, 1, "one raster once the pinch rests");
 }
 
@@ -621,7 +621,7 @@ fn over_budget_cache_falls_back_to_a_viewport_sized_target() {
         let mut out = Vec::new();
         for _ in 0..3 {
             rt.frame(1.0 / 60.0);
-            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
             out = pixels(&gpu, &renderer, &target);
         }
         match &want {
@@ -646,18 +646,18 @@ fn scale_commits_draw_live_without_repeated_cache_passes() {
     let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
     let mut rt = Runtime::new(1.0, view, (200.0, 200.0), Env::new(true, 1.0));
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
     let _ = pixels(&gpu, &renderer, &target);
     for step in 1..=30 {
         rt.state = 1.0 + step as f32 * 0.01;
         rt.invalidate();
         rt.frame(1.0 / 60.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
         assert_eq!(renderer.layer_stats().extra_passes, 0, "scale commit {step} must not rasterize another cache");
         let _ = pixels(&gpu, &renderer, &target);
     }
     rt.frame(0.15);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 200));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 200));
     assert_eq!(renderer.layer_stats().extra_passes, 1, "cache once the committed scale settles");
 }
 
@@ -697,7 +697,7 @@ fn glyph_atlas_survives_four_hundred_scales_and_renders_fresh_and_cached_text() 
         Env::new(true, 1.0),
     );
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (360, 120));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (360, 120));
     let _ = pixels(&gpu, &renderer, &target);
 
     for i in 0..400 {
@@ -713,7 +713,7 @@ fn glyph_atlas_survives_four_hundred_scales_and_renders_fresh_and_cached_text() 
     rt.state.card_text = "CACHED SUBTREE OMEGA";
     rt.invalidate();
     rt.frame(1.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (360, 120));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (360, 120));
     let out = pixels(&gpu, &renderer, &target);
 
     let glyphs: Vec<_> = rt.instances.iter().filter(|q| q.params[1] == KIND_GLYPH).collect();
@@ -763,7 +763,7 @@ fn single_frame_spanning_multiple_glyph_atlas_pages_draws_all_pages() {
     assert!(rt.instances.iter().any(|i| i.params[1] == KIND_GLYPH && i.params[2] == 0.0), "has page 0 glyphs");
     assert!(rt.instances.iter().any(|i| i.params[1] == KIND_GLYPH && i.params[2] >= 1.0), "has page 1+ glyphs");
 
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (512, 512));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (512, 512));
     let out = pixels(&gpu, &renderer, &target);
     for page in [0.0f32, 1.0f32] {
         let g = rt
@@ -867,7 +867,7 @@ fn pill_styles_follow_captured_state_through_a_cached_subtree() {
     let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
     let mut step = |rt: &mut Runtime<S>| {
         rt.frame(1.0 / 60.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (200, 40));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (200, 40));
         (pixels(&gpu, &renderer, &target), renderer.layer_stats().extra_passes)
     };
     let chips = |out: &[u8]| {

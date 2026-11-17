@@ -39,41 +39,41 @@ impl<S: 'static> Runtime<S> {
     /// mounted subtrees need not rebuild.
     pub(in crate::runtime) fn virtual_only(&self, tx: &Tx) -> bool {
         #[cfg(feature = "hot")]
-        if self.hot.is_some() {
+        if self.core.hot.is_some() {
             return false;
         }
-        if self.relayout
-            || !self.state_unchanged
+        if self.core.relayout
+            || !self.core.state_unchanged
             || tx.settle
-            || self.checking_live_only()
-            || self.reuse.read_moved
-            || self.reuse.scale != self.env.scale
-            || self.reuse.srgb != Some(self.srgb_blend)
+            || self.core.checking_live_only()
+            || self.core.reuse.read_moved
+            || self.core.reuse.scale != self.core.env.scale
+            || self.core.reuse.srgb != Some(self.core.srgb_blend)
             || self.playground.is_some()
-            || self.patch_pending()
-            || self.virtuals.is_empty()
-            || self.nodes.is_empty()
-            || self.layout.live_count() != self.nodes.len()
+            || self.core.patch_pending()
+            || self.core.virtuals.is_empty()
+            || self.core.nodes.is_empty()
+            || self.core.layout.live_count() != self.core.nodes.len()
         {
             return false;
         }
-        if !self.nodes.iter().all(|n| {
+        if !self.core.nodes.iter().all(|n| {
             relayout::reusable(n) && n.text.as_ref().is_none_or(|t| !t.redacted && t.live.is_none())
         }) {
             return false;
         }
-        for (path, v) in &self.virtuals {
+        for (path, v) in &self.core.virtuals {
             if !v.indexed || !v.selection.source.as_ref().is_some_and(|s| s.count == v.keys.len()) {
                 return false;
             }
-            let Some(&list_id) = self.path_ids.get(path) else { return false };
-            let Some(&list_idx) = self.node_index.get(&list_id) else { return false };
-            if !self.nodes.get(list_idx).is_some_and(|n| n.id == list_id && n.path == *path && n.growth.is_some()) {
+            let Some(&list_id) = self.core.path_ids.get(path) else { return false };
+            let Some(&list_idx) = self.core.node_index.get(&list_id) else { return false };
+            if !self.core.nodes.get(list_idx).is_some_and(|n| n.id == list_id && n.path == *path && n.growth.is_some()) {
                 return false;
             }
-            let Some(&scroll_id) = self.path_ids.get(&v.scroll_path) else { return false };
-            let Some(&scroll_idx) = self.node_index.get(&scroll_id) else { return false };
-            if !self.nodes.get(scroll_idx).is_some_and(|n| {
+            let Some(&scroll_id) = self.core.path_ids.get(&v.scroll_path) else { return false };
+            let Some(&scroll_idx) = self.core.node_index.get(&scroll_id) else { return false };
+            if !self.core.nodes.get(scroll_idx).is_some_and(|n| {
                 n.id == scroll_id
                     && n.path == v.scroll_path
                     && n.scroll.is_some()
@@ -82,7 +82,7 @@ impl<S: 'static> Runtime<S> {
             }) {
                 return false;
             }
-            if self.virtuals.keys().any(|other| {
+            if self.core.virtuals.keys().any(|other| {
                 other != path && other.strip_prefix(path.as_str()).is_some_and(|r| r.starts_with('/'))
             }) {
                 return false;

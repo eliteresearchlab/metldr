@@ -4,6 +4,47 @@
 use super::*;
 
 impl<S: 'static> Runtime<S> {
+    /// After an edit, scrolls the focused field's nearest scroll viewport on each axis just far
+    /// enough to show the caret line, as a browser does for a textarea, leaving the viewport's
+    /// `El::scroll_margin` like CSS `scroll-padding`.
+    pub(super) fn follow_caret(&mut self) {
+        let Some(i) = self.core.focused_index() else { return };
+        let Some(r) = self.core.caret_rect(&self.core.nodes, i) else { return };
+        let mut scrolled = false;
+        for horizontal in [false, true] {
+            let Some(v) = std::iter::successors(Some(i), |&p| self.core.nodes[p].parent.filter(|_| self.core.nodes[p].above.is_none()))
+                .skip(1)
+                .find(|&p| self.core.nodes[p].scroll.is_some() && self.core.nodes[p].scroll_axes.has(horizontal)) else { continue };
+            let a = usize::from(!horizontal);
+            let start = scroll_offsets(&self.core.scrolls, &self.core.nodes, v).fold(self.core.nodes[v].target[a], |p, o| p - o[a]);
+            let view = f64::from(self.core.nodes[v].target[a + 2] - self.core.nodes[v].target[a]);
+            let (at, len) = (f64::from(r[a] - start), f64::from(r[a + 2]));
+            let margin = f64::from(self.core.nodes[v].scroll_edges.margin);
+            let delta = scroll_edge::reveal(0.0, at, len, view, margin);
+            if delta == 0.0 { continue; }
+            let stick = self.core.nodes[v].scroll.is_some_and(|s| s.stick_bottom);
+            let Some(st) = self.core.scrolls.get_mut(&self.core.nodes[v].id) else { continue };
+            if horizontal {
+                st.x.offset = (st.x.offset + delta).clamp(0.0, st.x.max);
+                st.x.v = 0.0;
+                st.x.glide = None;
+            } else {
+                st.offset = (st.offset + delta).clamp(0.0, st.max);
+                st.pinned = stick && st.offset >= st.max - 0.5;
+                st.v = 0.0;
+                st.glide = None;
+                scrolled = true;
+            }
+            st.direct = true;
+        }
+        if scrolled && self.core.virtual_window_changed() {
+            self.commit(&Tx::default());
+            self.core.step_scroll(0.0);
+        }
+    }
+}
+
+impl RuntimeCore {
     /// Any vertical shift from ancestor growth rows whose presented height has not settled to layout.
     pub(super) fn stack_row_dy(&self, nodes: &[Node], i: usize) -> f32 {
         let mut dy = 0.0;
@@ -50,45 +91,6 @@ impl<S: 'static> Runtime<S> {
         let bb = crate::text::cursor_geometry(&cur, layout, 1.5 * s);
         let h = if bb.y1 > bb.y0 { (bb.y1 - bb.y0) as f32 / s } else { spec.style.line_px() };
         Some([x + bb.x0 as f32 / s, y + n.inset[1] + bb.y0 as f32 / s, 1.5, h])
-    }
-
-    /// After an edit, scrolls the focused field's nearest scroll viewport on each axis just far
-    /// enough to show the caret line, as a browser does for a textarea, leaving the viewport's
-    /// `El::scroll_margin` like CSS `scroll-padding`.
-    pub(super) fn follow_caret(&mut self) {
-        let Some(i) = self.focused_index() else { return };
-        let Some(r) = self.caret_rect(&self.nodes, i) else { return };
-        let mut scrolled = false;
-        for horizontal in [false, true] {
-            let Some(v) = std::iter::successors(Some(i), |&p| self.nodes[p].parent.filter(|_| self.nodes[p].above.is_none()))
-                .skip(1)
-                .find(|&p| self.nodes[p].scroll.is_some() && self.nodes[p].scroll_axes.has(horizontal)) else { continue };
-            let a = usize::from(!horizontal);
-            let start = scroll_offsets(&self.scrolls, &self.nodes, v).fold(self.nodes[v].target[a], |p, o| p - o[a]);
-            let view = f64::from(self.nodes[v].target[a + 2] - self.nodes[v].target[a]);
-            let (at, len) = (f64::from(r[a] - start), f64::from(r[a + 2]));
-            let margin = f64::from(self.nodes[v].scroll_edges.margin);
-            let delta = scroll_edge::reveal(0.0, at, len, view, margin);
-            if delta == 0.0 { continue; }
-            let stick = self.nodes[v].scroll.is_some_and(|s| s.stick_bottom);
-            let Some(st) = self.scrolls.get_mut(&self.nodes[v].id) else { continue };
-            if horizontal {
-                st.x.offset = (st.x.offset + delta).clamp(0.0, st.x.max);
-                st.x.v = 0.0;
-                st.x.glide = None;
-            } else {
-                st.offset = (st.offset + delta).clamp(0.0, st.max);
-                st.pinned = stick && st.offset >= st.max - 0.5;
-                st.v = 0.0;
-                st.glide = None;
-                scrolled = true;
-            }
-            st.direct = true;
-        }
-        if scrolled && self.virtual_window_changed() {
-            self.commit(&Tx::default());
-            self.step_scroll(0.0);
-        }
     }
 
     /// Refreshes the caret the next view sees from `nodes` (the current frame's when `None`).

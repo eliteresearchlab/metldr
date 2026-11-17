@@ -21,7 +21,7 @@ fn render<S: 'static>(state: S, view: fn(&S, &mut Cx<S>) -> El, w: u32, h: u32, 
     let target = Offscreen::with_format(&gpu.device, dw, dh, FORMAT);
     let mut rt = Runtime::new(state, view, (w as f32, h as f32), Env::new(true, scale));
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (dw, dh));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (dw, dh));
     let mut enc = gpu.device.create_command_encoder(&Default::default());
     renderer.draw(&mut enc, &target.view, [0.0; 4]);
     target.copy(&mut enc);

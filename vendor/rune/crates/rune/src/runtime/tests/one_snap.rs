@@ -59,8 +59,8 @@ impl Bench {
         self.renderer.prepare(
             &self.gpu.device,
             &self.gpu.queue,
-            &mut rt.text.atlas,
-            &rt.instances,
+            &mut rt.core.text.atlas,
+            &rt.core.instances,
             (self.dw, self.dh),
         );
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());

@@ -28,6 +28,25 @@ impl El {
 }
 
 impl<S: 'static> Runtime<S> {
+    /// The selection side of a primary press on `target` at (x, y): it starts or clears a
+    /// selection, unless the press is on an [`El::keeps_text_selection`] element.
+    pub(in crate::runtime) fn press_selection(&mut self, target: Option<usize>, x: f32, y: f32) {
+        if target.is_some_and(|t| self.core.press_keeps_selection(t)) { return; }
+        self.selection_down(self.core.selectable_at(x, y), x, y);
+    }
+
+    /// The selection's focus comes before its anchor.
+    pub(in crate::runtime) fn selection_backward(&self) -> bool {
+        let Some(h) = self.core.selection_holder_end() else { return false };
+        match self.core.focus_holder_end(h) {
+            Some(f) if f != h => self.core.tree_order(f) < self.core.tree_order(h),
+            Some(_) => self.core.text_sel.focus < self.core.text_sel.anchor,
+            None => false,
+        }
+    }
+}
+
+impl RuntimeCore {
     /// What a press on node `i` leaves as it is, from it and its ancestors.
     fn on_press_keeps(&self, i: usize) -> OnPress {
         std::iter::successors(Some(i), |&p| self.nodes[p].parent)
@@ -45,22 +64,5 @@ impl<S: 'static> Runtime<S> {
     pub(in crate::runtime) fn press_keeps_focus(&self, i: usize) -> bool {
         let keeps = self.on_press_keeps(i);
         keeps.focus || keeps.selection
-    }
-
-    /// The selection side of a primary press on `target` at (x, y): it starts or clears a
-    /// selection, unless the press is on an [`El::keeps_text_selection`] element.
-    pub(in crate::runtime) fn press_selection(&mut self, target: Option<usize>, x: f32, y: f32) {
-        if target.is_some_and(|t| self.press_keeps_selection(t)) { return; }
-        self.selection_down(self.selectable_at(x, y), x, y);
-    }
-
-    /// The selection's focus comes before its anchor.
-    pub(in crate::runtime) fn selection_backward(&self) -> bool {
-        let Some(h) = self.selection_holder_end() else { return false };
-        match self.focus_holder_end(h) {
-            Some(f) if f != h => self.tree_order(f) < self.tree_order(h),
-            Some(_) => self.text_sel.focus < self.text_sel.anchor,
-            None => false,
-        }
     }
 }

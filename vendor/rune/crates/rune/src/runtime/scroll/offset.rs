@@ -17,49 +17,33 @@ pub(crate) struct ScrollRequest {
 }
 
 impl<S: 'static> Runtime<S> {
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn relay_wheel(&mut self, key: &str, dx: f32, dy: f32) {
-        let mut matches = self.nodes.iter().enumerate().filter(|(i, n)| n.key.as_deref() == Some(key)
-            && n.scroll.is_some() && !self.subtree_exiting(*i));
-        let Some((_, node)) = matches.next() else { return };
-        if matches.next().is_some() { return; }
-        let path = node.path.clone();
-        if self.nodes.iter().filter(|n| n.named(&path)).count() != 1 { return; }
-        let Some(scroll) = self.scrolls.get(&node.id) else { return };
-        let x = node.scroll_axes.x().then_some((scroll.x.offset + f64::from(dx)) as f32);
-        let y = node.scroll_axes.y().then_some((scroll.offset + f64::from(dy)) as f32);
-        self.native_geometry_valid = false;
-        self.scroll_to_offsets(vec![ScrollRequest { key: path, x, y, glide: None, anchor: false }]);
-        self.invalidate();
-    }
-
     /// Each request moves the viewport keyed (or pathed) by its key, or the nearest one around
     /// it that scrolls an axis it asks for, clamped to its content. Axes the viewport doesn't
     /// scroll are left alone.
     pub(super) fn scroll_to_offsets(&mut self, requests: Vec<ScrollRequest>) {
         // This frame's commit may have changed the content: measure the extent first.
-        self.step_scroll(0.0);
-        let animate = !self.reduced_motion && !self.settled;
+        self.core.step_scroll(0.0);
+        let animate = !self.core.reduced_motion && !self.core.settled;
         // Jumps: (viewport, horizontal, offset), reapplied once virtual rows land.
         let mut jumps = Vec::new();
         // Anchored jumps, placed again from the new layout once virtual rows land.
         let mut anchors = Vec::new();
         for r in requests {
             if r.anchor {
-                let Some((i, to)) = self.anchor_offset(&r.key, r.y.unwrap_or(0.0)) else { continue };
-                jumps.push((self.nodes[i].id, false, to));
+                let Some((i, to)) = self.core.anchor_offset(&r.key, r.y.unwrap_or(0.0)) else { continue };
+                jumps.push((self.core.nodes[i].id, false, to));
                 anchors.push((jumps.len() - 1, r.key, r.y.unwrap_or(0.0)));
-                if let Some(st) = self.scrolls.get_mut(&self.nodes[i].id) {
+                if let Some(st) = self.core.scrolls.get_mut(&self.core.nodes[i].id) {
                     st.v = 0.0;
                     st.glide = None;
                     st.glide_to = None;
                 }
                 continue;
             }
-            let Some(i) = self.scroll_viewport_on(&r.key, r.x.is_some(), r.y.is_some()) else { continue };
-            let (id, axes) = (self.nodes[i].id, self.nodes[i].scroll_axes);
-            let (view_w, view_h) = (f64::from(self.nodes[i].local.w), f64::from(self.nodes[i].local.h));
-            let Some(st) = self.scrolls.get_mut(&id) else { continue };
+            let Some(i) = self.core.scroll_viewport_on(&r.key, r.x.is_some(), r.y.is_some()) else { continue };
+            let (id, axes) = (self.core.nodes[i].id, self.core.nodes[i].scroll_axes);
+            let (view_w, view_h) = (f64::from(self.core.nodes[i].local.w), f64::from(self.core.nodes[i].local.h));
+            let Some(st) = self.core.scrolls.get_mut(&id) else { continue };
             let glide = r.glide.filter(|_| animate);
             if glide.is_some() { st.spring = glide; }
             if let Some(x) = r.x.filter(|_| axes.x()) {
@@ -95,18 +79,21 @@ impl<S: 'static> Runtime<S> {
                 }
             }
         }
-        self.apply_jumps(&jumps);
+        self.core.apply_jumps(&jumps);
         // Landing mounts the virtual rows there, which measure and can move the end it clamped to.
         for _ in 0..3 {
-            if !self.virtual_window_changed() { break; }
+            if !self.core.virtual_window_changed() { break; }
             self.commit(&Tx::default());
-            self.step_scroll(0.0);
+            self.core.step_scroll(0.0);
             for (j, key, at) in &anchors {
-                if let Some((_, to)) = self.anchor_offset(key, *at) { jumps[*j].2 = to; }
+                if let Some((_, to)) = self.core.anchor_offset(key, *at) { jumps[*j].2 = to; }
             }
-            self.apply_jumps(&jumps);
+            self.core.apply_jumps(&jumps);
         }
     }
+}
+
+impl RuntimeCore {
 
     fn apply_jumps(&mut self, jumps: &[(NodeId, bool, f64)]) {
         for &(id, horizontal, to) in jumps {
@@ -238,7 +225,7 @@ impl ScrollState {
     }
 }
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     /// Counts down, once a frame, the frames an app's instant scrolls hold hover for. Returns
     /// whether one still holds, which asks for the frame that lets go.
     pub(super) fn step_nudges(&mut self) -> bool {
@@ -248,5 +235,23 @@ impl<S: 'static> Runtime<S> {
             held |= st.nudged > 0;
         }
         held
+    }
+}
+
+impl<S: 'static> Runtime<S> {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn relay_wheel(&mut self, key: &str, dx: f32, dy: f32) {
+        let mut matches = self.nodes.iter().enumerate().filter(|(i, n)| n.key.as_deref() == Some(key)
+            && n.scroll.is_some() && !self.subtree_exiting(*i));
+        let Some((_, node)) = matches.next() else { return };
+        if matches.next().is_some() { return; }
+        let path = node.path.clone();
+        if self.nodes.iter().filter(|n| n.named(&path)).count() != 1 { return; }
+        let Some(scroll) = self.scrolls.get(&node.id) else { return };
+        let x = node.scroll_axes.x().then_some((scroll.x.offset + f64::from(dx)) as f32);
+        let y = node.scroll_axes.y().then_some((scroll.offset + f64::from(dy)) as f32);
+        self.native_geometry_valid = false;
+        self.scroll_to_offsets(vec![ScrollRequest { key: path, x, y, glide: None, anchor: false }]);
+        self.invalidate();
     }
 }

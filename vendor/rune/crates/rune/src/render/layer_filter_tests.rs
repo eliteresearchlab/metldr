@@ -97,7 +97,7 @@ fn runtime_keeps_offscreen_blur_sources_and_presence_transitions() {
     let mut rt = Runtime::new((), offscreen, (64.0, 48.0), Env { scale: 1.0, system_dark: true });
     rt.frame(0.0);
     assert!(rt.instances.iter().any(|i| i.params[1] == KIND_RECT && i.rect[0] < 0.0));
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (64, 48));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (64, 48));
     let out = pixels(&gpu, &renderer, &target);
     assert!(out[(18 * 64) * 4 + 3] > 0, "offscreen paint contributes to the visible halo");
 
@@ -372,7 +372,7 @@ fn blur_replace_cost_and_appearance() {
                         }
                     }
                 }
-                renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, size);
+                renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, size);
                 if rows == 1 && alpha == 0.5 {
                     let out = pixels(&gpu, &renderer, &target);
                     let start = mode * out.len();

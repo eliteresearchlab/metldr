@@ -34,37 +34,37 @@ impl<S: 'static> Runtime<S> {
     /// A resting wake's poll still stands for a frame it asked for that runs covered or misses
     /// its drawable: its timers count from it, and nothing polls again unless another came due.
     pub(crate) fn poll_hidden(&mut self) -> bool {
-        let now = self.now_clock();
-        if self.timer_wake.asked.is_some() && self.wake_deadlines.first().is_none_or(|t| *t > now) {
-            self.cancel_timer_frame();
-            return self.needs_commit();
+        let now = self.core.now_clock();
+        if self.core.timer_wake.asked.is_some() && self.core.wake_deadlines.first().is_none_or(|t| *t > now) {
+            self.core.cancel_timer_frame();
+            return self.core.needs_commit();
         }
         let stale = self.poll_alone();
-        let wakes = std::mem::take(&mut self.pending.wakes);
-        self.schedule_wakes(wakes);
+        let wakes = std::mem::take(&mut self.core.pending.wakes);
+        self.core.schedule_wakes(wakes);
         stale
     }
 
     /// `poll_hidden`, leaving the poll's `wake_after`s in `pending`.
     fn poll_alone(&mut self) -> bool {
-        self.timer_wake = TimerWake::default();
-        if let Some(clock) = self.wall_clock() { self.clock = clock; }
+        self.core.timer_wake = TimerWake::default();
+        if let Some(clock) = self.core.wall_clock() { self.core.clock = clock; }
         // An `update`'s `wake_after` counts from now; no frame may come to schedule it.
-        let wakes = std::mem::take(&mut self.pending.wakes);
-        self.schedule_wakes(wakes);
+        let wakes = std::mem::take(&mut self.core.pending.wakes);
+        self.core.schedule_wakes(wakes);
         // Due timers are spent with or without a poll, as a frame spends them; one left due
         // would wake the host again every frame interval.
-        let due = self.wake_deadlines.partition_point(|t| *t <= self.clock);
-        self.wake_deadlines.drain(..due);
-        let patched = self.patch_pending();
+        let due = self.core.wake_deadlines.partition_point(|t| *t <= self.core.clock);
+        self.core.wake_deadlines.drain(..due);
+        let patched = self.core.patch_pending();
         let Some(poll) = self.poll else { return patched };
         let mut one = self.transaction();
-        let changed = self.idle_meter.polled(crate::tooling::perf_warn::timed("poll", || app_call!(poll, &mut self.state, self.clock, &mut one)));
-        self.dirty |= changed;
-        let asks_frame = one.srgb_blend.is_some_and(|b| b != self.srgb_blend) || one.font_smoothing.is_some_and(|m| m != self.text.smoothing) || self.changes_families(&one) || (one.blur && self.focused.is_some()) || one.focus_request.is_some();
+        let changed = self.core.idle_meter.polled(crate::tooling::perf_warn::timed("poll", || app_call!(poll, &mut self.state, self.core.clock, &mut one)));
+        self.core.dirty |= changed;
+        let asks_frame = one.srgb_blend.is_some_and(|b| b != self.core.srgb_blend) || one.font_smoothing.is_some_and(|m| m != self.core.text.smoothing) || self.core.changes_families(&one) || (one.blur && self.core.focused.is_some()) || one.focus_request.is_some();
         self.latch_requests(&mut one);
         let stale = changed || one.frame_work() || patched || asks_frame;
-        merge(&mut self.pending, one);
+        merge(&mut self.core.pending, one);
         stale
     }
 
@@ -76,12 +76,14 @@ impl<S: 'static> Runtime<S> {
     /// hover or tooltip delay, a loop, a live value, `SurfaceDraw` content, or a poll stepping
     /// every frame.
     pub(crate) fn resting_wake(&mut self) -> Option<bool> {
-        if !self.rests() { return None; }
+        if !self.core.rests() { return None; }
         let stale = self.poll_alone();
-        let steps = self.pending.wakes.iter().any(|d| d.is_zero());
-        Some(stale || self.window_frame.is_some() || steps)
+        let steps = self.core.pending.wakes.iter().any(|d| d.is_zero());
+        Some(stale || self.core.window_frame.is_some() || steps)
     }
+}
 
+impl RuntimeCore {
     /// Whether the host asked for a frame after `resting_wake`. That frame doesn't poll again
     /// and its timers count from it; without one they count from the poll.
     pub(crate) fn resting_wake_frame(&mut self, frame: bool) {

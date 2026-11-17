@@ -23,7 +23,7 @@ fn raised_children_of_cached_clipped_groups_stay_visible_and_clipped() {
     let mut rt = Runtime::new((), view, (32.0, 32.0), Env::new(true, 1.0));
     for _ in 0..3 {
         rt.frame(0.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 32));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 32));
         let out = pixels(&gpu, &renderer, &target);
         near(&out[(8 * 32 + 8) * 4..(8 * 32 + 9) * 4], rgba([0.5; 4]));
         near(&out[(8 * 32 + 20) * 4..(8 * 32 + 21) * 4], [0; 4]);
@@ -126,7 +126,7 @@ fn leaf_dimming_keeps_container_opacity_isolated() {
     let mut rt = Runtime::new(Live::new(0.5), view, (32.0, 16.0), Env { scale: 1.0, system_dark: true });
     for (alpha, targets) in [(0.5, 1), (1.0, 0)] {
         rt.state.set(alpha); rt.frame(0.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 16));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 16));
         assert_eq!(renderer.layer_stats().targets, targets);
         let out = pixels(&gpu, &renderer, &target);
         near(&out[(8*32+6)*4..(8*32+7)*4], rgba([0.5 * alpha; 4]));
@@ -155,7 +155,7 @@ fn dissolve_keeps_opaque_coverage_and_isolates_each_state() {
     let mut rt = Runtime::new((Live::new(0.5), Live::new(0.5)), view, (32.0, 16.0), Env { scale: 1.0, system_dark: true });
     for t in [0.5, 0.0, 0.25, 0.75, 1.0] {
         rt.state.0.set(1.0 - t); rt.state.1.set(t); rt.frame(0.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 16));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 16));
         if t == 0.0 || t == 1.0 {
             assert!(rt.instances.iter().all(|i| i.params[1] != KIND_LAYER), "no dissolve scope at rest");
             assert_eq!(renderer.layer_stats().extra_passes, 0);
@@ -176,7 +176,7 @@ fn dissolve_keeps_opaque_coverage_and_isolates_each_state() {
         let mut frames = Vec::new();
         for t in [rest, moving] {
             rt.state.0.set(1.0 - t); rt.state.1.set(t); rt.frame(0.0);
-            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 16));
+            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 16));
             assert_eq!(renderer.layer_stats().targets > 0, t == moving);
             frames.push(pixels(&gpu, &renderer, &target));
         }
@@ -219,7 +219,7 @@ fn dissolve_samples_sequence_opacity_before_selecting_scopes() {
     for (dt, active) in [(0.0, false), (0.5, true), (0.5, false)] {
         rt.frame(dt);
         assert_eq!(rt.instances.iter().any(|i| i.params[1] == KIND_LAYER), active);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (32, 16));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (32, 16));
         let out = pixels(&gpu, &renderer, &target);
         assert!(out.chunks_exact(4).all(|p| p[3] == 255), "complementary sequences retain opaque coverage");
     }
@@ -263,7 +263,7 @@ fn scale_and_fade_reuse_bucket_for_sixty_growing_frames() {
     let target = Offscreen::new(&gpu.device, 256, 256);
     let mut rt = Runtime::new((Live::new(0.9), Live::new(0.1)), view, (256.0, 256.0), Env { scale: 1.0, system_dark: true });
     rt.frame(0.0);
-    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (256, 256));
+    renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (256, 256));
     let allocations = renderer.layer_stats().allocations;
     let first_bounds = renderer.layers.plan[0].bounds;
     assert_eq!(allocations, 1);
@@ -272,7 +272,7 @@ fn scale_and_fade_reuse_bucket_for_sixty_growing_frames() {
         rt.state.0.set(0.9 + 0.1 * t);
         rt.state.1.set(0.1 + 0.8 * t);
         rt.frame(1.0 / 60.0);
-        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (256, 256));
+        renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (256, 256));
         let out = pixels(&gpu, &renderer, &target);
         near(&out[(90 * 256 + 90) * 4..(90 * 256 + 91) * 4], rgba([0.1 + 0.8 * t; 4]));
         assert_eq!(renderer.layer_stats().allocations, allocations, "frame {frame}");
@@ -393,7 +393,7 @@ fn clipped_single_draw_fades_do_not_allocate_targets() {
             let mut rt = Runtime::new((video.then(|| surface.clone()), mode), view, (64.0, 48.0), Env::new(true, 1.0));
             rt.frame(0.0);
             assert!(rt.instances.iter().all(|i| i.params[1] != KIND_LAYER));
-            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (64, 48));
+            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (64, 48));
             renderer.prepare_surfaces(&gpu.device, &gpu.queue, &rt.surfaces, (64, 48));
             assert_eq!(renderer.layer_stats().targets, 0, "mode={mode} video={video}");
             let out = pixels(&gpu, &renderer, &target);

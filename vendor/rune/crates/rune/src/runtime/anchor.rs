@@ -221,7 +221,7 @@ fn attach_point(a: &Anchor, t: [f32; 4], d: [f32; 4]) -> [f32; 2] {
     }
 }
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     /// Sets up anchored overlay `i`'s inherited paint state beside anchor `j`: at the anchor's
     /// zoom (see [`inherited_zoom`]), placed and flipped by its zoomed size where the anchor was
     /// drawn, and zooming about the point it attaches at. Its own `prop::OFFSET` and transition

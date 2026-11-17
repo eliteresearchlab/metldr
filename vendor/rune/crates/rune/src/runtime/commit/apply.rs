@@ -2,7 +2,21 @@
 //! live bindings and retained exits.
 use super::*;
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
+    /// Sets `prop` to `to` when `quiet`, or animates it from `identity` when its target changed.
+    fn snap_or_animate<T: rune_motion::Animatable + PartialEq>(
+        &mut self, id: NodeId, prop: Prop<T>, to: T, quiet: bool, identity: T, motion: Option<Anim>, spring: Spring,
+    ) {
+        if quiet {
+            self.scene.set(id, prop, to);
+        } else if self.scene.store().target(id, prop) != Some(to) {
+            if !self.scene.store().has(id, prop) { self.scene.set(id, prop, identity); }
+            self.scene.animate(id, prop, to, motion.unwrap_or_else(|| spring.into()));
+        }
+    }
+}
+
+impl RuntimeCore {
     /// The mutation phase cannot accept an El or an unfinished measurement pass.
     pub(super) fn apply(&mut self, measured: Measured, tx: &Tx) {
         let _apply_time = crate::frame::profile::Scope::new(crate::frame::profile::Phase::Apply);
@@ -794,7 +808,6 @@ impl<S: 'static> Runtime<S> {
         self.memo.commit_flattened(&self.nodes, present_len, memo_flattened, memo_reused, taken_paths);
         skip_spans.clear();
         self.memo.skip_scratch = skip_spans;
-        self.find_app_root();
         self.commit_gen = self.commit_gen.wrapping_add(1);
         let (mut dissolve, mut cache, mut pix, mut drawn_ly, mut key_up, mut sticky, mut raise, mut any_loop) =
             (false, false, false, false, false, false, false, false);
@@ -836,8 +849,6 @@ impl<S: 'static> Runtime<S> {
         self.prune_path_ids();
         self.subscribe_live();
         self.refresh_modal_index();
-        self.sync_modals();
-        self.sync_follows();
         self.loops.retain(|id, _| self.scene.contains(*id));
         self.catch_loops_up();
         self.static_scales.retain(|id, _| self.scene.contains(*id));
@@ -863,17 +874,5 @@ impl<S: 'static> Runtime<S> {
         self.aspect_snap.clear();
         self.viewport_stepped = false;
         self.settle = false;
-    }
-
-    /// Sets `prop` to `to` when `quiet`, or animates it from `identity` when its target changed.
-    fn snap_or_animate<T: rune_motion::Animatable + PartialEq>(
-        &mut self, id: NodeId, prop: Prop<T>, to: T, quiet: bool, identity: T, motion: Option<Anim>, spring: Spring,
-    ) {
-        if quiet {
-            self.scene.set(id, prop, to);
-        } else if self.scene.store().target(id, prop) != Some(to) {
-            if !self.scene.store().has(id, prop) { self.scene.set(id, prop, identity); }
-            self.scene.animate(id, prop, to, motion.unwrap_or_else(|| spring.into()));
-        }
     }
 }

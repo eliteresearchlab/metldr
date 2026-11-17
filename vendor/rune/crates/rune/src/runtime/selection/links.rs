@@ -127,6 +127,49 @@ impl LinkFx {
 }
 
 impl<S: 'static> Runtime<S> {
+    /// Runs the `on_link` handler of node `path` for link `k`.
+    pub(super) fn press_link(&mut self, path: &str, k: usize, tx: &mut Tx) -> bool {
+        let Some((f, id)) = self.core.node(path).and_then(|n| {
+            let t = n.text.as_ref()?;
+            Some((t.on_link.clone()?, t.links.get(k)?.id.clone()))
+        }) else { return false };
+        log_event!(self, "link {path} {id}");
+        (f.0)(states!(self), &id, tx);
+        true
+    }
+
+    /// Runs the `on_link_secondary` handler of node `path` for link `k`.
+    pub(super) fn secondary_press_link(&mut self, path: &str, k: usize, point: PointerEvent, tx: &mut Tx) -> bool {
+        let Some((f, id)) = self.core.node(path).and_then(|n| {
+            let t = n.text.as_ref()?;
+            Some((t.on_link_secondary.clone()?, t.links.get(k)?.id.clone()))
+        }) else { return false };
+        log_event!(self, "link secondary {path} {id}");
+        (f.0)(states!(self), &id, point.window(), tx);
+        true
+    }
+
+    /// The Menu key on focused node `i`'s focused link: its `on_link_secondary`, at the
+    /// bottom-left of its first line box.
+    pub(super) fn focused_link_menu(&mut self, i: usize, tx: &mut Tx) -> bool {
+        let Some(k) = self.core.links.focus.filter(|&k| k < self.core.link_count(i)) else { return false };
+        if self.core.nodes[i].text.as_ref().is_none_or(|t| t.on_link_secondary.is_none()) { return false; }
+        let Some((_, r)) = self.core.link_boxes(i, self.core.drawn_box(i)).into_iter().find(|(j, _)| *j == k) else { return false };
+        let path = self.core.nodes[i].path.clone();
+        let point = self.core.pointer_event(i, r[0], r[3]);
+        self.secondary_press_link(&path, k, point, tx)
+    }
+
+    /// Enter or Space on a focused link presses it.
+    pub(super) fn link_key(&mut self, i: usize, tx: &mut Tx) -> bool {
+        let Some(k) = self.core.links.focus.filter(|&k| k < self.core.link_count(i)) else { return false };
+        let path = self.core.nodes[i].path.clone();
+        self.press_link(&path, k, tx);
+        true
+    }
+}
+
+impl RuntimeCore {
     /// Node `i`'s border box as drawn this frame (points, x0 y0 x1 y1).
     pub(super) fn drawn_box(&self, i: usize) -> [f32; 4] {
         self.drawn.get(i).filter(|d| d[2] > 0.0 || d[3] > 0.0)
@@ -222,17 +265,6 @@ impl<S: 'static> Runtime<S> {
         }
     }
 
-    /// Runs the `on_link` handler of node `path` for link `k`.
-    pub(super) fn press_link(&mut self, path: &str, k: usize, tx: &mut Tx) -> bool {
-        let Some((f, id)) = self.node(path).and_then(|n| {
-            let t = n.text.as_ref()?;
-            Some((t.on_link.clone()?, t.links.get(k)?.id.clone()))
-        }) else { return false };
-        log_event!(self, "link {path} {id}");
-        (f.0)(states!(self), &id, tx);
-        true
-    }
-
     /// Node `i`'s link under (x, y), if its text takes secondary presses on links.
     pub(super) fn secondary_link_at(&self, i: usize, x: f32, y: f32) -> Option<usize> {
         self.nodes[i].text.as_ref()?.on_link_secondary.as_ref()?;
@@ -245,17 +277,6 @@ impl<S: 'static> Runtime<S> {
     }
 
     pub(super) fn take_secondary_link(&mut self) -> Option<usize> { self.links.secondary.take() }
-
-    /// Runs the `on_link_secondary` handler of node `path` for link `k`.
-    pub(super) fn secondary_press_link(&mut self, path: &str, k: usize, point: PointerEvent, tx: &mut Tx) -> bool {
-        let Some((f, id)) = self.node(path).and_then(|n| {
-            let t = n.text.as_ref()?;
-            Some((t.on_link_secondary.clone()?, t.links.get(k)?.id.clone()))
-        }) else { return false };
-        log_event!(self, "link secondary {path} {id}");
-        (f.0)(states!(self), &id, point.window(), tx);
-        true
-    }
 
     /// Centre of the first drawn line box of the link whose id is `id`, in points.
     pub(super) fn find_link(&self, id: &str) -> Option<(f32, f32)> {
@@ -306,25 +327,6 @@ impl<S: 'static> Runtime<S> {
     pub(super) fn focused_link_id(&self, i: usize) -> Option<String> {
         let k = self.links.focus?;
         self.nodes[i].text.as_ref()?.links.get(k).map(|l| l.id.clone())
-    }
-
-    /// The Menu key on focused node `i`'s focused link: its `on_link_secondary`, at the
-    /// bottom-left of its first line box.
-    pub(super) fn focused_link_menu(&mut self, i: usize, tx: &mut Tx) -> bool {
-        let Some(k) = self.links.focus.filter(|&k| k < self.link_count(i)) else { return false };
-        if self.nodes[i].text.as_ref().is_none_or(|t| t.on_link_secondary.is_none()) { return false; }
-        let Some((_, r)) = self.link_boxes(i, self.drawn_box(i)).into_iter().find(|(j, _)| *j == k) else { return false };
-        let path = self.nodes[i].path.clone();
-        let point = self.pointer_event(i, r[0], r[3]);
-        self.secondary_press_link(&path, k, point, tx)
-    }
-
-    /// Enter or Space on a focused link presses it.
-    pub(super) fn link_key(&mut self, i: usize, tx: &mut Tx) -> bool {
-        let Some(k) = self.links.focus.filter(|&k| k < self.link_count(i)) else { return false };
-        let path = self.nodes[i].path.clone();
-        self.press_link(&path, k, tx);
-        true
     }
 
     /// Reports each link as its own element after its text, which hands it its focus.

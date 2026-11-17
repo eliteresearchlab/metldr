@@ -205,7 +205,7 @@ fn debug_check_does_not_blame_live_only_for_layout_feedback_before_a_key() {
     // A layout callback changed view state, then a checked event, then another key
     // forces the queue's mid-frame commit rather than the final commit.
     rt.nodes[0].handlers.on_layout = Some(Rc::new(|s, _, _| s.cast::<S>().unwrap().count += 1));
-    rt.queue.push(Action::Layout(rt.nodes[0].path.clone(), [0.0; 4]));
+    rt.core.queue.push(Action::Layout(rt.core.nodes[0].path.clone(), [0.0; 4]));
     rt.key_up(KeyEvent { key: Key::Right, mods: Mods::default() });
     rt.key(KeyEvent { key: Key::Left, mods: Mods::default() });
     rt.frame(0.0);

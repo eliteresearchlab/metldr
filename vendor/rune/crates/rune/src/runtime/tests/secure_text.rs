@@ -384,7 +384,7 @@ fn wrap_anywhere_wraps_unbroken_tokens_keeps_word_breaks_and_lowers_min_content_
     let mut rt = Runtime::new((), view, (400.0, 500.0), Env::new(true, 1.0));
     rt.frame(0.0);
 
-    let node = |k: &str| rt.nodes.iter().find(|n| n.key.as_deref() == Some(k)).unwrap();
+    let node = |k: &str| rt.core.nodes.iter().find(|n| n.key.as_deref() == Some(k)).unwrap();
     let el = |k: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k)).unwrap();
 
     // Default .wrap() does not break inside an unbroken token and keeps its full min-content width.
@@ -409,8 +409,8 @@ fn wrap_anywhere_wraps_unbroken_tokens_keeps_word_breaks_and_lowers_min_content_
     }
 
     // Min-content width (max_width = Some(0.0)) shrinks from the full token width to a single character's width.
-    let min_def = rt.text.layout_for_spec(node("default_wrap").text.as_ref().unwrap(), 1.0, Some(0.0), parley::Alignment::Start);
-    let min_any = rt.text.layout_for_spec(any_node.text.as_ref().unwrap(), 1.0, Some(0.0), parley::Alignment::Start);
+    let min_def = rt.core.text.layout_for_spec(node("default_wrap").text.as_ref().unwrap(), 1.0, Some(0.0), parley::Alignment::Start);
+    let min_any = rt.core.text.layout_for_spec(any_node.text.as_ref().unwrap(), 1.0, Some(0.0), parley::Alignment::Start);
     assert!(min_def.full_width() > 400.0);
     assert!(min_any.full_width() < 20.0, "wrap_anywhere min-content width is a single grapheme (got {})", min_any.full_width());
 
@@ -653,7 +653,7 @@ fn secure_label_masks_reveals_conceals_and_never_leaks_plaintext() {
             let mut rt = Runtime::new(rev, card_view, (420.0, 230.0), Env::new(true, 2.0));
             rt.frame(0.0);
             let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
-            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (w, h));
+            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.core.text.atlas, &rt.core.instances, (w, h));
             renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
             let target = Offscreen::new(&gpu.device, w, h);
             let mut enc = gpu.device.create_command_encoder(&Default::default());

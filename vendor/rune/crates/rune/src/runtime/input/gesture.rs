@@ -21,20 +21,216 @@ impl<S: 'static> Runtime<S> {
     /// phase. The innermost [`El::on_wheel`] handler there hears it first, up to the nearest
     /// scroll view; what none takes scrolls as [`Self::wheel_xy`] does.
     pub fn wheel_event(&mut self, ev: WheelEvent) {
-        if ev.phase == GesturePhase::Began { self.wheel_began(); }
+        if ev.phase == GesturePhase::Began { self.core.wheel_began(); }
         let moved = ev.dx != 0.0 || ev.dy != 0.0;
         if moved {
-            self.dismiss_help();
-            self.wheel_delta_arrived(ev.dx, ev.dy);
+            self.core.dismiss_help();
+            self.core.wheel_delta_arrived(ev.dx, ev.dy);
         }
         if moved || ev.phase != GesturePhase::Moved {
-            let ev = WheelEvent { momentum: self.wheel_lock.momentum, ..ev };
-            let gesture = self.wheel_lock.gesture;
-            if !self.offer_wheel(gesture, ev) { self.wheel_scroll_for(gesture, ev.x, ev.y, ev.dx, ev.dy); }
+            let ev = WheelEvent { momentum: self.core.wheel_lock.momentum, ..ev };
+            let gesture = self.core.wheel_lock.gesture;
+            if !self.core.offer_wheel(gesture, ev) { self.wheel_scroll_for(gesture, ev.x, ev.y, ev.dx, ev.dy); }
         }
-        if ev.phase == GesturePhase::Ended { self.wheel_ended(); }
+        if ev.phase == GesturePhase::Ended { self.core.wheel_ended(); }
     }
 
+    /// A queued wheel delta: the handler holding the gesture hears it, else each handler
+    /// under the pointer until one takes it, else it scrolls.
+    pub(super) fn run_wheel(&mut self, gesture: u64, chain: Vec<String>, ev: WheelEvent, tx: &mut Tx) -> bool {
+        self.core.wheel_lock.sync_gesture(gesture);
+        let mut taken = None;
+        if let Some(path) = self.core.wheel_lock.handler.clone() {
+            taken = self.call_wheel(&path, ev, tx);
+            if taken.is_none() { self.core.wheel_lock.handler = None; }
+        } else if self.core.wheel_lock.horizontal.is_none() {
+            for path in chain {
+                if self.call_wheel(&path, ev, tx) == Some(true) {
+                    self.core.wheel_lock.handler = Some(path);
+                    taken = Some(true);
+                    break;
+                }
+            }
+        }
+        if taken.is_none() {
+            self.wheel_scroll_for(gesture, ev.x, ev.y, ev.dx, ev.dy);
+        }
+        if self.core.wheel_lock.gesture != gesture && !self.core.queue.iter().any(|a| matches!(a, Action::Wheel(g, ..) if *g == gesture)) {
+            self.core.wheel_lock.sync_gesture(self.core.wheel_lock.gesture);
+        }
+        taken.unwrap_or(false)
+    }
+
+    /// Element `path`'s `on_wheel` on `ev`, in its own points; None when it's gone.
+    fn call_wheel(&mut self, path: &str, ev: WheelEvent, tx: &mut Tx) -> Option<bool> {
+        let (i, f) = self.core.gesture_handler(path, |g| g.wheel.clone())?;
+        let [x, y] = self.core.to_local(i, ev.x, ev.y);
+        Some(Tx::took(f(states!(self), WheelEvent { x, y, ..ev }, tx), tx))
+    }
+
+    pub(super) fn run_gesture(&mut self, chain: Vec<String>, gesture: Gesture, tx: &mut Tx) -> bool {
+        for path in chain {
+            let taken = match gesture {
+                Gesture::Magnify(ev) => self.core.gesture_handler(&path, |g| g.magnify.clone()).map(|(i, f)| {
+                    let [x, y] = self.core.to_local(i, ev.x, ev.y);
+                    Tx::took(f(states!(self), MagnifyEvent { x, y, ..ev }, tx), tx)
+                }),
+                Gesture::Rotate(ev) => self.core.gesture_handler(&path, |g| g.rotate.clone()).map(|(i, f)| {
+                    let [x, y] = self.core.to_local(i, ev.x, ev.y);
+                    Tx::took(f(states!(self), RotateEvent { x, y, ..ev }, tx), tx)
+                }),
+                Gesture::SmartMagnify(x, y) => self.core.gesture_handler(&path, |g| g.smart_magnify.clone()).map(|(i, f)| {
+                    let [x, y] = self.core.to_local(i, x, y);
+                    Tx::took(f(states!(self), x, y, tx), tx)
+                }),
+            };
+            if taken == Some(true) { return true; }
+        }
+        false
+    }
+
+    /// A mouse button went down at (x, y). The primary and secondary buttons do what
+    /// [`Self::pointer_down`] and [`Self::secondary_down`] do; another presses the innermost
+    /// element there that takes it ([`El::pointer_buttons`]), whose `on_drag` and `on_press`
+    /// follow as for the primary button.
+    pub fn button_down(&mut self, x: f32, y: f32, button: PointerButton) {
+        match button {
+            PointerButton::Primary => return self.pointer_down(x, y),
+            PointerButton::Secondary => return self.core.secondary_down(x, y),
+            _ => {}
+        }
+        if self.core.capture.is_some() { return; }
+        self.core.pointer = Some((x, y));
+        self.core.dismiss_help();
+        let hit = self.core.hits.iter().rev().find(|&&(id, r)| self.core.hit_contains(id, r, x, y)).and_then(|(id, _)| self.core.node_index.get(id).copied());
+        let target = std::iter::successors(hit, |&i| self.core.nodes[i].parent)
+            .take_while(|&i| !self.core.subtree_exiting(i) && self.core.allowed(i))
+            .find(|&i| {
+                let n = &self.core.nodes[i];
+                n.handlers.gestures.as_ref().is_some_and(|g| g.buttons & button.bit() != 0) && (n.handlers.on_press.is_some() || n.handlers.on_drag.is_some())
+            });
+        let Some(i) = target else { return };
+        let n = &self.core.nodes[i];
+        let r = n.target;
+        let [lx, ly] = self.core.to_local(i, x, y);
+        let d = Drag { phase: Phase::Down, x: lx, y: ly, w: r[2] - r[0], h: r[3] - r[1], start_x: lx, start_y: ly, dx: 0.0, dy: 0.0, data: 0.0, clicks: 1, cancelled: false };
+        let path = n.path.clone();
+        if n.handlers.on_drag.is_some() { self.core.queue.push(Action::Drag(path.clone(), d, button)); }
+        self.core.drag_out_armed = false;
+        self.core.double_armed = false;
+        self.core.last_press = None;
+        self.core.press_clicks.clear();
+        self.core.press_at = (x, y);
+        self.core.press_down_t = self.core.now_clock();
+        self.core.press_moved = false;
+        self.core.press_cancelled = false;
+        self.core.capture = Some((path, d));
+        self.core.capture_button = button;
+        self.core.capture_inside = true;
+    }
+
+    /// A mouse button came up at (x, y): the release of [`Self::button_down`].
+    pub fn button_up(&mut self, x: f32, y: f32, button: PointerButton) {
+        match button {
+            PointerButton::Primary => self.pointer_up(x, y),
+            PointerButton::Secondary => self.secondary_up(x, y),
+            _ if self.core.capture.is_some() && self.core.capture_button == button => self.release_capture(x, y),
+            _ => {}
+        }
+    }
+
+    /// A key came up, for the [`El::on_key_up`] handlers: true when one is there to hear it,
+    /// and a frame is needed. A host with physical keys passes the release's logical key to
+    /// `physical_then` instead, so the focused `on_physical_input` hears it first.
+    pub fn key_up(&mut self, ev: KeyEvent) -> bool {
+        if !self.core.wants_key_up() { return false; }
+        if self.core.queue.is_empty() && !self.core.dirty && self.eat_ime_key_up() { return false; }
+        self.core.queue.push(Action::KeyUp(ev));
+        true
+    }
+
+    /// Records a key press for [`Self::route_key_up`]: whether it belongs to an open IME
+    /// composition, or which focused element should still hear its release if focus moves.
+    pub(super) fn note_key_down(&mut self, repeat: bool) {
+        if self.composing() {
+            if !repeat { self.core.ime_keys_down += 1; }
+            self.core.ime_eat_key_up = true;
+        } else if !repeat {
+            self.core.ime_keys_down = 0;
+            self.core.ime_eat_key_up = false;
+            self.core.key_focus = self.core.focused.clone();
+            self.core.keys_held += 1;
+        }
+    }
+
+    /// Suppresses key releases that belong to an IME composition (while preedit is open, or
+    /// the release of the key that confirmed or cancelled it).
+    pub(super) fn eat_ime_key_up(&mut self) -> bool {
+        if self.composing() {
+            self.core.ime_keys_down = self.core.ime_keys_down.saturating_sub(1);
+            return true;
+        }
+        if self.core.ime_keys_down > 0 {
+            self.core.ime_keys_down -= 1;
+            if self.core.ime_keys_down == 0 { self.core.ime_eat_key_up = false; }
+            return true;
+        }
+        std::mem::take(&mut self.core.ime_eat_key_up)
+    }
+
+    /// A key release goes to the focused element and up through its ancestors, else to every
+    /// element with a handler (deepest first), inside the open modal if there is one. If focus moved since the key went down, the element that had
+    /// focus on the press (and its ancestors) hears the release first.
+    pub(super) fn route_key_up(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if self.eat_ime_key_up() { return false; }
+        tx.focused = self.core.focused_key();
+        let pressed = self.core.key_focus.as_deref().and_then(|p| self.core.live_index(p));
+        let focused = self.core.focused.as_deref().and_then(|p| self.core.live_index(p));
+        let secure = [pressed, focused].into_iter().flatten()
+            .any(|i| self.core.nodes[i].input.as_ref().is_some_and(|input| input.edit.is_secure()));
+        if self.core.keys_held > 0 {
+            self.core.keys_held -= 1;
+            if self.core.keys_held == 0 { self.core.key_focus = None; }
+        } else {
+            self.core.key_focus = None;
+        }
+        let mut chain = Vec::new();
+        for start in [pressed, focused].into_iter().flatten() {
+            let mut at = Some(start);
+            while let Some(i) = at {
+                if !self.core.allowed(i) { break; }
+                if !chain.contains(&i) { chain.push(i); }
+                at = self.core.nodes[i].parent;
+            }
+        }
+        // Nothing is focused, or focus rests on the open modal itself (where it lands on open):
+        // every element that hears releases is offered this one, the deepest first, confined to
+        // the modal, not only a handler on the root.
+        let at_rest = chain.is_empty() || (self.core.active_modal().is_some() && focused == self.core.active_modal() && pressed.is_none_or(|p| Some(p) == focused));
+        if at_rest {
+            let rest: Vec<usize> = (0..self.nodes.len()).rev().filter(|&i| !chain.contains(&i) && self.core.allowed(i) && self.core.nodes[i].focus.key_up.is_some()).collect();
+            chain.extend(rest);
+        } else if pressed.is_some() && focused.is_some() && pressed != focused {
+            // Keep shared ancestors (such as the root) after both focused elements.
+            let mut shared = Vec::new();
+            let mut at = focused;
+            while let Some(i) = at {
+                shared.push(i);
+                at = self.core.nodes[i].parent;
+            }
+            chain.sort_by_key(|i| shared.iter().position(|s| s == i).map_or(0, |p| p + 1));
+        }
+        for i in chain {
+            if let Some(f) = self.core.nodes[i].focus.key_up.clone() && Tx::took(f(states!(self), ev, tx), tx) {
+                if secure { log_event!(self, "key-up [redacted]") } else { log_event!(self, "key-up {:?}", ev.key) }
+                return true;
+            }
+        }
+        false
+    }
+}
+
+impl RuntimeCore {
     /// Queues `ev` for the `on_wheel` handlers it may go to; false leaves it to scrolling now.
     fn offer_wheel(&mut self, gesture: u64, ev: WheelEvent) -> bool {
         let lock = &self.wheel_lock;
@@ -46,39 +242,6 @@ impl<S: 'static> Runtime<S> {
         if chain.is_empty() && !(same_gesture && lock.handler.is_some()) && !pending { return false; }
         self.queue.push(Action::Wheel(gesture, chain, ev));
         true
-    }
-
-    /// A queued wheel delta: the handler holding the gesture hears it, else each handler
-    /// under the pointer until one takes it, else it scrolls.
-    pub(super) fn run_wheel(&mut self, gesture: u64, chain: Vec<String>, ev: WheelEvent, tx: &mut Tx) -> bool {
-        self.wheel_lock.sync_gesture(gesture);
-        let mut taken = None;
-        if let Some(path) = self.wheel_lock.handler.clone() {
-            taken = self.call_wheel(&path, ev, tx);
-            if taken.is_none() { self.wheel_lock.handler = None; }
-        } else if self.wheel_lock.horizontal.is_none() {
-            for path in chain {
-                if self.call_wheel(&path, ev, tx) == Some(true) {
-                    self.wheel_lock.handler = Some(path);
-                    taken = Some(true);
-                    break;
-                }
-            }
-        }
-        if taken.is_none() {
-            self.wheel_scroll_for(gesture, ev.x, ev.y, ev.dx, ev.dy);
-        }
-        if self.wheel_lock.gesture != gesture && !self.queue.iter().any(|a| matches!(a, Action::Wheel(g, ..) if *g == gesture)) {
-            self.wheel_lock.sync_gesture(self.wheel_lock.gesture);
-        }
-        taken.unwrap_or(false)
-    }
-
-    /// Element `path`'s `on_wheel` on `ev`, in its own points; None when it's gone.
-    fn call_wheel(&mut self, path: &str, ev: WheelEvent, tx: &mut Tx) -> Option<bool> {
-        let (i, f) = self.gesture_handler(path, |g| g.wheel.clone())?;
-        let [x, y] = self.to_local(i, ev.x, ev.y);
-        Some(Tx::took(f(states!(self), WheelEvent { x, y, ..ev }, tx), tx))
     }
 
     /// A trackpad pinch at window point (`ev.x`, `ev.y`) for the [`El::on_magnify`] handlers
@@ -110,27 +273,6 @@ impl<S: 'static> Runtime<S> {
     fn offer_gesture(&mut self, x: f32, y: f32, has: impl Fn(&CanvasInput) -> bool, gesture: Gesture) {
         let chain = self.gesture_chain(x, y, has, false);
         if !chain.is_empty() { self.queue.push(Action::Gesture(chain, gesture)); }
-    }
-
-    pub(super) fn run_gesture(&mut self, chain: Vec<String>, gesture: Gesture, tx: &mut Tx) -> bool {
-        for path in chain {
-            let taken = match gesture {
-                Gesture::Magnify(ev) => self.gesture_handler(&path, |g| g.magnify.clone()).map(|(i, f)| {
-                    let [x, y] = self.to_local(i, ev.x, ev.y);
-                    Tx::took(f(states!(self), MagnifyEvent { x, y, ..ev }, tx), tx)
-                }),
-                Gesture::Rotate(ev) => self.gesture_handler(&path, |g| g.rotate.clone()).map(|(i, f)| {
-                    let [x, y] = self.to_local(i, ev.x, ev.y);
-                    Tx::took(f(states!(self), RotateEvent { x, y, ..ev }, tx), tx)
-                }),
-                Gesture::SmartMagnify(x, y) => self.gesture_handler(&path, |g| g.smart_magnify.clone()).map(|(i, f)| {
-                    let [x, y] = self.to_local(i, x, y);
-                    Tx::took(f(states!(self), x, y, tx), tx)
-                }),
-            };
-            if taken == Some(true) { return true; }
-        }
-        false
     }
 
     /// The elements under window point (x, y) with a handler `has` picks, innermost first: up
@@ -165,66 +307,6 @@ impl<S: 'static> Runtime<S> {
         Some((i, pick(self.nodes[i].handlers.gestures.as_deref()?)?))
     }
 
-    /// A mouse button went down at (x, y). The primary and secondary buttons do what
-    /// [`Self::pointer_down`] and [`Self::secondary_down`] do; another presses the innermost
-    /// element there that takes it ([`El::pointer_buttons`]), whose `on_drag` and `on_press`
-    /// follow as for the primary button.
-    pub fn button_down(&mut self, x: f32, y: f32, button: PointerButton) {
-        match button {
-            PointerButton::Primary => return self.pointer_down(x, y),
-            PointerButton::Secondary => return self.secondary_down(x, y),
-            _ => {}
-        }
-        if self.capture.is_some() { return; }
-        self.pointer = Some((x, y));
-        self.dismiss_help();
-        let hit = self.hits.iter().rev().find(|&&(id, r)| self.hit_contains(id, r, x, y)).and_then(|(id, _)| self.node_index.get(id).copied());
-        let target = std::iter::successors(hit, |&i| self.nodes[i].parent)
-            .take_while(|&i| !self.subtree_exiting(i) && self.allowed(i))
-            .find(|&i| {
-                let n = &self.nodes[i];
-                n.handlers.gestures.as_ref().is_some_and(|g| g.buttons & button.bit() != 0) && (n.handlers.on_press.is_some() || n.handlers.on_drag.is_some())
-            });
-        let Some(i) = target else { return };
-        let n = &self.nodes[i];
-        let r = n.target;
-        let [lx, ly] = self.to_local(i, x, y);
-        let d = Drag { phase: Phase::Down, x: lx, y: ly, w: r[2] - r[0], h: r[3] - r[1], start_x: lx, start_y: ly, dx: 0.0, dy: 0.0, data: 0.0, clicks: 1, cancelled: false };
-        let path = n.path.clone();
-        if n.handlers.on_drag.is_some() { self.queue.push(Action::Drag(path.clone(), d, button)); }
-        self.drag_out_armed = false;
-        self.double_armed = false;
-        self.last_press = None;
-        self.press_clicks.clear();
-        self.press_at = (x, y);
-        self.press_down_t = self.now_clock();
-        self.press_moved = false;
-        self.press_cancelled = false;
-        self.capture = Some((path, d));
-        self.capture_button = button;
-        self.capture_inside = true;
-    }
-
-    /// A mouse button came up at (x, y): the release of [`Self::button_down`].
-    pub fn button_up(&mut self, x: f32, y: f32, button: PointerButton) {
-        match button {
-            PointerButton::Primary => self.pointer_up(x, y),
-            PointerButton::Secondary => self.secondary_up(x, y),
-            _ if self.capture.is_some() && self.capture_button == button => self.release_capture(x, y),
-            _ => {}
-        }
-    }
-
-    /// A key came up, for the [`El::on_key_up`] handlers: true when one is there to hear it,
-    /// and a frame is needed. A host with physical keys passes the release's logical key to
-    /// `physical_then` instead, so the focused `on_physical_input` hears it first.
-    pub fn key_up(&mut self, ev: KeyEvent) -> bool {
-        if !self.wants_key_up() { return false; }
-        if self.queue.is_empty() && !self.dirty && self.eat_ime_key_up() { return false; }
-        self.queue.push(Action::KeyUp(ev));
-        true
-    }
-
     /// Some reachable element has an `on_wheel` handler.
     pub(crate) fn hears_wheel(&self) -> bool {
         self.nodes.iter().enumerate().any(|(i, n)| n.handlers.get().is_some_and(|h| h.gestures.as_ref().is_some_and(|g| g.wheel.is_some())) && self.allowed(i))
@@ -233,86 +315,6 @@ impl<S: 'static> Runtime<S> {
     /// Some element hears key releases, so a host maps them to logical keys.
     pub(crate) fn wants_key_up(&self) -> bool {
         self.has_key_up || !self.queue.is_empty() || self.dirty
-    }
-
-    /// Records a key press for [`Self::route_key_up`]: whether it belongs to an open IME
-    /// composition, or which focused element should still hear its release if focus moves.
-    pub(super) fn note_key_down(&mut self, repeat: bool) {
-        if self.composing() {
-            if !repeat { self.ime_keys_down += 1; }
-            self.ime_eat_key_up = true;
-        } else if !repeat {
-            self.ime_keys_down = 0;
-            self.ime_eat_key_up = false;
-            self.key_focus = self.focused.clone();
-            self.keys_held += 1;
-        }
-    }
-
-    /// Suppresses key releases that belong to an IME composition (while preedit is open, or
-    /// the release of the key that confirmed or cancelled it).
-    pub(super) fn eat_ime_key_up(&mut self) -> bool {
-        if self.composing() {
-            self.ime_keys_down = self.ime_keys_down.saturating_sub(1);
-            return true;
-        }
-        if self.ime_keys_down > 0 {
-            self.ime_keys_down -= 1;
-            if self.ime_keys_down == 0 { self.ime_eat_key_up = false; }
-            return true;
-        }
-        std::mem::take(&mut self.ime_eat_key_up)
-    }
-
-    /// A key release goes to the focused element and up through its ancestors, else to every
-    /// element with a handler (deepest first), inside the open modal if there is one. If focus moved since the key went down, the element that had
-    /// focus on the press (and its ancestors) hears the release first.
-    pub(super) fn route_key_up(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
-        if self.eat_ime_key_up() { return false; }
-        tx.focused = self.focused_key();
-        let pressed = self.key_focus.as_deref().and_then(|p| self.live_index(p));
-        let focused = self.focused.as_deref().and_then(|p| self.live_index(p));
-        let secure = [pressed, focused].into_iter().flatten()
-            .any(|i| self.nodes[i].input.as_ref().is_some_and(|input| input.edit.is_secure()));
-        if self.keys_held > 0 {
-            self.keys_held -= 1;
-            if self.keys_held == 0 { self.key_focus = None; }
-        } else {
-            self.key_focus = None;
-        }
-        let mut chain = Vec::new();
-        for start in [pressed, focused].into_iter().flatten() {
-            let mut at = Some(start);
-            while let Some(i) = at {
-                if !self.allowed(i) { break; }
-                if !chain.contains(&i) { chain.push(i); }
-                at = self.nodes[i].parent;
-            }
-        }
-        // Nothing is focused, or focus rests on the open modal itself (where it lands on open):
-        // every element that hears releases is offered this one, the deepest first, confined to
-        // the modal, not only a handler on the root.
-        let at_rest = chain.is_empty() || (self.active_modal().is_some() && focused == self.active_modal() && pressed.is_none_or(|p| Some(p) == focused));
-        if at_rest {
-            let rest: Vec<usize> = (0..self.nodes.len()).rev().filter(|&i| !chain.contains(&i) && self.allowed(i) && self.nodes[i].focus.key_up.is_some()).collect();
-            chain.extend(rest);
-        } else if pressed.is_some() && focused.is_some() && pressed != focused {
-            // Keep shared ancestors (such as the root) after both focused elements.
-            let mut shared = Vec::new();
-            let mut at = focused;
-            while let Some(i) = at {
-                shared.push(i);
-                at = self.nodes[i].parent;
-            }
-            chain.sort_by_key(|i| shared.iter().position(|s| s == i).map_or(0, |p| p + 1));
-        }
-        for i in chain {
-            if let Some(f) = self.nodes[i].focus.key_up.clone() && Tx::took(f(states!(self), ev, tx), tx) {
-                if secure { log_event!(self, "key-up [redacted]") } else { log_event!(self, "key-up {:?}", ev.key) }
-                return true;
-            }
-        }
-        false
     }
 }
 

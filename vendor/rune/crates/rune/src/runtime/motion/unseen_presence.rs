@@ -7,7 +7,7 @@
 //! and one nobody saw that a filter brings into view enters like the rows new to it.
 use super::*;
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     /// Per node of the last build: neither it nor anything under it drew. Empty before the first
     /// build and after a commit, until the next one draws.
     pub(super) fn drew_nothing(&self) -> Vec<bool> {

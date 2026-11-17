@@ -19,7 +19,7 @@ pub(super) struct LeafBox {
     pub caret: Option<[f32; 4]>,
 }
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     pub(super) fn paint_content(
         &mut self,
         i: usize,

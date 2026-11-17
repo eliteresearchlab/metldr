@@ -93,6 +93,49 @@ impl<S: 'static> Runtime<S> {
         self.wheel_event(crate::WheelEvent::new(dx, dy).at(x, y));
     }
 
+    /// Scrolls by a delta no `on_wheel` handler took, on the axis the gesture locked to.
+    pub(super) fn wheel_scroll_for(&mut self, gesture: u64, x: f32, y: f32, dx: f32, dy: f32) {
+        if dx == 0.0 && dy == 0.0 { return; }
+        self.core.wheel_lock.sync_gesture(gesture);
+        let l = &self.core.wheel_lock;
+        let horizontal = match l.horizontal {
+            // Without phases, a delta wholly on the other axis is another wheel turning (Shift
+            // let go, a tilt, a second device), so it picks afresh rather than being dropped.
+            Some(h) if l.phased || if h { dx != 0.0 } else { dy != 0.0 } => h,
+            _ => {
+                let scroller = (dx.abs() > dy.abs()).then(|| self.core.scroll_at_axis(x, y, true)).flatten();
+                let h = scroller.is_some();
+                self.core.wheel_lock.horizontal = Some(h);
+                self.core.wheel_lock.scroller = scroller;
+                h
+            }
+        };
+        if horizontal { if dx != 0.0 { self.wheel_x(x, y, dx); } } else if dy != 0.0 { self.wheel(x, y, dy); }
+    }
+
+    /// Scrolls the horizontal viewport latched for the gesture (or the innermost one at (x, y))
+    /// by `dx` points, 1:1.
+    fn wheel_x(&mut self, x: f32, y: f32, dx: f32) {
+        self.core.release_hover_hold();
+        self.core.dismiss_help();
+        let latched = self.core.wheel_lock.scroller.filter(|id| {
+            self.core.node_index.get(id).is_some_and(|&i| {
+                self.core.nodes[i].scroll.is_some() && self.core.nodes[i].scroll_axes.x() && !self.core.subtree_exiting(i) && self.core.allowed(i)
+            })
+        });
+        let Some(id) = latched.or_else(|| self.core.scroll_at_axis(x, y, true)) else { return };
+        let Some(st) = self.core.scrolls.get_mut(&id) else { return };
+        let before = st.x.offset;
+        st.x.offset = (st.x.offset - f64::from(dx)).clamp(0.0, st.x.max);
+        st.x.v = 0.0;
+        st.x.glide = None;
+        st.direct = true;
+        log_event!(self.core, "wheel-x {dx:.1}");
+        if st.x.offset != before { self.core.scroll_cancels_press(id); }
+    }
+}
+
+impl RuntimeCore {
     /// A delta arrived: a gesture idle too long, or ended and not followed by its momentum,
     /// is over, and this delta starts the next. Without phases, a delta wholly on the other
     /// axis (Shift let go, a tilt, a second wheel) also starts a new gesture.
@@ -116,26 +159,6 @@ impl<S: 'static> Runtime<S> {
             }
         }
         l.at = Some(now);
-    }
-
-    /// Scrolls by a delta no `on_wheel` handler took, on the axis the gesture locked to.
-    pub(super) fn wheel_scroll_for(&mut self, gesture: u64, x: f32, y: f32, dx: f32, dy: f32) {
-        if dx == 0.0 && dy == 0.0 { return; }
-        self.wheel_lock.sync_gesture(gesture);
-        let l = &self.wheel_lock;
-        let horizontal = match l.horizontal {
-            // Without phases, a delta wholly on the other axis is another wheel turning (Shift
-            // let go, a tilt, a second device), so it picks afresh rather than being dropped.
-            Some(h) if l.phased || if h { dx != 0.0 } else { dy != 0.0 } => h,
-            _ => {
-                let scroller = (dx.abs() > dy.abs()).then(|| self.scroll_at_axis(x, y, true)).flatten();
-                let h = scroller.is_some();
-                self.wheel_lock.horizontal = Some(h);
-                self.wheel_lock.scroller = scroller;
-                h
-            }
-        };
-        if horizontal { if dx != 0.0 { self.wheel_x(x, y, dx); } } else if dy != 0.0 { self.wheel(x, y, dy); }
     }
 
     /// The platform began a trackpad gesture (winit's `TouchPhase::Started` on a wheel event):
@@ -181,27 +204,6 @@ impl<S: 'static> Runtime<S> {
         } else {
             self.wheel_lock = WheelLock { gesture, run_gesture: gesture, ..WheelLock::default() };
         }
-    }
-
-    /// Scrolls the horizontal viewport latched for the gesture (or the innermost one at (x, y))
-    /// by `dx` points, 1:1.
-    fn wheel_x(&mut self, x: f32, y: f32, dx: f32) {
-        self.release_hover_hold();
-        self.dismiss_help();
-        let latched = self.wheel_lock.scroller.filter(|id| {
-            self.node_index.get(id).is_some_and(|&i| {
-                self.nodes[i].scroll.is_some() && self.nodes[i].scroll_axes.x() && !self.subtree_exiting(i) && self.allowed(i)
-            })
-        });
-        let Some(id) = latched.or_else(|| self.scroll_at_axis(x, y, true)) else { return };
-        let Some(st) = self.scrolls.get_mut(&id) else { return };
-        let before = st.x.offset;
-        st.x.offset = (st.x.offset - f64::from(dx)).clamp(0.0, st.x.max);
-        st.x.v = 0.0;
-        st.x.glide = None;
-        st.direct = true;
-        log_event!(self, "wheel-x {dx:.1}");
-        if st.x.offset != before { self.scroll_cancels_press(id); }
     }
 
     /// Releases a scroll with velocity (vx, vy) in points per second (positive moves content

@@ -50,8 +50,8 @@ impl<S: 'static> Runtime<S> {
         if self.resize_only(tx) {
             // The view keeps what it last read; `settle_layout_reads` and the caret check run it
             // when the new layout moves them.
-            let reads = self.layout_seen.reads.clone();
-            let caret_read = self.caret_watch;
+            let reads = self.core.layout_seen.reads.clone();
+            let caret_read = self.core.caret_watch;
             let selection = self.selection_by_path();
             let mut m = self.measurement(true);
             m.layout_reads = reads;
@@ -65,10 +65,10 @@ impl<S: 'static> Runtime<S> {
             };
         }
         if self.virtual_only(tx) {
-            let _blend = crate::theme::scope(self.srgb_blend);
-            let _bars = crate::platform::scroll_bars::scope(self.scroll_bars.state, self.scroll_bars.runtime_id);
-            let reads = self.layout_seen.reads.clone();
-            let caret_read = self.caret_watch;
+            let _blend = crate::theme::scope(self.core.srgb_blend);
+            let _bars = crate::platform::scroll_bars::scope(self.core.scroll_bars.state, self.core.scroll_bars.runtime_id);
+            let reads = self.core.layout_seen.reads.clone();
+            let caret_read = self.core.caret_watch;
             let selection = self.selection_by_path();
             let mut m = self.measurement(true);
             m.layout_reads = reads;
@@ -92,12 +92,12 @@ impl<S: 'static> Runtime<S> {
     /// Whether this commit only resized the window: nothing the view reads changed since the
     /// last commit built it, and the nodes it built are all there, in the layout tree's order.
     pub(super) fn resize_only(&self, tx: &Tx) -> bool {
-        self.relayout && self.state_unchanged && !tx.settle && !self.reuse.read_moved
-            && self.reuse.scale == self.env.scale && self.reuse.srgb == Some(self.srgb_blend)
-            && self.playground.is_none() && !self.patch_pending()
+        self.core.relayout && self.core.state_unchanged && !tx.settle && !self.core.reuse.read_moved
+            && self.core.reuse.scale == self.core.env.scale && self.core.reuse.srgb == Some(self.core.srgb_blend)
+            && self.playground.is_none() && !self.core.patch_pending()
             // Exiting nodes left the layout tree.
-            && self.layout.live_count() == self.nodes.len()
-            && self.nodes.iter().all(reusable)
+            && self.core.layout.live_count() == self.core.nodes.len()
+            && self.core.nodes.iter().all(reusable)
     }
 }
 

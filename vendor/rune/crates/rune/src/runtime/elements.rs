@@ -132,6 +132,22 @@ impl Pose {
 }
 
 impl<S: 'static> Runtime<S> {
+    pub(super) fn run_pick_reads(&mut self, tx: &mut Tx) {
+        for read in std::mem::take(&mut tx.pick_reads) {
+            let picked = self.core.element_at_within(read.within.as_deref(), read.x, read.y, read.pick);
+            if let Some(f) = read.take() {
+                f(states!(self), picked, tx);
+                self.core.dirty = true;
+            }
+        }
+        // A callback may ask again, but cannot keep this dispatch running indefinitely.
+        self.core.pending.pick_reads.append(&mut tx.pick_reads);
+    }
+
+
+}
+
+impl RuntimeCore {
     /// Authored geometry goals, before scroll and spring sampling, in parent space.
     pub(crate) fn trace_goals(&self) -> impl Iterator<Item = (&str, [f32; 7])> {
         self.nodes.iter().map(|n| (n.path.as_str(), [n.local.x, n.local.y, n.local.w, n.local.h, n.vis.offset[0], n.vis.offset[1], n.static_scale]))
@@ -193,6 +209,138 @@ impl<S: 'static> Runtime<S> {
         }
     }
 
+    /// Centre of the first element whose key is `key`, or whose path ends with `key` when it
+    /// contains a `/` (e.g. `slider/knob`), in points. Failing that, the first line box of the
+    /// link (`El::link`) or highlight (`El::text_highlight`) keyed `key`. Exiting elements and
+    /// their children are gone here; [`Runtime::presented`] still reads them.
+    pub fn find(&self, key: &str) -> Option<(f32, f32)> {
+        let suffix = format!("/{key}");
+        let matches = |n: &Node| if key.contains('/') { n.path == key || n.path.ends_with(&suffix) } else { n.key.as_deref() == Some(key) };
+        let i = (0..self.nodes.len()).find(|&i| matches(&self.nodes[i]) && !self.subtree_exiting(i));
+        let Some(i) = i else { return self.find_link(key).or_else(|| self.find_highlight(key)) };
+        let r = self.drawn.get(i).copied()?;
+        Some((r[0] + r[2] * 0.5, r[1] + r[3] * 0.5))
+    }
+
+    /// Drawn rect `[x, y, w, h]` in points and effective opacity (ancestors included) of the
+    /// element keyed `key`, exiting or not, as of the last frame.
+    pub fn presented(&self, key: &str) -> Option<([f32; 4], f32)> {
+        let i = self.nodes.iter().position(|n| n.key.as_deref() == Some(key))?;
+        Some((*self.drawn.get(i)?, self.inh_scratch.get(i)?.opacity))
+    }
+
+    /// The topmost element drawn at window point (`x`, `y`) in points, as of the last frame: the
+    /// point is tested against each element's drawn box the way a press is, through `El::rotate`,
+    /// `El::scale`, `El::origin`, offsets and scrolling, and inside its ancestors' clips
+    /// (including a turned ancestor's clip), in paint order (so `El::raise`, sticky and flying
+    /// elements count). Unlike a press, it also finds elements with no handlers, and it ignores
+    /// `El::inert` and modals, so a press can land on a different element than this returns.
+    /// Elements that are exiting or fully transparent are skipped (see [`Runtime::element_at_with`] to include transparent ones). `El::hit`, which marks native
+    /// overlay input, makes no difference, and overlay panels outside the window are not
+    /// considered. An element is not cut by its own clip, only by its ancestors'. This is box
+    /// geometry, not pixel/alpha picking: a box with no fill remains pickable (as an invisible
+    /// input area does), and rounded corners and soft clip fades do not trim its hit box.
+    /// Running handlers can use [`Tx::element_at`] without holding a `Runtime`.
+    pub fn element_at(&self, x: f32, y: f32) -> Option<Picked> {
+        self.element_at_with(x, y, Pick::default())
+    }
+
+    /// [`Runtime::element_at`] with options: [`Pick::transparent`] also finds fully
+    /// transparent elements (exiting ones stay skipped).
+    pub fn element_at_with(&self, x: f32, y: f32, pick: Pick) -> Option<Picked> {
+        self.element_at_within(None, x, y, pick)
+    }
+
+    /// [`Runtime::element_at`] restricted to an element and its descendants, ignoring other
+    /// subtrees. `within` accepts a key or key path as [`Cx::layout`] does.
+    pub fn element_at_in(&self, within: &str, x: f32, y: f32) -> Option<Picked> {
+        self.element_at_in_with(within, x, y, Pick::default())
+    }
+
+    /// [`Runtime::element_at_in`] with options, as [`Runtime::element_at_with`].
+    pub fn element_at_in_with(&self, within: &str, x: f32, y: f32, pick: Pick) -> Option<Picked> {
+        self.element_at_within(Some(within), x, y, pick)
+    }
+
+    fn element_at_within(&self, within: Option<&str>, x: f32, y: f32, pick: Pick) -> Option<Picked> {
+        let scope = match within {
+            Some(key) => Some(self.nodes.iter().position(|n| crate::flight::selects(key, &n.path, n.key.as_deref()))?),
+            None => None,
+        };
+        let n = self.nodes.len();
+        let at = |k: usize| if self.layer_paint_order.is_empty() { k } else { self.layer_paint_order[k] };
+        let count = if self.layer_paint_order.is_empty() { n } else { self.layer_paint_order.len() };
+        (0..count).rev().map(at).find(|&i| {
+            scope.is_none_or(|scope| std::iter::successors(Some(i), |&p| self.nodes[p].parent).any(|p| p == scope))
+                && self.pickable(i, x, y, pick)
+        }).map(|i| Picked {
+            path: self.nodes[i].path.clone(),
+            key: self.nodes[i].key.clone(),
+        })
+    }
+
+    /// Whether window point (`x`, `y`), in points, is inside the drawn, clipped and turned box
+    /// of the element keyed `key`, whatever is drawn above it and whether or not it has handlers.
+    /// False when there is no such element, it is exiting or fully transparent. Same geometry
+    /// as [`Runtime::element_at`].
+    pub fn contains(&self, key: &str, x: f32, y: f32) -> bool {
+        self.contains_with(key, x, y, Pick::default())
+    }
+
+    /// [`Runtime::contains`] with options, as [`Runtime::element_at_with`].
+    pub fn contains_with(&self, key: &str, x: f32, y: f32, pick: Pick) -> bool {
+        self.nodes.iter().position(|n| crate::flight::selects(key, &n.path, n.key.as_deref())).is_some_and(|i| self.pickable(i, x, y, pick))
+    }
+
+    fn pickable(&self, i: usize, x: f32, y: f32, pick: Pick) -> bool {
+        self.drawn.get(i).is_some()
+            && self.inh_scratch.get(i).is_some_and(|h| pick.transparent || h.opacity > 0.0)
+            && !self.subtree_exiting(i)
+            && self.node_contains(i, x, y)
+    }
+
+    /// The presented rotation, scale and shadows of the element keyed `key`, exiting or not, as
+    /// of the last frame, and whether any spring still moves them. It reads the springs on
+    /// demand: nothing runs per frame for it. This is a driver/headless read: running view
+    /// functions and handlers do not hold a `Runtime`.
+    pub fn presented_pose(&self, key: &str) -> Option<Pose> {
+        let i = self.nodes.iter().position(|n| crate::flight::selects(key, &n.path, n.key.as_deref()))?;
+        let n = &self.nodes[i];
+        let store = self.scene.store();
+        let shadows = n.vis.shadows.iter().enumerate().map(|(k, sh)| {
+            let sh = self.shadow_at(n.id, k, sh);
+            match P_SHADOWS.get(k) {
+                Some(&p) => crate::el::Shadow { color: self.color(n.id, p, sh.color), ..sh },
+                None => sh,
+            }
+        }).collect();
+        let moving = self.rect_springing(i)
+            || std::iter::successors(Some(i), |&p| step_up(&self.nodes, p)).any(|p| {
+                let id = self.nodes[p].id;
+                paint_pose_springing(store, id)
+                    || (!self.reduced_motion && self.loops.get(&id).is_some_and(|l| l.active(store.node_time(id))))
+            });
+        Some(Pose {
+            rotation: self.scene.get(n.id, prop::ROTATION).unwrap_or(n.vis.rotate),
+            scale: self.inh_scratch.get(i)?.scale,
+            shadows,
+            moving,
+        })
+    }
+}
+
+impl RuntimeCore {
+    /// Whether the root's own fill is dark, when it has an opaque one (headless `--keys` caps
+    /// follow it, so they flip when the app changes theme itself).
+    pub(crate) fn backdrop_dark(&self) -> Option<bool> {
+        if self.transparent { return None; }
+        let n = self.nodes.get(self.app_root())?;
+        let c = self.color(n.id, P_FILL, n.vis.fill);
+        (c.a > 0.5).then(|| 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b < 0.25)
+    }
+}
+
+impl RuntimeCore {
     pub fn elements(&self) -> Vec<ElementInfo> {
         fn intent(n: &Node) -> u32 {
             n.live.iter().filter(|b| b.spring.is_none()).fold(0, |bits, b| bits | match b.property {
@@ -364,145 +512,5 @@ impl<S: 'static> Runtime<S> {
         self.link_elements(&mut elements);
         self.highlight_elements(&mut elements);
         elements
-    }
-
-    /// Centre of the first element whose key is `key`, or whose path ends with `key` when it
-    /// contains a `/` (e.g. `slider/knob`), in points. Failing that, the first line box of the
-    /// link (`El::link`) or highlight (`El::text_highlight`) keyed `key`. Exiting elements and
-    /// their children are gone here; [`Runtime::presented`] still reads them.
-    pub fn find(&self, key: &str) -> Option<(f32, f32)> {
-        let suffix = format!("/{key}");
-        let matches = |n: &Node| if key.contains('/') { n.path == key || n.path.ends_with(&suffix) } else { n.key.as_deref() == Some(key) };
-        let i = (0..self.nodes.len()).find(|&i| matches(&self.nodes[i]) && !self.subtree_exiting(i));
-        let Some(i) = i else { return self.find_link(key).or_else(|| self.find_highlight(key)) };
-        let r = self.drawn.get(i).copied()?;
-        Some((r[0] + r[2] * 0.5, r[1] + r[3] * 0.5))
-    }
-
-    /// Drawn rect `[x, y, w, h]` in points and effective opacity (ancestors included) of the
-    /// element keyed `key`, exiting or not, as of the last frame.
-    pub fn presented(&self, key: &str) -> Option<([f32; 4], f32)> {
-        let i = self.nodes.iter().position(|n| n.key.as_deref() == Some(key))?;
-        Some((*self.drawn.get(i)?, self.inh_scratch.get(i)?.opacity))
-    }
-
-    /// The topmost element drawn at window point (`x`, `y`) in points, as of the last frame: the
-    /// point is tested against each element's drawn box the way a press is, through `El::rotate`,
-    /// `El::scale`, `El::origin`, offsets and scrolling, and inside its ancestors' clips
-    /// (including a turned ancestor's clip), in paint order (so `El::raise`, sticky and flying
-    /// elements count). Unlike a press, it also finds elements with no handlers, and it ignores
-    /// `El::inert` and modals, so a press can land on a different element than this returns.
-    /// Elements that are exiting or fully transparent are skipped (see [`Runtime::element_at_with`] to include transparent ones). `El::hit`, which marks native
-    /// overlay input, makes no difference, and overlay panels outside the window are not
-    /// considered. An element is not cut by its own clip, only by its ancestors'. This is box
-    /// geometry, not pixel/alpha picking: a box with no fill remains pickable (as an invisible
-    /// input area does), and rounded corners and soft clip fades do not trim its hit box.
-    /// Running handlers can use [`Tx::element_at`] without holding a `Runtime`.
-    pub fn element_at(&self, x: f32, y: f32) -> Option<Picked> {
-        self.element_at_with(x, y, Pick::default())
-    }
-
-    /// [`Runtime::element_at`] with options: [`Pick::transparent`] also finds fully
-    /// transparent elements (exiting ones stay skipped).
-    pub fn element_at_with(&self, x: f32, y: f32, pick: Pick) -> Option<Picked> {
-        self.element_at_within(None, x, y, pick)
-    }
-
-    pub(super) fn run_pick_reads(&mut self, tx: &mut Tx) {
-        for read in std::mem::take(&mut tx.pick_reads) {
-            let picked = self.element_at_within(read.within.as_deref(), read.x, read.y, read.pick);
-            if let Some(f) = read.take() {
-                f(states!(self), picked, tx);
-                self.dirty = true;
-            }
-        }
-        // A callback may ask again, but cannot keep this dispatch running indefinitely.
-        self.pending.pick_reads.append(&mut tx.pick_reads);
-    }
-
-    /// [`Runtime::element_at`] restricted to an element and its descendants, ignoring other
-    /// subtrees. `within` accepts a key or key path as [`Cx::layout`] does.
-    pub fn element_at_in(&self, within: &str, x: f32, y: f32) -> Option<Picked> {
-        self.element_at_in_with(within, x, y, Pick::default())
-    }
-
-    /// [`Runtime::element_at_in`] with options, as [`Runtime::element_at_with`].
-    pub fn element_at_in_with(&self, within: &str, x: f32, y: f32, pick: Pick) -> Option<Picked> {
-        self.element_at_within(Some(within), x, y, pick)
-    }
-
-    fn element_at_within(&self, within: Option<&str>, x: f32, y: f32, pick: Pick) -> Option<Picked> {
-        let scope = match within {
-            Some(key) => Some(self.nodes.iter().position(|n| crate::flight::selects(key, &n.path, n.key.as_deref()))?),
-            None => None,
-        };
-        let n = self.nodes.len();
-        let at = |k: usize| if self.layer_paint_order.is_empty() { k } else { self.layer_paint_order[k] };
-        let count = if self.layer_paint_order.is_empty() { n } else { self.layer_paint_order.len() };
-        (0..count).rev().map(at).find(|&i| {
-            scope.is_none_or(|scope| std::iter::successors(Some(i), |&p| self.nodes[p].parent).any(|p| p == scope))
-                && self.pickable(i, x, y, pick)
-        }).map(|i| Picked {
-            path: self.nodes[i].path.clone(),
-            key: self.nodes[i].key.clone(),
-        })
-    }
-
-    /// Whether window point (`x`, `y`), in points, is inside the drawn, clipped and turned box
-    /// of the element keyed `key`, whatever is drawn above it and whether or not it has handlers.
-    /// False when there is no such element, it is exiting or fully transparent. Same geometry
-    /// as [`Runtime::element_at`].
-    pub fn contains(&self, key: &str, x: f32, y: f32) -> bool {
-        self.contains_with(key, x, y, Pick::default())
-    }
-
-    /// [`Runtime::contains`] with options, as [`Runtime::element_at_with`].
-    pub fn contains_with(&self, key: &str, x: f32, y: f32, pick: Pick) -> bool {
-        self.nodes.iter().position(|n| crate::flight::selects(key, &n.path, n.key.as_deref())).is_some_and(|i| self.pickable(i, x, y, pick))
-    }
-
-    fn pickable(&self, i: usize, x: f32, y: f32, pick: Pick) -> bool {
-        self.drawn.get(i).is_some()
-            && self.inh_scratch.get(i).is_some_and(|h| pick.transparent || h.opacity > 0.0)
-            && !self.subtree_exiting(i)
-            && self.node_contains(i, x, y)
-    }
-
-    /// The presented rotation, scale and shadows of the element keyed `key`, exiting or not, as
-    /// of the last frame, and whether any spring still moves them. It reads the springs on
-    /// demand: nothing runs per frame for it. This is a driver/headless read: running view
-    /// functions and handlers do not hold a `Runtime`.
-    pub fn presented_pose(&self, key: &str) -> Option<Pose> {
-        let i = self.nodes.iter().position(|n| crate::flight::selects(key, &n.path, n.key.as_deref()))?;
-        let n = &self.nodes[i];
-        let store = self.scene.store();
-        let shadows = n.vis.shadows.iter().enumerate().map(|(k, sh)| {
-            let sh = self.shadow_at(n.id, k, sh);
-            match P_SHADOWS.get(k) {
-                Some(&p) => crate::el::Shadow { color: self.color(n.id, p, sh.color), ..sh },
-                None => sh,
-            }
-        }).collect();
-        let moving = self.rect_springing(i)
-            || std::iter::successors(Some(i), |&p| step_up(&self.nodes, p)).any(|p| {
-                let id = self.nodes[p].id;
-                paint_pose_springing(store, id)
-                    || (!self.reduced_motion && self.loops.get(&id).is_some_and(|l| l.active(store.node_time(id))))
-            });
-        Some(Pose {
-            rotation: self.scene.get(n.id, prop::ROTATION).unwrap_or(n.vis.rotate),
-            scale: self.inh_scratch.get(i)?.scale,
-            shadows,
-            moving,
-        })
-    }
-
-    /// Whether the root's own fill is dark, when it has an opaque one (headless `--keys` caps
-    /// follow it, so they flip when the app changes theme itself).
-    pub(crate) fn backdrop_dark(&self) -> Option<bool> {
-        if self.transparent { return None; }
-        let n = self.nodes.get(self.app_root())?;
-        let c = self.color(n.id, P_FILL, n.vis.fill);
-        (c.a > 0.5).then(|| 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b < 0.25)
     }
 }

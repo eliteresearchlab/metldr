@@ -61,24 +61,14 @@ pub(super) fn glide(st: &mut ScrollState, dt: f32) -> bool {
 }
 
 impl<S: 'static> Runtime<S> {
-    /// The scroll viewport `key` names (`Node::named`), or the nearest one containing it.
-    fn scroll_viewport(&self, key: &str) -> Option<usize> {
-        let mut i = self.nodes.iter().enumerate()
-            .position(|(i, n)| n.named(key) && !self.subtree_exiting(i))?;
-        loop {
-            if self.nodes[i].scroll.is_some() && self.nodes[i].scroll_axes.y() { return Some(i); }
-            i = self.nodes[i].parent?;
-        }
-    }
-
     pub(super) fn scroll_to_bottom(&mut self, requests: Vec<(String, bool)>) {
         // This frame's commit may have changed the content: measure the extent first.
-        self.step_scroll(0.0);
+        self.core.step_scroll(0.0);
         let mut targets = Vec::new();
         for (key, animated) in requests {
-            let Some(i) = self.scroll_viewport(&key) else { continue };
-            let (id, sticky, view_h) = (self.nodes[i].id, self.nodes[i].scroll.is_some_and(|s| s.stick_bottom), f64::from(self.nodes[i].local.h));
-            let Some(st) = self.scrolls.get_mut(&id) else { continue };
+            let Some(i) = self.core.scroll_viewport(&key) else { continue };
+            let (id, sticky, view_h) = (self.core.nodes[i].id, self.core.nodes[i].scroll.is_some_and(|s| s.stick_bottom), f64::from(self.core.nodes[i].local.h));
+            let Some(st) = self.core.scrolls.get_mut(&id) else { continue };
             targets.push((id, animated, sticky, view_h, st.offset, st.glide));
             // Stand at the bottom first so a virtual list mounts and measures its tail rows,
             // which can differ from the estimate: the trip below then ends at the true bottom.
@@ -89,17 +79,17 @@ impl<S: 'static> Runtime<S> {
             st.v = 0.0;
         }
         for _ in 0..3 {
-            if !self.virtual_window_changed() { break; }
+            if !self.core.virtual_window_changed() { break; }
             self.commit(&Tx::default());
-            self.step_scroll(0.0);
+            self.core.step_scroll(0.0);
             for (id, ..) in &targets {
-                if let Some(st) = self.scrolls.get_mut(id) { st.offset = st.max; }
+                if let Some(st) = self.core.scrolls.get_mut(id) { st.offset = st.max; }
             }
         }
         for (id, animated, sticky, view_h, start, glide) in targets {
-            let Some(st) = self.scrolls.get_mut(&id) else { continue };
+            let Some(st) = self.core.scrolls.get_mut(&id) else { continue };
             // A settled frame (a window showing or uncovering) lands at the end.
-            if animated && !self.reduced_motion && !self.settled && st.max - start > 0.5 {
+            if animated && !self.core.reduced_motion && !self.core.settled && st.max - start > 0.5 {
                 st.offset = start.max(st.max - GLIDE_REACH * view_h);
                 st.glide = Some(glide.unwrap_or(0.0));
                 st.spring = None;
@@ -110,23 +100,35 @@ impl<S: 'static> Runtime<S> {
                 st.pinned = sticky;
             }
         }
-        if self.virtual_window_changed() {
+        if self.core.virtual_window_changed() {
             self.commit(&Tx::default());
-            self.step_scroll(0.0);
+            self.core.step_scroll(0.0);
         }
     }
 
     /// `Tx::scroll_page`: each viewport moves by its requested pages.
     pub(super) fn scroll_pages(&mut self, requests: Vec<(String, i32)>) {
         // This frame's commit may have changed the content: measure the extent first.
-        self.step_scroll(0.0);
+        self.core.step_scroll(0.0);
         for (key, pages) in requests {
-            let Some(i) = self.scroll_viewport(&key) else { continue };
-            self.page_to(i, |offset, _, page| offset + page * f64::from(pages));
+            let Some(i) = self.core.scroll_viewport(&key) else { continue };
+            self.core.page_to(i, |offset, _, page| offset + page * f64::from(pages));
         }
-        if self.virtual_window_changed() {
+        if self.core.virtual_window_changed() {
             self.commit(&Tx::default());
-            self.step_scroll(0.0);
+            self.core.step_scroll(0.0);
+        }
+    }
+}
+
+impl RuntimeCore {
+    /// The scroll viewport `key` names (`Node::named`), or the nearest one containing it.
+    fn scroll_viewport(&self, key: &str) -> Option<usize> {
+        let mut i = self.nodes.iter().enumerate()
+            .position(|(i, n)| n.named(key) && !self.subtree_exiting(i))?;
+        loop {
+            if self.nodes[i].scroll.is_some() && self.nodes[i].scroll_axes.y() { return Some(i); }
+            i = self.nodes[i].parent?;
         }
     }
 

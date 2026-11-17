@@ -3,6 +3,59 @@
 use super::*;
 
 impl<S: 'static> Runtime<S> {
+    pub fn secondary_up(&mut self, x: f32, y: f32) {
+        self.core.pointer = Some((x, y));
+        let down_link = self.core.take_secondary_link();
+        if let Some(path) = self.core.secondary_capture.take()
+            && self.core.secondary_target(x, y) == Some(path.as_str())
+        {
+            let i = self.core.nodes.iter().position(|n| n.path == path);
+            let point = i.map_or(PointerEvent { x, y, window_x: x, window_y: y }, |i| self.core.pointer_event(i, x, y));
+            let link = i.and_then(|i| self.core.secondary_link_at(i, x, y));
+            // Like a primary link press, it must end on the link it began on; one that moved
+            // onto, off or between links opens nothing.
+            match (link, down_link) {
+                (Some(k), Some(d)) if k == d => self.core.queue.push(Action::LinkSecondary(path, k, point)),
+                (None, None) if !self.selection_menu(&path, x, y) => self.core.queue.push(Action::SecondaryPress(path, point)),
+                _ => {}
+            }
+        }
+        self.core.leave_after_release();
+    }
+
+    /// The Menu key, or Shift+F10, that nothing before it took: the focused element's context
+    /// menu. That is its focused link's `on_link_secondary`, else its own or its nearest
+    /// ancestor's `on_secondary_press`, at the bottom-left of the focused link or element, where
+    /// a menu opens below it as AppKit's and Windows' keyboard menus do.
+    pub(super) fn context_menu_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        let m = ev.mods;
+        let plain = !m.cmd && !m.ctrl && !m.alt && !m.logo;
+        let menu_key = match ev.key {
+            crate::Key::ContextMenu => plain,
+            crate::Key::Function(10) => plain && m.shift,
+            _ => false,
+        };
+        let Some(focused) = self.core.focused_index().filter(|&i| menu_key && self.core.can_focus(i)) else { return false };
+        if self.focused_link_menu(focused, tx) { return true; }
+        let [x, _, _, y] = self.core.drawn_box(focused);
+        let mut index = focused;
+        loop {
+            let n = &self.core.nodes[index];
+            if !self.core.allowed(index) { return false; }
+            if let Some(f) = n.handlers.on_secondary_press.clone() {
+                let path = n.path.clone();
+                let point = self.core.pointer_event(index, x, y);
+                log_event!(self, "secondary press {path}");
+                f(states!(self), point, tx);
+                return true;
+            }
+            let Some(p) = n.parent else { return false };
+            index = p;
+        }
+    }
+}
+
+impl RuntimeCore {
     /// The nearest element with `on_secondary_press` (or a link with `on_link_secondary`) at
     /// (x, y), else the selectable text there (its Copy menu): an app's context menu on a row
     /// wins over its text's.
@@ -30,56 +83,5 @@ impl<S: 'static> Runtime<S> {
         self.secondary_capture = self.secondary_target(x, y).map(str::to_owned);
         let i = self.secondary_capture.as_ref().and_then(|p| self.nodes.iter().position(|n| &n.path == p));
         self.secondary_link_down(i, x, y);
-    }
-
-    pub fn secondary_up(&mut self, x: f32, y: f32) {
-        self.pointer = Some((x, y));
-        let down_link = self.take_secondary_link();
-        if let Some(path) = self.secondary_capture.take()
-            && self.secondary_target(x, y) == Some(path.as_str())
-        {
-            let i = self.nodes.iter().position(|n| n.path == path);
-            let point = i.map_or(PointerEvent { x, y, window_x: x, window_y: y }, |i| self.pointer_event(i, x, y));
-            let link = i.and_then(|i| self.secondary_link_at(i, x, y));
-            // Like a primary link press, it must end on the link it began on; one that moved
-            // onto, off or between links opens nothing.
-            match (link, down_link) {
-                (Some(k), Some(d)) if k == d => self.queue.push(Action::LinkSecondary(path, k, point)),
-                (None, None) if !self.selection_menu(&path, x, y) => self.queue.push(Action::SecondaryPress(path, point)),
-                _ => {}
-            }
-        }
-        self.leave_after_release();
-    }
-
-    /// The Menu key, or Shift+F10, that nothing before it took: the focused element's context
-    /// menu. That is its focused link's `on_link_secondary`, else its own or its nearest
-    /// ancestor's `on_secondary_press`, at the bottom-left of the focused link or element, where
-    /// a menu opens below it as AppKit's and Windows' keyboard menus do.
-    pub(super) fn context_menu_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
-        let m = ev.mods;
-        let plain = !m.cmd && !m.ctrl && !m.alt && !m.logo;
-        let menu_key = match ev.key {
-            crate::Key::ContextMenu => plain,
-            crate::Key::Function(10) => plain && m.shift,
-            _ => false,
-        };
-        let Some(focused) = self.focused_index().filter(|&i| menu_key && self.can_focus(i)) else { return false };
-        if self.focused_link_menu(focused, tx) { return true; }
-        let [x, _, _, y] = self.drawn_box(focused);
-        let mut index = focused;
-        loop {
-            let n = &self.nodes[index];
-            if !self.allowed(index) { return false; }
-            if let Some(f) = n.handlers.on_secondary_press.clone() {
-                let path = n.path.clone();
-                let point = self.pointer_event(index, x, y);
-                log_event!(self, "secondary press {path}");
-                f(states!(self), point, tx);
-                return true;
-            }
-            let Some(p) = n.parent else { return false };
-            index = p;
-        }
     }
 }

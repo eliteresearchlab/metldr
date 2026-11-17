@@ -30,73 +30,63 @@ impl<S: 'static> Runtime<S> {
     }
 
     pub(super) fn measure_retry(&mut self, tx: &Tx) -> Measured {
-        let _blend = crate::theme::scope(self.srgb_blend);
-        let _bars = crate::platform::scroll_bars::scope(self.scroll_bars.state, self.scroll_bars.runtime_id);
+        let _blend = crate::theme::scope(self.core.srgb_blend);
+        let _bars = crate::platform::scroll_bars::scope(self.core.scroll_bars.state, self.core.scroll_bars.runtime_id);
         let selection = self.selection_by_path();
         Measured { selection, ..self.measurement(true).finish_from(tx, 1) }
     }
 
     /// `committing` when the result is applied, so the last commit's text layouts can go.
     pub(super) fn measure_pass(&mut self, tx: &Tx, committing: bool) -> Measured {
-        let _blend = crate::theme::scope(self.srgb_blend);
-        let _bars = crate::platform::scroll_bars::scope(self.scroll_bars.state, self.scroll_bars.runtime_id);
+        let _blend = crate::theme::scope(self.core.srgb_blend);
+        let _bars = crate::platform::scroll_bars::scope(self.core.scroll_bars.state, self.core.scroll_bars.runtime_id);
         let selection = self.selection_by_path();
         Measured { selection, ..self.measurement(committing).finish(tx) }
     }
 
     pub(super) fn measurement(&mut self, committing: bool) -> Measurement<'_, S> {
-        let hold_windows = self.checking_live_only();
+        let hold_windows = self.core.checking_live_only();
         Measurement {
             state: &self.state,
             view: self.view,
             playground: self.playground.as_deref(),
-            env: self.env,
-            viewport: self.viewport,
-            fit_height: self.fit_height,
-            system_reduced_motion: self.system_reduced_motion,
-            titlebar_inset: self.titlebar_inset,
-            system_accent: self.system_accent,
-            system_scroll_bars: self.scroll_bars.state,
-            reduced_motion: self.reduced_motion,
-            time_scale: self.time_scale,
-            caret: self.caret.clone(),
+            env: self.core.env,
+            viewport: self.core.viewport,
+            fit_height: self.core.fit_height,
+            system_reduced_motion: self.core.system_reduced_motion,
+            titlebar_inset: self.core.titlebar_inset,
+            system_accent: self.core.system_accent,
+            system_scroll_bars: self.core.scroll_bars.state,
+            reduced_motion: self.core.reduced_motion,
+            time_scale: self.core.time_scale,
+            caret: self.core.caret.clone(),
             caret_read: false,
-            layout_seen: self.layout_seen.rects.clone(),
+            layout_seen: self.core.layout_seen.rects.clone(),
             layout_reads: Vec::new(),
-            commits: self.commits,
-            nodes: &mut self.nodes,
+            commits: self.core.commits,
+            nodes: &mut self.core.nodes,
             committing,
-            spare_nodes: &mut self.spare_nodes,
-            text: &mut self.text,
-            layout: &mut self.layout,
-            node_index: &mut self.node_index,
-            path_ids: &mut self.path_ids,
-            memo: &mut self.memo,
-            next_id: &mut self.next_id,
-            scrolls: &mut self.scrolls,
-            virtuals: &mut self.virtuals,
-            virtual_culled: &mut self.virtual_culled,
-            virtual_inputs: &mut self.virtual_inputs,
-            stats: &mut self.stats,
-            key_warnings: &mut self.key_warnings,
-            focused: self.focused.as_deref(),
-            state_unchanged: std::mem::take(&mut self.state_unchanged),
+            spare_nodes: &mut self.core.spare_nodes,
+            text: &mut self.core.text,
+            layout: &mut self.core.layout,
+            node_index: &mut self.core.node_index,
+            path_ids: &mut self.core.path_ids,
+            memo: &mut self.core.memo,
+            next_id: &mut self.core.next_id,
+            scrolls: &mut self.core.scrolls,
+            virtuals: &mut self.core.virtuals,
+            virtual_culled: &mut self.core.virtual_culled,
+            virtual_inputs: &mut self.core.virtual_inputs,
+            stats: &mut self.core.stats,
+            key_warnings: &mut self.core.key_warnings,
+            focused: self.core.focused.as_deref(),
+            state_unchanged: std::mem::take(&mut self.core.state_unchanged),
             retry: false,
             hold_windows,
         }
     }
 
-    /// Forgets the ids of paths that left with nothing kept under their id, so a session that
-    /// mounts many distinct keys (a long virtual list scrolled end to end) doesn't keep them all.
-    /// A path whose id still holds scroll, growth or reveal state keeps it, so it comes back
-    /// with that state as before.
-    pub(super) fn prune_path_ids(&mut self) {
-        if self.path_ids.len() <= self.node_index.len() { return; }
-        let Self { path_ids, node_index, scrolls, stacks, grows, reveals, .. } = self;
-        path_ids.retain(|_, id| {
-            node_index.contains_key(id) || scrolls.contains_key(id) || stacks.contains_key(id) || grows.contains_key(id) || reveals.contains_key(id)
-        });
-    }
+
 }
 
 impl<S: 'static> Measurement<'_, S> {
@@ -535,7 +525,7 @@ impl<S: 'static> Measurement<'_, S> {
     }
 }
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     /// Records which row of each virtual list holds focus, by key, so the row is still built
     /// after it scrolls out. Walks the node tree, since a key may itself contain `/`.
     pub(super) fn track_focused_rows(&mut self) {
@@ -561,5 +551,19 @@ impl<S: 'static> Runtime<S> {
                 }
             }
         }
+    }
+}
+
+impl RuntimeCore {
+    /// Forgets the ids of paths that left with nothing kept under their id, so a session that
+    /// mounts many distinct keys (a long virtual list scrolled end to end) doesn't keep them all.
+    /// A path whose id still holds scroll, growth or reveal state keeps it, so it comes back
+    /// with that state as before.
+    pub(super) fn prune_path_ids(&mut self) {
+        if self.path_ids.len() <= self.node_index.len() { return; }
+        let RuntimeCore { path_ids, node_index, scrolls, stacks, grows, reveals, .. } = self;
+        path_ids.retain(|_, id| {
+            node_index.contains_key(id) || scrolls.contains_key(id) || stacks.contains_key(id) || grows.contains_key(id) || reveals.contains_key(id)
+        });
     }
 }

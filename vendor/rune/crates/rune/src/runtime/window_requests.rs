@@ -25,6 +25,17 @@ impl Title {
 }
 
 impl<S: 'static> Runtime<S> {
+    /// The root's natural height at the current width, measured without committing, so a
+    /// window that fits its content can open at that height.
+    pub fn content_height(&mut self) -> f32 {
+        let measured = self.measure_pass(&Tx::default(), false);
+        let height = measured.nodes.first().map_or(self.core.viewport.1, |root| root.local.h);
+        self.core.discard_measured(measured);
+        height.ceil_to(self.core.env.scale).max(1.0)
+    }
+}
+
+impl RuntimeCore {
     /// Asks the window for the content's new height, on this commit's spring. The first
     /// commit, a viewport change and `Tx::instant` jump.
     pub(super) fn fit_window(&mut self, height: f32, tx: &Tx, first: bool) {
@@ -39,14 +50,5 @@ impl<S: 'static> Runtime<S> {
             spring: (!jump).then(|| tx.motion.unwrap_or(motion::DEFAULT)), center: false,
         };
         self.window_frame = Some(self.window_frame.unwrap_or_default().merge(request));
-    }
-
-    /// The root's natural height at the current width, measured without committing, so a
-    /// window that fits its content can open at that height.
-    pub fn content_height(&mut self) -> f32 {
-        let measured = self.measure_pass(&Tx::default(), false);
-        let height = measured.nodes.first().map_or(self.viewport.1, |root| root.local.h);
-        self.discard_measured(measured);
-        height.ceil_to(self.env.scale).max(1.0)
     }
 }

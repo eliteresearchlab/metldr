@@ -446,7 +446,7 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
                         target: &target, format: r.renderer.format(), size: (r.config.width, r.config.height), dt,
                         update_ms: now.elapsed().as_secs_f64() * 1000.0, rt: &mut r.rt, ui: &mut r.renderer });
                 } else {
-                    r.renderer.prepare(&r.gpu.device, &r.gpu.queue, &mut r.rt.text.atlas, &r.rt.instances, (r.config.width, r.config.height));
+                    r.renderer.prepare(&r.gpu.device, &r.gpu.queue, &mut r.rt.core.text.atlas, &r.rt.core.instances, (r.config.width, r.config.height));
                     r.renderer.draw(&mut encoder, &target, r.rt.clear_color());
                 }
                 r.renderer.submit(&r.gpu.queue, encoder);

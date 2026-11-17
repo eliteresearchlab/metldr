@@ -46,7 +46,7 @@ const GAP: f32 = 6.0;
 const MAX_W: f32 = 300.0;
 const MARGIN: f32 = 4.0;
 
-impl<S: 'static> Runtime<S> {
+impl RuntimeCore {
     /// The host shows the system's own tooltips for [`Runtime::help_regions`], so Rune draws none.
     #[cfg(target_os = "macos")]
     pub(crate) fn set_native_help(&mut self, on: bool) { self.help.native = on; }
@@ -141,95 +141,6 @@ impl<S: 'static> Runtime<S> {
             parts = parts.into_iter().flat_map(|p| subtract(p, o)).collect();
         }
         parts
-    }
-
-    /// After `build`'s hits: track the rest, show or hide the tooltip and draw it.
-    pub(super) fn update_help(&mut self) {
-        self.help.regions.clear();
-        if self.help.native {
-            // Nothing behind a modal, and only where nothing else is drawn over the element.
-            let mut regions = Vec::new();
-            for &(id, r, seq, link) in &self.help.hits {
-                let Some(&i) = self.node_index.get(&id) else { continue };
-                let Some(text) = self.help_text(i, link) else { continue };
-                if self.subtree_exiting(i) || !self.allowed(i) { continue; }
-                regions.extend(self.unoccluded(i, r, seq).into_iter().map(|p| (p, text.clone())));
-            }
-            self.help.regions = regions;
-            self.help.tip = None;
-            return;
-        }
-        let pointer = self.pointer.filter(|&(x, y)| self.in_viewport(x, y) && self.capture.is_none() && self.secondary_capture.is_none());
-        // While moving layout holds hover, the tooltip keeps its element, and nothing sliding
-        // under the pointer starts a wait.
-        let under = match self.held_hover() {
-            Some(_) => self.help.target.as_ref().and_then(|(p, k, _)| Some((self.hover_live(p)?, *k))).filter(|_| pointer.is_some()),
-            None => pointer.and_then(|(x, y)| self.help_at(x, y)),
-        };
-        let at = under.map(|(i, k)| (self.nodes[i].path.as_str(), k));
-        if at != self.help.target.as_ref().map(|(p, k, _)| (p.as_str(), *k)) {
-            self.help.target = under.map(|(i, k)| (self.nodes[i].path.clone(), k, self.clock));
-            self.help.dismissed = false;
-            self.help.scheduled = None;
-        }
-        self.help.tip = None;
-        let (Some((i, link)), Some((_, _, since))) = (under, self.help.target.clone()) else { return };
-        if self.help.dismissed { return; }
-        let due = since + self.help_delay;
-        if self.clock + 1e-6 < due {
-            if self.help.scheduled != Some(due) {
-                self.help.scheduled = Some(due);
-                self.schedule_wakes([std::time::Duration::from_secs_f64(due - self.clock)]);
-            }
-            return;
-        }
-        let Some(text) = self.help_text(i, link).cloned() else { return };
-        let e = self.drawn_box(i);
-        let anchor = link.and_then(|k| self.link_boxes(i, e).into_iter().filter(|(j, _)| *j == k).map(|(_, r)| r)
-            .reduce(|u, r| [u[0].min(r[0]), u[1].min(r[1]), u[2].max(r[2]), u[3].max(r[3])]));
-        self.draw_tooltip(anchor.unwrap_or(e), text);
-    }
-
-    /// Draws `text` in a tooltip under box `e` (window points, x0 y0 x1 y1; above it when
-    /// there's no room below), kept inside the window.
-    fn draw_tooltip(&mut self, e: [f32; 4], text: String) {
-        let s = self.env.scale;
-        let dark = self.backdrop_dark().unwrap_or(self.env.system_dark);
-        let grey = |v: f32| Color { r: v, g: v, b: v, a: 1.0 };
-        let (fill, ink, edge) = if dark {
-            (grey(0.17), grey(0.93), Color::WHITE.alpha(0.14))
-        } else {
-            (grey(0.98), grey(0.11), Color::BLACK.alpha(0.16))
-        };
-        let style = crate::TextStyle::new(12.0, 400.0).lh(16.0);
-        let layout = self.text.layout_rich(&text, &[], style, s, Some(MAX_W * s));
-        let (tw, th) = ((layout.full_width() / s).ceil(), (layout.height() / s).ceil());
-        let (w, h) = (tw + 2.0 * PAD[0], th + 2.0 * PAD[1]);
-        let (vw, vh) = self.viewport;
-        let mut y = e[3] + GAP;
-        if y + h > vh - MARGIN && e[1] - GAP - h >= MARGIN { y = e[1] - GAP - h; }
-        let x = ((e[0] + e[2] - w) * 0.5).clamp(MARGIN, (vw - w - MARGIN).max(MARGIN));
-        let y = y.clamp(MARGIN, (vh - h - MARGIN).max(MARGIN));
-        let r = [x * s, y * s, w * s, h * s].map(|v| v.round());
-        let srgb = self.srgb_blend;
-        self.instances.push(Instance {
-            rect: r,
-            radii: [5.0 * s; 4],
-            fill: premul(fill, 1.0, srgb),
-            border: premul(edge, 1.0, srgb),
-            params: [s.max(1.0), KIND_RECT, 0.0, 1.0],
-            uv: [0.0; 4],
-            clip: NO_CLIP,
-            fade: crate::render::pack_fade([0.0; 4], NO_CLIP, NO_CLIP),
-        });
-        let origin = [r[0] + PAD[0] * s, r[1] + PAD[1] * s];
-        self.glyph_scratch.clear();
-        self.text.set_glyph_inks(ink, &[]);
-        self.text.glyphs_for_layout_scaled(&layout, origin, 1.0, false, &mut self.glyph_scratch);
-        for q in &self.glyph_scratch {
-            self.instances.extend(glyph_or_image(q, &self.text, &mut self.images, premul(ink, 1.0, srgb), NO_CLIP, [0.0; 4]));
-        }
-        self.help.tip = Some((text, [x, y, w, h]));
     }
 }
 
@@ -339,5 +250,98 @@ mod tests {
         rt.frame(0.0);
         let texts: Vec<&str> = rt.help_regions().iter().map(|(_, t)| t.as_str()).collect();
         assert_eq!(texts, ["Goes to b"]);
+    }
+}
+
+impl RuntimeCore {
+    /// After `build`'s hits: track the rest, show or hide the tooltip and draw it.
+    pub(super) fn update_help(&mut self) {
+        self.help.regions.clear();
+        if self.help.native {
+            // Nothing behind a modal, and only where nothing else is drawn over the element.
+            let mut regions = Vec::new();
+            for &(id, r, seq, link) in &self.help.hits {
+                let Some(&i) = self.node_index.get(&id) else { continue };
+                let Some(text) = self.help_text(i, link) else { continue };
+                if self.subtree_exiting(i) || !self.allowed(i) { continue; }
+                regions.extend(self.unoccluded(i, r, seq).into_iter().map(|p| (p, text.clone())));
+            }
+            self.help.regions = regions;
+            self.help.tip = None;
+            return;
+        }
+        let pointer = self.pointer.filter(|&(x, y)| self.in_viewport(x, y) && self.capture.is_none() && self.secondary_capture.is_none());
+        // While moving layout holds hover, the tooltip keeps its element, and nothing sliding
+        // under the pointer starts a wait.
+        let under = match self.held_hover() {
+            Some(_) => self.help.target.as_ref().and_then(|(p, k, _)| Some((self.hover_live(p)?, *k))).filter(|_| pointer.is_some()),
+            None => pointer.and_then(|(x, y)| self.help_at(x, y)),
+        };
+        let at = under.map(|(i, k)| (self.nodes[i].path.as_str(), k));
+        if at != self.help.target.as_ref().map(|(p, k, _)| (p.as_str(), *k)) {
+            self.help.target = under.map(|(i, k)| (self.nodes[i].path.clone(), k, self.clock));
+            self.help.dismissed = false;
+            self.help.scheduled = None;
+        }
+        self.help.tip = None;
+        let (Some((i, link)), Some((_, _, since))) = (under, self.help.target.clone()) else { return };
+        if self.help.dismissed { return; }
+        let due = since + self.help_delay;
+        if self.clock + 1e-6 < due {
+            if self.help.scheduled != Some(due) {
+                self.help.scheduled = Some(due);
+                self.schedule_wakes([std::time::Duration::from_secs_f64(due - self.clock)]);
+            }
+            return;
+        }
+        let Some(text) = self.help_text(i, link).cloned() else { return };
+        let e = self.drawn_box(i);
+        let anchor = link.and_then(|k| self.link_boxes(i, e).into_iter().filter(|(j, _)| *j == k).map(|(_, r)| r)
+            .reduce(|u, r| [u[0].min(r[0]), u[1].min(r[1]), u[2].max(r[2]), u[3].max(r[3])]));
+        self.draw_tooltip(anchor.unwrap_or(e), text);
+    }
+}
+
+impl RuntimeCore {
+    /// Draws `text` in a tooltip under box `e` (window points, x0 y0 x1 y1; above it when
+    /// there's no room below), kept inside the window.
+    fn draw_tooltip(&mut self, e: [f32; 4], text: String) {
+        let s = self.env.scale;
+        let dark = self.backdrop_dark().unwrap_or(self.env.system_dark);
+        let grey = |v: f32| Color { r: v, g: v, b: v, a: 1.0 };
+        let (fill, ink, edge) = if dark {
+            (grey(0.17), grey(0.93), Color::WHITE.alpha(0.14))
+        } else {
+            (grey(0.98), grey(0.11), Color::BLACK.alpha(0.16))
+        };
+        let style = crate::TextStyle::new(12.0, 400.0).lh(16.0);
+        let layout = self.text.layout_rich(&text, &[], style, s, Some(MAX_W * s));
+        let (tw, th) = ((layout.full_width() / s).ceil(), (layout.height() / s).ceil());
+        let (w, h) = (tw + 2.0 * PAD[0], th + 2.0 * PAD[1]);
+        let (vw, vh) = self.viewport;
+        let mut y = e[3] + GAP;
+        if y + h > vh - MARGIN && e[1] - GAP - h >= MARGIN { y = e[1] - GAP - h; }
+        let x = ((e[0] + e[2] - w) * 0.5).clamp(MARGIN, (vw - w - MARGIN).max(MARGIN));
+        let y = y.clamp(MARGIN, (vh - h - MARGIN).max(MARGIN));
+        let r = [x * s, y * s, w * s, h * s].map(|v| v.round());
+        let srgb = self.srgb_blend;
+        self.instances.push(Instance {
+            rect: r,
+            radii: [5.0 * s; 4],
+            fill: premul(fill, 1.0, srgb),
+            border: premul(edge, 1.0, srgb),
+            params: [s.max(1.0), KIND_RECT, 0.0, 1.0],
+            uv: [0.0; 4],
+            clip: NO_CLIP,
+            fade: crate::render::pack_fade([0.0; 4], NO_CLIP, NO_CLIP),
+        });
+        let origin = [r[0] + PAD[0] * s, r[1] + PAD[1] * s];
+        self.glyph_scratch.clear();
+        self.text.set_glyph_inks(ink, &[]);
+        self.text.glyphs_for_layout_scaled(&layout, origin, 1.0, false, &mut self.glyph_scratch);
+        for q in &self.glyph_scratch {
+            self.instances.extend(glyph_or_image(q, &self.text, &mut self.images, premul(ink, 1.0, srgb), NO_CLIP, [0.0; 4]));
+        }
+        self.help.tip = Some((text, [x, y, w, h]));
     }
 }
