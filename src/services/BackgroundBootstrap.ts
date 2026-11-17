@@ -1,9 +1,8 @@
 import { cacheService } from './CacheService'
-import { lookupWord } from './RustCore'
+import { lookupWord, summaryGate } from './RustCore'
 import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
-import { SummaryPrefs } from '../utils/summaryPrefs'
 import { logger } from './LoggerService'
 import { ragService } from './rag/RagService'
 import { concurrencyManager } from './ConcurrencyManager'
@@ -18,8 +17,6 @@ import type {
   WordLookupMessage,
   BackgroundMessage,
   ResponseCallback,
-  SummaryPrefsConfig,
-  ClassifyResult,
   SummaryResult,
   ExtractedData,
   GetEmailCacheMessage,
@@ -363,7 +360,6 @@ export class BackgroundBootstrap {
   static async _performExtractAndSummarize(tabId: number, force: boolean, trigger = 'auto'): Promise<SummaryResult> {
     try {
       log.log('_performExtractAndSummarize:', { tabId, force, trigger })
-      const prefs = await this._getSummaryPrefs()
       let extracted: ExtractedData | undefined
       try {
         const response = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_ARTICLE' }) as { success: boolean; data?: ExtractedData; error?: string }
@@ -379,7 +375,7 @@ export class BackgroundBootstrap {
 
       if (!extracted) return { success: false, error: 'extraction failed' }
       if (extracted.skip) return { success: false, skip: true, reason: extracted.reason }
-      const gating = this._classifyPage(extracted, prefs, trigger, force)
+      const gating = await summaryGate(extracted, trigger === 'manual' || force)
       log.log('classification:', { action: gating.action, reason: gating.reason, wordCount: extracted?.wordCount })
       if (gating.action === 'skip') return { success: false, skip: true, reason: gating.reason }
       if (gating.action === 'prompt') return { success: false, prompt: true, reason: gating.reason }
@@ -390,72 +386,6 @@ export class BackgroundBootstrap {
       log.error('performExtractAndSummarize]', (err as Error).message)
       return { success: false, error: (err as Error).message }
     }
-  }
-
-  static async _getSummaryPrefs(): Promise<SummaryPrefsConfig> {
-    try {
-      const stored = await chrome.storage.local.get(['summaryPrefs'])
-      return SummaryPrefs.buildPrefs(stored?.summaryPrefs || {})
-    } catch {
-      return SummaryPrefs.DEFAULT_PREFS
-    }
-  }
-
-  static _classifyPage(extracted: ExtractedData, prefs: SummaryPrefsConfig, trigger: string, force: boolean): ClassifyResult {
-    const url = extracted?.url || ''
-    const contentType = extracted?.contentType || 'text/html'
-    const signals = extracted?.pageSignals || {}
-    const wordCount = extracted?.wordCount || 0
-
-    if (prefs.denylist.some(d => url.includes(d))) {
-      return { action: 'skip', reason: 'denylist' }
-    }
-
-    if (!contentType.startsWith('text/')) {
-      return { action: 'skip', reason: 'non_text' }
-    }
-
-    if (trigger === 'manual' || force) {
-      if (wordCount < 80) return { action: 'skip', reason: 'too_short' }
-      return { action: 'auto', reason: 'manual_trigger' }
-    }
-
-    const nonReader =
-      signals.isSPA ||
-      signals.isDashboard ||
-      signals.isSearch ||
-      signals.isCart ||
-      signals.isFeed ||
-      signals.isSocialFeed ||
-      signals.canvasHeavy ||
-      (signals.buttonToParagraphRatio || 0) > 2 ||
-      (signals.linkDensity || 0) > 0.55
-
-    if (nonReader) {
-      return { action: 'skip', reason: 'non_reader' }
-    }
-
-    if (prefs.mode === 'manual') {
-      return { action: 'wait', reason: 'manual_mode' }
-    }
-
-    const allowHit = prefs.allowlist.some(d => url.includes(d))
-    const strongArticle = (signals.hasArticleTag || (signals.h1Count || 0) > 0) && (signals.textDensity || 0) > 0.4 && wordCount >= prefs.minAutoWords
-    const highConfidence = allowHit ? wordCount >= prefs.minPromptWords : strongArticle
-
-    if (highConfidence) {
-      return { action: 'auto', reason: allowHit ? 'allowlist' : 'article_confident' }
-    }
-
-    const mediumConfidence = (signals.hasMain || signals.hasArticleTag || (signals.h1Count || 0) > 0) &&
-      wordCount >= prefs.minPromptWords &&
-      (signals.textDensity || 0) > 0.25
-
-    if (prefs.mode === 'smart' && mediumConfidence) {
-      return { action: 'prompt', reason: 'medium_confidence' }
-    }
-
-    return { action: 'wait', reason: 'low_confidence' }
   }
 
   static _onGetEmailCache(msg: GetEmailCacheMessage, respond: ResponseCallback): void {

@@ -96,17 +96,23 @@ async fn local(word: &str, languages: &[String]) -> Option<Lookup> {
     open.set_onupgradeneeded(Some(refuse.unchecked_ref()));
     let db: IdbDatabase = keys::done(&open).await.ok()?.dyn_into().ok()?;
     let names = db.object_store_names();
+    let mut found = None;
     for language in languages.iter().filter(|code| names.contains(code)) {
-        let store = db
-            .transaction_with_str(language)
-            .and_then(|tx| tx.object_store(language))
-            .ok()?;
-        let record = keys::done(&store.get(&word.into()).ok()?).await.ok()?;
-        if let Some(found) = word::from_local(&from_js(&record), language) {
-            db.close();
-            return Some(found);
+        found = read(&db, language, word).await;
+        if found.is_some() {
+            break;
         }
     }
     db.close();
-    None
+    found
+}
+
+/// One language's record for `word`; any failure reads as absent.
+async fn read(db: &IdbDatabase, language: &str, word: &str) -> Option<Lookup> {
+    let store = db
+        .transaction_with_str(language)
+        .and_then(|tx| tx.object_store(language))
+        .ok()?;
+    let record = keys::done(&store.get(&word.into()).ok()?).await.ok()?;
+    word::from_local(&from_js(&record), language)
 }

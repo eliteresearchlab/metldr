@@ -2,6 +2,7 @@ mod chunking;
 pub mod gateway;
 pub mod query;
 pub mod retrieval;
+pub mod summary_gate;
 pub mod word;
 
 pub use chunking::{Chunk, ContentType, chunk_for_embedding};

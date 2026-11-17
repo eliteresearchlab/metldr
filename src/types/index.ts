@@ -237,20 +237,6 @@ export interface PageSignals {
   hasMain?: boolean
 }
 
-export interface ClassifiedPage {
-  url?: string
-  contentType?: string
-  pageSignals?: PageSignals
-  wordCount?: number
-  skip?: boolean
-  reason?: string
-}
-
-export interface ClassifyResult {
-  action: 'skip' | 'auto' | 'prompt' | 'wait'
-  reason: string
-}
-
 export interface SummaryResult {
   success: boolean
   summary?: unknown
@@ -437,23 +423,6 @@ export type BackgroundMessage =
   | { type: 'GET_PAGE_CACHE'; url: string }
 
 export type ResponseCallback = (response: unknown) => void
-
-// summary prefs
-export interface SummaryPrefsConfig {
-  mode: string
-  allowlist: string[]
-  denylist: string[]
-  minAutoWords: number
-  minPromptWords: number
-}
-
-export interface SummaryPrefsType {
-  mode: string
-  allowlist: string[]
-  denylist: string[]
-  minAutoWords: number
-  minPromptWords: number
-}
 
 // ui summary display
 export interface Summary {

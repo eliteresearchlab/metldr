@@ -124,6 +124,7 @@ fn saved<'a>(settings: &'a Value, route: &str, field: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
+mod summary_gate;
 mod word;
 
 // ---------- the key store ----------
