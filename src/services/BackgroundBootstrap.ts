@@ -1,6 +1,5 @@
 import { cacheService } from './CacheService'
-import { dictionaryService } from './DictionaryService'
-import { WordService } from './WordService'
+import { lookupWord } from './RustCore'
 import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
@@ -52,14 +51,7 @@ export class BackgroundBootstrap {
       .catch(err => log.error('side panel error', err))
 
     log.log('cache service ready (lazy init)')
-    
-    try {
-      await dictionaryService.init()
-      log.log('dictionary service ready')
-    } catch (err) {
-      log.error('dictionary init failed', (err as Error).message)
-    }
-    
+
     this.isInitialized = true
 
     chrome.runtime.onMessage.addListener((msg: BackgroundMessage, _sender, respond: ResponseCallback) => {
@@ -322,66 +314,17 @@ export class BackgroundBootstrap {
   }
 
   static _onWordLookup(msg: WordLookupMessage, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const { word, context } = msg
-        
-        if (!word || typeof word !== 'string') {
-          respond({ success: false, error: 'invalid word' })
-          return
-        }
-        
-        if (!this.isInitialized) {
-          console.log('[BackgroundBootstrap._onWordLookup] waiting for init...')
-          await this.init()
-        }
-
-        const settings = await chrome.storage.local.get(['selectedLanguages', 'dictionarySource'])
-        const languages = this._normalizeLanguages(settings.selectedLanguages)
-        
-        console.log('[BackgroundBootstrap._onWordLookup] looking up:', word, 'langs:', languages)
-
-        let detectedLang = context?.pageLang || 'en'
-        
-        if (!context?.pageLang) {
-          try {
-            const contextText = context?.fullSentence || 
-              `${context?.contextBefore || ''} ${word} ${context?.contextAfter || ''}`.trim()
-            
-            detectedLang = await WordService.detectLanguage(word, contextText)
-            console.log('[BackgroundBootstrap._onWordLookup] detected language:', detectedLang)
-          } catch (err) {
-            console.log('[BackgroundBootstrap._onWordLookup] detection failed:', (err as Error).message)
-            detectedLang = 'en'
-          }
-        } else {
-          console.log('[BackgroundBootstrap._onWordLookup] using page language hint:', detectedLang)
-        }
-
-        const priorityLangs = [detectedLang]
-        for (const lang of languages) {
-          if (lang !== detectedLang) priorityLangs.push(lang)
-        }
-        if (detectedLang !== 'en' && !languages.includes('en')) {
-          priorityLangs.push('en')
-        }
-
-        const result = await WordService.lookup(word, { ...context, languages: priorityLangs })
-
-        if (result) {
-          console.log('[BackgroundBootstrap._onWordLookup] found result, source:', result.source)
-          const cached = result.source === 'local' || result.source === 'cache'
-          analyticsService.trackWordLookup(word, cached).catch(() => {})
-          respond({ success: true, result })
-        } else {
-          console.log('[BackgroundBootstrap._onWordLookup] no result found')
-          respond({ success: false, error: 'word not found' })
-        }
-      } catch (err) {
-        log.error('onWordLookup', (err as Error).message)
-        respond({ success: false, error: (err as Error).message || 'lookup failed' })
-      }
-    })()
+    const { word, context } = msg
+    if (!word || typeof word !== 'string') {
+      respond({ success: false, error: 'invalid word' })
+      return
+    }
+    lookupWord(word, context ?? {})
+      .then(result => {
+        analyticsService.trackWordLookup(word, result.source === 'local').catch(err => log.error('word lookup analytics', (err as Error).message))
+        respond({ success: true, result })
+      })
+      .catch(err => respond({ success: false, error: (err as Error).message || 'lookup failed' }))
   }
 
   static _onGlobalChat(msg: { type: string; messages: import('../types').ChatMessage[] }, respond: ResponseCallback): void {
@@ -407,19 +350,6 @@ export class BackgroundBootstrap {
         respond({ ok: false, error: (err as Error).message || 'global chat failed' })
       }
     })()
-  }
-
-  static _normalizeLanguages(langs: unknown): string[] {
-    if (!langs) return ['en']
-
-    if (!Array.isArray(langs)) {
-      if (typeof langs === 'object' && langs !== null) {
-        return Object.values(langs).filter((l): l is string => typeof l === 'string')
-      }
-      return [String(langs)]
-    }
-
-    return langs.length > 0 ? (langs as string[]) : ['en']
   }
 
   static _enqueueSummary<T>(task: () => Promise<T>): Promise<T | { success: false; error: string }> {

@@ -124,6 +124,8 @@ fn saved<'a>(settings: &'a Value, route: &str, field: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
+mod word;
+
 // ---------- the key store ----------
 
 mod keys {
@@ -134,7 +136,7 @@ mod keys {
     const STORE: &str = "crypto";
     const KEY: &str = "aes";
 
-    async fn done(request: &IdbRequest) -> Result<JsValue, Error> {
+    pub(super) async fn done(request: &IdbRequest) -> Result<JsValue, Error> {
         let promise = js_sys::Promise::new(&mut |resolve, reject| {
             let ok = request.clone();
             let success = Closure::once_into_js(move || {
