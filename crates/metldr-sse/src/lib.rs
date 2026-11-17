@@ -2,6 +2,19 @@
 
 type Result<T> = std::result::Result<T, String>;
 
+/// One turn of a plain text conversation sent to a provider.
+#[derive(Clone, Copy, Debug)]
+pub struct Turn<'a> {
+    pub assistant: bool,
+    pub text: &'a str,
+}
+
+impl<'a> Turn<'a> {
+    pub fn user(text: &'a str) -> Self {
+        Self { assistant: false, text }
+    }
+}
+
 #[cfg(test)]
 mod checks;
 pub mod http;

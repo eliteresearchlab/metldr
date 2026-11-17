@@ -10,6 +10,7 @@ use stream::Turn;
 pub struct Client {
     http: sse::http::Http,
     model: String,
+    text_max: Option<usize>,
 }
 
 /// Response timeout when the connection does not set one.
@@ -75,6 +76,7 @@ impl Client {
         Ok(Self {
             http,
             model: model.into(),
+            text_max: None,
         })
     }
 
@@ -86,8 +88,35 @@ impl Client {
         stop: &AtomicBool,
         emit: impl FnMut(TextEvent) -> Result<()>,
     ) -> Result<crate::Usage> {
+        self.converse(system, &[sse::Turn::user(input)], stop, emit)
+            .await
+    }
+
+    /// Streams the reply to a conversation that ends with the user's turn, without tools; the
+    /// reply may be as long as a page tool answer (64 KB).
+    pub async fn turns(
+        mut self,
+        system: &str,
+        turns: &[sse::Turn<'_>],
+        stop: &AtomicBool,
+        emit: impl FnMut(TextEvent) -> Result<()>,
+    ) -> Result<crate::Usage> {
+        self.text_max = Some(65_536);
+        self.converse(system, turns, stop, emit).await
+    }
+
+    async fn converse(
+        self,
+        system: &str,
+        turns: &[sse::Turn<'_>],
+        stop: &AtomicBool,
+        emit: impl FnMut(TextEvent) -> Result<()>,
+    ) -> Result<crate::Usage> {
+        if turns.is_empty() || turns.len() > metldr_conversation::MAX_MESSAGES {
+            return Err("text conversation has no turns or too many".into());
+        }
         let turn = self
-            .send(&self.text_request(system, input), stop, emit)
+            .send(&self.text_request(system, turns), stop, emit)
             .await?;
         if !turn.calls.is_empty() {
             return Err("Chat text request returned a tool call".into());
@@ -95,9 +124,13 @@ impl Client {
         Ok(turn.usage.unwrap_or_default())
     }
 
-    fn text_request(&self, system: &str, input: &str) -> Value {
-        json!({"model":self.model,
-            "messages":[{"role":"system","content":system},{"role":"user","content":input}],
+    fn text_request(&self, system: &str, turns: &[sse::Turn<'_>]) -> Value {
+        let mut messages = vec![json!({"role":"system","content":system})];
+        for turn in turns {
+            let role = if turn.assistant { "assistant" } else { "user" };
+            messages.push(json!({"role": role, "content": turn.text}));
+        }
+        json!({"model":self.model,"messages":messages,
             "stream":true,"stream_options":{"include_usage":true},"max_tokens":4096})
     }
 
@@ -133,6 +166,7 @@ impl Client {
         let events = self.http.events(body, stop).await?;
         let sse = sse::Sse::new("Chat");
         let mut state = stream::State::default();
+        state.text_max = self.text_max;
         let mut rendered = String::new();
         events
             .frames(stop, sse, 524_288, |event, data| -> Result<()> {

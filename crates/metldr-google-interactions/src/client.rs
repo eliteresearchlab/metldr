@@ -9,6 +9,7 @@ use stream::Turn;
 pub struct Client {
     http: sse::http::Http,
     model: String,
+    text_max: Option<usize>,
 }
 
 impl Client {
@@ -52,6 +53,7 @@ impl Client {
         Ok(Self {
             http,
             model: model.into(),
+            text_max: None,
         })
     }
 
@@ -63,8 +65,35 @@ impl Client {
         stop: &AtomicBool,
         emit: impl FnMut(TextEvent) -> Result<()>,
     ) -> Result<crate::Usage> {
+        self.converse(system, &[sse::Turn::user(input)], stop, emit)
+            .await
+    }
+
+    /// Streams the reply to a conversation that ends with the user's turn, without tools; the
+    /// reply may be as long as a page tool answer (64 KB).
+    pub async fn turns(
+        mut self,
+        system: &str,
+        turns: &[sse::Turn<'_>],
+        stop: &AtomicBool,
+        emit: impl FnMut(TextEvent) -> Result<()>,
+    ) -> Result<crate::Usage> {
+        self.text_max = Some(65_536);
+        self.converse(system, turns, stop, emit).await
+    }
+
+    async fn converse(
+        self,
+        system: &str,
+        turns: &[sse::Turn<'_>],
+        stop: &AtomicBool,
+        emit: impl FnMut(TextEvent) -> Result<()>,
+    ) -> Result<crate::Usage> {
+        if turns.is_empty() || turns.len() > metldr_conversation::MAX_MESSAGES {
+            return Err("text conversation has no turns or too many".into());
+        }
         let turn = self
-            .send(&self.text_request(system, input), stop, emit)
+            .send(&self.text_request(system, turns), stop, emit)
             .await?;
         if turn.call.is_some() {
             return Err("Google Interactions text request returned a tool call".into());
@@ -72,9 +101,17 @@ impl Client {
         Ok(turn.usage)
     }
 
-    fn text_request(&self, system: &str, input: &str) -> Value {
-        json!({"model":self.model,"system_instruction":system,
-            "input":[{"type":"user_input","content":[{"type":"text","text":input}]}],
+    fn text_request(&self, system: &str, turns: &[sse::Turn<'_>]) -> Value {
+        let mut input = Vec::with_capacity(turns.len());
+        for turn in turns {
+            let kind = if turn.assistant {
+                "model_output"
+            } else {
+                "user_input"
+            };
+            input.push(json!({"type": kind, "content": [{"type": "text", "text": turn.text}]}));
+        }
+        json!({"model":self.model,"system_instruction":system,"input":input,
             "stream":true,"store":false,"generation_config":{"max_output_tokens":2048}})
     }
 
@@ -106,6 +143,7 @@ impl Client {
         let events = self.http.events(body, stop).await?;
         let sse = sse::Sse::new("Google");
         let mut state = stream::State::default();
+        state.text_max = self.text_max;
         let mut rendered = String::new();
         events
             .frames(stop, sse, 524_288, |event, data| -> Result<()> {

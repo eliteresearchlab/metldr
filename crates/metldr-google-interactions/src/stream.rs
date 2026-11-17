@@ -21,6 +21,8 @@ struct Step {
 
 #[derive(Default)]
 pub(super) struct State {
+    /// Longest reply text; `None` keeps the browser step bound.
+    pub(super) text_max: Option<usize>,
     identity: Option<(String, Option<String>)>,
     steps: BTreeMap<u64, Step>,
     terminal: Option<String>,
@@ -142,7 +144,7 @@ impl State {
                             text = parts_text(content)?;
                         }
                         self.text_bytes = self.text_bytes.saturating_add(text.len());
-                        if self.text_bytes > crate::TEXT_MAX {
+                        if self.text_bytes > self.text_max.unwrap_or(crate::TEXT_MAX) {
                             return Err("Google text exceeds bound".into());
                         }
                     }
@@ -199,7 +201,7 @@ impl State {
                     ("model_output", "text") => {
                         let text = string(delta, "text")?;
                         self.text_bytes = self.text_bytes.saturating_add(text.len());
-                        if self.text_bytes > crate::TEXT_MAX {
+                        if self.text_bytes > self.text_max.unwrap_or(crate::TEXT_MAX) {
                             return Err("Google text exceeds bound".into());
                         }
                         step.text.push_str(text);

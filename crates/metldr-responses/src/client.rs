@@ -65,6 +65,7 @@ const PRESENTATION_BOUNDS: Bounds = Bounds {
 pub struct Client {
     http: sse::http::Http,
     model: String,
+    text_max: Option<usize>,
 }
 
 impl Client {
@@ -108,6 +109,7 @@ impl Client {
         Ok(Self {
             http,
             model: model.into(),
+            text_max: None,
         })
     }
 
@@ -119,9 +121,36 @@ impl Client {
         stop: &AtomicBool,
         emit: impl FnMut(TextEvent) -> Result<()>,
     ) -> Result<crate::Usage> {
+        self.converse(system, &[sse::Turn::user(input)], stop, emit)
+            .await
+    }
+
+    /// Streams the reply to a conversation that ends with the user's turn, without tools; the
+    /// reply may be as long as a page tool answer (64 KB).
+    pub async fn turns(
+        mut self,
+        system: &str,
+        turns: &[sse::Turn<'_>],
+        stop: &AtomicBool,
+        emit: impl FnMut(TextEvent) -> Result<()>,
+    ) -> Result<crate::Usage> {
+        self.text_max = Some(65_536);
+        self.converse(system, turns, stop, emit).await
+    }
+
+    async fn converse(
+        self,
+        system: &str,
+        turns: &[sse::Turn<'_>],
+        stop: &AtomicBool,
+        emit: impl FnMut(TextEvent) -> Result<()>,
+    ) -> Result<crate::Usage> {
+        if turns.is_empty() || turns.len() > metldr_conversation::MAX_MESSAGES {
+            return Err("text conversation has no turns or too many".into());
+        }
         let turn = self
             .send(
-                &self.text_request(system, input),
+                &self.text_request(system, turns),
                 stop,
                 emit,
                 BROWSER_BOUNDS,
@@ -134,9 +163,16 @@ impl Client {
         Ok(turn.usage)
     }
 
-    fn text_request(&self, system: &str, input: &str) -> Value {
-        json!({"model":self.model,"instructions":system,
-            "input":[{"role":"user","content":[{"type":"input_text","text":input}]}],
+    fn text_request(&self, system: &str, turns: &[sse::Turn<'_>]) -> Value {
+        let mut input = Vec::with_capacity(turns.len());
+        for turn in turns {
+            let (role, kind) = match turn.assistant {
+                true => ("assistant", "output_text"),
+                false => ("user", "input_text"),
+            };
+            input.push(json!({"role": role, "content": [{"type": kind, "text": turn.text}]}));
+        }
+        json!({"model":self.model,"instructions":system,"input":input,
             "stream":true,"store":false,"truncation":"disabled","max_output_tokens":2048})
     }
 
@@ -204,6 +240,7 @@ impl Client {
         let sse = sse::Sse::with_bound("Responses", bounds.sse);
         let mut state =
             stream::State::with_limits(bounds.argument, bounds.events, bounds.pause_at_call);
+        state.text_max = self.text_max;
         let mut rendered = String::new();
         events
             .frames(stop, sse, bounds.stream, |event, data| -> Result<()> {
