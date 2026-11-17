@@ -87,15 +87,20 @@ async function copyRune() {
   const source = await readFile(join(root, 'crates/metldr-panel/src/ui_bridge/rune/fonts.rs'), 'utf8');
   const list = constant => {
     const start = source.indexOf(`const ${constant}:`);
-    return [...source.slice(start, source.indexOf('];', start)).matchAll(/"([^"]+\.tt[fc])"/g)].map(match => match[1]);
+    const block = source.slice(start, source.indexOf('];', start));
+    return Array.from(block.matchAll(/"([^"]+\.tt[fc])"/g), match => match[1]);
   };
   const names = list('NAMES');
   const fallbacks = list('FALLBACKS');
+  const cjk = list('CJK');
   const fonts = join(output, 'fonts');
   await mkdir(fonts, { recursive: true });
-  for (const name of names) await copyFile(join(root, 'crates/metldr-panel/assets/fonts', name), join(fonts, name));
-  for (const name of fallbacks) await copyFile(join(root, 'crates/metldr-panel/assets/fonts/fallback', name), join(fonts, name));
-  await writeFile(join(fonts, 'manifest.json'), JSON.stringify({ fonts: names, fallbacks }));
+  const assets = join(root, 'crates/metldr-panel/assets/fonts');
+  for (const name of names) await copyFile(join(assets, name), join(fonts, name));
+  for (const name of [...fallbacks, ...cjk]) {
+    await copyFile(join(assets, 'fallback', name), join(fonts, name));
+  }
+  await writeFile(join(fonts, 'manifest.json'), JSON.stringify({ fonts: names, fallbacks, cjk }));
 }
 
 export async function buildChat() {

@@ -23,9 +23,9 @@ pub(super) const NAMES: [&str; 13] = [
     "939c4f875ee75fbb-s.ttf",
     "bb3ef058b751a6ad-s.p.ttf",
 ];
-/// Approved fallbacks for other scripts, symbols and emoji (about 33 MB, mostly CJK and emoji),
-/// added after the first frame so a cold open neither fetches nor parses them first.
-pub(super) const FALLBACKS: [&str; 10] = [
+/// Approved fallbacks for other scripts, symbols and emoji (about 13 MB, mostly emoji), added
+/// after the first frame so a cold open neither fetches nor parses them first.
+pub(super) const FALLBACKS: [&str; 9] = [
     "NotoSansHebrew-Regular.ttf",
     "NotoSansArabic-Regular.ttf",
     "NotoSansDevanagari-Regular.ttf",
@@ -34,9 +34,10 @@ pub(super) const FALLBACKS: [&str; 10] = [
     "NotoSansSymbols-Regular.ttf",
     "NotoSansSymbols2-Regular.ttf",
     "NotoSansMath-Regular.ttf",
-    "NotoSansCJK-Regular.ttc",
     "NotoColorEmoji.ttf",
 ];
+/// The CJK collection (about 19.5 MB), added only once the chat lays out CJK text.
+pub(super) const CJK: [&str; 1] = ["NotoSansCJK-Regular.ttc"];
 /// Upper bound for one file. The largest approved file, the CJK collection, is about 19.5 MB.
 const MAX_FONT_BYTES: usize = 24 * 1024 * 1024;
 
@@ -45,6 +46,16 @@ pub(super) const FAMILIES: (&str, &str) = ("Inter", "JetBrains Mono");
 thread_local! {
     static RETAINED: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
     static RETAINED_FALLBACKS: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
+    static RETAINED_CJK: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
+}
+
+/// A group of fonts the page adds after start, by its manifest name.
+pub(super) fn group(name: &str) -> Option<&'static [&'static str]> {
+    match name {
+        "fallbacks" => Some(&FALLBACKS),
+        "cjk" => Some(&CJK),
+        _ => None,
+    }
 }
 
 /// Copies the page's font buffers into the module and checks them against `names`.
@@ -89,10 +100,11 @@ pub(super) fn retain(fonts: Vec<Vec<u8>>) -> &'static [&'static [u8]] {
     RETAINED.with(|retained| *retained.get_or_init(|| leak(fonts)))
 }
 
-/// Keeps the fallbacks like [`retain`]. `None` when they were already kept, so a document adds
-/// them to the renderer once.
-pub(super) fn retain_fallbacks(fonts: Vec<Vec<u8>>) -> Option<&'static [&'static [u8]]> {
-    RETAINED_FALLBACKS.with(|retained| {
+/// Keeps a group added after start like [`retain`]. `None` when it was already kept, so a
+/// document adds each group to the renderer once.
+pub(super) fn retain_group(name: &str, fonts: Vec<Vec<u8>>) -> Option<&'static [&'static [u8]]> {
+    let cell = if name == "cjk" { &RETAINED_CJK } else { &RETAINED_FALLBACKS };
+    cell.with(|retained| {
         let mut fresh = false;
         let kept = *retained.get_or_init(|| {
             fresh = true;

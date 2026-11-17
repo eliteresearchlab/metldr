@@ -8,22 +8,25 @@ async function load(url) {
   return response;
 }
 
-const loadFiles = names => Promise.all(names.map(async name => new Uint8Array(await (await load(`/chat/fonts/${name}`)).arrayBuffer())));
+async function loadFile(name) {
+  const response = await load(`/chat/fonts/${name}`);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+const loadFiles = names => Promise.all(names.map(loadFile));
 const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
 const idle = () => new Promise(resolve => requestIdleCallback(resolve, { timeout: 1000 }));
 
-// Two frames in, the chat has drawn; the fallbacks are fetched then, and parsed once the page is
-// idle, so the copy into the renderer never delays the chat's first interactive frame. Without
-// them the chat still works, so a failure is only logged.
-async function addFallbacks(add) {
+// A font group from the manifest, fetched now and parsed once the page is idle, so the copy into
+// the renderer never delays a frame the user is waiting for. Without it the chat still works, so
+// a failure is only logged.
+async function addGroup(add, group) {
   try {
-    await nextFrame();
-    await nextFrame();
-    const files = await loadFiles((await manifest).fallbacks);
+    const files = await loadFiles((await manifest)[group]);
     await idle();
-    add(files);
+    add(group, files);
   } catch (error) {
-    console.error("metldr chat could not load its fallback fonts", error);
+    console.error(`metldr chat could not load its ${group} fonts`, error);
   }
 }
 
@@ -70,9 +73,11 @@ if (!(await canDraw())) {
 } else try {
   const { default: init, start_rune_chat, stop_rune_chat, add_rune_chat_fonts } = await glue;
   const [files] = await Promise.all([fonts, init()]);
-  start_rune_chat(capturePage, files);
+  // The chat asks for the CJK collection (about 19.5 MB) only once it lays out CJK text.
+  start_rune_chat(capturePage, files, group => addGroup(add_rune_chat_fonts, group));
   window.addEventListener("pagehide", stop_rune_chat, { once: true });
-  addFallbacks(add_rune_chat_fonts);
+  // Two frames in, the chat has drawn; the other fallbacks follow.
+  nextFrame().then(nextFrame).then(() => addGroup(add_rune_chat_fonts, "fallbacks"));
 } catch (error) {
   explain(error);
 }

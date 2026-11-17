@@ -2087,10 +2087,23 @@ const SUMMARY_REQUEST: &str = "Summarize this page.";
 
 thread_local! {
     static HOST: RefCell<Option<AppHandle<State>>> = const { RefCell::new(None) };
+    /// The page's font loader, called once with `"cjk"` when the chat first lays out CJK text.
+    static WANT_FONTS: RefCell<Option<Function>> = const { RefCell::new(None) };
+}
+
+/// Asks the page for the CJK font the first frame CJK text was laid out.
+fn ask_for_cjk() {
+    if ::rune::text::cjk_seen() {
+        WANT_FONTS.with(|want| {
+            if let Some(want) = want.borrow_mut().take() {
+                let _ = want.call1(&JsValue::NULL, &JsValue::from_str("cjk"));
+            }
+        });
+    }
 }
 
 #[wasm_bindgen]
-pub fn start_rune_chat(capture: Function, fonts: js_sys::Array) -> Result<(), JsValue> {
+pub fn start_rune_chat(capture: Function, fonts: js_sys::Array, want_fonts: Function) -> Result<(), JsValue> {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if host.is_some() {
@@ -2100,6 +2113,7 @@ pub fn start_rune_chat(capture: Function, fonts: js_sys::Array) -> Result<(), Js
         }
         let fonts = fonts::read(&fonts, &fonts::NAMES)?;
         crate::flow::install_capture(capture);
+        WANT_FONTS.with(|want| *want.borrow_mut() = Some(want_fonts));
         let spec = AppSpec {
             fonts: fonts::retain(fonts),
             families: fonts::FAMILIES,
@@ -2113,6 +2127,7 @@ pub fn start_rune_chat(capture: Function, fonts: js_sys::Array) -> Result<(), Js
             .full_viewport()
             .tab_visits_controls(true)
             .on_frame_drawn(|runtime| {
+                ask_for_cjk();
                 if let Some(updates) = &runtime.state.updates {
                     runtime.state.answers.drawn(
                         if runtime.state.settings_open || runtime.state.conversations.is_open() {
@@ -2135,11 +2150,13 @@ pub fn start_rune_chat(capture: Function, fonts: js_sys::Array) -> Result<(), Js
     })
 }
 
-/// Adds the fallback fonts (`fonts::FALLBACKS`) once the chat has drawn. Text in other scripts
-/// lays out again with them on the next frame. A second call in the same document does nothing.
+/// Adds a font group the page loads after start: `fallbacks` once the chat has drawn, `cjk`
+/// once the chat asks for it. Text in those scripts lays out again on the next frame. A group
+/// added before does nothing.
 #[wasm_bindgen]
-pub fn add_rune_chat_fonts(fonts: js_sys::Array) -> Result<(), JsValue> {
-    if let Some(fonts) = fonts::retain_fallbacks(fonts::read(&fonts, &fonts::FALLBACKS)?) {
+pub fn add_rune_chat_fonts(group: String, fonts: js_sys::Array) -> Result<(), JsValue> {
+    let names = fonts::group(&group).ok_or_else(|| crate::err("Unknown font group."))?;
+    if let Some(fonts) = fonts::retain_group(&group, fonts::read(&fonts, names)?) {
         ::rune::text::add_fonts(fonts);
         HOST.with(|host| {
             if let Some(host) = host.borrow().as_ref() {
