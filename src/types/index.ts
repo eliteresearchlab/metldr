@@ -466,13 +466,6 @@ export interface WordLookupMessage {
   }
 }
 
-export interface ChatMessageRequest {
-  type: 'CHAT_MESSAGE'
-  model?: string
-  messages: ChatMessage[]
-  pageContext?: PageContext
-}
-
 export interface CheckHealthMessage {
   type: 'CHECK_OLLAMA_HEALTH'
 }
@@ -494,19 +487,14 @@ export type BackgroundMessage =
   | GenerateReplySuggestionsMessage
   | ExtractAndSummarizeMessage
   | WordLookupMessage
-  | ChatMessageRequest
   | CheckHealthMessage
   | GetEmailCacheMessage
   | SetEmailCacheMessage
   | { type: 'EXTRACT_ONLY'; tabId: number }
-  | { type: 'RAG_INDEX'; entry: VectorEntry }
-  | { type: 'RAG_INDEX_CHUNKS'; text: string; metadata: Record<string, unknown> }
-  | { type: 'RAG_SEARCH'; query: string; limit?: number }
   | { type: 'RAG_HAS_INDEXED_CONTENT'; sourceUrl: string }
   | { type: 'RAG_SEARCH_WITH_CONTEXT'; query: string; limit?: number; sourceUrl?: string }
   | { type: 'RAG_IS_INDEXING'; sourceId: string }
   | { type: 'RAG_ENSURE_INDEXED'; text: string; metadata: Record<string, unknown> }
-  | { type: 'RAG_INDEXING_STATUS'; sourceId: string }
   | { type: 'GLOBAL_CHAT'; messages: ChatMessage[] }
   | { type: 'PDF_SUMMARIZE'; url: string }
   | { type: 'PDF_EXTRACT_TEXT'; url: string }
@@ -733,12 +721,6 @@ export interface VectorEntry {
   content: string
   metadata: Record<string, unknown>
   timestamp: number
-}
-
-export interface SearchResult {
-  entry: VectorEntry
-  score: number
-  matchType?: 'semantic' | 'keyword' | 'hybrid'
 }
 
 export interface PdfChunk {

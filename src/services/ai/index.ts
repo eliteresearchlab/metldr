@@ -4,7 +4,7 @@ export { OllamaProvider, ollamaProvider } from './OllamaProvider'
 export { localModels } from './LocalModelProvider'
 export { aiGateway } from './AIGateway'
 export { mapReduceService } from './MapReduceService'
-export { AIPrompts, type EmailContext, type PageChatContext } from './AIPrompts'
+export { AIPrompts, type EmailContext } from './AIPrompts'
 
 export type {
   AICompleteRequest,

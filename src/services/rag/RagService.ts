@@ -102,18 +102,6 @@ export class RagService {
     }
   }
 
-  async index(entry: VectorEntry): Promise<void> {
-    const startTime = Date.now()
-    try {
-      console.log(`[RagService] Indexing single entry: ${entry.id}`)
-      const embedding = await embeddingProvider.embedDocument(entry.content)
-      await vectorStore.add(entry, embedding)
-      console.log(`[RagService] Indexed ${entry.id} (${Date.now() - startTime}ms)`)
-    } catch (err) {
-      console.error('[RagService] Single indexing failed:', err)
-    }
-  }
-
   async indexChunks(text: string, metadata: ChunkMetadata, onProgress?: (percent: number) => void): Promise<void> {
     const wallClockStart = Date.now()
     await this.ensureMetadataLoaded()
@@ -445,14 +433,6 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
 
     await this.indexChunks(text, metadata, onProgress)
     return 'indexed-now'
-  }
-
-  async getIndexingStatus(sourceId: string): Promise<'indexed' | 'in-progress' | 'needed'> {
-    if (this.activeIndexing.has(sourceId)) return 'in-progress'
-    
-    await this.ensureMetadataLoaded()
-    const hasContent = await this.hasIndexedContent(sourceId)
-    return hasContent ? 'indexed' : 'needed'
   }
 }
 

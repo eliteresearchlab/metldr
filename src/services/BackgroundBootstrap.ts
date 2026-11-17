@@ -19,14 +19,11 @@ import type {
   GenerateReplySuggestionsMessage,
   ExtractAndSummarizeMessage,
   WordLookupMessage,
-  ChatMessageRequest,
   BackgroundMessage,
   ResponseCallback,
   SummaryPrefsConfig,
-  ClassifiedPage,
   ClassifyResult,
   SummaryResult,
-  ChatMessage,
   ExtractedData,
   GetEmailCacheMessage,
   SetEmailCacheMessage
@@ -114,11 +111,6 @@ export class BackgroundBootstrap {
         return true
       }
 
-      if (msg.type === 'CHAT_MESSAGE') {
-        this._onChatMessage(msg as ChatMessageRequest, respond)
-        return true
-      }
-
       if (msg.type === 'GLOBAL_CHAT') {
         this._onGlobalChat(msg as { type: string; messages: import('../types').ChatMessage[] }, respond)
         return true
@@ -131,16 +123,6 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'SET_EMAIL_CACHE') {
         this._onSetEmailCache(msg as SetEmailCacheMessage, respond)
-        return true
-      }
-
-      if (msg.type === 'RAG_INDEX') {
-        this._onRagIndex(msg as { type: string; entry: import('../types').VectorEntry }, respond)
-        return true
-      }
-
-      if (msg.type === 'RAG_INDEX_CHUNKS') {
-        this._onRagIndexChunks(msg as { type: string; text: string; metadata: any }, respond)
         return true
       }
 
@@ -162,11 +144,6 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'RAG_ENSURE_INDEXED') {
         this._onRagEnsureIndexed(msg as { type: string; text: string; metadata: any }, respond)
-        return true
-      }
-
-      if (msg.type === 'RAG_INDEXING_STATUS') {
-        this._onRagIndexingStatus(msg as { type: string; sourceId: string }, respond)
         return true
       }
 
@@ -439,38 +416,6 @@ export class BackgroundBootstrap {
     })()
   }
 
-  static _onChatMessage(msg: ChatMessageRequest, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const { model, messages, pageContext } = msg
-
-        if (!messages?.length) {
-          respond({ ok: false, error: 'no messages provided' })
-          return
-        }
-
-        console.log('[BackgroundBootstrap._onChatMessage] processing', messages.length, 'messages, model:', model || 'auto')
-        
-        const result = await PageService.chat(messages, pageContext || null, model || null)
-        
-        if (!result) {
-          log.error('onChatMessage no result from PageService')
-          respond({ ok: false, error: 'no response from chat service' })
-          return
-        }
-        
-        respond({
-          ...result,
-          timing: result.timing || null
-        })
-        
-      } catch (err) {
-        log.error('onChatMessage error:', (err as Error).message)
-        respond({ ok: false, error: (err as Error).message || 'chat processing failed' })
-      }
-    })()
-  }
-
   static _onGlobalChat(msg: { type: string; messages: import('../types').ChatMessage[] }, respond: ResponseCallback): void {
     (async () => {
       try {
@@ -642,48 +587,6 @@ export class BackgroundBootstrap {
     })()
   }
 
-  static _onRagIndex(msg: { type: string; entry: import('../types').VectorEntry }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        await ragService.index(msg.entry)
-        respond({ success: true })
-      } catch (err) {
-        log.error('onRagIndex', (err as Error).message)
-        respond({ success: false, error: (err as Error).message })
-      }
-    })()
-  }
-
-  static _onRagIndexChunks(msg: { type: string; text: string; metadata: any }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const sourceUrl = msg.metadata?.sourceUrl || msg.metadata?.sourceId || 'unknown'
-        const sourceId = msg.metadata?.sourceId || sourceUrl
-        
-        const broadcastProgress = (percent: number) => {
-          console.log('[BackgroundBootstrap] Broadcasting progress:', percent, 'for', sourceId.slice(0, 40))
-          chrome.runtime.sendMessage({
-            type: 'INDEXING_PROGRESS',
-            sourceId,
-            percent
-          }).catch(() => {})
-        }
-        
-        await concurrencyManager.execute('indexing', sourceUrl, async (signal) => {
-          if (signal.aborted) throw new Error('Indexing aborted')
-          await ragService.indexChunks(msg.text, msg.metadata, broadcastProgress)
-        })
-        respond({ success: true })
-      } catch (err) {
-        const errMsg = (err as Error).message
-        if (errMsg !== 'Indexing aborted' && errMsg !== 'Operation cancelled') {
-          log.error('onRagIndexChunks', errMsg)
-        }
-        respond({ success: false, error: errMsg })
-      }
-    })()
-  }
-
   static _onRagHasIndexedContent(msg: { type: string; sourceUrl: string }, respond: ResponseCallback): void {
     (async () => {
       try {
@@ -735,18 +638,6 @@ export class BackgroundBootstrap {
           log.error('onRagEnsureIndexed', errMsg)
         }
         respond({ success: false, error: errMsg })
-      }
-    })()
-  }
-
-  static _onRagIndexingStatus(msg: { type: string; sourceId: string }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const status = await ragService.getIndexingStatus(msg.sourceId)
-        respond({ success: true, status })
-      } catch (err) {
-        log.error('onRagIndexingStatus', (err as Error).message)
-        respond({ success: false, error: (err as Error).message, status: 'needed' })
       }
     })()
   }

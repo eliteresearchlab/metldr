@@ -7,11 +7,6 @@ export interface EmailContext {
   snippet: string
 }
 
-export interface PageChatContext {
-  content: string
-  title?: string
-}
-
 export const AIPrompts = {
 
   email: {
@@ -131,46 +126,5 @@ Generate 3-5 reply options with varying tones (professional/friendly/brief/detai
         }
       }
     }
-  },
-
-  chat: {
-    withContext: (ctx: PageChatContext): string => {
-      const MAX_CONTEXT = 50000
-      let content = ctx.content
-      if (content.length > MAX_CONTEXT) {
-        const headLen = Math.floor(MAX_CONTEXT * 0.6)
-        const tailLen = MAX_CONTEXT - headLen
-        content = content.slice(0, headLen) + 
-          '\n\n[...content truncated for brevity...]\n\n' + 
-          content.slice(-tailLen)
-      }
-
-      return `you are an assistant helping the user understand an article.
-
-ARTICLE CONTENT:
-${content}
-
-RULES:
-1. answer based ONLY on the article above
-2. if info isn't in the article, say so
-3. be concise (2-3 sentences unless more needed)`
-    },
-
-    noContext: 'you are a helpful assistant. be concise.'
-  },
-
-  page: {
-    summarySystem: `you are a factual summariser. respond ONLY with bullet points.`,
-
-    summaryUser: (snippet: string, title: string, author?: string): string => {
-      let prefix = `Title: ${title}\n`
-      if (author) prefix += `Author: ${author}\n`
-      return `${prefix}\n${snippet}\n\nSummarize the above in 3 bullet points. Be factual and concise.`
-    }
-  },
-
-  word: {
-    defineSystem: 'you are a concise dictionary. respond in 15 words or less.',
-    define: (word: string): string => `Define "${word}" briefly.`
   }
 }

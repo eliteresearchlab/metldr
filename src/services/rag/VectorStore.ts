@@ -4,13 +4,6 @@ import type { VectorEntry } from '../../types'
 import { KeywordIndex } from '../../../crates/metldr-core/pkg/metldr_core'
 import { loadRustCore } from '../RustCore'
 
-// one chunk in the Rust index, which keeps its text for page chat context and search sources
-function indexEntry(index: KeywordIndex, entry: VectorEntry): void {
-  const meta = entry.metadata ?? {}
-  index.add(entry.id, entry.type, String(meta.title ?? ''), entry.content, String(meta.sourceUrl ?? ''),
-    String(meta.sourceId ?? ''), meta.isSummary === true)
-}
-
 export class VectorStore {
   private operationQueue: Promise<void> = Promise.resolve()
   private pendingSaveTimeout: ReturnType<typeof setTimeout> | null = null
@@ -22,7 +15,6 @@ export class VectorStore {
   
   // sandbox lifecycle tracking
   private lastSandboxId: string | null = null
-  private voyIndexLoadedAt: number = 0
 
   async add(entry: VectorEntry, embedding: Float32Array): Promise<void> {
     this.pendingAdds++
@@ -52,8 +44,11 @@ export class VectorStore {
     return this.keywordIndex!
   }
 
+  // the Rust index keeps each chunk's text for page chat context and search sources
   private remember(entry: VectorEntry): void {
-    indexEntry(this.keywordIndex!, entry)
+    const meta = entry.metadata ?? {}
+    this.keywordIndex!.add(entry.id, entry.type, String(meta.title ?? ''), entry.content,
+      String(meta.sourceUrl ?? ''), String(meta.sourceId ?? ''), meta.isSummary === true)
   }
 
   async addBatch(entries: Array<{ entry: VectorEntry; embedding: Float32Array }>): Promise<void> {
@@ -139,7 +134,6 @@ export class VectorStore {
         // convert bytes back to string for voyLoad
         const indexStr = new TextDecoder().decode(indexData)
         await localModels.voyLoad(indexStr)
-        this.voyIndexLoadedAt = Date.now()
         console.log(`[VectorStore] VOY index loaded from IDB (${Date.now() - startTime}ms)`)
       } catch (err) {
         console.error('[VectorStore] VOY load failed, starting fresh:', err)

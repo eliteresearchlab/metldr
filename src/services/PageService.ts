@@ -1,8 +1,7 @@
-import { OllamaService } from './OllamaService'
 import { cacheService } from './CacheService'
-import { aiGateway, AIPrompts, mapReduceService } from './ai'
+import { aiGateway, mapReduceService } from './ai'
 import { analyticsService } from './AnalyticsService'
-import type { ExtractedData, SummaryTiming, PageSummary, ChatMessage, PageContext, ChatResult } from '../types'
+import type { ExtractedData, SummaryTiming, PageSummary, ChatMessage, ChatResult } from '../types'
 
 import { ragService } from './rag/RagService'
 
@@ -174,64 +173,6 @@ export class PageService {
     if (summaryParts.length === 0) return context
     
     return `SUMMARIES:\n${summaryParts.join('\n')}\n\nDETAILED SOURCES:\n${context}`
-  }
-
-  static async chat(messages: ChatMessage[], pageContext: PageContext | null, _model: string | null): Promise<ChatResult> {
-    const startTime = performance.now()
-    
-    let contextText = pageContext?.fullContent || ''
-
-    const MAX_CONTEXT = 50000
-    if (contextText.length > MAX_CONTEXT) {
-      const headLen = Math.floor(MAX_CONTEXT * 0.6)
-      const tailLen = MAX_CONTEXT - headLen
-      contextText = contextText.slice(0, headLen) + 
-        '\n\n[...content truncated for brevity...]\n\n' + 
-        contextText.slice(-tailLen)
-    }
-
-    const lastUserMsg = messages.filter(m => m.role === 'user').pop()?.content || ''
-    
-    let ragContext = ''
-    if (lastUserMsg) {
-      try {
-        ragContext = await ragService.searchWithContext(lastUserMsg, 3)
-        if (ragContext) {
-          ragContext = '\n\nRELEVANT KNOWLEDGE FROM OTHER DOCUMENTS:\n' + ragContext
-        }
-      } catch (err) {
-        console.warn('[PageService] RAG search failed', err)
-      }
-    }
-
-    const systemPrompt = (contextText 
-      ? AIPrompts.chat.withContext({ content: contextText })
-      : AIPrompts.chat.noContext) + ragContext
-
-    const chatHistory = messages
-      .filter(m => m.content !== lastUserMsg)
-      .slice(-6)
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
-
-    const result = await aiGateway.complete({
-      systemPrompt,
-      userPrompt: lastUserMsg,
-      messages: chatHistory,
-      temperature: 0.3
-    })
-    
-    if (result.ok) {
-      return {
-        ok: true,
-        content: result.content,
-        timing: { 
-          total: Math.round(performance.now() - startTime), 
-          model: result.model || (aiGateway.getPreference() === 'chrome-ai' ? 'gemini-nano' : 'ollama')
-        }
-      }
-    }
-
-    return { ok: false, error: result.error || 'ai generation failed' }
   }
 
   static async globalChat(
