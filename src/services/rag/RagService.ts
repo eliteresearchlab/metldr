@@ -5,7 +5,6 @@ import { databaseService, DB_CONFIGS } from '../DatabaseService'
 import { aiGateway } from '../ai/AIGateway'
 import { LRUCache } from 'lru-cache'
 import type { VectorEntry, SearchResult } from '../../types'
-import { rankHybrid, type HybridRankOptions } from './rankFusion'
 
 interface ChunkMetadata {
   sourceId: string
@@ -37,11 +36,6 @@ const QUERY_CACHE_MAX = 100
 const QUERY_CACHE_TTL = 5 * 60 * 1000
 const WHITESPACE_PATTERN = /\s+/
 const COLLAPSED_WHITESPACE_PATTERN = /\s+/g
-// post-fusion adjustments carried over from the previous scorer; fusion itself is rank-based RRF (rankFusion.ts)
-const HYBRID_RANK_OPTIONS: HybridRankOptions<VectorEntry> = {
-  summaryBoost: { points: 8, isSummary: entry => entry.metadata?.isSummary === true },
-  sourceDiversity: { penaltyPerRepeat: 15, sourceOf: entry => (entry.metadata?.sourceUrl as string) || '' }
-}
 const LLM_TERM_QUOTES_PATTERN = /[\"\'\n]/g
 const LLM_TERM_SEPARATOR_PATTERN = /[,;]/
 const TRAILING_SLASH_PATTERN = /\/$/
@@ -64,7 +58,6 @@ export class RagService {
   private metadataLoaded = false
   private loadingPromise: Promise<void> | null = null
   private activeIndexing = new Map<string, Promise<void>>()
-  private lastStats: IndexingStats | null = null
   // LRU cache for query results (instant repeat queries)
   private queryCache = new LRUCache<string, SearchResult[]>({
     max: QUERY_CACHE_MAX,
@@ -170,7 +163,6 @@ export class RagService {
           stats.skipped = true
           stats.skipReason = 'unchanged'
           stats.wallClockMs = Date.now() - wallClockStart
-          this.lastStats = stats
           report(100) // done (cached)
           console.log(`[RagService] SKIPPED: ${metadata.sourceId.slice(0, 50)} (content unchanged, VOY verified) [${stats.wallClockMs}ms]`)
           return
@@ -187,7 +179,6 @@ export class RagService {
           stats.skipped = true
           stats.skipReason = 'backfilled'
           stats.wallClockMs = Date.now() - wallClockStart
-          this.lastStats = stats
           report(100)
           console.log(`[RagService] SKIPPED: ${metadata.sourceId.slice(0, 50)} (VOY has data, backfilled metadata) [${stats.wallClockMs}ms]`)
           return
@@ -204,7 +195,6 @@ export class RagService {
         stats.skipped = true
         stats.skipReason = 'no_chunks'
         stats.wallClockMs = Date.now() - wallClockStart
-        this.lastStats = stats
         report(100)
         console.log(`[RagService] SKIPPED: No chunks to index [${stats.wallClockMs}ms]`)
         return
@@ -247,7 +237,6 @@ export class RagService {
       stats.storageMs = Date.now() - persistStart
       
       stats.wallClockMs = Date.now() - wallClockStart
-      this.lastStats = stats
       
       // invalidate query cache (new content indexed)
       this.queryCache.clear()
@@ -257,7 +246,6 @@ export class RagService {
       console.log(`[RagService] Timing: total=${stats.wallClockMs}ms, embed=${stats.embeddingMs}ms, persist=${stats.storageMs}ms`)
     } catch (err) {
       stats.wallClockMs = Date.now() - wallClockStart
-      this.lastStats = stats
       report(100) // end on error too
       console.error(`[RagService] Chunk indexing FAILED after ${stats.wallClockMs}ms:`, err)
     }
@@ -326,21 +314,11 @@ export class RagService {
       const expanded = await this.expandQueryWithLLM(query)
       const processed = this.preprocessQuery(expanded)
       
-      // 2. parallel retrieval: dense hits and BM25 hits, each best first
+      // 2. dense neighbours and BM25 hits, fused by rank in Rust
       const queryEmbedding = await embeddingProvider.embedQuery(processed)
-      const [denseHits, lexicalHits] = await Promise.all([
-        vectorStore.search(Array.from(queryEmbedding), limit * 5),
-        vectorStore.searchKeyword(processed, limit * 5)
-      ])
-      
-      // 3. rank-based Reciprocal Rank Fusion (k = 60), then the summary boost and the source-diversity penalty
-      const fused = rankHybrid(denseHits, lexicalHits, HYBRID_RANK_OPTIONS)
-      
-      const results: SearchResult[] = fused.slice(0, limit).map(hit => ({
-        entry: hit.item,
-        score: Math.round(hit.score),
-        matchType: hit.matchType
-      }))
+      const results = (await vectorStore.rank(processed, Array.from(queryEmbedding), limit * 5))
+        .slice(0, limit)
+        .map(hit => ({ ...hit, score: Math.round(hit.score) }))
       
       // cache results
       this.queryCache.set(cacheKey, results)
@@ -439,9 +417,6 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
           return ''
         }
       }
-      
-      // sort by score
-      filtered.sort((a, b) => b.score - a.score)
       
       const contextParts = filtered.slice(0, limit).map((r, i) => {
         const meta = r.entry.metadata || {}
@@ -639,18 +614,6 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
 
   isIndexing(sourceId: string): boolean {
     return this.activeIndexing.has(sourceId)
-  }
-
-  getActiveIndexingCount(): number {
-    return this.activeIndexing.size
-  }
-
-  getLastStats(): IndexingStats | null {
-    return this.lastStats
-  }
-  
-  getMetadataCount(): number {
-    return this.contentHashes.size
   }
 
   // unified entry point: check if indexed, wait if in-progress, or index if needed
