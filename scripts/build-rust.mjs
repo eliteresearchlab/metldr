@@ -117,11 +117,6 @@ async function runPool(tasks, limit) {
   if (failure) throw failure;
 }
 
-function crateEnv(crate) {
-  if (!crate.rustflags) return cargoEnv;
-  return { ...cargoEnv, RUSTFLAGS: [cargoEnv.RUSTFLAGS, crate.rustflags].filter(Boolean).join(' ') };
-}
-
 function cargoBuildArgs(crate) {
   const args = ['--locked', '--manifest-path', join('crates', crate.name, 'Cargo.toml'), '--lib', '--target', 'wasm32-unknown-unknown'];
   if (crate.features) args.push('--features', crate.features);
@@ -149,14 +144,14 @@ try {
   if (isCheck) {
     for (const crate of crates) {
       const args = ['check', ...cargoBuildArgs(crate)];
-      await runAsync('cargo', args, `Cargo (${crate.name})`, false, crateEnv(crate));
+      await runAsync('cargo', args, `Cargo (${crate.name})`);
       if (failure) throw failure;
     }
   } else {
     await runPool(crates.map(crate => async () => {
       const targetDir = wasmTargetDir(crate);
       const args = ['build', '--profile', profile, ...cargoBuildArgs(crate), '--target-dir', targetDir];
-      await runAsync('cargo', args, `Cargo (${crate.name})`, false, crateEnv(crate));
+      await runAsync('cargo', args, `Cargo (${crate.name})`);
       if (failure) return;
       const wasm = join(targetDir, 'wasm32-unknown-unknown', profile, `${crate.artifact ?? crate.module}.wasm`);
       // An unchanged wasm already has its bindings: skip wasm-bindgen when the wasm's hash
