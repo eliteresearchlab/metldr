@@ -1302,7 +1302,11 @@ fn allowed_method(method: &str) -> bool {
             | "Runtime.evaluate"
             | "Runtime.callFunctionOn"
             | "Runtime.releaseObject"
+            | "Runtime.releaseObjectGroup"
             | "Runtime.runIfWaitingForDebugger"
+            | "DOM.describeNode"
+            | "DOM.resolveNode"
+            | "DOM.getFrameOwner"
     )
 }
 

@@ -2,10 +2,13 @@ use super::*;
 impl Actor {
     pub(super) fn result(&mut self, id: CallId, result: runtime::Result<Value>) -> Result<()> {
         let pending = self.pending.remove(&id).ok_or("unknown actor response")?;
+        if let Work::Page(job) = pending.work {
+            let _ = job.reply.send(pending.prevented.map_or(result, Err));
+            return Ok(());
+        }
         let context = pending.context;
         let guarded = (|| -> Result<Value> {
-            let value =
-                result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
+            let value = result.map_err(|_| "browser command failed")?;
             if !matches!(pending.work, Work::Navigate { .. }) {
                 if let Some(context) = &context {
                     self.contexts.validate(context)?;
@@ -33,6 +36,7 @@ impl Actor {
             );
         }
         match pending.work {
+            Work::Page(_) => Err("browser page reply took the action path".into()),
             Work::Init(init) => {
                 if init.page && init.step == 1 {
                     self.contexts
@@ -295,6 +299,10 @@ impl Actor {
         };
         let unverified = |why: &str| Outcome::Uncertain { reason: why.into() };
         match work {
+            Work::Page(job) => {
+                let _ = job.reply.send(Err(reason));
+                Ok(())
+            }
             Work::CreateWorld if prevented => Ok(()),
             Work::Init(_) | Work::CreateWorld => {
                 Err(format!("browser session initialization failed: {reason}").into())

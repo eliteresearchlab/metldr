@@ -157,7 +157,7 @@ impl Transport {
                 Ok(value)
             }
             Ok(_) => return self.fail("browser result must be an object"),
-            Err(_) => Err("browser command failed".into()),
+            Err(error) => Err(error.chars().take(300).collect()),
         };
         self.answer(id, result);
         Ok(())

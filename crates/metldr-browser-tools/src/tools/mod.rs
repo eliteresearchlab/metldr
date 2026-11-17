@@ -20,6 +20,7 @@ pub mod scroll;
 pub mod secret;
 pub mod select;
 pub mod settings;
+pub mod snapshot;
 pub mod status;
 
 use crate::{Call, Definition, Result};
@@ -69,7 +70,7 @@ const LOCAL_READ: Annotations = Annotations {
 };
 
 /// Every browser tool, in advertised order.
-pub static TOOLS: [Tool; 14] = [
+pub static TOOLS: [Tool; 15] = [
     Tool {
         name: observe::NAME,
         order: observe::ORDER,
@@ -183,6 +184,18 @@ pub static TOOLS: [Tool; 14] = [
         definition: keys::definition,
         decode: keys::decode,
     },
+    Tool {
+        name: snapshot::NAME,
+        order: snapshot::ORDER,
+        annotations: Annotations {
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+            open_world: true,
+        },
+        definition: snapshot::definition,
+        decode: snapshot::decode,
+    },
 ];
 
 /// The registered tool with this name.
@@ -191,6 +204,6 @@ pub fn find(name: &str) -> Option<&'static Tool> {
 }
 
 /// Every definition in advertised order.
-pub fn definitions() -> [Definition; 14] {
+pub fn definitions() -> [Definition; 15] {
     TOOLS.each_ref().map(|tool| (tool.definition)())
 }

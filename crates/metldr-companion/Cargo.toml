@@ -20,6 +20,10 @@ metldr-codex-session = { path = "../metldr-codex-session" }
 metldr-opencode-session = { path = "../metldr-opencode-session" }
 metldr-claude-session = { path = "../metldr-claude-session" }
 metldr-browser-tools = { path = "../metldr-browser-tools" }
+browse-core = { path = "../../vendor/browse/crates/browse-core" }
+browse-page = { path = "../../vendor/browse/crates/browse-page" }
+async-trait = "0.1"
+anyhow = "1"
 metldr-harness = { path = "../metldr-harness" }
 metldr-responses = { path = "../metldr-responses" }
 metldr-google-interactions = { path = "../metldr-google-interactions" }
