@@ -14,7 +14,6 @@ export class WordPopup {
   private resizeListener: (() => void) | null = null
   private clickListener: ((e: MouseEvent) => void) | null = null
   private isGmail: boolean
-  private isCleaningUp = false
   private pendingPopupTimeout: ReturnType<typeof setTimeout> | null = null
   private lastDblClickTime = 0
 
@@ -39,8 +38,8 @@ export class WordPopup {
     return undefined
   }
 
-  async handleTextSelection(e: MouseEvent): Promise<void> {
-    if (this.isGmail || this.isCleaningUp) return
+  handleTextSelection(e: MouseEvent): void {
+    if (this.isGmail) return
 
     this.lastDblClickTime = Date.now()
 
@@ -73,13 +72,10 @@ export class WordPopup {
     const selection = window.getSelection()
     const selectedText = selection?.toString().trim() || ''
 
-    if (this.container) {
-      this.cleanup()
-      await new Promise(resolve => setTimeout(resolve, 150))
-    }
+    // A second double-click replaces the open popup at once; the old one fades out on its own.
+    this.cleanup()
 
     if (!selectedText) return
-
 
     const hasSpaces = WHITESPACE_REGEX.test(selectedText)
     const isTooLong = selectedText.length > 30
@@ -90,9 +86,8 @@ export class WordPopup {
       return
     }
 
-    const sel = window.getSelection()
-    if (sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0)
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0)
       const rect = range.getBoundingClientRect()
 
       const node = range.commonAncestorContainer
@@ -167,11 +162,11 @@ export class WordPopup {
   }
 
   cleanup(): void {
-    if (!this.container || this.isCleaningUp) return
-
-    this.isCleaningUp = true
-
-    this.container.style.pointerEvents = 'none'
+    const container = this.container
+    if (!container) return
+    this.container = null
+    this.anchorRange = null
+    container.style.pointerEvents = 'none'
 
     if (this.scrollListener) {
       window.removeEventListener('scroll', this.scrollListener, true)
@@ -188,20 +183,13 @@ export class WordPopup {
       this.clickListener = null
     }
 
-    gsap.to(this.container, {
+    gsap.to(container, {
       opacity: 0,
       scale: 0.94,
       y: -4,
       duration: 0.12,
       ease: 'power2.in',
-      onComplete: () => {
-        if (this.container && this.container.parentNode) {
-          this.container.remove()
-        }
-        this.container = null
-        this.anchorRange = null
-        this.isCleaningUp = false
-      }
+      onComplete: () => container.remove()
     })
   }
 
@@ -209,6 +197,7 @@ export class WordPopup {
     const settings = await chrome.storage.local.get(['wordPopupEnabled']) as { wordPopupEnabled?: boolean }
     if (settings.wordPopupEnabled === false) return
 
+    this.cleanup()
     const selection = window.getSelection()
     if (selection && selection.rangeCount > 0) {
       this.anchorRange = selection.getRangeAt(0).cloneRange()
