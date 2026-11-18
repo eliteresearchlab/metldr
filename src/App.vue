@@ -80,15 +80,13 @@ const {
 } = useSettings()
 
 const {
+  languages,
   downloadedLanguages,
   selectedLanguages,
   downloadProgress,
-  storage,
   loadDictionarySettings,
   toggleLanguage,
-  deleteLanguageData,
-  initSelectedLanguages,
-  updateSelectedLanguages
+  deleteLanguageData
 } = useDictionary()
 
 const { saveTabSession, setupTabListener } = useTabSession()
@@ -137,7 +135,7 @@ async function clearCache(): Promise<void> {
   if (!confirm('clear all cached summaries?')) return
   
   try {
-    await storage.cacheClearAll()
+    await chrome.runtime.sendMessage({ type: 'CLEAR_SUMMARY_CACHE' })
     alert('cache cleared!')
     if (historyRef.value) {
       historyRef.value.refresh()
@@ -217,12 +215,11 @@ onMounted(async () => {
     loadFontSize()
   ])
   await loadDictionarySettings()
-  await initSelectedLanguages()
   
   await detect()
   
   setupSettingsWatcher()
-  setupStorageListener((langs) => { updateSelectedLanguages(langs) })
+  setupStorageListener()
   
   cleanupTabListener = setupTabListener(
     currentTabId,
@@ -364,6 +361,7 @@ onUnmounted(() => {
             :allowlist-input="allowlistInput"
             :denylist-input="denylistInput"
             :word-popup-enabled="wordPopupEnabled"
+            :languages="languages"
             :downloaded-languages="downloadedLanguages"
             :selected-languages="selectedLanguages"
             :download-progress="downloadProgress"

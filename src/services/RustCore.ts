@@ -1,6 +1,6 @@
 import initCore, {
-  gateway_complete, gateway_preferred, gateway_summarize, gateway_word_lookup,
-  summary_gate, summary_prefs_load, summary_prefs_save
+  dictionary_request, gateway_complete, gateway_preferred, gateway_summarize, gateway_word_lookup,
+  summary_cache_clear, summary_gate, summary_prefs_load, summary_prefs_save
 } from '../../crates/metldr-core/pkg/metldr_core'
 import type { WordLookupResult } from '../types'
 import coreWasmUrl from '../../crates/metldr-core/pkg/metldr_core_bg.wasm?url'
@@ -56,6 +56,17 @@ export interface WordContext {
 export async function lookupWord(word: string, context: WordContext): Promise<WordLookupResult> {
   await loadRustCore()
   return gateway_word_lookup(word, context)
+}
+
+// The downloaded dictionaries: `{action: 'state' | 'select' | 'delete', code, on}` to their state.
+export async function dictionary(request: object): Promise<unknown> {
+  await loadRustCore()
+  return dictionary_request(request)
+}
+
+export async function clearSummaryCache(): Promise<void> {
+  await loadRustCore()
+  await summary_cache_clear()
 }
 
 export interface SummaryPrefs {

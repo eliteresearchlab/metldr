@@ -17,6 +17,7 @@ use theme::Root as _;
 mod glimm;
 mod messages;
 mod pi_replies;
+mod page_tools;
 mod preferences;
 mod replies;
 mod secrets;
@@ -140,6 +141,7 @@ struct State {
     settings: settings::Settings,
     sources: sources::Sources,
     preferences: preferences::Preferences,
+    page_tools: page_tools::PageTools,
     settings_open: bool,
     /// Settings sections the user opened; kept while the panel stays open.
     settings_sections: std::collections::HashSet<&'static str>,
@@ -176,6 +178,7 @@ impl Default for State {
             settings: settings::Settings::default(),
             sources: sources::Sources::default(),
             preferences: preferences::Preferences::default(),
+            page_tools: page_tools::PageTools::default(),
             settings_open: false,
             settings_sections: Default::default(),
             welcome_revealed: false,
@@ -819,6 +822,7 @@ async fn prepare_core(core: Rc<Core>, updates: &Rc<Updates>) -> Result<Rc<Core>,
 
 fn setup(state: &mut State, wake: ::rune::Waker) {
     state.preferences.setup(wake.clone());
+    state.page_tools.setup(wake.clone());
     let updates = Updates::new(wake, state.conversations.archive_epoch());
     state.updates = Some(Rc::clone(&updates));
     spawn_local(async move {
@@ -837,7 +841,7 @@ fn setup(state: &mut State, wake: ::rune::Waker) {
 }
 
 fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
-    let appearance_changed = state.preferences.poll();
+    let appearance_changed = state.preferences.poll() | state.page_tools.poll();
     let Some(updates) = state.updates.clone() else {
         return appearance_changed;
     };
@@ -1503,7 +1507,81 @@ fn browser_action_view(
     card
 }
 
+/// The settings screen: appearance and the page tools always, providers and agents with the
+/// companion.
+fn settings_view(state: &State, cx: &mut Cx<State>, core: Option<&Rc<Core>>) -> El {
+    let palette = state.preferences.palette();
+    let (ink, page) = (palette.ink, palette.page);
+    let typography = state.preferences.typography();
+    // Only an open section builds its body: a collapsed one would be dropped unseen.
+    let open = |section: &Section| state.settings_sections.contains(section.key);
+    // Providers and agents belong to the companion; without it they are not shown.
+    let (providers, agents) = core.map_or((None, None), |core| state.settings.view(core, cx, typography, palette, (open(&PROVIDERS), open(&AGENTS))));
+    let appearance = open(&APPEARANCE).then(|| state.preferences.view(State::preference));
+    let page_tools = open(&PAGE_TOOLS).then(|| state.page_tools.view(typography, palette));
+    let presets = open(&PROVIDERS).then(|| state.settings.preset_list(typography, palette)).flatten();
+    let title = row()
+        .w_full()
+        .items_center()
+        .justify_between()
+        .child(
+            typography
+                .text("Settings")
+                .font(typography.font(16.0, 600.0))
+                .role("heading"),
+        )
+        .child(conversations::button(
+            palette,
+            typography,
+            "Close",
+            "settings-back".into(),
+            true,
+            |state: &mut State, tx| state.close_settings(tx),
+        )
+        .label("Back to chat"));
+    return col()
+        .w_full()
+        .h_full()
+        .min_h(0.0)
+        .fill(palette.canvas)
+        .color(ink)
+        .padding(10.0)
+        .material(palette)
+        .child(
+            col()
+                .key("settings-card")
+                .w_full()
+                .grow(1.0)
+                .min_h(0.0)
+                .gap(12.0)
+                .padding(16.0)
+                .fill(page)
+                .border(1.0, palette.line)
+                .radius(14.0)
+                .clip_rounded(14.0)
+                .child(title)
+                .child(
+                    col()
+                        .w_full()
+                        .gap(10.0)
+                        .child(settings_section(state, &APPEARANCE, appearance))
+                        .child(settings_section(state, &PAGE_TOOLS, page_tools))
+                        .children(core.map(|_| settings_section(state, &PROVIDERS, providers)))
+                        .children(core.map(|_| settings_section(state, &AGENTS, agents)))
+                        .grow(1.0)
+                        .min_h(0.0)
+                        .scroll(ScrollSpec {
+                            stick_bottom: false,
+                        }),
+                ),
+        )
+        .children(presets)
+}
+
 fn view(state: &State, cx: &mut Cx<State>) -> El {
+    if state.settings_open {
+        return settings_view(state, cx, state.core());
+    }
     let palette = state.preferences.palette();
     let (ink, page) = (palette.ink, palette.page);
     let typography = state.preferences.typography();
@@ -1617,6 +1695,15 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                         .gap(12.0)
                         .flex_wrap()
                         .items_center()
+                        .child(
+                            typography
+                                .text("Settings")
+                                .key("settings-open")
+                                .role("button")
+                                .focusable(true)
+                                .native_activation()
+                                .on_press_tx(|state: &mut State, tx| state.open_settings(tx)),
+                        )
                         .child(metldr_ui::toggle::toggle(
                             typography.text("Search everything").key("gateway-everywhere"),
                             metldr_ui::toggle::Props { disabled: gateway.streaming() },
@@ -1696,68 +1783,6 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         .updates
         .as_ref()
         .is_none_or(|updates| updates.presentation.borrow().messages.messages.is_empty());
-    if state.settings_open {
-        // Only an open section builds its body: a collapsed one would be dropped unseen.
-        let open = |section: &Section| state.settings_sections.contains(section.key);
-        let (providers, agents) = state.settings.view(core, cx, typography, palette, (open(&PROVIDERS), open(&AGENTS)));
-        let appearance = open(&APPEARANCE).then(|| state.preferences.view(State::preference));
-        let presets = open(&PROVIDERS).then(|| state.settings.preset_list(typography, palette)).flatten();
-        let title = row()
-            .w_full()
-            .items_center()
-            .justify_between()
-            .child(
-                typography
-                    .text("Settings")
-                    .font(typography.font(16.0, 600.0))
-                    .role("heading"),
-            )
-            .child(conversations::button(
-                palette,
-                typography,
-                "Close",
-                "settings-back".into(),
-                true,
-                |state: &mut State, tx| state.close_settings(tx),
-            )
-            .label("Back to chat"));
-        return col()
-            .w_full()
-            .h_full()
-            .min_h(0.0)
-            .fill(palette.canvas)
-            .color(ink)
-            .padding(10.0)
-            .material(palette)
-            .child(
-                col()
-                    .key("settings-card")
-                    .w_full()
-                    .grow(1.0)
-                    .min_h(0.0)
-                    .gap(12.0)
-                    .padding(16.0)
-                    .fill(page)
-                    .border(1.0, palette.line)
-                    .radius(14.0)
-                    .clip_rounded(14.0)
-                    .child(title)
-                    .child(
-                        col()
-                            .w_full()
-                            .gap(10.0)
-                            .child(settings_section(state, &APPEARANCE, appearance))
-                            .child(settings_section(state, &PROVIDERS, providers))
-                            .child(settings_section(state, &AGENTS, agents))
-                            .grow(1.0)
-                            .min_h(0.0)
-                            .scroll(ScrollSpec {
-                                stick_bottom: false,
-                            }),
-                    ),
-            )
-            .children(presets);
-    }
     if let Some(followup) = &state.proposed_followup {
         thread = thread.child(
             col()
@@ -2085,6 +2110,12 @@ const APPEARANCE: Section = Section {
     trigger: "settings-section-appearance",
     panel: "settings-panel-appearance",
     title: "Appearance and sound",
+};
+const PAGE_TOOLS: Section = Section {
+    key: "page-tools",
+    trigger: "settings-section-page-tools",
+    panel: "settings-panel-page-tools",
+    title: "Word lookup and dictionaries",
 };
 const PROVIDERS: Section = Section {
     key: "providers",

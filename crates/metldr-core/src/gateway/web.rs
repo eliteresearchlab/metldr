@@ -124,6 +124,7 @@ fn saved<'a>(settings: &'a Value, route: &str, field: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
+mod dictionary;
 mod summary_gate;
 mod word;
 
@@ -369,7 +370,12 @@ fn auth_headers(route: &Route, key: Option<&str>) -> Vec<(&'static str, String)>
 }
 
 /// GETs a JSON document within `ms`; any failure is the route being unreachable.
-async fn get_json(url: &str, headers: &[(&'static str, String)], ms: u32) -> Result<Vec<u8>, u16> {
+async fn get_json(
+    url: &str,
+    headers: &[(&'static str, String)],
+    ms: u32,
+    bound: usize,
+) -> Result<Vec<u8>, u16> {
     let init = web_sys::RequestInit::new();
     init.set_method("GET");
     let list = web_sys::Headers::new().map_err(|_| 0u16)?;
@@ -392,7 +398,7 @@ async fn get_json(url: &str, headers: &[(&'static str, String)], ms: u32) -> Res
         .await
         .map_err(|_| 0u16)?;
     let body = js_sys::Uint8Array::new(&body);
-    if body.length() as usize > MODELS_BOUND {
+    if body.length() as usize > bound {
         return Err(0);
     }
     Ok(body.to_vec())
@@ -403,6 +409,7 @@ async fn models(route: &Route, base: &str, key: Option<&str>, ms: u32) -> Result
         &format!("{base}{}", route.models),
         &auth_headers(route, key),
         ms,
+        MODELS_BOUND,
     )
     .await?;
     Ok(super::model_names(&body))
