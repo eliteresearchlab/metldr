@@ -86,6 +86,11 @@ export class BackgroundBootstrap {
         return true
       }
 
+      if (msg.type === 'STATS_RECORD') {
+        recordStat(msg.event).then(() => respond(true), () => respond(false))
+        return true
+      }
+
       if (msg.type === 'STATS_SUMMARY') {
         statsSummary(msg.days).then(respond, () => respond(null))
         return true

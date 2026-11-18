@@ -405,6 +405,7 @@ export type BackgroundMessage =
   | { type: 'DICTIONARY'; action: 'state' | 'select' | 'delete'; code?: string; on?: boolean }
   | { type: 'CLEAR_SUMMARY_CACHE' }
   | { type: 'STATS_SUMMARY'; days: number }
+  | { type: 'STATS_RECORD'; event: import('../services/RustCore').StatEvent }
 
 export type ResponseCallback = (response: unknown) => void
 

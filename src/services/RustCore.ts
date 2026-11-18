@@ -77,6 +77,7 @@ interface SummaryStat {
 }
 
 export type StatEvent = SummaryStat | { kind: 'lookup' } | { kind: 'replies'; count: number }
+  | { kind: 'run'; input?: number; output?: number; ms: number; model: string }
 
 export async function recordStat(event: StatEvent): Promise<void> {
   await loadRustCore()
