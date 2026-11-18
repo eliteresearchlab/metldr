@@ -38,6 +38,8 @@ pub(super) const NATIVE_WORKFLOWS: [TableDefinition<&str, &[u8]>; 4] =
     [PI, CODEX, OPENCODE, HARNESS];
 pub(super) const ACTIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("actions");
 pub(super) const TASK_PLANS: TableDefinition<&str, &[u8]> = TableDefinition::new("task_plans");
+/// Each chat's approval mode as `ApprovalMode::byte`; a chat without an entry asks.
+pub(super) const APPROVAL_MODES: TableDefinition<&str, u8> = TableDefinition::new("approval_modes");
 pub(super) const RUN_ORDER: TableDefinition<(&str, u64), &str> = TableDefinition::new("run_order");
 pub(super) const ACTION_ORDER: TableDefinition<(&str, u64, &str), &str> =
     TableDefinition::new("action_order");
