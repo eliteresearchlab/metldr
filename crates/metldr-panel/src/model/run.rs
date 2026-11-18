@@ -3,7 +3,7 @@ use metldr_conversation::{Display, ProjectedEntry, Projection};
 use super::{
     ActivityOutcome, ActivityPhase, FlowError, MAX_ACTIVITY, MAX_PAGE_TEXT, RunId, RunKind,
     RunRoute, RunView, WireRun, parse_identity, valid_ascii_label, valid_chat_endpoint,
-    valid_correction_receipt, valid_fingerprint, valid_https_endpoint, valid_label,
+    valid_correction_receipt, valid_endpoint, valid_fingerprint, valid_https_endpoint, valid_label,
 };
 
 const MAX_RUN_DOCUMENT: usize = 2 * 1024 * 1024;
@@ -129,7 +129,7 @@ impl WireRun {
                 ))
             || self.conversation.iter().any(|entry| matches!(entry,
                 ProjectedEntry::Artifact { id, .. } if !valid_id(id.as_str())
-                    || !matches!(&self.route, RunRoute::Text { protocol: super::ProviderProtocol::Responses, .. })))
+                    || !matches!(&self.route, RunRoute::Text { protocol: super::Protocol::Responses, .. })))
             || matches!(&self.route, RunRoute::Text { .. } if !self.activity.is_empty()
             || self.conversation.iter().any(|entry| matches!(entry, ProjectedEntry::Tool { .. }))
             || match self.kind {
@@ -156,7 +156,7 @@ impl WireRun {
             || matches!(&self.route, RunRoute::HttpsGoogleInteractions { endpoint, model, revision, fingerprint }
                 if !valid_https_endpoint(endpoint) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
             || matches!(&self.route, RunRoute::Text { protocol, endpoint, model, revision, fingerprint, .. }
-                if !(if *protocol == super::ProviderProtocol::ChatCompletions { valid_chat_endpoint(endpoint) } else { valid_https_endpoint(endpoint) }) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
+                if !valid_endpoint(*protocol, endpoint) || !valid_ascii_label(model, 128) || *revision == 0 || !valid_fingerprint(fingerprint))
             || (matches!(self.kind, RunKind::Agent)
                 != matches!(
                     &self.route,

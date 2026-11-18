@@ -144,6 +144,9 @@ impl Owner {
                         output.accept(event)
                     };
                     let usage = match protocol {
+                        Protocol::ChromeAi => {
+                            return Err("Chrome's built-in model runs in the extension".into());
+                        }
                         Protocol::Messages => {
                             profile
                                 .messages_client(&worker_stop)?

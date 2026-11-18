@@ -2,6 +2,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Document, Element, HtmlSelectElement};
 
 use crate::state::{Choice, Panel, Server, Setup, Status};
+use metldr_core::gateway;
 
 pub fn element(document: &Document, id: &str) -> Result<Element, JsValue> {
     document
@@ -36,31 +37,49 @@ pub fn models(document: &Document, names: &[String], selected: &str) -> Result<(
     Ok(())
 }
 
+/// The local servers and key services from the route table: a button per server before the
+/// installed agent choice, an option per service.
+pub fn fill_routes(document: &Document) -> Result<(), JsValue> {
+    let installed = element(document, "choose-installed")?;
+    let group = element(document, "local-options")?;
+    for route in gateway::local_routes() {
+        let button = document.create_element("button")?;
+        button.set_id(&format!("choose-{}", route.id));
+        for (name, value) in [("type", "button"), ("aria-pressed", "false"), ("disabled", "")] {
+            button.set_attribute(name, value)?;
+        }
+        button.set_text_content(Some(route.name));
+        group.insert_before(&button, Some(&installed))?;
+    }
+    let services = element(document, "key-service")?;
+    for route in gateway::key_routes() {
+        let option = document.create_element("option")?;
+        option.set_attribute("value", route.id)?;
+        option.set_text_content(Some(route.name));
+        services.append_child(&option)?;
+    }
+    Ok(())
+}
+
 pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(), JsValue> {
     let local = matches!(setup.choice, Choice::Chrome | Choice::Local(_));
     let have = matches!(setup.choice, Choice::Local(_) | Choice::Agent);
     let checking = setup.status == Status::Checking;
-    for (id, selected) in [
+    let server = |route: Server| {
+        let selected = setup.choice == Choice::Local(route);
+        (format!("choose-{}", route.id), selected)
+    };
+    let choices = [
         ("choose-local", setup.choice == Choice::Chrome),
         ("choose-agent", have),
         ("choose-provider", setup.choice == Choice::Provider),
-        (
-            "choose-ollama",
-            setup.choice == Choice::Local(Server::Ollama),
-        ),
-        (
-            "choose-lmstudio",
-            setup.choice == Choice::Local(Server::LmStudio),
-        ),
-        (
-            "choose-llamacpp",
-            setup.choice == Choice::Local(Server::LlamaCpp),
-        ),
         ("choose-installed", setup.choice == Choice::Agent),
-    ] {
-        element(document, id)?
+    ];
+    let fixed = choices.map(|(id, selected)| (id.to_owned(), selected));
+    for (id, selected) in fixed.into_iter().chain(gateway::local_routes().map(server)) {
+        element(document, &id)?
             .set_attribute("aria-pressed", if selected { "true" } else { "false" })?;
-        flag(document, id, "disabled", setup.saving)?;
+        flag(document, &id, "disabled", setup.saving)?;
     }
     for (id, visible) in [
         ("pick-local", setup.recommended == Some(Choice::Chrome)),
@@ -73,7 +92,7 @@ pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(
         ("chrome-controls", setup.choice == Choice::Chrome),
         (
             "ollama-guide",
-            setup.choice == Choice::Local(Server::Ollama),
+            matches!(setup.choice, Choice::Local(server) if server.id == "ollama"),
         ),
         ("key-controls", setup.choice == Choice::Provider),
         (
@@ -126,7 +145,7 @@ pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(
         match setup.status {
             Status::Idle => match setup.choice {
                 Choice::Chrome => "Chrome's built-in AI".to_owned(),
-                Choice::Local(server) => format!("{} on this computer", server.name()),
+                Choice::Local(server) => format!("{} on this computer", server.name),
                 Choice::Provider => "Bring a key".to_owned(),
                 Choice::Agent => "Set up an installed agent".to_owned(),
             },
@@ -140,7 +159,7 @@ pub fn render(document: &Document, setup: &Setup, downloading: bool) -> Result<(
     };
     element(document, "key-service")?
         .dyn_into::<HtmlSelectElement>()?
-        .set_value(setup.service.route());
+        .set_value(setup.service.id);
     text(document, "status-text", &heading)?;
     text(document, "connection-detail", &setup.detail)?;
     text(

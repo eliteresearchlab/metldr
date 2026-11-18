@@ -956,21 +956,11 @@ dependencies = [
 name = "metldr-core"
 version = "0.1.0"
 dependencies = [
- "js-sys",
- "metldr-chat-completions",
- "metldr-conversation",
  "metldr-embed",
- "metldr-google-interactions",
- "metldr-messages",
- "metldr-responses",
  "metldr-retrieval",
- "metldr-sse",
  "py3langid",
  "serde",
  "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]

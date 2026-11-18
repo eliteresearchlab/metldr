@@ -3,7 +3,7 @@
 use crate::flow::FlowClient;
 use crate::model::{
     AgentSessionView, BrowserRouteView, ChatRouteView, FlowError, GoogleRouteView, PageView,
-    ProviderProtocol, ResponsesRouteView, RunId, SourceId, UserText,
+    Protocol, ResponsesRouteView, RunId, SourceId, UserText,
 };
 
 pub(crate) mod choices;
@@ -23,7 +23,7 @@ pub(crate) enum Destination {
         fingerprint: String,
     },
     PageText {
-        protocol: ProviderProtocol,
+        protocol: Protocol,
         fingerprint: String,
     },
     Pi,
@@ -97,9 +97,9 @@ fn opencode_ready(view: &PageView, session: &AgentSessionView) -> bool {
         && view.source().is_some()
 }
 
-fn page_route(view: &PageView, protocol: ProviderProtocol) -> Option<(&str, &str, &str)> {
+fn page_route(view: &PageView, protocol: Protocol) -> Option<(&str, &str, &str)> {
     match protocol {
-        ProviderProtocol::Messages => view.browser_route.as_ref().and_then(|route| match route {
+        Protocol::Messages => view.browser_route.as_ref().and_then(|route| match route {
             BrowserRouteView::HttpsMessages {
                 endpoint,
                 model,
@@ -108,7 +108,8 @@ fn page_route(view: &PageView, protocol: ProviderProtocol) -> Option<(&str, &str
             } => Some((endpoint.as_str(), model.as_str(), fingerprint.as_str())),
             BrowserRouteView::Messages { .. } => None,
         }),
-        ProviderProtocol::Responses => view.responses_route.as_ref().map(
+        Protocol::ChromeAi => None,
+        Protocol::Responses => view.responses_route.as_ref().map(
             |ResponsesRouteView::HttpsResponses {
                  endpoint,
                  model,
@@ -116,7 +117,7 @@ fn page_route(view: &PageView, protocol: ProviderProtocol) -> Option<(&str, &str
                  ..
              }| (endpoint.as_str(), model.as_str(), fingerprint.as_str()),
         ),
-        ProviderProtocol::ChatCompletions => view.chat_route.as_ref().map(
+        Protocol::ChatCompletions => view.chat_route.as_ref().map(
             |ChatRouteView::HttpsChatCompletions {
                  endpoint,
                  model,
@@ -124,7 +125,7 @@ fn page_route(view: &PageView, protocol: ProviderProtocol) -> Option<(&str, &str
                  ..
              }| (endpoint.as_str(), model.as_str(), fingerprint.as_str()),
         ),
-        ProviderProtocol::GoogleInteractions => view.google_route.as_ref().map(
+        Protocol::GoogleInteractions => view.google_route.as_ref().map(
             |GoogleRouteView::HttpsGoogleInteractions {
                  endpoint,
                  model,
@@ -132,15 +133,6 @@ fn page_route(view: &PageView, protocol: ProviderProtocol) -> Option<(&str, &str
                  ..
              }| (endpoint.as_str(), model.as_str(), fingerprint.as_str()),
         ),
-    }
-}
-
-fn provider_name(protocol: ProviderProtocol) -> &'static str {
-    match protocol {
-        ProviderProtocol::Messages => "Messages",
-        ProviderProtocol::Responses => "OpenAI Responses",
-        ProviderProtocol::ChatCompletions => "Chat Completions",
-        ProviderProtocol::GoogleInteractions => "Google Interactions",
     }
 }
 
@@ -184,10 +176,10 @@ pub(crate) fn resolve(view: &PageView, value: &str) -> Result<Destination, Strin
         },
         value if value.starts_with("page:") => {
             let protocol = match value {
-                "page:messages" => ProviderProtocol::Messages,
-                "page:responses" => ProviderProtocol::Responses,
-                "page:chat_completions" => ProviderProtocol::ChatCompletions,
-                "page:google_interactions" => ProviderProtocol::GoogleInteractions,
+                "page:messages" => Protocol::Messages,
+                "page:responses" => Protocol::Responses,
+                "page:chat_completions" => Protocol::ChatCompletions,
+                "page:google_interactions" => Protocol::GoogleInteractions,
                 _ => {
                     return Err("The selected page questions provider is unavailable.".into());
                 }
@@ -197,7 +189,7 @@ pub(crate) fn resolve(view: &PageView, value: &str) -> Result<Destination, Strin
                 .ok_or_else(|| {
                     format!(
                         "{} page questions are unavailable.",
-                        provider_name(protocol)
+                        Protocol::label(protocol)
                     )
                 })?;
             Ok(Destination::PageText {

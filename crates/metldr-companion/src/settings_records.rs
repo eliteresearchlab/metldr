@@ -58,7 +58,7 @@ impl Owner {
             }
         }
         if previous_providers != serde_json::to_vec(&(&providers.scope, &providers.slots))? {
-            for protocol in crate::provider_settings::Protocol::ALL {
+            for protocol in crate::provider_settings::Protocol::KEYED {
                 if providers.managed(protocol) {
                     self.set_provider_route(protocol, None);
                     self.settings.states.remove(&protocol);
@@ -105,7 +105,7 @@ impl Owner {
 
     // Credentials, endpoints, trust roots and agent file paths are never included.
     fn browser_settings_snapshot(&self) -> Value {
-        let providers: Vec<Value> = Protocol::ALL
+        let providers: Vec<Value> = Protocol::KEYED
             .into_iter()
             .map(|protocol| {
                 let slot = self.state.providers.slot(protocol);
