@@ -68,7 +68,7 @@ pub(super) struct Gateway {
     /// Citations by answer message id.
     citations: RefCell<std::collections::HashMap<String, Vec<Citation>>>,
     /// A page summary or a search answer is on its way.
-    summarizing: Cell<bool>,
+    waiting: Cell<bool>,
     /// Questions go to everything the reader has read and saved, not the page.
     everywhere: Cell<bool>,
     /// The search chat as the extension's search takes it: each question and answer.
@@ -131,7 +131,7 @@ impl Gateway {
             page: RefCell::default(),
             shown: RefCell::default(),
             shown_ids: RefCell::default(),
-            summarizing: Cell::new(false),
+            waiting: Cell::new(false),
             everywhere: Cell::new(false),
             searches: RefCell::default(),
             summarized: RefCell::default(),
@@ -195,29 +195,25 @@ impl Gateway {
         push_bounded(&mut self.searches.borrow_mut(), ("user", text.clone()));
         show(&updates, &id, text.clone(), String::new());
         updates.presentation.borrow_mut().error = None;
-        self.summarizing.set(true);
+        self.waiting.set(true);
         updates.changed();
-        let messages: Vec<Value> = self.searches.borrow().iter().map(|(role, content)| json!({"role":role,"content":content})).collect();
-        let reply = ask_extension(&json!({"type":"GLOBAL_CHAT","messages":messages})).await.unwrap_or_default();
-        self.summarizing.set(false);
+
+        let reply = self.search_reply().await;
+        self.waiting.set(false);
         let Some(answer) = reply["content"].as_str().filter(|_| reply["ok"] == true) else {
             self.searches.borrow_mut().pop();
             updates.changed();
             let error = reply["error"].as_str().unwrap_or("Search could not answer.");
             return Err(FlowError::Host(error.to_owned()));
         };
-        let sources = reply["sources"].as_array().cloned().unwrap_or_default();
-        let source = |n: usize| sources.iter().find(|s| s["index"].as_u64() == Some(n as u64));
-        let cites = crate::reading::cited(answer, sources.len()).into_iter().filter_map(|n| {
-            let found = source(n)?;
-            let title = found["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Source");
-            Some((n, title.to_owned(), source_page(found["url"].as_str()?)?))
-        });
-        self.citations.borrow_mut().insert(id.clone(), cites.collect());
+
+        self.citations.borrow_mut().insert(id.clone(), search_citations(answer, &reply["sources"]));
         push_bounded(&mut self.searches.borrow_mut(), ("assistant", answer.to_owned()));
-        if let Some(AgUiMessage::Assistant { content, .. }) = updates.presentation.borrow_mut().messages.messages.last_mut() {
+        let mut presentation = updates.presentation.borrow_mut();
+        if let Some(AgUiMessage::Assistant { content, .. }) = presentation.messages.messages.last_mut() {
             answer.clone_into(content);
         }
+        drop(presentation);
         self.shown.borrow_mut().push((text, answer.to_owned()));
         self.shown_ids.borrow_mut().push(id);
         spawn_local(save(self.saved()));
@@ -225,8 +221,15 @@ impl Gateway {
         Ok(())
     }
 
+    /// The extension's search reply to the search chat so far.
+    async fn search_reply(&self) -> Value {
+        let message = |(role, content): &(&str, String)| json!({"role":role,"content":content});
+        let messages: Vec<Value> = self.searches.borrow().iter().map(message).collect();
+        ask_extension(&json!({"type":"GLOBAL_CHAT","messages":messages})).await.unwrap_or_default()
+    }
+
     pub(super) fn streaming(&self) -> bool {
-        self.streaming.get().is_some() || self.summarizing.get()
+        self.streaming.get().is_some() || self.waiting.get()
     }
 
     /// The active tab's summary from the extension's page tools: cached per page and, when not
@@ -240,12 +243,12 @@ impl Gateway {
         if !manual && self.summarized.borrow().as_deref() == Some(url.as_str()) {
             return Ok(());
         }
-        self.summarizing.set(true);
+        self.waiting.set(true);
         updates.changed();
         let trigger = if manual { "manual" } else { "auto" };
         let request = json!({"type":"EXTRACT_AND_SUMMARIZE","tabId":tab,"force":manual,"trigger":trigger});
         let reply = ask_extension(&request).await;
-        self.summarizing.set(false);
+        self.waiting.set(false);
         updates.changed();
         let reply = reply.unwrap_or_default();
         let Some(text) = summary_text(&reply["summary"]).filter(|_| reply["success"] == true) else {
@@ -495,6 +498,18 @@ async fn ask_extension(request: &Value) -> Option<Value> {
     json_of(&crate::await_call(&runtime, "sendMessage", &[message]).await.ok()?)
 }
 
+/// The sources `answer` cites, each by number with its title and the page it opens.
+fn search_citations(answer: &str, sources: &Value) -> Vec<Citation> {
+    let sources = sources.as_array().map(Vec::as_slice).unwrap_or_default();
+    let numbered = |n: usize| sources.iter().find(|s| s["index"].as_u64() == Some(n as u64));
+    let cite = |n: usize| {
+        let source = numbered(n)?;
+        let title = source["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Source");
+        Some((n, title.to_owned(), source_page(source["url"].as_str()?)?))
+    };
+    crate::reading::cited(answer, sources.len()).into_iter().filter_map(cite).collect()
+}
+
 /// Adds `turn` to the search chat, which keeps only what the extension reads.
 fn push_bounded(searches: &mut Vec<(&'static str, String)>, turn: (&'static str, String)) {
     if searches.len() == SEARCH_TURNS {
@@ -506,7 +521,10 @@ fn push_bounded(searches: &mut Vec<(&'static str, String)>, turn: (&'static str,
 /// The page a search source opens: its address, or the Gmail thread of a saved email.
 fn source_page(url: &str) -> Option<String> {
     match url.strip_prefix("email://") {
-        Some(email) => Some(format!("https://mail.google.com/mail/u/0/#inbox/{}", email.rsplit('/').next()?)),
+        Some(email) => {
+            let thread = email.rsplit('/').next()?;
+            Some(format!("https://mail.google.com/mail/u/0/#inbox/{thread}"))
+        }
         None => url.starts_with("http").then(|| url.to_owned()),
     }
 }

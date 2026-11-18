@@ -390,6 +390,13 @@ impl State {
         });
     }
 
+    /// Without the companion: questions go to everything read, or back to the page.
+    fn search_everywhere(&mut self, on: bool) {
+        if let (Some(gateway), Some(updates)) = (self.gateway(), self.updates.as_ref()) {
+            gateway.set_everywhere(on, updates);
+        }
+    }
+
     /// Without the companion: answers with gateway route `index` from now on.
     pub(super) fn choose_gateway(&mut self, index: usize) {
         if self.running() {
@@ -1614,11 +1621,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                             typography.text("Search everything").key("gateway-everywhere"),
                             metldr_ui::toggle::Props { disabled: gateway.streaming() },
                             gateway.everywhere(),
-                            |state: &mut State, on, _| {
-                                if let (Some(gateway), Some(updates)) = (state.gateway(), state.updates.as_ref()) {
-                                    gateway.set_everywhere(on, updates);
-                                }
-                            },
+                            |state: &mut State, on, _| state.search_everywhere(on),
                         ))
                         .child(
                             typography
