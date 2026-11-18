@@ -160,7 +160,8 @@ fn https_host(url: &str) -> Option<String> {
 /// The registrable part of `host`: its last two labels, or three under a two-level suffix.
 fn site(host: &str) -> String {
     let labels: Vec<&str> = host.trim_end_matches('.').rsplit('.').collect();
-    let two_level = labels.len() > 2 && matches!(labels[1], "co" | "com" | "org" | "net" | "gov" | "ac" | "edu");
+    let suffix_part = matches!(labels.get(1), Some(&("co" | "com" | "org" | "net" | "gov" | "ac" | "edu")));
+    let two_level = labels.len() > 2 && suffix_part;
     let keep = if two_level { 3 } else { 2 };
     labels.iter().take(keep).rev().copied().collect::<Vec<_>>().join(".")
 }

@@ -1482,10 +1482,9 @@ pub(crate) async fn page_text(observed: &JsValue, page: &str) -> Result<String> 
         .ok_or_else(|| FlowError::InvalidInput("The page capture is malformed.".into()))?;
     let capture: crate::reading::Capture = serde_json::from_str(&raw)
         .map_err(|_| FlowError::InvalidInput("The page capture is malformed.".into()))?;
-    if let Some(text) = match capture.site_markdown(page) {
-        Some(href) => site_text(href).await,
-        None => None,
-    } {
+    if let Some(href) = capture.site_markdown(page)
+        && let Some(text) = site_text(href).await
+    {
         return Ok(text);
     }
     capture.markdown(MAX_PAGE).ok_or_else(|| {
@@ -1501,7 +1500,10 @@ thread_local! {
 /// The site's markdown at `href`, within the page budget: text only, at most 2 MB, three
 /// seconds, no redirects. None when the site does not answer that way.
 async fn site_text(href: &str) -> Option<String> {
-    let cached = SITE_TEXT.with(|cache| cache.borrow().as_ref().filter(|(at, _)| at == href).map(|(_, text)| text.clone()));
+    let cached = SITE_TEXT.with(|cache| {
+        let cache = cache.borrow();
+        cache.as_ref().filter(|(at, _)| at == href).map(|(_, text)| text.clone())
+    });
     if let Some(text) = cached {
         return text;
     }
@@ -1513,7 +1515,8 @@ async fn site_text(href: &str) -> Option<String> {
 async fn fetch_text(href: &str) -> Option<String> {
     let global = js_sys::global();
     let signal = call(&get(&global, "AbortSignal").ok()?, "timeout", &[3000.into()]).ok()?;
-    let init = json_js(&json!({"headers":{"Accept":"text/markdown, text/plain;q=0.9"},"redirect":"error","credentials":"omit"})).ok()?;
+    let accept = json!({"Accept":"text/markdown, text/plain;q=0.9"});
+    let init = json_js(&json!({"headers":accept,"redirect":"error","credentials":"omit"})).ok()?;
     Reflect::set(&init, &"signal".into(), &signal).ok()?;
     let response = await_call(&global, "fetch", &[href.into(), init]).await.ok()?;
     let headers = get(&response, "headers").ok()?;
