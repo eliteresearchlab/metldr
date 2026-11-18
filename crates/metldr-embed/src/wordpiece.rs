@@ -1,4 +1,4 @@
-//! BERT WordPiece, lowercased with accents stripped, as the potion models' tokenizer does it:
+//! BERT WordPiece, lowercased with accents stripped, as the Model2Vec models' tokenizer does it:
 //! it matches Hugging Face's on 99.92% of the SciFact documents.
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;

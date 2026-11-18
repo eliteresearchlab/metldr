@@ -71,12 +71,9 @@ export class VectorStore {
     return this.index()
   }
 
+  // every stored chunk is in the index, so its sources answer without reading IndexedDB
   async hasDocument(sourceId: string): Promise<boolean> {
-    if ((await this.index()).has_source(sourceId)) return true
-    const counts = await Promise.all(['article', 'pdf', 'email'].map(type =>
-      databaseService.count(DB_CONFIGS.cache, 'page_cache', `rag:${type}:${sourceId}:chunk:0`)
-    ))
-    return counts.some(count => count > 0)
+    return (await this.index()).has_source(sourceId)
   }
 
   async forceSave(): Promise<void> {
