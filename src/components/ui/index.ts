@@ -1,7 +1,0 @@
-export { default as Button } from './Button.vue'
-export { default as Toggle } from './Toggle.vue'
-export { ScrollArea } from './scroll-area'
-export { Checkbox } from './checkbox'
-export { Textarea } from './textarea'
-export { Input } from './input'
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip'

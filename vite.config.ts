@@ -1,8 +1,6 @@
 import { watchChat } from './scripts/build-chat.mjs'
 import { copySandboxAssets } from './scripts/copy-sandbox-assets.mjs'
 import { defineConfig, normalizePath, type Plugin } from 'vite'
-import vue from '@vitejs/plugin-vue'
-import tailwindcss from '@tailwindcss/vite'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -115,7 +113,7 @@ export default defineConfig({
     watch: { ignored: privateFiles },
     fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', ...privateFiles] },
   },
-  plugins: isContentBuild ? [] : [rustWelcome(), chatDevelopment(), vue(), tailwindcss(), copyInboxSDKPlugin(), copyWasmAssets(), copyBrowseScripts()],
+  plugins: isContentBuild ? [] : [rustWelcome(), chatDevelopment(), copyInboxSDKPlugin(), copyWasmAssets(), copyBrowseScripts()],
   resolve: {
     alias: {
       '@': resolve(__dirname, './src')
@@ -143,7 +141,6 @@ export default defineConfig({
       },
     } : {
       input: {
-        side_panel: 'index.html',
         chat: 'chat.html',
         welcome: 'welcome.html',
         background: 'src/background/index.ts',
