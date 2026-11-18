@@ -13,6 +13,7 @@ Each route sends content only to the destination listed for it.
 | Your own API key in the extension | The service the key belongs to: OpenAI (api.openai.com), Anthropic (api.anthropic.com), Google (generativelanguage.googleapis.com), OpenRouter (openrouter.ai), or the OpenAI compatible endpoint you set. It receives your question, the page content you ask about and the conversation so far. |
 | Provider connections in the companion (Messages, Responses, Google Interactions, Chat Completions) | The endpoint you configure. It receives task instructions, page content, browser observations and relevant prior answers. |
 | Installed agents (Codex, Claude Code, OpenCode, Pi) | The agent on your computer, which sends what it needs to the account and model you configured for it |
+| Reading a page | When the page you ask about links to its own markdown copy on the same site over https, the extension fetches that copy from the site, without cookies, instead of reading the page's layout. No address on your computer or local network is fetched. |
 | Dictionary lookups | The selected word goes to api.dictionaryapi.dev. Dictionary data files come from media.githubusercontent.com. |
 | Gmail features | The InboxSDK library runs on mail.google.com. It sends its own error reports and usage events to inboxsdk.com. |
 
