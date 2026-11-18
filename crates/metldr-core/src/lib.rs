@@ -3,6 +3,7 @@ pub mod gateway;
 pub mod summary_gate;
 pub mod word;
 pub mod dictionary;
+pub mod stats;
 
 pub use chunking::{Chunk, ContentType, chunk_for_embedding};
 

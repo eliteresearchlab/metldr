@@ -23,6 +23,7 @@ mod replies;
 mod secrets;
 mod settings;
 mod sources;
+mod stats;
 mod theme;
 
 use activities::Activities;
@@ -142,6 +143,8 @@ struct State {
     sources: sources::Sources,
     preferences: preferences::Preferences,
     page_tools: page_tools::PageTools,
+    stats: stats::Stats,
+    stats_open: bool,
     settings_open: bool,
     /// Settings sections the user opened; kept while the panel stays open.
     settings_sections: std::collections::HashSet<&'static str>,
@@ -179,6 +182,8 @@ impl Default for State {
             sources: sources::Sources::default(),
             preferences: preferences::Preferences::default(),
             page_tools: page_tools::PageTools::default(),
+            stats: stats::Stats::default(),
+            stats_open: false,
             settings_open: false,
             settings_sections: Default::default(),
             welcome_revealed: false,
@@ -239,6 +244,21 @@ impl State {
         self.source_engaged = false;
         self.settings_open = true;
         tx.focus("settings-back");
+    }
+
+    fn open_stats(&mut self, tx: &mut Tx) {
+        self.sound(crate::interaction_audio::Cue::Press);
+        self.menu = None;
+        self.settings_open = false;
+        self.stats_open = true;
+        self.stats.load();
+        tx.focus("stats-back");
+    }
+
+    fn close_stats(&mut self, tx: &mut Tx) {
+        self.sound(crate::interaction_audio::Cue::Press);
+        self.stats_open = false;
+        tx.focus("stats-open");
     }
 
     fn close_settings(&mut self, tx: &mut Tx) {
@@ -855,6 +875,7 @@ async fn prepare_core(core: Rc<Core>, updates: &Rc<Updates>) -> Result<Rc<Core>,
 fn setup(state: &mut State, wake: ::rune::Waker) {
     state.preferences.setup(wake.clone());
     state.page_tools.setup(wake.clone());
+    state.stats.setup(wake.clone());
     let updates = Updates::new(wake, state.conversations.archive_epoch());
     state.updates = Some(Rc::clone(&updates));
     spawn_local(async move {
@@ -873,7 +894,7 @@ fn setup(state: &mut State, wake: ::rune::Waker) {
 }
 
 fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
-    let appearance_changed = state.preferences.poll() | state.page_tools.poll();
+    let appearance_changed = state.preferences.poll() | state.page_tools.poll() | state.stats.poll();
     let Some(updates) = state.updates.clone() else {
         return appearance_changed;
     };
@@ -1543,7 +1564,6 @@ fn browser_action_view(
 /// companion.
 fn settings_view(state: &State, cx: &mut Cx<State>, core: Option<&Rc<Core>>) -> El {
     let palette = state.preferences.palette();
-    let (ink, page) = (palette.ink, palette.page);
     let typography = state.preferences.typography();
     // Only an open section builds its body: a collapsed one would be dropped unseen.
     let open = |section: &Section| state.settings_sections.contains(section.key);
@@ -1552,67 +1572,65 @@ fn settings_view(state: &State, cx: &mut Cx<State>, core: Option<&Rc<Core>>) -> 
     let appearance = open(&APPEARANCE).then(|| state.preferences.view(State::preference));
     let page_tools = open(&PAGE_TOOLS).then(|| state.page_tools.view(typography, palette));
     let presets = open(&PROVIDERS).then(|| state.settings.preset_list(typography, palette)).flatten();
+    let body = col()
+        .w_full()
+        .gap(10.0)
+        .child(settings_section(state, &APPEARANCE, appearance))
+        .child(settings_section(state, &PAGE_TOOLS, page_tools))
+        .children(core.map(|_| settings_section(state, &PROVIDERS, providers)))
+        .children(core.map(|_| settings_section(state, &AGENTS, agents)));
+    screen(state, "Settings", "settings", body, State::close_settings).children(presets)
+}
+
+/// The stats screen.
+fn stats_view(state: &State) -> El {
+    let body = state.stats.view(state.preferences.typography(), state.preferences.palette());
+    screen(state, "Stats", "stats", body, State::close_stats)
+}
+
+/// A full panel screen over the chat: its title, a Close back to the chat, and `body` scrolling
+/// in a card. `key` names the card and the Close (`{key}-card`, `{key}-back`).
+fn screen(state: &State, title: &str, key: &str, body: El, close: fn(&mut State, &mut Tx)) -> El {
+    let palette = state.preferences.palette();
+    let typography = state.preferences.typography();
     let title = row()
         .w_full()
         .items_center()
         .justify_between()
-        .child(
-            typography
-                .text("Settings")
-                .font(typography.font(16.0, 600.0))
-                .role("heading"),
-        )
-        .child(conversations::button(
-            palette,
-            typography,
-            "Close",
-            "settings-back".into(),
-            true,
-            |state: &mut State, tx| state.close_settings(tx),
-        )
-        .label("Back to chat"));
-    return col()
+        .child(typography.text(title).font(typography.font(16.0, 600.0)).role("heading"))
+        .child(conversations::button(palette, typography, "Close", format!("{key}-back"), true, close).label("Back to chat"));
+    let body = body.grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false });
+    col()
         .w_full()
         .h_full()
         .min_h(0.0)
         .fill(palette.canvas)
-        .color(ink)
+        .color(palette.ink)
         .padding(10.0)
         .material(palette)
         .child(
             col()
-                .key("settings-card")
+                .key(format!("{key}-card"))
                 .w_full()
                 .grow(1.0)
                 .min_h(0.0)
                 .gap(12.0)
                 .padding(16.0)
-                .fill(page)
+                .fill(palette.page)
                 .border(1.0, palette.line)
                 .radius(14.0)
                 .clip_rounded(14.0)
                 .child(title)
-                .child(
-                    col()
-                        .w_full()
-                        .gap(10.0)
-                        .child(settings_section(state, &APPEARANCE, appearance))
-                        .child(settings_section(state, &PAGE_TOOLS, page_tools))
-                        .children(core.map(|_| settings_section(state, &PROVIDERS, providers)))
-                        .children(core.map(|_| settings_section(state, &AGENTS, agents)))
-                        .grow(1.0)
-                        .min_h(0.0)
-                        .scroll(ScrollSpec {
-                            stick_bottom: false,
-                        }),
-                ),
+                .child(body),
         )
-        .children(presets)
 }
 
 fn view(state: &State, cx: &mut Cx<State>) -> El {
     if state.settings_open {
         return settings_view(state, cx, state.core());
+    }
+    if state.stats_open {
+        return stats_view(state);
     }
     let palette = state.preferences.palette();
     let (ink, page) = (palette.ink, palette.page);
@@ -1735,6 +1753,15 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                                 .focusable(true)
                                 .native_activation()
                                 .on_press_tx(|state: &mut State, tx| state.open_settings(tx)),
+                        )
+                        .child(
+                            typography
+                                .text("Stats")
+                                .key("stats-open")
+                                .role("button")
+                                .focusable(true)
+                                .native_activation()
+                                .on_press_tx(|state: &mut State, tx| state.open_stats(tx)),
                         )
                         .child(metldr_ui::toggle::toggle(
                             typography.text("Search everything").key("gateway-everywhere"),
@@ -1989,6 +2016,16 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             rows,
             true,
             |state: &mut State, tx| state.open_settings(tx),
+        ))
+        .child(conversations::entry(
+            p,
+            typography,
+            "Stats",
+            "stats-open".into(),
+            &conversations::STATS,
+            rows,
+            true,
+            |state: &mut State, tx| state.open_stats(tx),
         ))
         .child(conversations::entry(
             p,

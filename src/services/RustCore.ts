@@ -1,6 +1,6 @@
 import initCore, {
   dictionary_request, gateway_complete, gateway_preferred, gateway_summarize, gateway_word_lookup,
-  summary_cache_clear, summary_gate, summary_prefs_load, summary_prefs_save
+  stats_summary, summary_cache_clear, summary_gate, summary_prefs_load, summary_prefs_save
 } from '../../crates/metldr-core/pkg/metldr_core'
 import type { WordLookupResult } from '../types'
 import coreWasmUrl from '../../crates/metldr-core/pkg/metldr_core_bg.wasm?url'
@@ -62,6 +62,12 @@ export async function lookupWord(word: string, context: WordContext): Promise<Wo
 export async function dictionary(request: object): Promise<unknown> {
   await loadRustCore()
   return dictionary_request(request)
+}
+
+// The Stats page's numbers for the last `days` days, from the local records.
+export async function statsSummary(days: number): Promise<unknown> {
+  await loadRustCore()
+  return stats_summary(days)
 }
 
 export async function clearSummaryCache(): Promise<void> {

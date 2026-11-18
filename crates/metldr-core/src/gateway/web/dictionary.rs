@@ -317,7 +317,7 @@ async fn database() -> Result<IdbDatabase, Error> {
 }
 
 /// Waits for `tx` to commit.
-async fn finished(tx: &IdbTransaction) -> Result<(), Error> {
+pub(super) async fn finished(tx: &IdbTransaction) -> Result<(), Error> {
     let promise = js_sys::Promise::new(&mut |resolve, reject| {
         let complete = Closure::once_into_js(move || {
             let _ = resolve.call0(&JsValue::NULL);

@@ -1,5 +1,5 @@
 import { cacheService } from './CacheService'
-import { clearSummaryCache, dictionary, lookupWord, summaryGate } from './RustCore'
+import { clearSummaryCache, dictionary, lookupWord, statsSummary, summaryGate } from './RustCore'
 import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
@@ -84,6 +84,11 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'DICTIONARY') {
         dictionary(msg).then(respond, err => respond({ error: (err as Error).message }))
+        return true
+      }
+
+      if (msg.type === 'STATS_SUMMARY') {
+        statsSummary(msg.days).then(respond, () => respond(null))
         return true
       }
 
