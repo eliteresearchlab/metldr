@@ -1193,37 +1193,6 @@ async fn summary(
 
 /// Paragraph groups of about `SECTION_TARGET` characters, cut inside a paragraph only when one
 /// paragraph is longer than that.
-fn sections(content: &str) -> Vec<String> {
-    let mut sections = Vec::new();
-    let mut current = String::new();
-    let paragraphs = content
-        .split("\n\n")
-        .map(str::trim)
-        .filter(|p| !p.is_empty());
-    // A wall of text without blank lines still splits, at character boundaries.
-    let pieces = paragraphs.flat_map(|p| {
-        let chars: Vec<char> = p.chars().collect();
-        chars
-            .chunks(SECTION_TARGET * 2)
-            .map(|c| c.iter().collect::<String>())
-            .collect::<Vec<_>>()
-    });
-    for paragraph in pieces {
-        let paragraph = paragraph.as_str();
-        if !current.is_empty() && current.len() + paragraph.len() > SECTION_TARGET {
-            sections.push(std::mem::take(&mut current));
-        }
-        if !current.is_empty() {
-            current.push_str("\n\n");
-        }
-        current.push_str(paragraph);
-    }
-    if !current.is_empty() {
-        sections.push(current);
-    }
-    sections
-}
-
 /// Summarizes each section, two at a time, then merges the section summaries; a failed merge
 /// falls back to the section summaries themselves.
 async fn map_reduce(
@@ -1232,7 +1201,8 @@ async fn map_reduce(
     kind: &str,
     length: &str,
 ) -> Result<String, Error> {
-    let sections = sections(&request.content);
+    let page = crate::page::Sections::new(request.content.clone());
+    let sections = page.spans(SECTION_TARGET);
     let total = sections.len();
     let about = request
         .context
