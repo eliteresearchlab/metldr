@@ -3,7 +3,8 @@
 //! lexical features (keyword rank, word, trigram and number overlap with the goal and the last
 //! acted controls, the name's length, the control's role); no embedding model. Read-only: it
 //! orders refs, it grants nothing.
-use metldr_retrieval::{Chunk, Index, tokenize};
+use metldr_retrieval::{Index, tokenize};
+use std::borrow::Cow;
 
 mod weights;
 use weights::{HIDDEN, INPUTS, WEIGHTS};
@@ -84,27 +85,21 @@ fn numbers(text: &str) -> impl Iterator<Item = &str> {
         .filter(|n| !n.is_empty())
 }
 
-/// The keyword rank of each control for `query`: 1 for the best match, 1/2 for the next, 0 for none.
-fn keyword(query: &str, texts: &[String]) -> Vec<f32> {
+/// The keyword rank of each control for `query`: 1 for the best match, 1/2 for the next, 0 for
+/// none. Each control is indexed as its role and name, its slot its place in `controls`.
+fn keyword(query: &str, controls: &[Control]) -> Vec<f32> {
     let mut index = Index::default();
-    let ids: Vec<String> = (0..texts.len()).map(|i| i.to_string()).collect();
-    for (id, content) in ids.iter().zip(texts) {
-        let (source_url, source_id) = (id.as_str(), id.as_str());
-        index.add(&Chunk {
-            id,
-            kind: "page",
-            title: "",
-            content,
-            source_url,
-            source_id,
-            summary: false,
-        });
+    let mut text = String::new();
+    for control in controls {
+        text.clear();
+        text.push_str(control.role);
+        text.push(' ');
+        text.push_str(control.name);
+        index.add_text(&text);
     }
-    let mut score = vec![0.0f32; texts.len()];
-    for (rank, &slot) in index.keyword(query, texts.len()).iter().enumerate() {
-        if let Ok(i) = index.id(slot).parse::<usize>() {
-            score[i] = 1.0 / (1.0 + rank as f32);
-        }
+    let mut score = vec![0.0f32; controls.len()];
+    for (rank, &slot) in index.keyword(query, controls.len()).iter().enumerate() {
+        score[slot as usize] = 1.0 / (1.0 + rank as f32);
     }
     score
 }
@@ -118,11 +113,7 @@ pub fn scores(goal: &str, previous: &[&str], controls: &[Control]) -> Vec<f32> {
         .copied()
         .collect::<Vec<_>>()
         .join("; ");
-    let texts: Vec<String> = controls
-        .iter()
-        .map(|c| format!("{} {}", c.role, c.name))
-        .collect();
-    let keyword = keyword(&format!("{goal} {previous}"), &texts);
+    let keyword = keyword(&format!("{goal} {previous}"), controls);
     let goal_lower = goal.to_lowercase();
     let (mut goal_words, mut goal_grams, mut previous_words) = (Vec::new(), Vec::new(), Vec::new());
     words(goal, &mut goal_words);
@@ -188,12 +179,19 @@ fn score(x: &[f32; INPUTS]) -> f32 {
 }
 
 /// The role, accessible name and ref of an outline line such as `- button "Save" [ref=e12]`.
-fn parse(line: &str) -> Option<(&str, String, bool)> {
+/// A name without escapes is borrowed from the line: one SIMD scan finds its closing quote.
+fn parse(line: &str) -> Option<(&str, Cow<'_, str>, bool)> {
     let rest = line.trim_start().strip_prefix("- ")?;
     let end = rest.find([' ', ':']).unwrap_or(rest.len());
     let (role, mut rest) = rest.split_at(end);
-    let mut name = String::new();
+    let mut name = Cow::Borrowed("");
     if let Some(quoted) = rest.strip_prefix(" \"") {
+        let first = memchr::memchr2(b'"', b'\\', quoted.as_bytes());
+        if let Some(at) = first.filter(|&at| quoted.as_bytes()[at] == b'"') {
+            let after = &quoted[at + 1..];
+            return Some((role, Cow::Borrowed(&quoted[..at]), after.contains("[ref=")));
+        }
+        let name = name.to_mut();
         let mut chars = quoted.char_indices();
         while let Some((i, c)) = chars.next() {
             match c {
@@ -209,10 +207,10 @@ fn parse(line: &str) -> Option<(&str, String, bool)> {
     Some((role, name, rest.contains("[ref=")))
 }
 
-/// The best `limit` controls of a page outline for `goal`, best first, under a line saying how
-/// many there were. Lines keep their text, refs included, without their indentation.
-pub fn shortlist(outline: &str, goal: &str, previous: &[&str], limit: usize) -> String {
-    let lines: Vec<(&str, &str, String)> = outline
+/// The controls of a page outline, best first for `goal`: each line's text without its
+/// indentation, refs included.
+pub fn ranked<'a>(outline: &'a str, goal: &str, previous: &[&str]) -> Vec<&'a str> {
+    let lines: Vec<(&str, &str, Cow<str>)> = outline
         .lines()
         .filter_map(|text| {
             parse(text)
@@ -231,14 +229,28 @@ pub fn shortlist(outline: &str, goal: &str, previous: &[&str], limit: usize) -> 
     let scores = scores(goal, previous, &controls);
     let mut order: Vec<usize> = (0..lines.len()).collect();
     order.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]));
-    let shown = order.len().min(limit);
-    let mut out = format!(
-        "{shown} of {} controls, best first for the goal; snapshot without goal for the whole page.\n",
+    order.into_iter().map(|i| lines[i].0).collect()
+}
+
+/// `lines`, the best of `total` controls, under a line saying so; `by` names who ranked them.
+pub fn write_shortlist(lines: &[&str], total: usize, by: &str, out: &mut String) {
+    use std::fmt::Write;
+    let _ = writeln!(
+        out,
+        "{} of {total} controls, best first for the goal{by}; snapshot without goal for the whole page.",
         lines.len()
     );
-    for &i in &order[..shown] {
-        out.push_str(lines[i].0);
+    for line in lines {
+        out.push_str(line);
         out.push('\n');
     }
+}
+
+/// The best `limit` controls of a page outline for `goal`, best first, under a line saying how
+/// many there were.
+pub fn shortlist(outline: &str, goal: &str, previous: &[&str], limit: usize) -> String {
+    let lines = ranked(outline, goal, previous);
+    let mut out = String::new();
+    write_shortlist(&lines[..lines.len().min(limit)], lines.len(), "", &mut out);
     out
 }

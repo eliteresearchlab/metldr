@@ -235,6 +235,38 @@ impl Index {
             ..
         } = *chunk;
         self.remove(id);
+        let (counts, slot) = self.count_terms(chunk.content);
+        let len = self.lens[slot as usize];
+        for key in [source_url, source_id] {
+            if !key.is_empty() {
+                *self.sources.entry(key.into()).or_default() += 1;
+            }
+        }
+        self.slots.insert(id.into(), slot);
+        self.docs[slot as usize] = Some(Doc {
+            id: id.into(),
+            kind: chunk.kind.into(),
+            title: chunk.title.into(),
+            content: chunk.content.into(),
+            len,
+            terms: counts.into_iter().map(|(term, _)| term).collect(),
+            summary: chunk.summary,
+            source: source_base(source_url).into(),
+            source_url: source_url.into(),
+            source_id: source_id.into(),
+        });
+    }
+
+    /// Adds `content` as an unnamed chunk for a throwaway ranking, such as the element scout's
+    /// keyword feature: `keyword` scores it like any chunk, and its slot is the order of adding.
+    /// Nothing else (search, context, sources) sees it.
+    pub fn add_text(&mut self, content: &str) -> u32 {
+        self.count_terms(content).1
+    }
+
+    /// Counts `content`'s terms into the postings of a new slot; returns its distinct terms
+    /// with their counts, and the slot.
+    fn count_terms(&mut self, content: &str) -> (Vec<(u32, u32)>, u32) {
         let mut counts: Vec<(u32, u32)> = Vec::new();
         let mut len = 0u32;
         let (terms, lengths, postings, seen) = (
@@ -243,7 +275,7 @@ impl Index {
             &mut self.postings,
             &mut self.seen,
         );
-        tokenize(chunk.content, &mut |word| {
+        tokenize(content, &mut |word| {
             len += 1;
             let term = match terms.get(word) {
                 Some(&term) => term,
@@ -282,25 +314,8 @@ impl Index {
         for &(term, count) in &counts {
             self.postings[term as usize].push((slot, count));
         }
-        for key in [source_url, source_id] {
-            if !key.is_empty() {
-                *self.sources.entry(key.into()).or_default() += 1;
-            }
-        }
         self.total_len += u64::from(len);
-        self.slots.insert(id.into(), slot);
-        self.docs[slot as usize] = Some(Doc {
-            id: id.into(),
-            kind: chunk.kind.into(),
-            title: chunk.title.into(),
-            content: chunk.content.into(),
-            len,
-            terms: counts.into_iter().map(|(term, _)| term).collect(),
-            summary: chunk.summary,
-            source: source_base(source_url).into(),
-            source_url: source_url.into(),
-            source_id: source_id.into(),
-        });
+        (counts, slot)
     }
 
     pub fn remove(&mut self, id: &str) {
@@ -332,7 +347,8 @@ impl Index {
 
     /// BM25 hits, best first, as slots; equal scores keep the earlier slot first.
     pub fn keyword(&self, query: &str, limit: usize) -> Vec<u32> {
-        let n = self.slots.len();
+        // Live chunks, named or not: every slot made, less the freed ones.
+        let n = self.lens.len() - self.free.len();
         if n == 0 || limit == 0 {
             return Vec::new();
         }
@@ -345,7 +361,7 @@ impl Index {
             }
         });
         let average = self.total_len as f64 / n as f64;
-        let mut scores = vec![0.0f64; self.docs.len()];
+        let mut scores = vec![0.0f64; self.lens.len()];
         let mut touched: Vec<u32> = Vec::new();
         for term in terms {
             let posting = &self.postings[term as usize];
