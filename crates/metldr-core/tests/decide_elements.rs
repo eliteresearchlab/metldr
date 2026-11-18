@@ -10,7 +10,6 @@ fn port_agrees_with_the_trained_scorer() {
                 role: c[0].as_str().unwrap(),
                 name: c[1].as_str().unwrap(),
                 clickable: c[2].as_bool().unwrap(),
-                parent: c[3].as_str().unwrap(),
             })
             .collect();
         let goal = case["goal"].as_str().unwrap();
@@ -25,11 +24,13 @@ fn port_agrees_with_the_trained_scorer() {
 }
 
 #[test]
-fn shortlist_ranks_outline_controls_for_the_goal() {
-    let outline = "- banner:\n  - link \"Home\" [ref=e1]\n  - navigation \"Main\":\n    - link \"Pricing\" [ref=e2]\n    - link \"Docs\" [ref=e3]\n- main:\n  - heading \"Order 4471\" [level=1]\n  - button \"Apply update\" [ref=e4]\n  - button \"Cancel order\" [ref=e5]\n  - textbox \"Say \\\"hi\\\"\" [ref=e6]";
-    let list = metldr_core::decide::elements::shortlist(outline, "Click Apply update", &[], 2);
+fn shortlist_ranks_the_named_control_first_on_a_real_outline() {
+    // A Browse outline nests a section's controls under its heading line; the scout must not
+    // read that as the button sitting inside a heading.
+    let outline = include_str!("elements_outline.txt");
+    let list = metldr_core::decide::elements::shortlist(outline, "Click Apply update", &[], 3);
     let lines: Vec<&str> = list.lines().collect();
-    assert_eq!(lines[0], "2 of 6 controls, best first for the goal; snapshot without goal for the whole page.");
-    assert_eq!(lines[1], "- button \"Apply update\" [ref=e4]");
-    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0], "3 of 11 controls, best first for the goal; snapshot without goal for the whole page.");
+    assert_eq!(lines[1], "- button \"Apply update\" [ref=e11]");
+    assert_eq!(lines.len(), 4);
 }
