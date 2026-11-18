@@ -520,8 +520,7 @@ fn segment(
     if enabled { el.press(typography.press) } else { el.opacity(0.5) }
 }
 
-/// The interaction sounds setting as a switch: its label, then a track whose thumb sits right
-/// while on.
+/// The interaction sounds setting as a switch.
 fn sound_switch(
     typography: Typography,
     palette: &Palette,
@@ -530,6 +529,21 @@ fn sound_switch(
     action: &Rc<impl Fn(&mut State, Action, &mut Tx) + 'static>,
 ) -> El {
     let press = Rc::clone(action);
+    switch(typography, palette, "preferences-sound", "Interaction sounds", on, enabled, move |state: &mut State, on, tx| {
+        press(state, Action::Sound(on), tx)
+    })
+}
+
+/// A setting as a switch: its label, then a track whose thumb sits right while on.
+pub(super) fn switch(
+    typography: Typography,
+    palette: &Palette,
+    key: &str,
+    label: &str,
+    on: bool,
+    enabled: bool,
+    on_change: impl Fn(&mut State, bool, &mut Tx) + 'static,
+) -> El {
     // The thumb slides by an offset, so a toggle repaints the switch without laying out its row.
     // A molded switch is a slide switch: a key on its lip that snaps across on a detent.
     let (track_w, thumb_w, thumb_h, travel) = if palette.molded() { (44.0, 20.0, 16.0, 20.0) } else { (28.0, 12.0, 12.0, 12.0) };
@@ -547,15 +561,15 @@ fn sound_switch(
         .border(1.0, if on { palette.accent } else { palette.line })
         .child(thumb);
     let el = ::rune::row()
-        .key("preferences-sound")
-        .label("Interaction sounds")
+        .key(key.to_owned())
+        .label(label.to_owned())
         .w_full()
         .min_h(32.0)
         .gap(8.0)
         .items_center()
-        .child(typography.legend("Interaction sounds").grow(1.0))
+        .child(typography.legend(label).grow(1.0))
         .child(track);
-    let el = metldr_ui::choice::switch(el, !enabled, on, move |state: &mut State, on, tx| press(state, Action::Sound(on), tx));
+    let el = metldr_ui::choice::switch(el, !enabled, on, on_change);
     if enabled { el } else { el.opacity(0.5) }
 }
 

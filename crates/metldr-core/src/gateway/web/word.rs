@@ -6,8 +6,6 @@ use crate::word::{self, Context, Lookup};
 use web_sys::{IdbDatabase, IdbOpenDbRequest};
 
 const API_MS: u32 = 8_000;
-/// The database the side panel downloads dictionaries into, one store per language.
-const DICTIONARIES: &str = "metldr-dictionary";
 
 /// `word` and its page context to `{definitions, synonyms, language, source}`.
 #[wasm_bindgen]
@@ -57,7 +55,7 @@ async fn api(word: &str, languages: &[String]) -> Option<Lookup> {
     let encoded = String::from(js_sys::encode_uri_component(word));
     for language in languages {
         let url = format!("https://api.dictionaryapi.dev/api/v2/entries/{language}/{encoded}");
-        if let Ok(body) = get_json(&url, &[], API_MS).await
+        if let Ok(body) = get_json(&url, &[], API_MS, 1 << 20).await
             && let Some(found) = word::from_api(&body, language)
         {
             return Some(found);
@@ -91,7 +89,7 @@ async fn model(word: &str, language: &str, context: &Context) -> Option<Lookup> 
 /// downloaded the open is aborted before the database exists.
 async fn local(word: &str, languages: &[String]) -> Option<Lookup> {
     let factory: web_sys::IdbFactory = get(&js_sys::global(), "indexedDB").dyn_into().ok()?;
-    let open: IdbOpenDbRequest = factory.open(DICTIONARIES).ok()?;
+    let open: IdbOpenDbRequest = factory.open(super::dictionary::DATABASE).ok()?;
     let refuse = Closure::once_into_js({
         let open = open.clone();
         move || {

@@ -261,25 +261,6 @@ export interface WordLookupResult {
   source?: string
 }
 
-export interface DictEntry {
-  word: string
-  pos?: string
-  definition: string
-}
-
-export interface DictMetaEntry {
-  key: string
-  downloaded?: boolean
-  timestamp?: number
-}
-
-export interface DictLookupResult {
-  word: string
-  pos: string
-  definition: string
-  source?: string
-}
-
 export interface ContextData {
   contextBefore?: string
   contextAfter?: string
@@ -421,6 +402,8 @@ export type BackgroundMessage =
   | { type: 'TOGGLE_SIDE_PANEL'; focus?: string }
   | { type: 'PDF_PROCESS_ARRAYBUFFER'; data: number[]; filename: string; action: 'summarize' | 'copy'; sourceUrl?: string }
   | { type: 'GET_PAGE_CACHE'; url: string }
+  | { type: 'DICTIONARY'; action: 'state' | 'select' | 'delete'; code?: string; on?: boolean }
+  | { type: 'CLEAR_SUMMARY_CACHE' }
 
 export type ResponseCallback = (response: unknown) => void
 
@@ -553,14 +536,6 @@ export interface DropdownPos {
   top: number
   left: number
   width: number
-}
-
-export interface DownloadProgressItem {
-  language?: string
-  letter: string
-  progress: number
-  entriesProcessed?: number
-  entries?: number
 }
 
 export interface AppSummaryResponse {

@@ -1,5 +1,5 @@
 import { cacheService } from './CacheService'
-import { lookupWord, summaryGate } from './RustCore'
+import { clearSummaryCache, dictionary, lookupWord, summaryGate } from './RustCore'
 import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
@@ -79,6 +79,17 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'WORD_LOOKUP') {
         this._onWordLookup(msg, respond)
+        return true
+      }
+
+      if (msg.type === 'DICTIONARY') {
+        dictionary(msg).then(respond, err => respond({ error: (err as Error).message }))
+        return true
+      }
+
+      if (msg.type === 'CLEAR_SUMMARY_CACHE') {
+        const failed = (err: Error) => respond({ ok: false, error: err.message })
+        clearSummaryCache().then(() => respond({ ok: true }), failed)
         return true
       }
 

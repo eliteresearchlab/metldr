@@ -106,9 +106,7 @@ export function useSettings() {
     })
   }
 
-  function setupStorageListener(
-    onSelectedLanguagesChange?: (langs: string[]) => void
-  ): void {
+  function setupStorageListener(): void {
     storageService.onChange((changes) => {
       if (changes.summaryPrefs?.newValue) {
         const prefs = changes.summaryPrefs.newValue as { mode?: string; allowlist?: string[]; denylist?: string[]; minAutoWords?: number }
@@ -122,10 +120,6 @@ export function useSettings() {
         wordPopupEnabled.value = (changes.wordPopupEnabled.newValue as boolean) ?? true
       }
       
-      if (changes.selectedLanguages?.newValue && onSelectedLanguagesChange) {
-        onSelectedLanguagesChange(changes.selectedLanguages.newValue as string[])
-      }
-
       if (changes.fontSize?.newValue) {
         const size = changes.fontSize.newValue as string
         if (size === 'small' || size === 'medium' || size === 'large') {

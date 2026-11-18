@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { useThemeStore } from '@/stores/theme'
-import { SUPPORTED_LANGUAGES } from '@/utils/storage'
 import { 
   FileText, BookOpen, Database, Trash2, HelpCircle, X, Cpu, Zap, Palette, Loader2
 } from 'lucide-vue-next'
 import { Toggle, ScrollArea, Checkbox, Textarea, Input, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui'
 import AIStatusCards from './AIStatusCards.vue'
 import DonationCard from './DonationCard.vue'
-import type { DownloadProgressItem } from '@/types'
+import type { DictionaryLanguage } from '@/composables/useDictionary'
 import type { GatewayRoute } from '@/composables/useGateway'
 
 interface Props {
@@ -19,9 +18,10 @@ interface Props {
   allowlistInput: string
   denylistInput: string
   wordPopupEnabled: boolean
+  languages: DictionaryLanguage[]
   downloadedLanguages: string[]
   selectedLanguages: string[]
-  downloadProgress: Record<string, DownloadProgressItem>
+  downloadProgress: Record<string, number>
   fontSize: 'small' | 'medium' | 'large'
 }
 
@@ -92,7 +92,7 @@ const themeStore = useThemeStore()
         <ScrollArea class="h-40 w-full">
           <div class="space-y-1 pr-4">
             <div 
-              v-for="lang in SUPPORTED_LANGUAGES" 
+              v-for="lang in languages" 
               :key="lang.code" 
               @click="emit('toggle-language', lang.code)"
               class="flex items-center gap-2.5 py-1.5 cursor-pointer hover:bg-muted/50 rounded-lg px-2 -mx-2 transition-colors"
@@ -104,10 +104,10 @@ const themeStore = useThemeStore()
               <span class="text-(length:--font-text-secondary) text-foreground/80 flex-1">{{ lang.name }}</span>
               
               <!-- status badges -->
-              <div v-if="downloadProgress[lang.code]" class="flex items-center gap-1">
+              <div v-if="downloadProgress[lang.code] !== undefined" class="flex items-center gap-1">
                 <Loader2 :size="10" class="animate-spin text-amber-400" />
                 <span class="text-(length:--font-text-secondary) text-amber-400">
-                  {{ Number(downloadProgress[lang.code].progress || 0).toFixed(0) }}%
+                  {{ downloadProgress[lang.code] }}%
                 </span>
               </div>
               <span 

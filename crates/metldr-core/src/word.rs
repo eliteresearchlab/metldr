@@ -239,18 +239,20 @@ pub fn from_api(body: &[u8], language: &str) -> Option<Lookup> {
 
 /// A downloaded dictionary's record: `{word, definition, pos?}`.
 pub fn from_local(record: &Value, language: &str) -> Option<Lookup> {
-    let definition = record["definition"].as_str()?.to_owned();
-    Some(Lookup {
-        definitions: vec![Definition {
-            definition,
-            part_of_speech: record["pos"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .unwrap_or("unknown")
-                .to_owned(),
+    let sense = |pos: &Value, definition: &Value| {
+        Some(Definition {
+            definition: definition.as_str()?.to_owned(),
+            part_of_speech: pos.as_str().filter(|s| !s.is_empty()).unwrap_or("unknown").to_owned(),
             example: None,
             synonyms: Vec::new(),
-        }],
+        })
+    };
+    // The first sense, then the word's later senses as `[pos, definition]` pairs.
+    let mut definitions = vec![sense(&record["pos"], &record["definition"])?];
+    let more = record["more"].as_array().map_or(&[][..], Vec::as_slice);
+    definitions.extend(more.iter().filter_map(|pair| sense(&pair[0], &pair[1])));
+    Some(Lookup {
+        definitions,
         synonyms: Vec::new(),
         language: language.into(),
         source: "local".into(),

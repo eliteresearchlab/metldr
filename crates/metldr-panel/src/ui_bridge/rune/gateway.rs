@@ -492,7 +492,7 @@ fn ready_routes(reply: &Value) -> Option<(Vec<RouteChoice>, usize)> {
 }
 
 /// The extension's reply to `request` sent to its service worker, or None.
-async fn ask_extension(request: &Value) -> Option<Value> {
+pub(super) async fn ask_extension(request: &Value) -> Option<Value> {
     let runtime = crate::chrome_api("runtime").ok()?;
     let message = crate::flow::json_value(request).ok()?;
     json_of(&crate::await_call(&runtime, "sendMessage", &[message]).await.ok()?)
