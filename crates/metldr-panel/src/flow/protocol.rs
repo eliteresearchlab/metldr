@@ -846,6 +846,7 @@ mod tests {
 
     fn snapshot(sequence: u64, status: &str, output: &str) -> Value {
         json!({
+            "approval_mode": "ask",
             "sequence": sequence,
             "store": STORE,
             "selection": {"store":STORE,"conversation":format!("{STORE}:100"),"epoch":"1"},

@@ -263,7 +263,7 @@ mod checks {
         let store = "0123456789abcdef0123456789abcdef";
         let mut current = PageView::decode(
             &serde_json::to_vec(&serde_json::json!({
-                "sequence":2,"store":store,
+                "approval_mode":"ask","sequence":2,"store":store,
                 "selection":{"store":store,"conversation":format!("{store}:1"),"epoch":"2"},
                 "source":null,"runs":[],"native_correction":null,"pi_profile":null,
                 "agent_sessions":[],"browser_route":null

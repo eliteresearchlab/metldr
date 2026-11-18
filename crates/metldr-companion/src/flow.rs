@@ -243,7 +243,6 @@ pub(super) struct Owner {
     pub(super) pi_ui: BTreeMap<String, crate::pi_ui::State>,
     pub(super) codex_input: BTreeMap<String, crate::codex_input::State>,
     pub(super) plan_hold: Option<crate::browser_owner::PlanHold>,
-    pub(super) session_grants: BTreeMap<String, crate::browser_owner::SessionGrant>,
     /// Runs whose user stop is already recorded, so a repeated stop needs no second write.
     pub(super) stopping: std::collections::BTreeSet<String>,
     pub(super) browser_approval: Option<crate::browser_owner::PendingApproval>,
@@ -270,7 +269,12 @@ impl Owner {
             view.state.view.source.as_ref(),
             &view.native_fingerprints()?,
         )?;
-        let plan = history.edit(|edit| edit.plan_view(&selection, view.state))?;
+        let (plan, mode) = history.edit(|edit| {
+            Ok((
+                edit.plan_view(&selection, view.state)?,
+                edit.approval_mode(&selection.conversation)?,
+            ))
+        })?;
         let reply = view.reply(
             view.state,
             request,
@@ -280,6 +284,7 @@ impl Owner {
             &selection,
             &choices,
             plan,
+            mode,
         )?;
         self.emit(reply)
     }
@@ -313,6 +318,7 @@ impl Owner {
             let choices =
                 edit.native_choices(&subscription.scope, state.view.source.as_ref(), &profiles)?;
             let plan = edit.plan_view(&subscription.scope, &state)?;
+            let mode = edit.approval_mode(&subscription.scope.conversation)?;
             Ok((
                 view.reply(
                     &state,
@@ -323,6 +329,7 @@ impl Owner {
                     &subscription.scope,
                     &choices,
                     plan,
+                    mode,
                 )?,
                 ended,
             ))
@@ -573,34 +580,10 @@ impl Owner {
                 }
                 self.reply_view(Some(id), "view", true)
             }
-            ConversationAction::GrantSession { run, revision } => {
+            ConversationAction::SetApprovalMode { mode } => {
                 self.require_conversation(scope)?;
-                self.browser_operation(&run)?;
-                let plan = self.record_execution(&run, |edit, execution| {
-                    edit.current_execution(scope, &run)?;
-                    edit.task_plan(execution)
-                })?;
-                if !plan.is_some_and(|plan| {
-                    plan.revision == revision && plan.state == crate::history::PlanState::Approved
-                }) {
-                    return Err("session approval needs the current approved task plan".into());
-                }
-                let now = std::time::Instant::now();
-                self.session_grants
-                    .entry(run)
-                    .and_modify(|grant| {
-                        if grant.plan_revision == revision {
-                            grant.expires = now + crate::browser_owner::GRANT_TTL;
-                        } else {
-                            *grant = crate::browser_owner::SessionGrant::new(revision, now);
-                        }
-                    })
-                    .or_insert_with(|| crate::browser_owner::SessionGrant::new(revision, now));
-                self.reply_view(Some(id), "view", true)
-            }
-            ConversationAction::RevokeSession { run } => {
-                self.require_conversation(scope)?;
-                self.session_grants.remove(&run);
+                self.record_history
+                    .edit(|edit| edit.set_approval_mode(&scope.conversation, mode))?;
                 self.reply_view(Some(id), "view", true)
             }
             command @ (ConversationAction::PiPrompt { .. }
@@ -750,8 +733,6 @@ impl Owner {
         ledger: Option<metldr_conversation::Ledger>,
         disconnected: bool,
     ) -> Result<()> {
-        // A finished run ends its session grant (decision 09).
-        self.session_grants.remove(run);
         self.stopping.remove(run);
         let mut operation = self.operations.remove(run).ok_or_else(|| {
             if self.operations.is_empty() {

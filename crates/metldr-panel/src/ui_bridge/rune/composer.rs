@@ -313,6 +313,11 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
         }
         Some(choice) => choice.label,
     };
+    // A chat that acts without asking says so on its model button.
+    let model_label = match state.approval_mode() {
+        crate::model::ApprovalMode::Ask => model_label,
+        mode => format!("{model_label}, {}", mode.label()).into(),
+    };
     let mut field = ::rune::el::text_input(
         &state.draft,
         if p.crafted() {
@@ -746,9 +751,39 @@ pub(super) fn menu(state: &State) -> Option<El> {
                 );
                 menu = menu.child(mode_rows.role("group").label("Codex mode"));
             }
+            // A mode is the chat's setting, so it shows once a chat is connected.
+            if state.core().is_some() {
+                menu = menu.child(approval_rows(state, typography, &p));
+            }
             Some(menu)
         }
     }
+}
+
+/// The chat's approval mode as one radio group under the models: Ask, Auto, Full access.
+fn approval_rows(state: &State, typography: super::preferences::Typography, p: &Palette) -> El {
+    let current = state.approval_mode();
+    let heading = typography
+        .legend("Approvals")
+        .font(typography.font(11.0, 500.0))
+        .color(p.ink_3)
+        .px(8.0)
+        .pt(6.0)
+        .pb(2.0)
+        .a11y_hidden();
+    crate::model::ApprovalMode::ALL.into_iter().fold(
+        col().key("rune-approval-rows").w_full().child(heading),
+        |rows, mode| {
+            let active = mode == current;
+            let row = menu_row(typography, p, format!("approval:{}", mode.label()), mode.label().into(), "", active)
+                .label(mode.label())
+                .press(p.line_strong);
+            let close: metldr_ui::menu::CloseOnSelect<State> = Some(std::rc::Rc::new(close_menu));
+            rows.child(metldr_ui::menu::radio_item(row, false, active, close, move |state: &mut State, _| state.set_approval(mode)))
+        },
+    )
+    .role("group")
+    .label("Approvals")
 }
 
 #[cfg(test)]

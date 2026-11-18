@@ -1,9 +1,11 @@
 use super::{Edit, Execution, record, storage};
 use crate::{
     Result,
-    history::schema::{Record, TASK_PLANS, encode},
+    history::schema::{APPROVAL_MODES, Record, TASK_PLANS, encode},
+    browser_owner::ApprovalMode,
     model::valid_request_id,
 };
+use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -63,6 +65,21 @@ impl Edit<'_> {
                 "scope": plan.scope, "revision": plan.revision, "state": plan.state
             })
         }))
+    }
+
+    /// The chat's approval mode: Ask until the user picks another.
+    pub(crate) fn approval_mode(&self, conversation: &str) -> Result<ApprovalMode> {
+        let saved = storage(|| Ok(self.write.open_table(APPROVAL_MODES)?.get(conversation)?.map(|byte| byte.value())))?;
+        saved.map_or(Ok(ApprovalMode::Ask), |byte| ApprovalMode::from_byte(byte).ok_or_else(|| PlanError::Invalid.into()))
+    }
+
+    pub(crate) fn set_approval_mode(&mut self, conversation: &str, mode: ApprovalMode) -> Result<()> {
+        storage(|| {
+            self.write.open_table(APPROVAL_MODES)?.insert(conversation, mode.byte())?;
+            Ok(())
+        })?;
+        self.changed = true;
+        Ok(())
     }
 
     pub(crate) fn task_plan(&self, execution: &Execution) -> Result<Option<TaskPlan>> {
