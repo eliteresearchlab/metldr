@@ -86,6 +86,11 @@ impl SearchIndex {
         self.dense.add(id, content);
     }
 
+    pub fn remove(&mut self, id: &str) {
+        self.keywords.remove(id);
+        self.dense.remove(id);
+    }
+
     pub fn has_source(&self, source: &str) -> bool {
         self.keywords.has_source(source)
     }
@@ -135,7 +140,8 @@ struct Found {
 #[derive(Default)]
 struct Store {
     index: RefCell<SearchIndex>,
-    hashes: RefCell<HashMap<String, String>>,
+    /// Each source's content fingerprint and how many chunks it was cut into.
+    hashes: RefCell<HashMap<String, (String, usize)>>,
     indexing: RefCell<HashSet<String>>,
     queries: RefCell<VecDeque<(String, f64, Found)>>,
     model_tried: Cell<f64>,
@@ -239,10 +245,11 @@ async fn load() -> Rc<Store> {
                 if let (Some(id), Some(hash)) =
                     (entry["sourceId"].as_str(), entry["contentHash"].as_str())
                 {
+                    let chunks = entry["chunkCount"].as_u64().unwrap_or(0) as usize;
                     store
                         .hashes
                         .borrow_mut()
-                        .insert(id.to_owned(), hash.to_owned());
+                        .insert(id.to_owned(), (hash.to_owned(), chunks));
                 }
             }
         }
@@ -327,12 +334,18 @@ async fn keep(entries: &[Value], hash: Option<(&str, &str, usize)>) {
     let Some(db) = page_summary::cache().await else {
         return;
     };
-    keep_in(&db, entries, hash).await;
+    keep_in(&db, entries, hash, &[]).await;
     db.close();
 }
 
 /// [`keep`] on an open cache, so one indexing run opens it once.
-async fn keep_in(db: &web_sys::IdbDatabase, entries: &[Value], hash: Option<(&str, &str, usize)>) {
+/// Chunk ids in `removed` are deleted in the same transaction.
+async fn keep_in(
+    db: &web_sys::IdbDatabase,
+    entries: &[Value],
+    hash: Option<(&str, &str, usize)>,
+    removed: &[String],
+) {
     let written = async {
         let names = js_sys::Array::of2(&PAGES.into(), &HASHES.into());
         let tx = db
@@ -341,6 +354,9 @@ async fn keep_in(db: &web_sys::IdbDatabase, entries: &[Value], hash: Option<(&st
         let pages = tx.object_store(PAGES).map_err(err)?;
         for entry in entries {
             pages.put(&to_js(entry)).map_err(err)?;
+        }
+        for id in removed {
+            pages.delete(&format!("rag:{id}").into()).map_err(err)?;
         }
         if let Some((source, hash, chunks)) = hash {
             let record = json!({"sourceId": source, "contentHash": hash, "chunkCount": chunks, "timestamp": now()});
@@ -383,11 +399,12 @@ async fn index(
     report(progress, 5);
     let hash = fingerprint(text);
     let known = store.hashes.borrow().get(id).cloned();
+    let before = known.as_ref().map_or(0, |(_, chunks)| *chunks);
     let present = store.index.borrow().has_source(id);
     let done = match known {
-        Some(known) if known == hash && present => true,
+        Some((known, _)) if known == hash && present => true,
         None if present => {
-            store.hashes.borrow_mut().insert(id.clone(), hash.clone());
+            store.hashes.borrow_mut().insert(id.clone(), (hash.clone(), 0));
             keep(&[], Some((id, &hash, 0))).await;
             true
         }
@@ -420,7 +437,7 @@ async fn index(
                 })
                 .collect();
             if let Some(db) = &db {
-                keep_in(db, &entries, None).await;
+                keep_in(db, &entries, None, &[]).await;
             }
             for entry in &entries {
                 remember(&mut store.index.borrow_mut(), entry);
@@ -429,9 +446,15 @@ async fn index(
             report(progress, 20 + share.min(70) as u32);
         }
         if total > 0 {
-            store.hashes.borrow_mut().insert(id.clone(), hash.clone());
+            // A page that now cuts into fewer chunks drops the ones past its new end.
+            let chunk_id = |n| format!("{}:{id}:chunk:{n}", source.source_type);
+            let stale: Vec<String> = (total..before).map(chunk_id).collect();
+            for gone in &stale {
+                store.index.borrow_mut().remove(gone);
+            }
+            store.hashes.borrow_mut().insert(id.clone(), (hash.clone(), total));
             if let Some(db) = &db {
-                keep_in(db, &[], Some((id, &hash, total))).await;
+                keep_in(db, &[], Some((id, &hash, total)), &stale).await;
             }
             store.queries.borrow_mut().clear();
         }
@@ -487,7 +510,7 @@ pub async fn search_index_summary(text: String, source_of: JsValue) -> Result<()
     source.source_id = id.clone();
     let summary = entry(format!("{}:{id}", source.source_type), &source, &text, meta);
     let hash = fingerprint(&text);
-    store.hashes.borrow_mut().insert(id.clone(), hash.clone());
+    store.hashes.borrow_mut().insert(id.clone(), (hash.clone(), 1));
     keep(std::slice::from_ref(&summary), Some((&id, &hash, 1))).await;
     remember(&mut store.index.borrow_mut(), &summary);
     save_soon(&store);
