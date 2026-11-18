@@ -3,4 +3,5 @@ export function capturePage(): {
   title: string;
   blocks: [kind: string, depth: number, text: string][];
   truncated: boolean;
+  alternate: string;
 };

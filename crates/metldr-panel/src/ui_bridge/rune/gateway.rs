@@ -337,7 +337,8 @@ async fn capture() -> Result<(String, String, String), FlowError> {
     let observed = crate::get(&js_sys::Array::from(&values).get(0), "result")
         .map_err(|_| failure("The page could not be read."))?;
     let title = crate::string_property(&observed, "title").unwrap_or_default();
-    Ok((url, title, crate::flow::page_text(&observed)?))
+    let markdown = crate::flow::page_text(&observed, &url).await?;
+    Ok((url, title, markdown))
 }
 
 #[cfg(test)]

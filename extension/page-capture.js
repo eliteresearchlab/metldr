@@ -83,5 +83,8 @@ export function capturePage() {
   walk(root, 0);
   flush();
   if (!blocks.length) throw new Error("Page content is unavailable.");
-  return { url: location.href, title: document.title, blocks, truncated };
+  // A page may offer its own markdown; the extension checks and fetches it.
+  const offered = document.querySelector("link[rel~='alternate'][type='text/markdown']")?.href ?? "";
+  const alternate = offered.startsWith("https://") ? offered.slice(0, 2048) : "";
+  return { url: location.href, title: document.title, blocks, truncated, alternate };
 }
