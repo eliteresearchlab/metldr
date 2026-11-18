@@ -1,4 +1,5 @@
 mod chunking;
+pub mod decide;
 pub mod dense;
 pub mod gateway;
 pub mod summary_gate;

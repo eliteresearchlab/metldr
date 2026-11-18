@@ -188,6 +188,9 @@ pub(super) struct Page {
     context: ToolContext,
 }
 
+/// The controls a ranked snapshot shows.
+const SHORTLIST: usize = 40;
+
 impl Page {
     pub(super) fn new(
         tab: i32,
@@ -234,9 +237,20 @@ impl Page {
         Ok(text.join("\n"))
     }
 
-    /// The page outline from Browse's snapshot tool; `args` are the snapshot tool's options.
-    pub(super) async fn snapshot(&self, args: Value) -> crate::Result<Value> {
-        Ok(json!({ "kind": "page_snapshot", "text": self.tool("snapshot", args).await? }))
+    /// The page outline from Browse's snapshot tool; `args` are the snapshot tool's options. With
+    /// a `goal`, the controls only, ranked for it by the element scout; `previous` names the
+    /// controls acted on most recently, newest first.
+    pub(super) async fn snapshot(&self, mut args: Value, previous: &[String]) -> crate::Result<Value> {
+        let goal = args.as_object_mut().and_then(|args| args.remove("goal"));
+        let Some(goal) = goal.as_ref().and_then(Value::as_str) else {
+            return Ok(json!({ "kind": "page_snapshot", "text": self.tool("snapshot", args).await? }));
+        };
+        args["interactive"] = json!(true);
+        args["maxItems"] = json!(200);
+        let outline = self.tool("snapshot", args).await?;
+        let previous: Vec<&str> = previous.iter().map(String::as_str).collect();
+        let text = metldr_core::decide::elements::shortlist(&outline, goal, &previous, SHORTLIST);
+        Ok(json!({ "kind": "page_snapshot", "text": text }))
     }
 
     /// The role and accessible name of each of `ids` in the latest snapshot, `None` for an id it
