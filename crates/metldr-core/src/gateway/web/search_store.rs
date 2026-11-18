@@ -277,6 +277,12 @@ fn save_soon(store: &Rc<Store>) {
 /// Writes `entries` and their source's hash in one cache transaction.
 async fn keep(entries: &[Value], hash: Option<(&str, &str, usize)>) {
     let Some(db) = page_summary::cache().await else { return };
+    keep_in(&db, entries, hash).await;
+    db.close();
+}
+
+/// [`keep`] on an open cache, so one indexing run opens it once.
+async fn keep_in(db: &web_sys::IdbDatabase, entries: &[Value], hash: Option<(&str, &str, usize)>) {
     let written = async {
         let names = js_sys::Array::of2(&PAGES.into(), &HASHES.into());
         let tx = db.transaction_with_str_sequence_and_mode(&names, IdbTransactionMode::Readwrite).map_err(err)?;
@@ -291,7 +297,6 @@ async fn keep(entries: &[Value], hash: Option<(&str, &str, usize)>) {
         dictionary::finished(&tx).await
     };
     let _ = written.await;
-    db.close();
 }
 
 fn entry(id: String, source: &Source, content: &str, meta: Value) -> Value {
@@ -339,6 +344,7 @@ async fn index(store: &Rc<Store>, text: &str, source: &Source, progress: &Option
         let chunks = crate::chunk_for_embedding(text, kind);
         let total = chunks.len();
         report(progress, 20);
+        let db = page_summary::cache().await;
         for (batch, part) in chunks.chunks(BATCH).enumerate() {
             let entries: Vec<Value> = part
                 .iter()
@@ -349,7 +355,9 @@ async fn index(store: &Rc<Store>, text: &str, source: &Source, progress: &Option
                     entry(format!("{}:{id}:chunk:{}", source.source_type, chunk.index), source, &chunk.text, meta)
                 })
                 .collect();
-            keep(&entries, None).await;
+            if let Some(db) = &db {
+                keep_in(db, &entries, None).await;
+            }
             for entry in &entries {
                 remember(&mut store.index.borrow_mut(), entry);
             }
@@ -358,9 +366,16 @@ async fn index(store: &Rc<Store>, text: &str, source: &Source, progress: &Option
         }
         if total > 0 {
             store.hashes.borrow_mut().insert(id.clone(), hash.clone());
-            keep(&[], Some((id, &hash, total))).await;
-            save(store).await;
+            if let Some(db) = &db {
+                keep_in(db, &[], Some((id, &hash, total))).await;
+            }
             store.queries.borrow_mut().clear();
+        }
+        if let Some(db) = db {
+            db.close();
+        }
+        if total > 0 {
+            save(store).await;
         }
     }
     store.indexing.borrow_mut().remove(id);
