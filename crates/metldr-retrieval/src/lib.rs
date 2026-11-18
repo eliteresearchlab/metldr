@@ -10,6 +10,8 @@
 //! A query word the index has never seen is read as a typo: the closest indexed word within one
 //! or two edits (Smith-Waterman with affine gaps, SIMD where the target has it) answers for it.
 
+pub mod query;
+
 use std::collections::HashMap as StdMap;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::rc::Rc;
@@ -421,6 +423,11 @@ impl Index {
             kind: h.kind,
         });
         hits.collect()
+    }
+
+    /// The id of the chunk at `slot`, as `keyword` returns it.
+    pub fn id(&self, slot: u32) -> &str {
+        &self.doc(slot).id
     }
 
     fn doc(&self, slot: u32) -> &Doc {

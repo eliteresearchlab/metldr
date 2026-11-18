@@ -581,8 +581,8 @@ dependencies = [
  "metldr-google-interactions",
  "metldr-messages",
  "metldr-responses",
+ "metldr-retrieval",
  "metldr-sse",
- "neo_frizbee",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -622,6 +622,14 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "metldr-retrieval"
+version = "0.1.0"
+dependencies = [
+ "neo_frizbee",
+ "serde",
 ]
 
 [[package]]
