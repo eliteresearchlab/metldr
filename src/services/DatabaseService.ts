@@ -267,15 +267,6 @@ export const DB_CONFIGS = {
     name: 'metldr_cache',
     version: 8,
     stores: CACHE_STORE_CONFIGS
-  },
-  analytics: {
-    name: 'metldr-analytics',
-    version: 2,
-    stores: [
-      { name: 'daily_stats', keyPath: 'date', indexes: [{ name: 'timeInPanel', keyPath: 'timeInPanel' }] },
-      { name: 'sessions', keyPath: 'id', indexes: [{ name: 'startTime', keyPath: 'startTime' }] },
-      { name: 'events', keyPath: 'id', indexes: [{ name: 'timestamp', keyPath: 'timestamp' }] }
-    ]
   }
 } as const
 
