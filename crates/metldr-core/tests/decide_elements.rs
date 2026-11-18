@@ -24,11 +24,13 @@ fn port_agrees_with_the_trained_scorer() {
 }
 
 #[test]
-fn shortlist_ranks_the_named_control_first_on_a_real_outline() {
+fn the_scout_ranks_the_named_control_first_on_a_real_outline() {
     // A Browse outline nests a section's controls under its heading line; the scout must not
     // read that as the button sitting inside a heading.
     let outline = include_str!("elements_outline.txt");
-    let list = metldr_core::decide::elements::shortlist(outline, "Click Apply update", &[], 3);
+    let ranked = metldr_core::decide::elements::ranked(outline, "Click Apply update", &[]);
+    let mut list = String::new();
+    metldr_core::decide::elements::write_shortlist(&ranked[..3], ranked.len(), "", &mut list);
     let lines: Vec<&str> = list.lines().collect();
     assert_eq!(lines[0], "3 of 11 controls, best first for the goal; snapshot without goal for the whole page.");
     assert_eq!(lines[1], "- button \"Apply update\" [ref=e11]");

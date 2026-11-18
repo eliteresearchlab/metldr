@@ -245,12 +245,3 @@ pub fn write_shortlist(lines: &[&str], total: usize, by: &str, out: &mut String)
         out.push('\n');
     }
 }
-
-/// The best `limit` controls of a page outline for `goal`, best first, under a line saying how
-/// many there were.
-pub fn shortlist(outline: &str, goal: &str, previous: &[&str], limit: usize) -> String {
-    let lines = ranked(outline, goal, previous);
-    let mut out = String::new();
-    write_shortlist(&lines[..lines.len().min(limit)], lines.len(), "", &mut out);
-    out
-}
