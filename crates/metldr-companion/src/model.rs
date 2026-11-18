@@ -317,13 +317,9 @@ pub(super) enum ConversationAction {
         revision: u32,
         approve: bool,
     },
-    /// Allows Tier 1 steps without asking for 30 minutes, or extends an existing grant.
-    GrantSession {
-        run: String,
-        revision: u32,
-    },
-    RevokeSession {
-        run: String,
+    /// Sets which plans and steps of this chat run without asking (BR2b-2).
+    SetApprovalMode {
+        mode: crate::browser_owner::ApprovalMode,
     },
     Summarize {
         page: Page,
