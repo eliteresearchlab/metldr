@@ -11,6 +11,7 @@ mod composer;
 mod conversations;
 mod corrections;
 mod fonts;
+mod gateway;
 mod ground;
 use theme::Root as _;
 mod glimm;
@@ -41,6 +42,8 @@ enum Mode {
 enum Session {
     Connecting,
     Ready(Rc<Core>),
+    /// No companion: page questions go through the extension's model gateway.
+    Gateway(Rc<gateway::Gateway>),
     Failed,
 }
 
@@ -60,6 +63,8 @@ struct Updates {
     wake: ::rune::Waker,
     archive_epoch: Rc<Cell<u64>>,
     titles_dirty: Cell<bool>,
+    /// A gateway opened after the companion could not connect, for the next poll to adopt.
+    gateway: RefCell<Option<Rc<gateway::Gateway>>>,
 }
 
 impl Updates {
@@ -78,6 +83,7 @@ impl Updates {
             wake,
             archive_epoch,
             titles_dirty: Cell::new(false),
+            gateway: RefCell::default(),
         })
     }
 
@@ -363,7 +369,17 @@ impl State {
         crate::composer::choices::selected(Some(&core.page.view.borrow()), &self.selection)
     }
 
+    fn gateway(&self) -> Option<&Rc<gateway::Gateway>> {
+        match &self.session {
+            Session::Gateway(gateway) => Some(gateway),
+            _ => None,
+        }
+    }
+
     fn running(&self) -> bool {
+        if let Some(gateway) = self.gateway() {
+            return gateway.streaming();
+        }
         self.core().is_some_and(|core| {
             matches!(
                 *core.owner.borrow(),
@@ -385,6 +401,9 @@ impl State {
     /// A run can start now: the chat is connected, ready and idle, and the selected route can
     /// take one.
     fn can_start(&self) -> bool {
+        if self.gateway().is_some() {
+            return !self.running();
+        }
         !self.running()
             && self.core().is_some_and(|core| {
                 core.page.controls_ready()
@@ -522,6 +541,18 @@ impl State {
     }
 
     fn send(&mut self, _: &mut Tx) {
+        if let (Some(gateway), Some(updates)) = (self.gateway().cloned(), self.updates.clone()) {
+            if self.can_send() {
+                let text = self.draft.text.trim().to_owned();
+                self.clear_draft();
+                self.sound(crate::interaction_audio::Cue::Pulse);
+                spawn_local(async move {
+                    let asked = gateway.ask(text, Rc::clone(&updates)).await;
+                    updates.finish(asked);
+                });
+            }
+            return;
+        }
         if self.can_send() {
             self.start_run(self.draft.text.clone(), false);
         }
@@ -600,6 +631,11 @@ impl State {
         let Some(updates) = self.updates.clone() else {
             return;
         };
+        if let Some(gateway) = self.gateway() {
+            self.sound(crate::interaction_audio::Cue::Release);
+            updates.finish(gateway.stop());
+            return;
+        }
         if let Some(active) = &self.observation {
             match active.stop() {
                 Ok(stopping) => {
@@ -838,8 +874,20 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
             Err(error) => {
                 state.session = Session::Failed;
                 state.fail(error);
+                // Without the companion, the extension's own model gateway can still answer.
+                let opening = Rc::clone(&updates);
+                spawn_local(async move {
+                    if let Some(gateway) = gateway::Gateway::open(&opening).await {
+                        *opening.gateway.borrow_mut() = Some(gateway);
+                        opening.changed();
+                    }
+                });
             }
         }
+    }
+    if let Some(gateway) = updates.gateway.borrow_mut().take() {
+        state.session = Session::Gateway(gateway);
+        updates.presentation.borrow_mut().error = None;
     }
     if let Some(core) = state.core().cloned() {
         let running = state.running();
@@ -1460,6 +1508,27 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
         thread = thread.child(typography.text("Connecting").role("status"));
     }
     let Some(core) = state.core() else {
+        if let Some(gateway) = state.gateway() {
+            // No companion: the chat, a line naming the route that answers, and the composer.
+            let presentation = state.updates.as_ref().map(|updates| updates.presentation.borrow());
+            let error = presentation.as_ref().and_then(|presentation| presentation.error.clone());
+            drop(presentation);
+            let line = error.unwrap_or_else(|| {
+                format!("Answering with {}, without the companion", gateway.route)
+            });
+            let mut composer = col().w_full().max_w(720.0).child(composer::view(state, cx));
+            if let Some(menu) = composer::menu(state) {
+                composer = composer.child(menu);
+            }
+            return col()
+                .w_full()
+                .h_full()
+                .fill(page)
+                .color(ink)
+                .child(thread.padding(16.0).grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }))
+                .child(typography.text(line).role("status").wrap().px(16.0).color(palette.ink_2))
+                .child(col().w_full().items_center().padding(12.0).child(composer));
+        }
         if matches!(state.session, Session::Failed) {
             if let Some(error) = state
                 .updates
