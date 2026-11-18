@@ -24,7 +24,6 @@ pub(crate) struct View<'a> {
     settings: &'a crate::provider_settings::Runtime,
     agent_runtime: &'a crate::agent_settings::Runtime,
     operations: &'a BTreeMap<String, Operation>,
-    session_grants: &'a BTreeMap<String, crate::browser_owner::SessionGrant>,
 }
 
 impl Owner {
@@ -48,7 +47,6 @@ impl Owner {
                 settings: &self.settings,
                 agent_runtime: &self.agent_runtime,
                 operations: &self.operations,
-                session_grants: &self.session_grants,
             },
         )
     }
@@ -102,6 +100,7 @@ impl View<'_> {
         selection: &Selection,
         choices: &NativeChoices,
         plan: Option<Value>,
+        approval_mode: crate::browser_owner::ApprovalMode,
     ) -> Result<Value> {
         let mut view = crate::public_view::render(
             state,
@@ -127,26 +126,7 @@ impl View<'_> {
         }
         view["selection"] = serde_json::to_value(crate::history_io::Scope::from(selection))?;
         view["task_plan"] = plan.into();
-        if let Some(plan) = view["task_plan"].as_object_mut() {
-            let current = plan
-                .get("run")
-                .and_then(Value::as_str)
-                .and_then(|run| self.session_grants.get(run))
-                .filter(|grant| {
-                    plan.get("revision").and_then(Value::as_u64)
-                        == Some(u64::from(grant.plan_revision))
-                });
-            let now = std::time::Instant::now();
-            if let Some(grant) = current.filter(|grant| now < grant.expires) {
-                plan.insert(
-                    "session_grant".into(),
-                    json!({
-                        "remaining_s": grant.expires.saturating_duration_since(now).as_secs(),
-                        "bound": grant.bound.is_some(),
-                    }),
-                );
-            }
-        }
+        view["approval_mode"] = serde_json::to_value(approval_mode)?;
         view["native_correction"] = self.correction(state);
         view["provider_settings"] = self.settings.public(&state.providers);
         view["agent_settings"] = self.agent_runtime.public(
@@ -175,6 +155,7 @@ impl View<'_> {
             selection,
             choices,
             plan,
+            crate::browser_owner::ApprovalMode::Auto,
         )?;
         Ok(())
     }
