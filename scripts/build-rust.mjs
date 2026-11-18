@@ -14,7 +14,7 @@ const crates = [
   { name: 'metldr-panel', variant: 'rune', module: 'metldr_panel', pkg: 'target/wasm/metldr-panel-rune/pkg', features: 'rune-ui' },
   { name: 'metldr-welcome', module: 'welcome_runtime', pkg: 'public/welcome/pkg' },
   // The core's search compares int8 vectors with wasm SIMD, 16 lanes at once.
-  { name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg', simd: true },
+  { name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg', simd: true, features: 'web' },
   { name: 'metldr-pdf', module: 'metldr_pdf', pkg: 'crates/metldr-pdf/pkg', pdfium: true },
   { name: 'metldr-answer-codec', artifact: 'metldr_answer_codec', module: 'answer_codec', pkg: 'crates/metldr-answer-codec/pkg', features: 'guest' },
 ];

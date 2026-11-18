@@ -44,7 +44,7 @@ impl Runtime {
     }
 
     pub fn public(&self, settings: &super::Settings) -> Value {
-        let connections: Vec<_> = Protocol::ALL.into_iter().map(|protocol| {
+        let connections: Vec<_> = Protocol::KEYED.into_iter().map(|protocol| {
             let slot = settings.slot(protocol);
             let (state, endpoint, model, keyless, timeout) = match &slot.selection {
                 Selection::Unmanaged => ("unmanaged", None, None, false, None),
@@ -77,6 +77,8 @@ impl Owner {
             Protocol::Responses => self.responses_route.as_ref(),
             Protocol::GoogleInteractions => self.google_route.as_ref(),
             Protocol::ChatCompletions => self.chat_route.as_ref(),
+            // Chrome's built-in model runs in the extension; the companion has no route to it.
+            Protocol::ChromeAi => None,
         }
     }
 
@@ -86,6 +88,7 @@ impl Owner {
             Protocol::Responses => &mut self.responses_route,
             Protocol::GoogleInteractions => &mut self.google_route,
             Protocol::ChatCompletions => &mut self.chat_route,
+            Protocol::ChromeAi => return,
         } = profile;
     }
 
@@ -245,7 +248,7 @@ impl Owner {
             return Err("provider settings are busy".into());
         }
         self.persist_settings(self.state.clone())?;
-        for protocol in Protocol::ALL {
+        for protocol in Protocol::KEYED {
             if self.state.providers.managed(protocol) {
                 self.set_provider_route(protocol, None);
                 self.settings.states.insert(protocol, "loading");

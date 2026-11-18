@@ -1,6 +1,6 @@
 # Privacy
 
-Updated 17 November 2026.
+Updated 19 November 2026.
 
 ## Where content goes
 
@@ -10,7 +10,7 @@ Each route sends content only to the destination listed for it.
 | --- | --- |
 | Chrome built-in AI and the bundled local models | Your computer |
 | Local model servers | The server on your computer: Ollama at 127.0.0.1:11434, LM Studio at 127.0.0.1:1234, llama.cpp at 127.0.0.1:8080, or the local address you set. Ollama can also offer cloud models, so check the model you select. |
-| Your own API key in the extension | The service the key belongs to: OpenAI (api.openai.com), Anthropic (api.anthropic.com), Google (generativelanguage.googleapis.com), OpenRouter (openrouter.ai), or the OpenAI compatible endpoint you set. It receives your question, the page content you ask about and the conversation so far. |
+| Your own API key in the extension | The service the key belongs to: OpenAI (api.openai.com), Anthropic (api.anthropic.com), Google (generativelanguage.googleapis.com), OpenRouter (openrouter.ai), Groq (api.groq.com), DeepSeek (api.deepseek.com), Mistral (api.mistral.ai), Together (api.together.ai), xAI (api.x.ai), or the OpenAI compatible endpoint you set. It receives your question, the page content you ask about and the conversation so far. |
 | Provider connections in the companion (Messages, Responses, Google Interactions, Chat Completions) | The endpoint you configure. It receives task instructions, page content, browser observations and relevant prior answers. |
 | Installed agents (Codex, Claude Code, OpenCode, Pi) | The agent on your computer, which sends what it needs to the account and model you configured for it |
 | Reading a page | When the page you ask about links to its own markdown copy on the same site over https, the extension fetches that copy from the site, without cookies, instead of reading the page's layout. No address on your computer or local network is fetched. |

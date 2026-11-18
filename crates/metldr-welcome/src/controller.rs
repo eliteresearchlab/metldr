@@ -8,7 +8,7 @@ use crate::{
     backdrop, browser, dom, download,
     gateway::{self, Gateway},
     guide_view, setup_view,
-    state::{Choice, Panel, Server, Service, Setup, Status},
+    state::{self, Choice, Panel, Server, Setup, Status},
 };
 
 pub type Shared = Rc<RefCell<App>>;
@@ -50,6 +50,7 @@ pub fn mount() -> Result<(), JsValue> {
         .document()
         .ok_or_else(|| JsValue::from_str("Document unavailable"))?;
     let preview = window.location().protocol()? != "chrome-extension:";
+    dom::fill_routes(&document)?;
     guide_view::mount(&document)?;
     setup_view::mount(&document, preview)?;
     // The hero keeps its CSS gradient when WebGL2 is missing or the shader fails.
@@ -289,7 +290,7 @@ fn servers(detected: &JsValue) -> Vec<(Server, Vec<String>)> {
         })
         .filter_map(|state| {
             let route = browser::get(&state, "route").ok()?.as_string()?;
-            Some((Server::from_route(&route)?, gateway::models(&state)))
+            Some((state::local(&route)?, gateway::models(&state)))
         })
         .collect()
 }
@@ -305,12 +306,9 @@ fn handle_click(app: Shared, id: &str) {
     let choice = match id {
         "choose-local" => Some(Choice::Chrome),
         "choose-agent" => Some(found.map_or(Choice::Agent, Choice::Local)),
-        "choose-ollama" => Some(Choice::Local(Server::Ollama)),
-        "choose-lmstudio" => Some(Choice::Local(Server::LmStudio)),
-        "choose-llamacpp" => Some(Choice::Local(Server::LlamaCpp)),
         "choose-installed" => Some(Choice::Agent),
         "choose-provider" => Some(Choice::Provider),
-        _ => None,
+        _ => id.strip_prefix("choose-").and_then(state::local).map(Choice::Local),
     };
     if let Some(choice) = choice {
         let mut app = app.borrow_mut();
@@ -364,7 +362,7 @@ fn handle_change(app: Shared, id: &str, value: String) {
     }
     match id {
         "model-choice" if current.setup.models.contains(&value) => current.setup.model = value,
-        "key-service" => match Service::from_route(&value) {
+        "key-service" => match state::keyed(&value) {
             Some(service) => {
                 current.cancel();
                 current.setup.service = service;
@@ -462,7 +460,7 @@ fn check(app: Shared) {
                     app.setup.detail = format!(
                         "Nothing answered at {}. Start {}, then check again.",
                         server.address(),
-                        server.name()
+                        server.name
                     );
                 }
                 if dom::models(&app.document, &app.setup.models, &app.setup.model).is_err() {
@@ -511,7 +509,7 @@ fn connect_key(app: Shared) {
         app.setup.detail =
             "Checking the key with the service. No prompt or page content is sent.".into();
         app.paint();
-        (generation, app.setup.service.route(), key, gateway)
+        (generation, app.setup.service.id, key, gateway)
     };
     spawn_local(async move {
         let result = gateway.connect_key(route, key).await;
@@ -564,8 +562,8 @@ fn finish(app: Shared) {
         }
         let route = match app.setup.choice {
             Choice::Chrome => "chrome-ai",
-            Choice::Local(server) => server.route(),
-            Choice::Provider => app.setup.service.route(),
+            Choice::Local(server) => server.id,
+            Choice::Provider => app.setup.service.id,
             Choice::Agent => return,
         };
         let model = if app.setup.choice == Choice::Chrome {

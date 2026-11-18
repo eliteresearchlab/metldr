@@ -5,32 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const MAX_RETIRED: usize = 32;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Protocol {
-    Messages,
-    Responses,
-    GoogleInteractions,
-    ChatCompletions,
-}
-
-impl Protocol {
-    pub const ALL: [Self; 4] = [
-        Self::Messages,
-        Self::Responses,
-        Self::GoogleInteractions,
-        Self::ChatCompletions,
-    ];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Messages => "messages",
-            Self::Responses => "responses",
-            Self::GoogleInteractions => "google_interactions",
-            Self::ChatCompletions => "chat_completions",
-        }
-    }
-}
+/// One wire protocol list for the whole app: the gateway's.
+pub(crate) use metldr_core::gateway::Protocol;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -151,7 +127,7 @@ impl Settings {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.slots.len() > Protocol::ALL.len()
+        if self.slots.len() > Protocol::KEYED.len()
             || self.retired.len() + usize::from(self.pending.is_some()) > MAX_RETIRED
         {
             return Err("provider settings capacity exceeded".into());
@@ -161,6 +137,9 @@ impl Settings {
         }
         let mut referenced = BTreeSet::new();
         for (&protocol, slot) in &self.slots {
+            if !Protocol::KEYED.contains(&protocol) {
+                return Err("provider protocol has no slot".into());
+            }
             if slot
                 .last_request
                 .as_deref()

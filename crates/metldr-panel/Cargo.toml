@@ -38,6 +38,7 @@ metldr-answer-codec = { path = "../metldr-answer-codec" }
 metldr-conversation = { path = "../metldr-conversation" }
 metldr-history-pages = { path = "../metldr-history-pages" }
 metldr-retrieval = { path = "../metldr-retrieval" }
+metldr-core = { path = "../metldr-core", default-features = false }
 serde = { version = "=1.0.229", features = ["derive"] }
 js-sys = "=0.3.105"
 serde_json = "=1.0.154"

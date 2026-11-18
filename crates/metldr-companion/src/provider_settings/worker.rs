@@ -57,7 +57,7 @@ pub(super) fn load(
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let _lease = lease;
-        let profiles = Protocol::ALL
+        let profiles = Protocol::KEYED
             .into_iter()
             .filter_map(|protocol| {
                 let slot = settings.slot(protocol);

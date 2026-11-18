@@ -1,6 +1,6 @@
 use super::theme::ThemeCaret;
 use super::*;
-use crate::model::{AgentKind, AgentProfile, ProviderProtocol};
+use crate::model::{AgentKind, AgentProfile, Protocol};
 use std::{
     cell::RefCell,
     future::Future,
@@ -11,7 +11,7 @@ use std::{
 type WorkFuture = Pin<Box<dyn Future<Output = Result<js_sys::Undefined, FlowError>>>>;
 
 struct ProviderDraft {
-    protocol: ProviderProtocol,
+    protocol: Protocol,
     revision: u64,
     endpoint: TextEdit,
     model: TextEdit,
@@ -64,7 +64,7 @@ const PRESET_TRIGGER: &str = "settings-preset-trigger";
 
 /// The Chat Completions preset whose endpoint `draft` holds now.
 fn chosen_preset(draft: &ProviderDraft) -> Option<usize> {
-    crate::model::CHAT_PRESETS.iter().position(|&(_, endpoint, _)| endpoint == draft.endpoint.text)
+    metldr_core::gateway::chat_routes().position(|route| route.endpoint() == draft.endpoint.text)
 }
 
 impl Default for Settings {
@@ -72,7 +72,7 @@ impl Default for Settings {
         Self {
             owner: Weak::new(),
             flow: None,
-            providers: ProviderProtocol::ALL
+            providers: Protocol::KEYED
                 .into_iter()
                 .map(|protocol| ProviderDraft {
                     protocol,
@@ -247,7 +247,7 @@ impl Settings {
             state.settings.message = Some("Finish composing text before saving.");
             return;
         }
-        let chat = draft.protocol == ProviderProtocol::ChatCompletions;
+        let chat = draft.protocol == Protocol::ChatCompletions;
         let timeout = match draft.timeout.text.trim() {
             "" => None,
             text => match text.parse::<u16>() {
@@ -328,17 +328,17 @@ impl Settings {
         if !core.page.controls_ready() || core.page.settings_blocked() {
             return;
         }
-        let (Some(draft), Some((_, endpoint, keyless))) = (
+        let (Some(draft), Some(route)) = (
             state.settings.providers.get_mut(index),
-            crate::model::CHAT_PRESETS.get(preset),
+            metldr_core::gateway::chat_routes().nth(preset),
         ) else {
             return;
         };
         if draft.version != expected_version {
             return;
         }
-        replace_if_changed(&mut draft.endpoint, endpoint);
-        draft.keyless = *keyless;
+        replace_if_changed(&mut draft.endpoint, &route.endpoint());
+        draft.keyless = route.keyless();
         draft.key.clear();
         draft.dirty = true;
         draft.version = draft.version.wrapping_add(1);
@@ -708,7 +708,8 @@ impl Settings {
     fn preset_trigger(&self, i: usize, label: &str, enabled: bool, typography: super::preferences::Typography, palette: &super::preferences::Palette) -> El {
         let draft = &self.providers[i];
         let (version, chosen) = (draft.version, chosen_preset(draft));
-        let shown = chosen.map_or("Custom endpoint", |n| crate::model::CHAT_PRESETS[n].0);
+        let preset = chosen.and_then(|n| metldr_core::gateway::chat_routes().nth(n));
+        let shown = preset.map_or("Custom endpoint", |route| route.name);
         let trigger = row()
             .key(PRESET_TRIGGER)
             .gap(6.0)
@@ -720,10 +721,13 @@ impl Settings {
         if !enabled {
             return trigger.role("combobox").disabled(true).opacity(0.5);
         }
-        let items: Rc<[metldr_ui::select::Item]> = crate::model::CHAT_PRESETS
-            .iter()
+        let items: Rc<[metldr_ui::select::Item]> = metldr_core::gateway::chat_routes()
             .enumerate()
-            .map(|(n, &(name, _, _))| metldr_ui::select::Item { key: format!("settings-preset-{n}"), label: name.into(), disabled: false })
+            .map(|(n, route)| metldr_ui::select::Item {
+                key: format!("settings-preset-{n}"),
+                label: route.name.into(),
+                disabled: false,
+            })
             .collect();
         let open = self.preset_open == Some(i);
         let trigger = metldr_ui::select::trigger(
@@ -747,7 +751,8 @@ impl Settings {
         let draft = self.providers.get(i)?;
         let (version, chosen) = (draft.version, chosen_preset(draft));
         let close = |state: &mut State, _: &mut Tx| state.settings.preset_open = None;
-        let options = crate::model::CHAT_PRESETS.iter().enumerate().map(|(n, &(name, _, _))| {
+        let options = metldr_core::gateway::chat_routes().enumerate().map(|(n, route)| {
+            let name = route.name;
             let row = super::composer::menu_row(typography, p, format!("settings-preset-{n}"), name.into(), "", chosen == Some(n)).label(name).press(p.line_strong);
             metldr_ui::select::option(row, false, chosen == Some(n), move |state: &mut State, _| {
                 state.sound(crate::interaction_audio::Cue::Press);
@@ -823,12 +828,7 @@ impl Settings {
                 let enabled = !busy && row.is_some();
                 let version = draft.version;
                 let seen_revision = row.map(|row| row.revision);
-                let label = match draft.protocol {
-                    ProviderProtocol::Messages => "Messages",
-                    ProviderProtocol::ChatCompletions => "Chat Completions",
-                    ProviderProtocol::Responses => "OpenAI Responses",
-                    ProviderProtocol::GoogleInteractions => "Google Interactions",
-                };
+                let label = draft.protocol.label();
                 let mut section = col()
                     .key(format!("settings-provider-{i}"))
                     .w_full()
@@ -859,7 +859,7 @@ impl Settings {
                         typography,
                         palette,
                     ));
-                if draft.protocol == ProviderProtocol::ChatCompletions {
+                if draft.protocol == Protocol::ChatCompletions {
                     section = section.child(self.preset_trigger(i, label, enabled, typography, palette));
                     let keyless = draft.keyless;
                     section = section
@@ -901,7 +901,7 @@ impl Settings {
                             palette,
                         ));
                 }
-                if !(draft.protocol == ProviderProtocol::ChatCompletions && draft.keyless) {
+                if !(draft.protocol == Protocol::ChatCompletions && draft.keyless) {
                     section = section.child(provider_input(
                         i,
                         ProviderField::Key,

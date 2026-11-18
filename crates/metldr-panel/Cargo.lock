@@ -1512,6 +1512,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "metldr-core"
+version = "0.1.0"
+dependencies = [
+ "metldr-embed",
+ "metldr-retrieval",
+ "py3langid",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "metldr-embed"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "metldr-harness"
 version = "0.1.0"
 
@@ -1530,6 +1549,7 @@ dependencies = [
  "js-sys",
  "metldr-answer-codec",
  "metldr-conversation",
+ "metldr-core",
  "metldr-harness",
  "metldr-history-pages",
  "metldr-retrieval",
@@ -2429,6 +2449,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
+name = "py3langid"
+version = "0.4.1"
+dependencies = [
+ "unicode-normalization",
+]
+
+[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3122,6 +3149,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyvec"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+
+[[package]]
 name = "toml_datetime"
 version = "1.1.3+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3209,6 +3242,15 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-segmentation"

@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
 pub mod web;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -16,17 +16,54 @@ pub enum Kind {
     Key,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The wire protocol a route speaks. The one list for the gateway, the panel's settings and the
+/// companion's saved provider slots, whose names are stored, so they never change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Protocol {
-    ChromeAi,
-    Chat,
     Messages,
+    ChatCompletions,
     Responses,
-    Google,
+    GoogleInteractions,
+    ChromeAi,
 }
 
+impl Protocol {
+    /// The protocols a user's own endpoint and key can use.
+    pub const KEYED: [Self; 4] = [
+        Self::Messages,
+        Self::ChatCompletions,
+        Self::Responses,
+        Self::GoogleInteractions,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Messages => "messages",
+            Self::ChatCompletions => "chat_completions",
+            Self::Responses => "responses",
+            Self::GoogleInteractions => "google_interactions",
+            Self::ChromeAi => "chrome_ai",
+        }
+    }
+
+    /// How the protocol is shown.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Messages => "Messages",
+            Self::ChatCompletions => "Chat Completions",
+            Self::Responses => "OpenAI Responses",
+            Self::GoogleInteractions => "Google Interactions",
+            Self::ChromeAi => "Chrome built-in AI",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct Route {
     pub id: &'static str,
+    /// How the route is shown.
+    pub name: &'static str,
     pub kind: Kind,
     pub protocol: Protocol,
     /// The fixed base address; the custom Chat route takes the user's.
@@ -40,6 +77,7 @@ pub struct Route {
 pub const ROUTES: &[Route] = &[
     Route {
         id: "chrome-ai",
+        name: "Chrome built-in AI",
         kind: Kind::Builtin,
         protocol: Protocol::ChromeAi,
         base: "",
@@ -48,30 +86,34 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         id: "ollama",
+        name: "Ollama",
         kind: Kind::Local,
-        protocol: Protocol::Chat,
+        protocol: Protocol::ChatCompletions,
         base: "http://127.0.0.1:11434/v1",
         models: "/models",
         stream: "/chat/completions",
     },
     Route {
         id: "lmstudio",
+        name: "LM Studio",
         kind: Kind::Local,
-        protocol: Protocol::Chat,
+        protocol: Protocol::ChatCompletions,
         base: "http://127.0.0.1:1234/v1",
         models: "/models",
         stream: "/chat/completions",
     },
     Route {
         id: "llamacpp",
+        name: "llama.cpp",
         kind: Kind::Local,
-        protocol: Protocol::Chat,
+        protocol: Protocol::ChatCompletions,
         base: "http://127.0.0.1:8080/v1",
         models: "/models",
         stream: "/chat/completions",
     },
     Route {
         id: "openai",
+        name: "OpenAI",
         kind: Kind::Key,
         protocol: Protocol::Responses,
         base: "https://api.openai.com/v1",
@@ -80,6 +122,7 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         id: "anthropic",
+        name: "Anthropic",
         kind: Kind::Key,
         protocol: Protocol::Messages,
         base: "https://api.anthropic.com/v1",
@@ -88,24 +131,72 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         id: "google",
+        name: "Google",
         kind: Kind::Key,
-        protocol: Protocol::Google,
+        protocol: Protocol::GoogleInteractions,
         base: "https://generativelanguage.googleapis.com",
         models: "/v1beta/models",
         stream: "/v1/interactions",
     },
     Route {
         id: "openrouter",
+        name: "OpenRouter",
         kind: Kind::Key,
-        protocol: Protocol::Chat,
+        protocol: Protocol::ChatCompletions,
         base: "https://openrouter.ai/api/v1",
         models: "/models",
         stream: "/chat/completions",
     },
     Route {
-        id: "chat",
+        id: "groq",
+        name: "Groq",
         kind: Kind::Key,
-        protocol: Protocol::Chat,
+        protocol: Protocol::ChatCompletions,
+        base: "https://api.groq.com/openai/v1",
+        models: "/models",
+        stream: "/chat/completions",
+    },
+    Route {
+        id: "deepseek",
+        name: "DeepSeek",
+        kind: Kind::Key,
+        protocol: Protocol::ChatCompletions,
+        base: "https://api.deepseek.com",
+        models: "/models",
+        stream: "/chat/completions",
+    },
+    Route {
+        id: "mistral",
+        name: "Mistral",
+        kind: Kind::Key,
+        protocol: Protocol::ChatCompletions,
+        base: "https://api.mistral.ai/v1",
+        models: "/models",
+        stream: "/chat/completions",
+    },
+    Route {
+        id: "together",
+        name: "Together",
+        kind: Kind::Key,
+        protocol: Protocol::ChatCompletions,
+        base: "https://api.together.ai/v1",
+        models: "/models",
+        stream: "/chat/completions",
+    },
+    Route {
+        id: "xai",
+        name: "xAI",
+        kind: Kind::Key,
+        protocol: Protocol::ChatCompletions,
+        base: "https://api.x.ai/v1",
+        models: "/models",
+        stream: "/chat/completions",
+    },
+    Route {
+        id: "chat",
+        name: "Custom endpoint",
+        kind: Kind::Key,
+        protocol: Protocol::ChatCompletions,
         base: "",
         models: "/models",
         stream: "/chat/completions",
@@ -114,6 +205,39 @@ pub const ROUTES: &[Route] = &[
 
 pub fn route(id: &str) -> Option<&'static Route> {
     ROUTES.iter().find(|route| route.id == id)
+}
+
+/// The model servers on this computer.
+pub fn local_routes() -> impl Iterator<Item = &'static Route> {
+    ROUTES.iter().filter(|route| route.kind == Kind::Local)
+}
+
+/// The services a user brings a key for, each at a fixed address.
+pub fn key_routes() -> impl Iterator<Item = &'static Route> {
+    ROUTES.iter().filter(|route| route.kind == Kind::Key && !route.base.is_empty())
+}
+
+/// The routes with a fixed address that a Chat Completions setting can point at.
+pub fn chat_routes() -> impl Iterator<Item = &'static Route> {
+    ROUTES.iter().filter(|route| route.protocol == Protocol::ChatCompletions && !route.base.is_empty())
+}
+
+impl Route {
+    /// Where replies stream from.
+    pub fn endpoint(&self) -> String {
+        format!("{}{}", self.base, self.stream)
+    }
+
+    /// The host and port the route reaches, such as `127.0.0.1:11434`.
+    pub fn address(&self) -> &'static str {
+        let rest = self.base.split_once("://").map_or(self.base, |(_, rest)| rest);
+        rest.split('/').next().unwrap_or(rest)
+    }
+
+    /// Whether the route runs without a key.
+    pub fn keyless(&self) -> bool {
+        self.kind != Kind::Key
+    }
 }
 
 /// What `detect` and `connect` report for one route.

@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use wasm_bindgen::{JsValue, closure::Closure};
 
 use crate::model::{
-    AgentKind, AgentProfile, BrowserActionId, FlowError, PageView, ProviderProtocol, RunId,
+    AgentKind, AgentProfile, BrowserActionId, FlowError, PageView, RunId,
     SourceId, SourceStatus, UserText,
 };
 use crate::{
@@ -269,7 +269,7 @@ impl FlowClient {
 
     pub(crate) async fn provider_save(
         &self,
-        protocol: ProviderProtocol,
+        protocol: crate::model::Protocol,
         expected_revision: u64,
         endpoint: String,
         model: String,
@@ -277,7 +277,7 @@ impl FlowClient {
         timeout_secs: Option<u16>,
     ) -> Result<PageView> {
         use crate::model::ProviderKey;
-        let chat = protocol == ProviderProtocol::ChatCompletions;
+        let chat = protocol == crate::model::Protocol::ChatCompletions;
         let endpoint_valid = if chat {
             crate::model::valid_chat_endpoint(&endpoint)
         } else {
@@ -316,7 +316,7 @@ impl FlowClient {
 
     pub(crate) async fn provider_remove(
         &self,
-        protocol: ProviderProtocol,
+        protocol: crate::model::Protocol,
         expected_revision: u64,
     ) -> Result<PageView> {
         match self.request(json!({"op":"provider_remove","protocol":protocol.name(),"expected_revision":expected_revision}), ReplyKind::Page).await? {
@@ -469,7 +469,7 @@ impl FlowClient {
         &self,
         scope: metldr_history_pages::Scope,
         source: SourceId,
-        protocol: ProviderProtocol,
+        protocol: crate::model::Protocol,
         fingerprint: String,
         prompt: PageTextPrompt,
     ) -> Result<RunId> {

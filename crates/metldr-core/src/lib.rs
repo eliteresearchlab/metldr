@@ -8,7 +8,7 @@ pub mod stats;
 
 pub use chunking::{Chunk, ContentType, chunk_for_embedding};
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
 mod wasm {
     use metldr_retrieval::Chunk;
     use wasm_bindgen::prelude::*;

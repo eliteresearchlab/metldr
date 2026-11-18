@@ -242,7 +242,7 @@ pub(crate) enum PlanState {
 pub(crate) struct ProviderSettingsView {
     pub(crate) busy: bool,
     #[serde(deserialize_with = "Option::deserialize")]
-    pub(crate) pending: Option<ProviderProtocol>,
+    pub(crate) pending: Option<Protocol>,
     pub(crate) cleanup_pending: bool,
     #[serde(deserialize_with = "Option::deserialize")]
     pub(crate) notice: Option<String>,
@@ -396,36 +396,13 @@ pub(crate) fn valid_agent_profile(profile: &AgentProfile) -> bool {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ProviderProtocol {
-    Messages,
-    ChatCompletions,
-    Responses,
-    GoogleInteractions,
-}
-
-impl ProviderProtocol {
-    pub(crate) const ALL: [Self; 4] = [
-        Self::Messages,
-        Self::ChatCompletions,
-        Self::Responses,
-        Self::GoogleInteractions,
-    ];
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            Self::Messages => "messages",
-            Self::ChatCompletions => "chat_completions",
-            Self::Responses => "responses",
-            Self::GoogleInteractions => "google_interactions",
-        }
-    }
-}
+/// One wire protocol list for the whole app: the gateway's.
+pub(crate) use metldr_core::gateway::Protocol;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ProviderConnectionView {
-    pub(crate) protocol: ProviderProtocol,
+    pub(crate) protocol: Protocol,
     pub(crate) revision: u64,
     pub(crate) state: ProviderConnectionState,
     #[serde(deserialize_with = "Option::deserialize")]
@@ -813,7 +790,7 @@ pub(crate) enum RunRoute {
         fingerprint: String,
     },
     Text {
-        protocol: ProviderProtocol,
+        protocol: Protocol,
         endpoint: String,
         model: String,
         revision: u64,
@@ -1313,7 +1290,7 @@ fn default_provider_settings() -> ProviderSettingsView {
         pending: None,
         cleanup_pending: false,
         notice: None,
-        connections: ProviderProtocol::ALL
+        connections: Protocol::KEYED
             .into_iter()
             .map(|protocol| ProviderConnectionView {
                 protocol,
@@ -1813,12 +1790,12 @@ impl PageView {
         let settings = &wire.provider_settings;
         let mut protocols = std::collections::BTreeSet::new();
         if (settings.pending.is_some() && !settings.busy)
-            || settings.connections.len() != ProviderProtocol::ALL.len()
+            || settings.connections.len() != Protocol::KEYED.len()
             || settings
                 .connections
                 .iter()
                 .any(|connection| !protocols.insert(connection.protocol))
-            || protocols.len() != ProviderProtocol::ALL.len()
+            || !Protocol::KEYED.iter().all(|protocol| protocols.contains(protocol))
             || settings
                 .notice
                 .as_ref()
@@ -1843,7 +1820,7 @@ impl PageView {
                             connection.revision == 0
                                 || !has_metadata
                                 || !connection.endpoint.as_deref().is_some_and(|endpoint| {
-                                    if connection.protocol == ProviderProtocol::ChatCompletions {
+                                    if connection.protocol == Protocol::ChatCompletions {
                                         valid_chat_endpoint(endpoint)
                                     } else {
                                         valid_https_endpoint(endpoint)
@@ -2067,41 +2044,13 @@ fn endpoint_host(rest: &str) -> Option<&str> {
     }
 }
 
-/// Known Chat Completions endpoints: name, endpoint, and whether it runs without a key.
-pub(crate) const CHAT_PRESETS: [(&str, &str, bool); 8] = [
-    (
-        "OpenAI",
-        "https://api.openai.com/v1/chat/completions",
-        false,
-    ),
-    (
-        "OpenRouter",
-        "https://openrouter.ai/api/v1/chat/completions",
-        false,
-    ),
-    (
-        "Groq",
-        "https://api.groq.com/openai/v1/chat/completions",
-        false,
-    ),
-    (
-        "DeepSeek",
-        "https://api.deepseek.com/chat/completions",
-        false,
-    ),
-    (
-        "Mistral",
-        "https://api.mistral.ai/v1/chat/completions",
-        false,
-    ),
-    (
-        "Together",
-        "https://api.together.ai/v1/chat/completions",
-        false,
-    ),
-    ("xAI", "https://api.x.ai/v1/chat/completions", false),
-    ("Ollama", "http://127.0.0.1:11434/v1/chat/completions", true),
-];
+/// An endpoint `protocol` may reach: loopback HTTP for Chat Completions, else HTTPS only.
+pub(crate) fn valid_endpoint(protocol: Protocol, value: &str) -> bool {
+    match protocol {
+        Protocol::ChatCompletions => valid_chat_endpoint(value),
+        _ => valid_https_endpoint(value),
+    }
+}
 
 /// A Chat Completions endpoint: HTTPS, or plain HTTP to a loopback server such as Ollama.
 pub(crate) fn valid_chat_endpoint(value: &str) -> bool {
@@ -2149,7 +2098,8 @@ mod tests {
             assert!(!valid_chat_endpoint(invalid), "{invalid}");
         }
         assert!(!valid_https_endpoint("http://127.0.0.1:11434/v1"));
-        for (_, endpoint, _) in CHAT_PRESETS {
+        for route in metldr_core::gateway::chat_routes() {
+            let endpoint = &route.endpoint();
             assert!(valid_chat_endpoint(endpoint), "{endpoint}");
         }
     }
@@ -2435,7 +2385,7 @@ mod tests {
         let legacy = PageView::decode(VALID.as_bytes()).unwrap();
         assert_eq!(
             legacy.provider_settings.connections.len(),
-            ProviderProtocol::ALL.len()
+            Protocol::KEYED.len()
         );
         assert!(
             legacy.provider_settings.connections.iter().all(|row| {
@@ -2456,7 +2406,7 @@ mod tests {
         let decoded = PageView::decode(&serde_json::to_vec(&view).unwrap()).unwrap();
         assert_eq!(
             decoded.provider_settings.connections.len(),
-            ProviderProtocol::ALL.len()
+            Protocol::KEYED.len()
         );
         assert_eq!(
             decoded.provider_settings.connections[0].state,
@@ -2803,7 +2753,7 @@ mod tests {
                 .runs[0]
                 .route,
             RunRoute::Text {
-                protocol: ProviderProtocol::Responses,
+                protocol: Protocol::Responses,
                 ..
             }
         ));

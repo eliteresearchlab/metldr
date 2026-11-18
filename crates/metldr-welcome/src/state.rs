@@ -1,3 +1,5 @@
+use metldr_core::gateway::{self, Route};
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Choice {
     Chrome,
@@ -7,77 +9,19 @@ pub enum Choice {
 }
 
 /// A model server on this computer that the extension's gateway reaches on loopback.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Server {
-    Ollama,
-    LmStudio,
-    LlamaCpp,
-}
-
-impl Server {
-    pub const ALL: [Self; 3] = [Self::Ollama, Self::LmStudio, Self::LlamaCpp];
-
-    /// The gateway route that reaches this server.
-    pub fn route(self) -> &'static str {
-        match self {
-            Self::Ollama => "ollama",
-            Self::LmStudio => "lmstudio",
-            Self::LlamaCpp => "llamacpp",
-        }
-    }
-
-    pub fn from_route(route: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|server| server.route() == route)
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Ollama => "Ollama",
-            Self::LmStudio => "LM Studio",
-            Self::LlamaCpp => "llama.cpp",
-        }
-    }
-
-    pub fn address(self) -> &'static str {
-        match self {
-            Self::Ollama => "127.0.0.1:11434",
-            Self::LmStudio => "127.0.0.1:1234",
-            Self::LlamaCpp => "127.0.0.1:8080",
-        }
-    }
-}
+pub type Server = &'static Route;
 
 /// A service the user brings a key for; the gateway checks and stores the key.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Service {
-    OpenAi,
-    Anthropic,
-    Google,
-    OpenRouter,
+pub type Service = &'static Route;
+
+/// The local server with route `id`.
+pub fn local(id: &str) -> Option<Server> {
+    gateway::local_routes().find(|route| route.id == id)
 }
 
-impl Service {
-    pub const ALL: [Self; 4] = [
-        Self::OpenAi,
-        Self::Anthropic,
-        Self::Google,
-        Self::OpenRouter,
-    ];
-
-    pub fn route(self) -> &'static str {
-        match self {
-            Self::OpenAi => "openai",
-            Self::Anthropic => "anthropic",
-            Self::Google => "google",
-            Self::OpenRouter => "openrouter",
-        }
-    }
-
-    pub fn from_route(route: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|service| service.route() == route)
-    }
+/// The key service with route `id`.
+pub fn keyed(id: &str) -> Option<Service> {
+    gateway::key_routes().find(|route| route.id == id)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -139,7 +83,7 @@ impl Default for Setup {
             theme_saving: false,
             recommended: None,
             servers: Vec::new(),
-            service: Service::OpenAi,
+            service: keyed("openai").expect("the route table lists openai"),
         }
     }
 }
@@ -173,8 +117,8 @@ impl Setup {
                 return;
             }
             None => match (
-                preferred.and_then(Server::from_route),
-                preferred.and_then(Service::from_route),
+                preferred.and_then(local),
+                preferred.and_then(keyed),
             ) {
                 (Some(server), _) => Choice::Local(server),
                 (None, Some(service)) => {
@@ -204,14 +148,14 @@ impl Setup {
                         Status::Ready
                     };
                     if self.models.is_empty() {
-                        format!("{} is running here but has no models yet. Add one, then check again.", server.name())
+                        format!("{} is running here but has no models yet. Add one, then check again.", server.name)
                     } else {
-                        format!("{} is running here. Choose a model, then save.", server.name())
+                        format!("{} is running here. Choose a model, then save.", server.name)
                     }
                 }
                 None => format!(
                     "Start {} at {}, then check again. The check lists models and sends no prompt.",
-                    server.name(),
+                    server.name,
                     server.address()
                 ),
             },
@@ -239,7 +183,7 @@ impl Setup {
             _ => servers
                 .iter()
                 .find(|(_, models)| !models.is_empty())
-                .map_or(Choice::Provider, |(server, _)| Choice::Local(*server)),
+                .map_or(Choice::Provider, |(server, _)| Choice::Local(server)),
         }
     }
 
@@ -303,12 +247,16 @@ impl Setup {
 mod tests {
     use super::*;
 
+    fn at(id: &str) -> Server {
+        local(id).unwrap()
+    }
+
     #[test]
     fn choices_invalidate_checks_and_require_a_current_model() {
         let mut setup = Setup::default();
         let first = setup.begin(Status::Checking);
-        setup.servers = vec![(Server::LmStudio, vec!["qwen3-4b".into()])];
-        setup.choose(Choice::Local(Server::LmStudio));
+        setup.servers = vec![(at("lmstudio"), vec!["qwen3-4b".into()])];
+        setup.choose(Choice::Local(at("lmstudio")));
         assert!(!setup.current(first));
         assert_eq!(setup.status, Status::Ready);
         assert_eq!(setup.model, "qwen3-4b");
@@ -319,7 +267,7 @@ mod tests {
         setup.model = "qwen3-4b".into();
         assert!(!setup.ready());
         setup.preview = false;
-        setup.choose(Choice::Local(Server::LlamaCpp));
+        setup.choose(Choice::Local(at("llamacpp")));
         assert_eq!(setup.status, Status::Idle);
         assert!(setup.detail.contains("127.0.0.1:8080"));
         assert!(!setup.ready());
@@ -361,9 +309,9 @@ mod tests {
         for (destination, preferred, expected) in [
             (None, None, Choice::Chrome),
             (None, Some("chrome-ai"), Choice::Chrome),
-            (None, Some("ollama"), Choice::Local(Server::Ollama)),
-            (None, Some("lmstudio"), Choice::Local(Server::LmStudio)),
-            (None, Some("llamacpp"), Choice::Local(Server::LlamaCpp)),
+            (None, Some("ollama"), Choice::Local(at("ollama"))),
+            (None, Some("lmstudio"), Choice::Local(at("lmstudio"))),
+            (None, Some("llamacpp"), Choice::Local(at("llamacpp"))),
             (None, Some("anthropic"), Choice::Provider),
             (Some("browser"), Some("ollama"), Choice::Provider),
             (Some("chat"), None, Choice::Provider),
@@ -381,7 +329,7 @@ mod tests {
         }
         let mut setup = Setup::default();
         setup.restore_choice(None, Some("anthropic"));
-        assert_eq!(setup.service, Service::Anthropic);
+        assert_eq!(setup.service.id, "anthropic");
         setup.restore_choice(Some("unknown"), Some("ollama"));
         assert!(setup.detail.contains("Review your saved destination"));
     }
@@ -389,22 +337,16 @@ mod tests {
     #[test]
     fn the_easiest_working_choice_is_recommended() {
         let found = vec![
-            (Server::Ollama, Vec::new()),
-            (Server::LlamaCpp, vec!["gemma-3-1b".to_string()]),
+            (at("ollama"), Vec::new()),
+            (at("llamacpp"), vec!["gemma-3-1b".to_string()]),
         ];
         assert_eq!(Setup::recommend(Some("available"), &found), Choice::Chrome);
         assert_eq!(Setup::recommend(Some("downloadable"), &[]), Choice::Chrome);
         assert_eq!(
             Setup::recommend(Some("unavailable"), &found),
-            Choice::Local(Server::LlamaCpp)
+            Choice::Local(at("llamacpp"))
         );
         assert_eq!(Setup::recommend(None, &found[..1]), Choice::Provider);
         assert_eq!(Setup::recommend(Some("missing-api"), &[]), Choice::Provider);
-        for server in Server::ALL {
-            assert_eq!(Server::from_route(server.route()), Some(server));
-        }
-        for service in Service::ALL {
-            assert_eq!(Service::from_route(service.route()), Some(service));
-        }
     }
 }

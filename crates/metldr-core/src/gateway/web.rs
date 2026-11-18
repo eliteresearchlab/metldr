@@ -368,7 +368,7 @@ fn auth_headers(route: &Route, key: Option<&str>) -> Vec<(&'static str, String)>
             ("x-api-key", key.into()),
             ("anthropic-version", "2023-06-01".into()),
         ],
-        Protocol::Google => vec![("x-goog-api-key", key.into())],
+        Protocol::GoogleInteractions => vec![("x-goog-api-key", key.into())],
         _ => vec![("authorization", format!("Bearer {key}"))],
     }
 }
@@ -720,7 +720,7 @@ async fn reply(
             chrome_ai(system, messages, schema, stop, &mut on_event).await?;
             None
         }
-        Protocol::Chat => {
+        Protocol::ChatCompletions => {
             let timeout = if route.kind == Kind::Local {
                 LOCAL_TIMEOUT_SECS
             } else {
@@ -766,7 +766,7 @@ async fn reply(
                     .map_err(|e| e.to_string())?,
             )
         }
-        Protocol::Google => {
+        Protocol::GoogleInteractions => {
             let client = metldr_google_interactions::Client::new(
                 &url,
                 &model,

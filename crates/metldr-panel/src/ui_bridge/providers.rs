@@ -145,13 +145,7 @@ impl UiProviderConnection {
 
     #[wasm_bindgen(getter)]
     pub fn label(&self) -> String {
-        match self.connection.protocol {
-            crate::model::ProviderProtocol::Messages => "Messages",
-            crate::model::ProviderProtocol::Responses => "OpenAI Responses",
-            crate::model::ProviderProtocol::GoogleInteractions => "Google Interactions",
-            crate::model::ProviderProtocol::ChatCompletions => "Chat Completions",
-        }
-        .into()
+        self.connection.protocol.label().into()
     }
 
     #[wasm_bindgen(getter)]

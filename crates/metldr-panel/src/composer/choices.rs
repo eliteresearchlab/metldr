@@ -166,12 +166,12 @@ fn build(
                 )
             },
         ),
-        value if value.starts_with("page:") => ProviderProtocol::ALL
+        value if value.starts_with("page:") => Protocol::KEYED
             .into_iter()
             .find(|protocol| value.strip_prefix("page:") == Some(protocol.name()))
             .and_then(|protocol| {
                 page_route(view, protocol).map(|(endpoint, model, _)| {
-                    ("Page questions", provider_name(protocol), endpoint, model)
+                    ("Page questions", protocol.label(), endpoint, model)
                 })
             }),
         _ => None,
