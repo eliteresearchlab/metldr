@@ -69,8 +69,14 @@ impl Edit<'_> {
 
     /// The chat's approval mode: Ask until the user picks another.
     pub(crate) fn approval_mode(&self, conversation: &str) -> Result<ApprovalMode> {
-        let saved = storage(|| Ok(self.write.open_table(APPROVAL_MODES)?.get(conversation)?.map(|byte| byte.value())))?;
-        saved.map_or(Ok(ApprovalMode::Ask), |byte| ApprovalMode::from_byte(byte).ok_or_else(|| PlanError::Invalid.into()))
+        let saved = storage(|| {
+            let table = self.write.open_table(APPROVAL_MODES)?;
+            Ok(table.get(conversation)?.map(|byte| byte.value()))
+        })?;
+        match saved {
+            None => Ok(ApprovalMode::Ask),
+            Some(byte) => ApprovalMode::from_byte(byte).ok_or_else(|| PlanError::Invalid.into()),
+        }
     }
 
     pub(crate) fn set_approval_mode(&mut self, conversation: &str, mode: ApprovalMode) -> Result<()> {

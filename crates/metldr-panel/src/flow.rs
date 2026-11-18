@@ -926,22 +926,15 @@ impl FlowClient {
         revision: u32,
         approve: bool,
     ) -> Result<PageView> {
-        let available = self
-            .inner
-            .protocol
-            .borrow()
-            .latest
-            .as_ref()
-            .is_some_and(|view| {
-                self.is_connected()
-                    && view.selection == scope
-                    && view.active_run() == Some(&run)
-                    && view.task_plan.as_ref().is_some_and(|plan| {
-                        plan.run == run
-                            && plan.revision == revision
-                            && plan.state == crate::model::PlanState::Proposed
-                    })
-            });
+        let available = self.latest_is(|view| {
+            view.selection == scope
+                && view.active_run() == Some(&run)
+                && view.task_plan.as_ref().is_some_and(|plan| {
+                    plan.run == run
+                        && plan.revision == revision
+                        && plan.state == crate::model::PlanState::Proposed
+                })
+        });
         if !available {
             return Err(FlowError::InvalidInput(
                 "This task plan is no longer pending.".into(),
@@ -968,10 +961,7 @@ impl FlowClient {
         scope: metldr_history_pages::Scope,
         mode: crate::model::ApprovalMode,
     ) -> Result<PageView> {
-        let current = self.inner.protocol.borrow().latest.as_ref().is_some_and(|view| {
-            self.is_connected() && view.selection == scope
-        });
-        if !current {
+        if !self.latest_is(|view| view.selection == scope) {
             return Err(FlowError::HistoryStale);
         }
         match self
@@ -993,20 +983,13 @@ impl FlowClient {
         revision: u64,
         approve: bool,
     ) -> Result<PageView> {
-        let available = self
-            .inner
-            .protocol
-            .borrow()
-            .latest
-            .as_ref()
-            .is_some_and(|view| {
-                self.is_connected()
-                    && view.browser_actions.iter().any(|item| {
-                        item.id == action
-                            && item.revision == revision
-                            && matches!(item.phase, crate::model::BrowserActionPhase::Pending)
-                    })
-            });
+        let available = self.latest_is(|view| {
+            view.browser_actions.iter().any(|item| {
+                item.id == action
+                    && item.revision == revision
+                    && matches!(item.phase, crate::model::BrowserActionPhase::Pending)
+            })
+        });
         if !available {
             return Err(FlowError::InvalidInput(
                 "This browser action is no longer pending.".into(),
@@ -1133,6 +1116,11 @@ impl FlowClient {
     pub(super) fn is_closed(&self) -> bool {
         self.inner.protocol.borrow().closed
     }
+    /// Whether the client is connected and its latest view satisfies `check`.
+    fn latest_is(&self, check: impl FnOnce(&PageView) -> bool) -> bool {
+        self.is_connected() && self.inner.protocol.borrow().latest.as_ref().is_some_and(check)
+    }
+
     pub(super) fn is_connected(&self) -> bool {
         self.inner.protocol.borrow().connected
     }

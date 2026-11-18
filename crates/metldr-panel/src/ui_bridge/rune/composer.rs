@@ -774,12 +774,12 @@ fn approval_rows(state: &State, typography: super::preferences::Typography, p: &
     crate::model::ApprovalMode::ALL.into_iter().fold(
         col().key("rune-approval-rows").w_full().child(heading),
         |rows, mode| {
-            let active = mode == current;
-            let row = menu_row(typography, p, format!("approval:{}", mode.label()), mode.label().into(), "", active)
-                .label(mode.label())
-                .press(p.line_strong);
+            let (active, name) = (mode == current, mode.label());
+            let key = format!("approval:{name}");
+            let row = menu_row(typography, p, key, name.into(), "", active).label(name).press(p.line_strong);
             let close: metldr_ui::menu::CloseOnSelect<State> = Some(std::rc::Rc::new(close_menu));
-            rows.child(metldr_ui::menu::radio_item(row, false, active, close, move |state: &mut State, _| state.set_approval(mode)))
+            let choose = move |state: &mut State, _: &mut Tx| state.set_approval(mode);
+            rows.child(metldr_ui::menu::radio_item(row, false, active, close, choose))
         },
     )
     .role("group")

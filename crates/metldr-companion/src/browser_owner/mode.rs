@@ -85,13 +85,17 @@ mod tests {
             expires_at_ms: 1,
         };
         let press = |key| Intent::act("press", json!({"key":key}), &[]);
-        let fill = |submit| Intent::act("fill", json!({"ref":"e3","value":"x","submit":submit}), &[("e3", "textbox", "Search")]);
+        let fill = |submit| {
+            let args = json!({"ref":"e3","value":"x","submit":submit});
+            Intent::act("fill", args, &[("e3", "textbox", "Search")])
+        };
         for intent in [click("Apply update"), fill(false), press(json!("Tab"))] {
             assert!(!ApprovalMode::Ask.approves(&intent));
             assert!(ApprovalMode::Auto.approves(&intent));
             assert!(ApprovalMode::Full.approves(&intent));
         }
-        for intent in [click("Place order"), click("Delete account"), fill(true), press(json!(["a", "Shift+Enter"]))] {
+        let risky = [click("Place order"), click("Delete account"), fill(true), press(json!(["a", "Shift+Enter"]))];
+        for intent in risky {
             assert!(!ApprovalMode::Auto.approves(&intent), "{intent:?} can submit or delete");
             assert!(ApprovalMode::Full.approves(&intent));
         }
