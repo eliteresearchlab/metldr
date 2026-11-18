@@ -241,13 +241,13 @@ impl Page {
 
     /// The role and accessible name of each of `ids` in the latest snapshot, `None` for an id it
     /// does not hold. Looks up only those ids: an action names one or two of a page's refs.
-    pub(super) async fn refs(&self, ids: &[&str]) -> crate::Result<Vec<Option<(String, String)>>> {
-        Ok(browse_page::snapshot_ref_names(&self.context, self.tab, ids)
+    pub(super) async fn refs(
+        &self,
+        ids: &[&str],
+    ) -> crate::Result<Vec<Option<(String, Option<String>)>>> {
+        browse_page::snapshot_ref_names(&self.context, self.tab, ids)
             .await
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .map(|found| found.map(|(role, name)| (role, name.unwrap_or_default())))
-            .collect())
+            .map_err(|error| error.to_string().into())
     }
 
     /// Focuses the password or one-time code field `reference` with its text selected, so the

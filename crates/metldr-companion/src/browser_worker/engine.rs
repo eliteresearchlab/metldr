@@ -238,7 +238,7 @@ impl Engine {
                 Ok(Element {
                     reference: (*reference).into(),
                     role: bound(&role, 64),
-                    name: bound(&name, 256),
+                    name: bound(name.as_deref().unwrap_or_default(), 256),
                 })
             })
             .collect()
