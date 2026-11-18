@@ -226,18 +226,19 @@ impl Gateway {
             content = format!("Source: {title} ({url})\n\n");
             *self.page.borrow_mut() = Some(url);
             if !sections.fits(PAGE_BUDGET) {
-                content.push_str("The page is longer than this message. Its outline, by section and size:\n");
+                content.push_str("The page is longer than this message. ");
+                content.push_str("Its outline, by section and size:\n");
                 sections.write_outline(PAGE_BUDGET / 4, &mut content);
                 content.push_str("\nThe sections for this request:\n\n");
             }
         }
         let budget = if same_page { MORE_BUDGET } else { PAGE_BUDGET.saturating_sub(content.len()) };
         let picked = sections.pick(&text, budget);
-        drop(sections);
         if same_page && !picked.is_empty() {
             content.push_str("More from the page:\n\n");
         }
-        self.sections.borrow().write_numbered(&picked, &mut content);
+        sections.write_numbered(&picked, &mut content);
+        drop(sections);
         if !content.is_empty() {
             content.push_str("\n\nRequest: ");
         }

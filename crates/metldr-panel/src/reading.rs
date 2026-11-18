@@ -212,8 +212,8 @@ impl Sections {
         Self { text, ranges, sent }
     }
 
-    /// Reads the page again from `text`, keeping which sections were sent while the page splits
-    /// the same way.
+    /// Reads the page again from `text`. A page that splits into as many sections as before
+    /// keeps its sent marks.
     pub(crate) fn refresh(&mut self, text: String) {
         if self.text == text {
             return;
@@ -255,8 +255,15 @@ impl Sections {
             for &n in &unsent {
                 let content = self.get(n).unwrap_or_default();
                 let id = &n.to_string();
-                let chunk = metldr_retrieval::Chunk { id, kind: "page", title: "", content, source_url: "", source_id: "", summary: false };
-                index.add(&chunk);
+                index.add(&metldr_retrieval::Chunk {
+                    id,
+                    kind: "page",
+                    title: "",
+                    content,
+                    source_url: "",
+                    source_id: "",
+                    summary: false,
+                });
             }
             let slots = index.keyword(request, unsent.len());
             ranked.extend(slots.into_iter().filter_map(|slot| index.id(slot).parse::<usize>().ok()));
@@ -289,12 +296,14 @@ impl Sections {
     /// Writes the page's outline within `budget` bytes: each section that opens with a heading,
     /// by number, with the size of the text up to the next heading.
     pub(crate) fn write_outline(&self, budget: usize, out: &mut String) {
-        let headed: Vec<usize> = (1..=self.len()).filter(|&n| self.get(n).is_some_and(|s| s.starts_with('#'))).collect();
+        let opens_with_heading = |&n: &usize| self.get(n).is_some_and(|s| s.starts_with('#'));
+        let headed: Vec<usize> = (1..=self.len()).filter(opens_with_heading).collect();
         let start = out.len();
         for (at, &n) in headed.iter().enumerate() {
             let end = headed.get(at + 1).map_or(self.text.len(), |&next| self.ranges[next - 1].start);
             let heading = self.get(n).and_then(|s| s.lines().next()).unwrap_or_default();
-            let line = format!("[{n}] {} ({:.1} KB)\n", heading.trim_start_matches('#').trim(), (end - self.ranges[n - 1].start) as f64 / 1024.0);
+            let size = (end - self.ranges[n - 1].start) as f64 / 1024.0;
+            let line = format!("[{n}] {} ({size:.1} KB)\n", heading.trim_start_matches('#').trim());
             if out.len() - start + line.len() > budget {
                 break;
             }
