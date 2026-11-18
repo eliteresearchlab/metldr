@@ -25,21 +25,39 @@ const ROLES: [&str; 16] = [
 const BASE: usize = 15 + ROLES.len() * 2;
 const _: () = assert!(BASE == INPUTS && WEIGHTS.len() == HIDDEN * INPUTS + HIDDEN * 2 + 1);
 
-fn words(text: &str) -> HashSet<String> {
-    let mut out = HashSet::new();
+/// The distinct words of `text` as 64-bit hashes, sorted, in `out`.
+fn words(text: &str, out: &mut Vec<u64>) {
+    out.clear();
     tokenize(text, &mut |w| {
-        out.insert(w.to_owned());
+        out.push(w.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)));
     });
-    out
+    out.sort_unstable();
+    out.dedup();
 }
 
-fn grams(text: &str) -> HashSet<[u8; 3]> {
-    let lower: Vec<u8> = text
-        .bytes()
-        .map(|b| b.to_ascii_lowercase())
-        .filter(|b| b.is_ascii_alphanumeric() || *b == b' ')
-        .collect();
-    lower.windows(3).filter(|w| !w.contains(&b' ')).map(|w| [w[0], w[1], w[2]]).collect()
+/// The distinct letter trigrams of `text`, lowercase and packed in a `u32`, sorted, in `out`.
+fn grams(text: &str, out: &mut Vec<u32>) {
+    out.clear();
+    let mut window = [0u8; 3];
+    let mut filled = 0;
+    for b in text.bytes().map(|b| b.to_ascii_lowercase()) {
+        if b == b' ' {
+            filled = 0;
+        } else if b.is_ascii_alphanumeric() {
+            window = [window[1], window[2], b];
+            filled += 1;
+            if filled >= 3 {
+                out.push(u32::from_be_bytes([0, window[0], window[1], window[2]]));
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+}
+
+/// How many of `items` (sorted, distinct) are in `set` (sorted, distinct).
+fn shared<T: Ord>(items: &[T], set: &[T]) -> usize {
+    items.iter().filter(|item| set.binary_search(item).is_ok()).count()
 }
 
 fn numbers(text: &str) -> HashSet<&str> {
@@ -69,18 +87,22 @@ pub fn scores(goal: &str, previous: &[&str], controls: &[Control]) -> Vec<f32> {
     let texts: Vec<String> = controls.iter().map(|c| format!("{} {}", c.role, c.name)).collect();
     let keyword = keyword(&format!("{goal} {previous}"), &texts);
     let goal_lower = goal.to_lowercase();
-    let (goal_words, goal_grams, previous_words) = (words(goal), grams(goal), words(&previous));
+    let (mut goal_words, mut goal_grams, mut previous_words) = (Vec::new(), Vec::new(), Vec::new());
+    words(goal, &mut goal_words);
+    grams(goal, &mut goal_grams);
+    words(&previous, &mut previous_words);
     let goal_numbers = numbers(&goal_lower);
+    let (mut name, mut g) = (Vec::new(), Vec::new());
     let mut x = [0.0f32; INPUTS];
     controls
         .iter()
         .zip(keyword)
         .map(|(c, keyword)| {
-            let name = words(c.name);
-            let in_goal = name.iter().filter(|w| goal_words.contains(*w)).count() as f32;
-            let in_previous = name.iter().filter(|w| previous_words.contains(*w)).count() as f32;
-            let g = grams(c.name);
-            let shared = g.iter().filter(|t| goal_grams.contains(*t)).count() as f32;
+            words(c.name, &mut name);
+            let in_goal = shared(&name, &goal_words) as f32;
+            let in_previous = shared(&name, &previous_words) as f32;
+            grams(c.name, &mut g);
+            let shared = shared(&g, &goal_grams) as f32;
             let lower = c.name.to_lowercase();
             x.fill(0.0);
             x[0] = keyword;
