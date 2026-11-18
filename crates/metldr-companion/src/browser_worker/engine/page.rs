@@ -249,7 +249,18 @@ impl Page {
         args["maxItems"] = json!(200);
         let outline = self.tool("snapshot", args).await?;
         let previous: Vec<&str> = previous.iter().map(String::as_str).collect();
-        let text = metldr_core::decide::elements::shortlist(&outline, goal, &previous, SHORTLIST);
+        let ranked = metldr_core::decide::elements::ranked(&outline, goal, &previous);
+        let mut shortlist = ranked[..ranked.len().min(SHORTLIST)].to_vec();
+        let mut by = String::new();
+        if let Some((order, confidence)) = crate::decisions::rerank(goal, &previous, &shortlist).await {
+            shortlist = order;
+            by = match confidence {
+                Some(confidence) => format!(" by the decision model, confidence {confidence:.2}"),
+                None => " by the decision model".into(),
+            };
+        }
+        let mut text = String::new();
+        metldr_core::decide::elements::write_shortlist(&shortlist, ranked.len(), &by, &mut text);
         Ok(json!({ "kind": "page_snapshot", "text": text }))
     }
 

@@ -147,6 +147,9 @@ impl Owner {
                         Protocol::ChromeAi => {
                             return Err("Chrome's built-in model runs in the extension".into());
                         }
+                        Protocol::SystemOne => {
+                            return Err("a decision connection cannot answer page questions".into());
+                        }
                         Protocol::Messages => {
                             profile
                                 .messages_client(&worker_stop)?

@@ -108,7 +108,7 @@ fn page_route(view: &PageView, protocol: Protocol) -> Option<(&str, &str, &str)>
             } => Some((endpoint.as_str(), model.as_str(), fingerprint.as_str())),
             BrowserRouteView::Messages { .. } => None,
         }),
-        Protocol::ChromeAi => None,
+        Protocol::ChromeAi | Protocol::SystemOne => None,
         Protocol::Responses => view.responses_route.as_ref().map(
             |ResponsesRouteView::HttpsResponses {
                  endpoint,

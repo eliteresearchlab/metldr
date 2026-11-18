@@ -444,6 +444,24 @@ impl Profile {
         Ok(client)
     }
 
+    /// A System One client for this connection's decisions.
+    pub fn system_one_client(&self) -> Result<metldr_system_one::Client> {
+        let Self::Https {
+            binding, trust_pem, ..
+        } = self
+        else {
+            return Err("System One requires HTTPS".into());
+        };
+        let key = self.credential()?;
+        let key = key.to_str().map_err(|_| "invalid System One credential")?;
+        Ok(metldr_system_one::Client::new(
+            &binding.endpoint,
+            &binding.model,
+            key,
+            trust_pem.as_deref(),
+        )?)
+    }
+
     pub fn chat_client(
         &self,
         stop: &std::sync::atomic::AtomicBool,

@@ -930,6 +930,7 @@ dependencies = [
  "metldr-opencode-session",
  "metldr-pi-session",
  "metldr-responses",
+ "metldr-system-one",
  "neo_frizbee",
  "redb",
  "regex",
@@ -956,6 +957,7 @@ dependencies = [
 name = "metldr-core"
 version = "0.1.0"
 dependencies = [
+ "memchr",
  "metldr-embed",
  "metldr-retrieval",
  "py3langid",
@@ -1065,6 +1067,15 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "metldr-system-one"
+version = "0.1.0"
+dependencies = [
+ "metldr-sse",
+ "reqwest",
+ "serde_json",
 ]
 
 [[package]]

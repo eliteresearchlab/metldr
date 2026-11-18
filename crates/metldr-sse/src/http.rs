@@ -1,5 +1,6 @@
-//! The one HTTP request the provider clients make: a bounded JSON POST that must answer with an
-//! event stream, cancelled by the caller's stop flag and by a whole-request timeout. Native
+//! The HTTP requests the provider clients make: a bounded JSON POST that answers with an event
+//! stream, or with one bounded JSON body; both cancelled by the caller's stop flag and by a
+//! whole-request timeout. Native
 //! builds use reqwest with rustls and no proxy or redirects; the extension's wasm uses `fetch`
 //! with an AbortController, so neither needs a runtime timer of its own.
 
@@ -65,7 +66,7 @@ impl Http {
     /// `text/event-stream`.
     pub async fn events(&self, body: Vec<u8>, stop: &AtomicBool) -> Result<Events> {
         let provider = self.provider;
-        let sending = self.inner.post(&self.url, body);
+        let sending = self.inner.post(&self.url, body, "text/event-stream");
         let response = race(stop, sending)
             .await
             .ok_or_else(|| format!("{provider} request cancelled"))?
@@ -84,6 +85,29 @@ impl Http {
             ));
         }
         Ok(Events { provider, response })
+    }
+
+    /// Posts `body` and returns the JSON body of a 200 answer, at most `bound` bytes.
+    pub async fn json(&self, body: Vec<u8>, stop: &AtomicBool, bound: usize) -> Result<Vec<u8>> {
+        let provider = self.provider;
+        let sending = self.inner.post(&self.url, body, "application/json");
+        let response = race(stop, sending)
+            .await
+            .ok_or_else(|| format!("{provider} request cancelled"))?
+            .map_err(|_| format!("{provider} transport failed"))?;
+        if response.status() != 200 {
+            return Err(format!("{provider} endpoint returned an error"));
+        }
+        let mut events = Events { provider, response };
+        let mut out = Vec::new();
+        while let Some(chunk) = events.chunk(stop).await? {
+            let chunk = chunk.as_ref();
+            if out.len() + chunk.len() > bound {
+                return Err(format!("{provider} answer exceeds bound"));
+            }
+            out.extend_from_slice(chunk);
+        }
+        Ok(out)
     }
 }
 
@@ -171,10 +195,11 @@ mod platform {
         pub fn new(options: &Options<'_>) -> Result<Self> {
             let provider = options.provider;
             let mut headers = reqwest::header::HeaderMap::new();
-            let fixed = options.headers.iter().copied().chain([
-                ("content-type", "application/json"),
-                ("accept", "text/event-stream"),
-            ]);
+            let fixed = options
+                .headers
+                .iter()
+                .copied()
+                .chain([("content-type", "application/json")]);
             for (name, value) in fixed {
                 let value = reqwest::header::HeaderValue::from_str(value)
                     .map_err(|_| format!("invalid {provider} header"))?;
@@ -212,12 +237,15 @@ mod platform {
             Ok(Self { client, headers })
         }
 
-        pub async fn post(&self, url: &str, body: Vec<u8>) -> reqwest::Result<Response> {
-            let request = self
-                .client
-                .post(url)
-                .headers(self.headers.clone())
-                .body(body);
+        pub async fn post(
+            &self,
+            url: &str,
+            body: Vec<u8>,
+            accept: &'static str,
+        ) -> reqwest::Result<Response> {
+            let mut headers = self.headers.clone();
+            headers.insert("accept", reqwest::header::HeaderValue::from_static(accept));
+            let request = self.client.post(url).headers(headers).body(body);
             request.send().await.map(Response)
         }
     }
@@ -282,7 +310,6 @@ mod platform {
                 .map(|&(name, value)| (name, value.to_owned()))
                 .collect();
             headers.push(("content-type", "application/json".into()));
-            headers.push(("accept", "text/event-stream".into()));
             Ok(Self {
                 headers,
                 timeout_ms: u32::from(options.timeout_secs) * 1000,
@@ -293,6 +320,7 @@ mod platform {
             &self,
             url: &str,
             body: Vec<u8>,
+            accept: &'static str,
         ) -> std::result::Result<Response, JsValue> {
             let abort = web_sys::AbortController::new()?;
             let signals = js_sys::Array::of2(
@@ -303,6 +331,7 @@ mod platform {
             for (name, value) in &self.headers {
                 headers.set(name, value)?;
             }
+            headers.set("accept", accept)?;
             let init = web_sys::RequestInit::new();
             init.set_method("POST");
             init.set_headers(&headers);

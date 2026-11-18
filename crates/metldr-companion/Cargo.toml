@@ -28,6 +28,7 @@ anyhow = "1"
 metldr-harness = { path = "../metldr-harness" }
 metldr-responses = { path = "../metldr-responses" }
 metldr-google-interactions = { path = "../metldr-google-interactions" }
+metldr-system-one = { path = "../metldr-system-one" }
 metldr-messages = { path = "../metldr-messages" }
 metldr-chat-completions = { path = "../metldr-chat-completions" }
 metldr-native-credentials = { path = "../metldr-native-credentials" }

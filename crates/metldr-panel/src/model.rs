@@ -2418,7 +2418,8 @@ mod tests {
                 {"protocol":"messages","revision":2,"state":"locked","endpoint":"https://api.example/v1","model":"model-a"},
                 {"protocol":"chat_completions","revision":3,"state":"ready","endpoint":"https://llm.example/v1/chat/completions","model":"local","keyless":true,"timeout_secs":90},
                 {"protocol":"responses","revision":0,"state":"unmanaged","endpoint":null,"model":null},
-                {"protocol":"google_interactions","revision":1,"state":"removed","endpoint":null,"model":null}
+                {"protocol":"google_interactions","revision":1,"state":"removed","endpoint":null,"model":null},
+                {"protocol":"system_one","revision":0,"state":"unmanaged","endpoint":null,"model":null}
             ]
         });
         let decoded = PageView::decode(&serde_json::to_vec(&view).unwrap()).unwrap();

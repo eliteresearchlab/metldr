@@ -10,6 +10,8 @@ pub(crate) struct Runtime {
     pub started: Option<std::time::Instant>,
     pub states: BTreeMap<Protocol, &'static str>,
     pub notice: Option<&'static str>,
+    /// The System One connection, also published to `crate::decisions` for the browser tools.
+    pub decision_route: Option<Profile>,
 }
 
 pub(crate) enum Completion {
@@ -77,17 +79,22 @@ impl Owner {
             Protocol::Responses => self.responses_route.as_ref(),
             Protocol::GoogleInteractions => self.google_route.as_ref(),
             Protocol::ChatCompletions => self.chat_route.as_ref(),
+            Protocol::SystemOne => self.settings.decision_route.as_ref(),
             // Chrome's built-in model runs in the extension; the companion has no route to it.
             Protocol::ChromeAi => None,
         }
     }
 
     pub(crate) fn set_provider_route(&mut self, protocol: Protocol, profile: Option<Profile>) {
+        if protocol == Protocol::SystemOne {
+            crate::decisions::publish(profile.clone());
+        }
         *match protocol {
             Protocol::Messages => &mut self.browser_route,
             Protocol::Responses => &mut self.responses_route,
             Protocol::GoogleInteractions => &mut self.google_route,
             Protocol::ChatCompletions => &mut self.chat_route,
+            Protocol::SystemOne => &mut self.settings.decision_route,
             Protocol::ChromeAi => return,
         } = profile;
     }
