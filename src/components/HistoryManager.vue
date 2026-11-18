@@ -6,7 +6,6 @@ import {
   TrendingUp, Zap, Timer, Heart, Coffee
 } from 'lucide-vue-next'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui'
-import { statsService, type UsageStats } from '@/services/StatsService'
 import { analyticsService, type AnalyticsSummary } from '@/services/AnalyticsService'
 import { logger } from '@/services/LoggerService'
 import { APP_CONFIG } from '@/config/constants'
@@ -16,12 +15,6 @@ const POLL_INTERVAL_MS = 4000
 
 const props = defineProps<{ limit?: number }>()
 
-const activities = ref<never[]>([])
-const stats = ref<UsageStats>({
-  totalEmails: 0, totalPages: 0, totalInteractions: 0,
-  estimatedTimeSaved: 0, thisWeek: 0, today: 0,
-  totalChatMessages: 0, avgResponseTime: 0
-})
 const analytics = ref<AnalyticsSummary | null>(null)
 const loading = ref<boolean>(true)
 let messageListener: ((message: { type: string }) => void) | null = null
@@ -29,12 +22,7 @@ let pollIntervalId: ReturnType<typeof setInterval> | null = null
 
 async function loadData(): Promise<void> {
   try {
-    const [statsData, analyticsData] = await Promise.all([
-      statsService.getStats(),
-      analyticsService.getAnalyticsSummary(30)
-    ])
-    stats.value = statsData
-    analytics.value = analyticsData
+    analytics.value = await analyticsService.getAnalyticsSummary(30)
   } catch (error) {
     log.error('failed to load stats:', error)
   } finally {
@@ -42,18 +30,6 @@ async function loadData(): Promise<void> {
   }
 }
 
-function formatTimestamp(ts: number): string {
-  const date = new Date(ts)
-  const now = new Date()
-  const diffMins = Math.floor((now.getTime() - date.getTime()) / 60000)
-  if (diffMins < 1) return 'just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 7) return `${diffDays}d ago`
-  return date.toLocaleDateString()
-}
 
 // formatters
 const fmtTime = (s: number) => {
@@ -183,7 +159,7 @@ onUnmounted(() => {
   if (messageListener) chrome.runtime.onMessage.removeListener(messageListener)
 })
 
-defineExpose({ refresh: loadData, stats, analytics })
+defineExpose({ refresh: loadData, analytics })
 </script>
 
 <template>
