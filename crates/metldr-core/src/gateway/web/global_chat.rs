@@ -88,9 +88,13 @@ pub async fn gateway_global_chat(messages: JsValue) -> JsValue {
     else {
         return to_js(&json!({"ok": false, "error": "no user message"}));
     };
-    let found = search_store::sources(question, SOURCES).await;
+    let mut found = search_store::sources(question, SOURCES).await;
+    // The sources move out of the search result; only the context text stays borrowed.
+    let sources = match found["sources"].take() {
+        Value::Array(sources) => sources,
+        _ => Vec::new(),
+    };
     let context = found["context"].as_str().unwrap_or_default();
-    let sources = found["sources"].as_array().cloned().unwrap_or_default();
     if context.is_empty() {
         return to_js(&json!({"ok": true, "content": NOTHING, "sources": [],
             "timing": {"total": elapsed(), "model": "none"}}));

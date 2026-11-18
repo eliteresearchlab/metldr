@@ -599,13 +599,8 @@ pub async fn search_context(query: String, limit: u32, page: String) -> String {
     store.index.borrow().context(&focused, dense, limit, &page)
 }
 
-/// Global search: `{context, sources}`, one chunk per page, scored up by the question's words.
-#[wasm_bindgen]
-pub async fn search_sources(query: String, limit: u32) -> JsValue {
-    to_js(&sources(&query, limit).await)
-}
-
-/// `{context, sources}` for `query`, as [`search_sources`] gives it.
+/// Global search: `{context, sources}` for `query`, one chunk per page, scored up by the
+/// question's words.
 pub(super) async fn sources(query: &str, limit: u32) -> Value {
     let store = store().await;
     let Found { focused, dense } = found(&store, query, limit * 4).await;

@@ -1,5 +1,7 @@
 import { cacheService } from './CacheService'
-import { clearSummaryCache, dictionary, globalChat, lookupWord, recordStat, search, statsSummary, summaryGate } from './RustCore'
+import {
+  clearSummaryCache, dictionary, globalChat, lookupWord, recordStat, search, statsSummary, summaryGate
+} from './RustCore'
 import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
