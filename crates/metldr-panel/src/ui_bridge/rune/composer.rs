@@ -307,7 +307,10 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     let typography = state.preferences.typography();
     // The label moves into the text node: a route label built for this frame is never copied again.
     let model_label: std::borrow::Cow<'static, str> = match state.selected_choice() {
-        None => state.gateway().map_or_else(|| "Choose model".into(), |gateway| gateway.route.clone().into()),
+        None => match state.gateway() {
+            Some(gateway) => gateway.route().to_owned().into(),
+            None => "Choose model".into(),
+        },
         Some(choice) if supports_plan(&choice.value) && state.mode == Mode::Plan => {
             format!("Plan mode, {}", choice.label).into()
         }
@@ -647,6 +650,9 @@ pub(super) fn menu(state: &State) -> Option<El> {
             Some(list.focus_return("rune-source-trigger"))
         }
         Menu::Models => {
+            if let Some(gateway) = state.gateway() {
+                return Some(gateway_menu(state, gateway, typography, &p));
+            }
             // Configured routes by section with short names; routes still to set up fold into one
             // row that opens Settings. Full labels stay the accessible names.
             let mut choices = state.choices();
@@ -692,21 +698,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     close_menu,
                 ));
             }
-            let menu = col()
-                .key("rune-model-menu")
-                .min_w(176.0)
-                .max_w(416.0)
-                .max_h(384.0)
-                .padding(4.0)
-                .fill(p.surface)
-                .border(1.0, p.line)
-                .radius(10.0)
-                .shadow(0.0, 8.0, p.line.alpha(0.28))
-                .child(rows)
-                .scroll(::rune::ScrollSpec {
-                    stick_bottom: false,
-                });
-            let mut menu = metldr_ui::menu::popup(menu, "Models", "rune-model-trigger", Side::Top, super::theme::pop_in(p), close_menu);
+            let mut menu = model_panel(rows, &p);
             if supports_plan(&state.selection) {
                 let modes = [
                     (Mode::Configured, "Codex configured mode"),
@@ -758,6 +750,48 @@ pub(super) fn menu(state: &State) -> Option<El> {
             Some(menu)
         }
     }
+}
+
+/// The model menu's popup around `rows`: a raised list that scrolls past 384 px.
+fn model_panel(rows: El, p: &Palette) -> El {
+    let menu = col()
+        .key("rune-model-menu")
+        .min_w(176.0)
+        .max_w(416.0)
+        .max_h(384.0)
+        .padding(4.0)
+        .fill(p.surface)
+        .border(1.0, p.line)
+        .radius(10.0)
+        .shadow(0.0, 8.0, p.line.alpha(0.28))
+        .child(rows)
+        .scroll(::rune::ScrollSpec { stick_bottom: false });
+    let pop = super::theme::pop_in(p);
+    metldr_ui::menu::popup(menu, "Models", "rune-model-trigger", Side::Top, pop, close_menu)
+}
+
+/// Without the companion: the ready gateway routes, then a row that opens setup.
+fn gateway_menu(
+    state: &State,
+    gateway: &super::gateway::Gateway,
+    typography: super::preferences::Typography,
+    p: &Palette,
+) -> El {
+    let disabled = state.running();
+    let row = |key: String, name: &str, active: bool| {
+        menu_row(typography, p, key, name.to_owned(), "", active).label(name).press(p.line_strong)
+    };
+    let mut rows = col().key("rune-model-rows").w_full();
+    for (index, choice) in gateway.routes.iter().enumerate() {
+        let active = index == gateway.chosen();
+        let item = row(format!("gateway-route:{index}"), &choice.label, active);
+        let close: metldr_ui::menu::CloseOnSelect<State> = Some(std::rc::Rc::new(close_menu));
+        let choose = move |state: &mut State, _: &mut Tx| state.choose_gateway(index);
+        rows = rows.child(metldr_ui::menu::radio_item(item, disabled, active, close, choose));
+    }
+    let setup = row("gateway-setup".into(), "Set up more", false);
+    let open = |state: &mut State, _: &mut Tx| state.open_setup();
+    model_panel(rows.child(metldr_ui::menu::item(setup, false, open, close_menu)), p)
 }
 
 /// The chat's approval mode as one radio group under the models: Ask, Auto, Full access.

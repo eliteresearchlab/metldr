@@ -27,10 +27,19 @@ struct Saved {
     shown: Vec<(String, String)>,
 }
 
+/// One ready gateway route the reader can pick.
+pub(super) struct RouteChoice {
+    route: String,
+    model: Option<String>,
+    /// As people read it.
+    pub(super) label: String,
+}
+
 pub(super) struct Gateway {
     port: JsValue,
-    /// The route that answers, as people read it.
-    pub(super) route: String,
+    /// The ready routes, and the one that answers.
+    pub(super) routes: Vec<RouteChoice>,
+    chosen: Cell<usize>,
     next: Cell<u64>,
     streaming: Cell<Option<u64>>,
     /// What the model has seen so far: role and content, the page source in the first turn.
@@ -84,9 +93,11 @@ impl Gateway {
         listener.forget();
         post(&port, &json!({"id":DETECT,"op":"detect"})).ok()?;
         let reply = json_of(&wasm_bindgen_futures::JsFuture::from(promise).await.ok()?)?;
+        let (routes, chosen) = ready_routes(&reply)?;
         let gateway = Rc::new(Self {
             port,
-            route: ready_route(&reply)?,
+            routes,
+            chosen: Cell::new(chosen),
             next: Cell::new(DETECT + 1),
             streaming: Cell::new(None),
             turns: RefCell::default(),
@@ -96,6 +107,25 @@ impl Gateway {
         gateway.restore(updates).await;
         *opened.borrow_mut() = Some(Rc::clone(&gateway));
         Some(gateway)
+    }
+
+    /// The route that answers, as people read it.
+    pub(super) fn route(&self) -> &str {
+        &self.routes[self.chosen.get()].label
+    }
+
+    pub(super) fn chosen(&self) -> usize {
+        self.chosen.get()
+    }
+
+    /// Answers with route `index` from now on, and keeps it as the gateway's preferred route.
+    pub(super) fn choose(&self, index: usize) -> Result<(), FlowError> {
+        let Some(choice) = self.routes.get(index) else { return Ok(()) };
+        self.chosen.set(index);
+        let id = self.next.get();
+        self.next.set(id + 1);
+        let model = choice.model.clone().unwrap_or_default();
+        post(&self.port, &json!({"id":id,"op":"prefer","route":choice.route,"model":model}))
     }
 
     pub(super) fn streaming(&self) -> bool {
@@ -126,7 +156,9 @@ impl Gateway {
             .map(|(role, content)| json!({"role":role,"content":content}))
             .collect();
         drop(turns);
-        let request = json!({"id":id,"op":"stream","system":SYSTEM,"messages":messages});
+        let choice = &self.routes[self.chosen.get()];
+        let request = json!({"id":id,"op":"stream","route":choice.route,"model":choice.model,
+            "system":SYSTEM,"messages":messages});
         post(&self.port, &request)?;
         updates.changed();
         Ok(())
@@ -255,22 +287,27 @@ async fn save(saved: Saved) {
     }
 }
 
-/// The preferred route when it is ready, else the first ready one, named for people.
-fn ready_route(reply: &Value) -> Option<String> {
-    let routes = reply["routes"].as_array()?;
+/// The ready routes, named for people, and the preferred one (else the first).
+fn ready_routes(reply: &Value) -> Option<(Vec<RouteChoice>, usize)> {
     let preferred = reply["preferred"]["route"].as_str();
-    let mut ready = routes.iter().filter(|route| route["state"] == "ready");
-    let route = ready
-        .clone()
-        .find(|route| route["route"].as_str() == preferred)
-        .or_else(|| ready.next())?;
-    let name = route["route"].as_str()?;
-    let model = route["model"].as_str().filter(|model| !model.is_empty());
-    Some(match (name, model) {
-        ("chrome-ai", _) => "Chrome built-in AI".to_owned(),
-        (name, Some(model)) => format!("{model}, {name}"),
-        (name, None) => name.to_owned(),
-    })
+    let routes: Vec<RouteChoice> = reply["routes"]
+        .as_array()?
+        .iter()
+        .filter(|route| route["state"] == "ready")
+        .filter_map(|route| {
+            let name = route["route"].as_str()?;
+            let model = route["model"].as_str().filter(|model| !model.is_empty());
+            let model = model.map(str::to_owned);
+            let label = match (name, &model) {
+                ("chrome-ai", _) => "Chrome built-in AI".to_owned(),
+                (name, Some(model)) => format!("{model}, {name}"),
+                (name, None) => name.to_owned(),
+            };
+            Some(RouteChoice { route: name.to_owned(), model, label })
+        })
+        .collect();
+    let chosen = routes.iter().position(|choice| Some(choice.route.as_str()) == preferred).unwrap_or(0);
+    (!routes.is_empty()).then_some((routes, chosen))
 }
 
 /// The active tab's main content as markdown, captured without the companion.
