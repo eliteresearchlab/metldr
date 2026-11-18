@@ -41,6 +41,7 @@ mod native_start;
 mod opencode;
 mod opencode_model;
 mod opencode_owner;
+mod decisions;
 mod page_text;
 mod pi_ui;
 mod presentation;

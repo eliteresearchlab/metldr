@@ -26,16 +26,24 @@ pub enum Protocol {
     Responses,
     GoogleInteractions,
     ChromeAi,
+    /// Typed decisions with calibrated probabilities (TypeSafe's Jev); it never writes text.
+    SystemOne,
 }
 
 impl Protocol {
     /// The protocols a user's own endpoint and key can use.
-    pub const KEYED: [Self; 4] = [
+    pub const KEYED: [Self; 5] = [
         Self::Messages,
         Self::ChatCompletions,
         Self::Responses,
         Self::GoogleInteractions,
+        Self::SystemOne,
     ];
+
+    /// Whether the protocol writes answers; a decision protocol only picks among options.
+    pub fn answers(self) -> bool {
+        self != Self::SystemOne
+    }
 
     pub fn name(self) -> &'static str {
         match self {
@@ -44,6 +52,7 @@ impl Protocol {
             Self::Responses => "responses",
             Self::GoogleInteractions => "google_interactions",
             Self::ChromeAi => "chrome_ai",
+            Self::SystemOne => "system_one",
         }
     }
 
@@ -55,6 +64,7 @@ impl Protocol {
             Self::Responses => "OpenAI Responses",
             Self::GoogleInteractions => "Google Interactions",
             Self::ChromeAi => "Chrome built-in AI",
+            Self::SystemOne => "TypeSafe decisions",
         }
     }
 }
@@ -193,6 +203,15 @@ pub const ROUTES: &[Route] = &[
         stream: "/chat/completions",
     },
     Route {
+        id: "typesafe",
+        name: "TypeSafe",
+        kind: Kind::Key,
+        protocol: Protocol::SystemOne,
+        base: "https://api.typesafe.ai",
+        models: "/v1/models",
+        stream: "/v1/systemone",
+    },
+    Route {
         id: "chat",
         name: "Custom endpoint",
         kind: Kind::Key,
@@ -212,9 +231,19 @@ pub fn local_routes() -> impl Iterator<Item = &'static Route> {
     ROUTES.iter().filter(|route| route.kind == Kind::Local)
 }
 
-/// The services a user brings a key for, each at a fixed address.
+/// The services that answer with a key the user brings, each at a fixed address.
 pub fn key_routes() -> impl Iterator<Item = &'static Route> {
-    ROUTES.iter().filter(|route| route.kind == Kind::Key && !route.base.is_empty())
+    let keyed = |route: &&Route| route.kind == Kind::Key && !route.base.is_empty();
+    ROUTES.iter().filter(keyed).filter(|route| route.protocol.answers())
+}
+
+/// The decision model a new System One connection starts with.
+pub const DECISION_MODEL: &str = "jev-latest";
+
+/// The route for `protocol`'s decisions, when it is a decision protocol with a fixed address.
+pub fn decision_route(protocol: Protocol) -> Option<&'static Route> {
+    let decides = |route: &&Route| route.protocol == protocol && !protocol.answers();
+    ROUTES.iter().find(decides)
 }
 
 /// The routes with a fixed address that a Chat Completions setting can point at.

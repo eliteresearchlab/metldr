@@ -513,7 +513,7 @@ async fn state(route: &'static Route, settings: &Value) -> RouteState {
 
 async fn detect() -> Value {
     let settings = Rc::new(settings().await);
-    let probes = ROUTES.iter().map(|route| {
+    let probes = ROUTES.iter().filter(|route| route.protocol.answers()).map(|route| {
         let settings = settings.clone();
         wasm_bindgen_futures::future_to_promise(async move {
             Ok(to_js(
@@ -718,6 +718,7 @@ async fn reply(
     } = target;
     let url = format!("{base}{}", route.stream);
     let usage = match route.protocol {
+        Protocol::SystemOne => return Err("A decision route cannot answer.".into()),
         Protocol::ChromeAi => {
             chrome_ai(system, messages, schema, stop, &mut on_event).await?;
             None

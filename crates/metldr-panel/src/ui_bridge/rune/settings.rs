@@ -165,8 +165,14 @@ impl Settings {
                     .find(|row| row.protocol == draft.protocol)
             {
                 draft.revision = row.revision;
-                replace_if_changed(&mut draft.endpoint, row.endpoint.as_deref().unwrap_or(""));
-                replace_if_changed(&mut draft.model, row.model.as_deref().unwrap_or(""));
+                // A decision connection not yet set up starts at its service and model.
+                let decision = metldr_core::gateway::decision_route(draft.protocol)
+                    .filter(|_| row.endpoint.is_none());
+                let endpoint = decision.map(|route| route.endpoint());
+                let model = decision.map(|_| metldr_core::gateway::DECISION_MODEL);
+                let endpoint = row.endpoint.as_deref().or(endpoint.as_deref()).unwrap_or("");
+                replace_if_changed(&mut draft.endpoint, endpoint);
+                replace_if_changed(&mut draft.model, row.model.as_deref().or(model).unwrap_or(""));
                 draft.keyless = row.keyless;
                 replace_if_changed(
                     &mut draft.timeout,

@@ -192,6 +192,22 @@ fn scripted_protocol(
     key: &str,
     protocol: Protocol,
 ) -> (String, thread::JoinHandle<Vec<Value>>) {
+    let header = match protocol {
+        Protocol::Messages => "x-api-key",
+        Protocol::Responses | Protocol::Chat => "authorization",
+        Protocol::Google => "x-goog-api-key",
+    };
+    scripted_at(replies, key, protocol_path(protocol), header)
+}
+
+/// A TLS server answering `replies` in turn at `path`, checking the key in `header` (as a
+/// bearer token when the header is `authorization`).
+fn scripted_at(
+    replies: Vec<(String, String)>,
+    key: &str,
+    path: &'static str,
+    header: &'static str,
+) -> (String, thread::JoinHandle<Vec<Value>>) {
     let api_key = key.to_owned();
     let certs = rustls_pemfile::certs(&mut Cursor::new(include_bytes!(
         "../../test-tls/server.pem"
@@ -213,7 +229,6 @@ fn scripted_protocol(
     .unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
-    let path = protocol_path(protocol);
     let endpoint = format!("https://{}{path}", listener.local_addr().unwrap());
     let location = endpoint.clone();
     let worker = thread::spawn(move || {
@@ -257,12 +272,9 @@ fn scripted_protocol(
                 assert!(headers.len() < 8192);
             }
             let headers = String::from_utf8(headers).unwrap();
-            let (expected_header, expected_key) = match protocol {
-                Protocol::Messages => ("x-api-key", api_key.clone()),
-                Protocol::Responses | Protocol::Chat => {
-                    ("authorization", format!("Bearer {api_key}"))
-                }
-                Protocol::Google => ("x-goog-api-key", api_key.clone()),
+            let (expected_header, expected_key) = match header {
+                "authorization" => (header, format!("Bearer {api_key}")),
+                _ => (header, api_key.clone()),
             };
             // An empty key stands for a keyless endpoint: no key header may be sent.
             assert_eq!(
@@ -827,4 +839,32 @@ fn local_http_chat_endpoint_reaches_loopback_only() {
         server.join().unwrap(),
         ["post /v1/chat/completions http/1.1"; 2]
     );
+}
+
+#[test]
+fn a_decision_reads_each_shortlisted_controls_probability_over_tls() {
+    let answer = json!({"model":"jev-latest","usage":{"input_tokens":90,"output_tokens":3},
+        "answers":{"next":{"type":"choice","choice":"1","confidence":0.8,
+        "probabilities":{"0":0.2,"1":0.7,"2":0.1}}}});
+    let reply = vec![("200 OK".to_owned(), answer.to_string())];
+    let (endpoint, server) =
+        scripted_at(reply, "dummy-owned-browser-fixture", "/v1/systemone", "authorization");
+    let client = metldr_system_one::Client::new(
+        &endpoint,
+        "jev-latest",
+        "dummy-owned-browser-fixture",
+        Some(include_bytes!("../../test-tls/ca.pem")),
+    )
+    .unwrap();
+    let lines = ["link \"Home\" [ref=e1]", "button \"Apply update\" [ref=e2]", "link \"Help\" [ref=e3]"];
+    let state = json!({"goal": "apply the update"});
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let choice = runtime.block_on(client.choose(&state, "Which control?", &lines, &stop));
+    let choice = choice.unwrap();
+    assert_eq!(choice.probabilities, [0.2, 0.7, 0.1]);
+    assert_eq!(choice.confidence, Some(0.8));
+    let requests = server.join().unwrap();
+    assert_eq!(requests[0]["questions"]["next"]["criteria"]["1"], lines[1]);
+    assert_eq!(requests[0]["state"], state);
 }
