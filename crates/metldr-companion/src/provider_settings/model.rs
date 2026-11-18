@@ -137,6 +137,9 @@ impl Settings {
         }
         let mut referenced = BTreeSet::new();
         for (&protocol, slot) in &self.slots {
+            if !Protocol::KEYED.contains(&protocol) {
+                return Err("provider protocol has no slot".into());
+            }
             if slot
                 .last_request
                 .as_deref()

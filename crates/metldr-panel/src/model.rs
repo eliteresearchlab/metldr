@@ -1795,7 +1795,7 @@ impl PageView {
                 .connections
                 .iter()
                 .any(|connection| !protocols.insert(connection.protocol))
-            || protocols.len() != Protocol::KEYED.len()
+            || !Protocol::KEYED.iter().all(|protocol| protocols.contains(protocol))
             || settings
                 .notice
                 .as_ref()
