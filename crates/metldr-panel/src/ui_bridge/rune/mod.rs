@@ -10,7 +10,7 @@ mod answers;
 mod composer;
 mod conversations;
 mod corrections;
-mod fonts;
+use metldr_ui::fonts;
 mod gateway;
 mod ground;
 use theme::Root as _;
@@ -2303,7 +2303,7 @@ pub fn start_rune_chat(
                 "Rune already owns this document. Reload to reopen it.",
             ));
         }
-        let fonts = fonts::read(&fonts, &fonts::NAMES)?;
+        let fonts = fonts::read(&fonts, &fonts::NAMES).map_err(|e| crate::err(&e))?;
         crate::flow::install_capture(capture);
         crate::flow::install_pick(pick);
         WANT_FONTS.with(|want| *want.borrow_mut() = Some(want_fonts));
@@ -2349,7 +2349,8 @@ pub fn start_rune_chat(
 #[wasm_bindgen]
 pub fn add_rune_chat_fonts(group: String, fonts: js_sys::Array) -> Result<(), JsValue> {
     let names = fonts::group(&group).ok_or_else(|| crate::err("Unknown font group."))?;
-    if let Some(fonts) = fonts::retain_group(&group, fonts::read(&fonts, names)?) {
+    let read = fonts::read(&fonts, names).map_err(|e| crate::err(&e))?;
+    if let Some(fonts) = fonts::retain_group(&group, read) {
         ::rune::text::add_fonts(fonts);
         HOST.with(|host| {
             if let Some(host) = host.borrow().as_ref() {

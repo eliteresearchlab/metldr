@@ -9,6 +9,7 @@ pub mod collapsible;
 pub mod combobox;
 pub mod dialog;
 pub mod field;
+pub mod fonts;
 pub mod gauge;
 pub mod menu;
 pub mod popup;

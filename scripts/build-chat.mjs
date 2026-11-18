@@ -88,7 +88,7 @@ async function copyRune() {
   // the service worker's copy in assets/, so the package holds it once.
   await mkdir(join(output, 'pdf'), { recursive: true });
   await copyFile(join(root, 'crates/metldr-pdf/pkg/metldr_pdf.js'), join(output, 'pdf/metldr_pdf.js'));
-  const source = await readFile(join(root, 'crates/metldr-panel/src/ui_bridge/rune/fonts.rs'), 'utf8');
+  const source = await readFile(join(root, 'crates/metldr-ui/src/fonts.rs'), 'utf8');
   const list = constant => {
     const start = source.indexOf(`const ${constant}:`);
     const block = source.slice(start, source.indexOf('];', start));
