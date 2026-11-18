@@ -740,8 +740,26 @@ impl Core {
         for event in stream.push(run).map_err(FlowError::Protocol)? {
             emit(event)?;
         }
-        Ok(run.status.is_terminal())
+        let finished = run.status.is_terminal();
+        if let Some(ledger) = run.ledger.as_ref().filter(|_| finished) {
+            record_run(ledger, run.route.model());
+        }
+        Ok(finished)
     }
+}
+
+/// Counts a finished companion run in the extension's Stats, as the gateway counts its chats.
+fn record_run(ledger: &metldr_conversation::Ledger, model: &str) {
+    let total = ledger.total();
+    let (input, output, ms) = (total.input, total.output, ledger.ms);
+    let event = serde_json::json!({"kind":"run","input":input,"output":output,"ms":ms,"model":model});
+    let message = serde_json::json!({"type":"STATS_RECORD","event":event});
+    let sent = crate::chrome_api("runtime").and_then(|runtime| {
+        let message = js_sys::JSON::parse(&message.to_string())?;
+        crate::call(&runtime, "sendMessage", &[message])
+    });
+    // A lost count only leaves Stats short; the run itself is unaffected.
+    drop(sent);
 }
 
 fn emit_event(event: Event, emit: &Function) -> Result<(), FlowError> {

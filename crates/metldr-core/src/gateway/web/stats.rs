@@ -65,7 +65,8 @@ async fn record(event: &stats::Event<'_>) {
 }
 
 /// Counts what the extension's page tools did: `{kind: "summary", email, wordsIn, wordsOut,
-/// tokensOut, ms, model, url}`, `{kind: "lookup"}` or `{kind: "replies", count}`.
+/// tokensOut, ms, model, url}`, `{kind: "lookup"}` or `{kind: "replies", count}`; and a finished
+/// companion run, `{kind: "run", input, output, ms, model}`, as one chat.
 #[wasm_bindgen]
 pub async fn stats_record(event: JsValue) {
     let event = from_js(&event);
@@ -83,6 +84,10 @@ pub async fn stats_record(event: JsValue) {
                 site: stats::site(text("url")),
             };
             record(&summary).await;
+        }
+        "run" => {
+            let tokens = event["input"].as_u64().zip(event["output"].as_u64());
+            record(&stats::Event::Chat { tokens, ms: number("ms"), model: text("model") }).await;
         }
         "lookup" => record(&stats::Event::Lookup).await,
         "replies" => record(&stats::Event::Replies(number("count"))).await,

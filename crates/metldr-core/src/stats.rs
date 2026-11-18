@@ -217,48 +217,64 @@ pub enum Event<'a> {
 /// `event` added to `day` (a stored record, or null for a new day `date`). Fields the record
 /// already holds and this does not touch are kept.
 pub fn record(day: serde_json::Value, date: &str, event: &Event) -> serde_json::Value {
-    use serde_json::{Value, json};
-    let mut day = match day {
-        Value::Object(map) => Value::Object(map),
-        _ => {
-            json!({"date": date, "hourlyActivity": vec![0u8; 24], "topDomains": {}, "modelUsage": {}})
+    use serde_json::{Map, Value, json};
+    let mut map = match day {
+        Value::Object(map) => map,
+        _ => Map::from_iter([
+            ("date".to_owned(), json!(date)),
+            ("hourlyActivity".to_owned(), json!(vec![0u8; 24])),
+            ("topDomains".to_owned(), json!({})),
+            ("modelUsage".to_owned(), json!({})),
+        ]),
+    };
+    // Fields are found in place; a key is allocated only when the record lacks it.
+    fn put(map: &mut Map<String, Value>, key: &str, value: Value) {
+        match map.get_mut(key) {
+            Some(slot) => *slot = value,
+            None => {
+                map.insert(key.to_owned(), value);
+            }
         }
-    };
-    let number = |day: &Value, key: &str| day[key].as_f64().unwrap_or(0.0);
-    let add = |day: &mut Value, key: &str, by: f64| day[key] = json!(number(day, key) + by);
-    let timed = |day: &mut Value, ms: f64| {
-        let samples = number(day, "responseTimeSamples");
-        let average = number(day, "avgResponseTimeMs");
-        day["avgResponseTimeMs"] = json!((average * samples + ms) / (samples + 1.0));
-        day["responseTimeSamples"] = json!(samples + 1.0);
-        let fastest = day["fastestResponseMs"]
-            .as_f64()
-            .filter(|f| f.is_finite())
-            .map_or(ms, |f| f.min(ms));
-        day["fastestResponseMs"] = json!(fastest);
-        day["slowestResponseMs"] = json!(number(day, "slowestResponseMs").max(ms));
-    };
-    let count = |day: &mut Value, map: &str, key: &str| {
+    }
+    fn number(map: &Map<String, Value>, key: &str) -> f64 {
+        map.get(key).and_then(Value::as_f64).unwrap_or(0.0)
+    }
+    fn add(map: &mut Map<String, Value>, key: &str, by: f64) {
+        let sum = number(map, key) + by;
+        put(map, key, json!(sum));
+    }
+    fn timed(map: &mut Map<String, Value>, ms: f64) {
+        let samples = number(map, "responseTimeSamples");
+        let average = number(map, "avgResponseTimeMs");
+        put(map, "avgResponseTimeMs", json!((average * samples + ms) / (samples + 1.0)));
+        put(map, "responseTimeSamples", json!(samples + 1.0));
+        let fastest = map.get("fastestResponseMs").and_then(Value::as_f64).filter(|f| f.is_finite());
+        put(map, "fastestResponseMs", json!(fastest.map_or(ms, |f| f.min(ms))));
+        let slowest = number(map, "slowestResponseMs").max(ms);
+        put(map, "slowestResponseMs", json!(slowest));
+    }
+    fn count(map: &mut Map<String, Value>, field: &str, key: &str) {
         if key.is_empty() {
             return;
         }
-        if !day[map].is_object() {
-            day[map] = json!({});
+        if !map.get(field).is_some_and(Value::is_object) {
+            put(map, field, json!({}));
         }
-        let used = day[map][key].as_f64().unwrap_or(0.0);
-        day[map][key] = json!(used + 1.0);
-    };
+        if let Some(Value::Object(counts)) = map.get_mut(field) {
+            add(counts, key, 1.0);
+        }
+    }
     match *event {
         Event::Chat { tokens, ms, model } => {
-            add(&mut day, "chatMessagesSent", 1.0);
-            add(&mut day, "chatMessagesReceived", 1.0);
+            add(&mut map, "chatMessagesSent", 1.0);
+            add(&mut map, "chatMessagesReceived", 1.0);
             if let Some((input, output)) = tokens {
-                add(&mut day, "tokensInput", input as f64);
-                add(&mut day, "tokensOutput", output as f64);
+                add(&mut map, "tokensInput", input as f64);
+                add(&mut map, "tokensOutput", output as f64);
             }
-            timed(&mut day, ms);
-            day["usedChat"] = json!(true);
-            count(&mut day, "modelUsage", model);
+            timed(&mut map, ms);
+            put(&mut map, "usedChat", json!(true));
+            count(&mut map, "modelUsage", model);
         }
         Event::Summary {
             email,
@@ -269,31 +285,23 @@ pub fn record(day: serde_json::Value, date: &str, event: &Event) -> serde_json::
             model,
             site,
         } => {
-            add(&mut day, "summariesGenerated", 1.0);
-            add(
-                &mut day,
-                if email {
-                    "emailsProcessed"
-                } else {
-                    "pagesProcessed"
-                },
-                1.0,
-            );
-            add(&mut day, "totalWordsRead", words_in);
-            add(&mut day, "totalWordsSummarized", words_out);
-            add(&mut day, "tokensOutput", tokens_out);
-            timed(&mut day, ms);
-            day["usedSummary"] = json!(true);
-            count(&mut day, "modelUsage", model);
-            count(&mut day, "topDomains", site);
+            add(&mut map, "summariesGenerated", 1.0);
+            add(&mut map, if email { "emailsProcessed" } else { "pagesProcessed" }, 1.0);
+            add(&mut map, "totalWordsRead", words_in);
+            add(&mut map, "totalWordsSummarized", words_out);
+            add(&mut map, "tokensOutput", tokens_out);
+            timed(&mut map, ms);
+            put(&mut map, "usedSummary", json!(true));
+            count(&mut map, "modelUsage", model);
+            count(&mut map, "topDomains", site);
         }
         Event::Lookup => {
-            add(&mut day, "wordsLookedUp", 1.0);
-            day["usedWordLookup"] = json!(true);
+            add(&mut map, "wordsLookedUp", 1.0);
+            put(&mut map, "usedWordLookup", json!(true));
         }
-        Event::Replies(n) => add(&mut day, "replySuggestionsGenerated", n),
+        Event::Replies(n) => add(&mut map, "replySuggestionsGenerated", n),
     }
-    day
+    Value::Object(map)
 }
 
 /// The site of `url` as stats count it: its host without `www.`.

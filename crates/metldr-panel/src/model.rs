@@ -819,7 +819,25 @@ pub(crate) enum RunRoute {
     },
 }
 
-impl RunRoute {}
+impl RunRoute {
+    /// The model the route answered with, as Stats counts it.
+    pub(crate) fn model(&self) -> &str {
+        match self {
+            Self::Messages { model }
+            | Self::HttpsMessages { model, .. }
+            | Self::HttpsChatCompletions { model, .. }
+            | Self::HttpsResponses { model, .. }
+            | Self::HttpsGoogleInteractions { model, .. }
+            | Self::Text { model, .. }
+            | Self::Pi { model, .. } => model,
+            Self::Codex { model, .. } | Self::OpenCode { model, .. } => {
+                model.as_deref().unwrap_or_default()
+            }
+            Self::Harness { harness, .. } => harness,
+            Self::LegacyUnspecified | Self::Fixture => "",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
