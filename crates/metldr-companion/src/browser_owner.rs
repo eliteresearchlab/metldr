@@ -7,10 +7,10 @@ use std::sync::atomic::Ordering;
 
 type Reply = OwnerReply<Action>;
 
-mod grants;
+mod mode;
 mod review;
 mod secret;
-pub(crate) use grants::{GRANT_TTL, SessionGrant};
+pub(crate) use mode::ApprovalMode;
 pub(crate) use review::Budget;
 #[cfg(test)]
 pub(crate) use secret::now_ms;
@@ -116,7 +116,13 @@ impl Owner {
                                 approver_request: None,
                             },
                         )
-                        .map(|plan| plan.revision)
+                        .and_then(|plan| {
+                            // Full access approves the plan as it is proposed.
+                            if edit.approval_mode(execution.conversation())?.approves_plans() {
+                                edit.review_reply(execution, plan.revision, true, "mode:full")?;
+                            }
+                            Ok(plan.revision)
+                        })
                     })
                 });
                 return acknowledge(ack, result);
@@ -128,16 +134,17 @@ impl Owner {
             } => {
                 let plan = self.record_history.edit(|edit| {
                     let execution = edit.execution(&proposal.run)?;
-                    edit.task_plan(&execution)
+                    let mode = edit.approval_mode(execution.conversation())?;
+                    Ok(edit.task_plan(&execution)?.map(|plan| (plan, mode)))
                 });
                 match plan {
                     Ok(None) => {
                         return acknowledge(ack, Err("call propose_task_plan first".into()));
                     }
-                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Declined => {
+                    Ok(Some((plan, _))) if plan.state == crate::history::PlanState::Declined => {
                         return acknowledge(ack, Err("task plan declined".into()));
                     }
-                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Proposed => {
+                    Ok(Some((plan, _))) if plan.state == crate::history::PlanState::Proposed => {
                         if self.plan_hold.is_some() || self.browser_approval.is_some() {
                             return acknowledge(
                                 ack,
@@ -162,14 +169,9 @@ impl Owner {
                     Err(error) => return acknowledge(ack, Err(error)),
                     _ => {}
                 }
-                let now = std::time::Instant::now();
-                let auto = match &plan {
-                    Ok(Some(plan)) if plan.state == crate::history::PlanState::Approved => self
-                        .session_grants
-                        .get(&proposal.run)
-                        .is_some_and(|grant| grant.covers(&proposal, plan.revision, now)),
-                    _ => false,
-                };
+                let auto = matches!(&plan, Ok(Some((plan, mode)))
+                    if plan.state == crate::history::PlanState::Approved
+                        && mode.approves(&proposal.intent));
                 let result = (|| -> Result<(Action, bool, Option<review::Review>)> {
                     if let Some(existing) =
                         self.saved_browser_tool(&proposal.run, &proposal.tool_use_id)?
@@ -195,7 +197,7 @@ impl Owner {
                             return Ok((action, false, None));
                         }
                         if auto {
-                            // A session grant approves this Tier 1 step without asking.
+                            // The chat's approval mode runs this step without asking.
                             let approved =
                                 edit.decide_browser(execution, &action.id, action.revision, true)?;
                             return Ok((approved, false, None));
@@ -308,9 +310,6 @@ impl Owner {
         let record = self.record_execution(&run, |edit, execution| {
             edit.decide_browser(execution, action, revision, approve)
         })?;
-        if approve && let Some(grant) = self.session_grants.get_mut(&run) {
-            grant.bind(&record.proposal, std::time::Instant::now());
-        }
         if let Some(pending) = self.browser_approval.take() {
             pending.reply(Ok(record));
         }
@@ -318,7 +317,6 @@ impl Owner {
     }
 
     pub(super) fn cancel_browser_approval(&mut self, run: &str) {
-        self.session_grants.remove(run);
         self.drop_secret(run);
         if let Some(held) = self.plan_hold.take_if(|p| p.proposal.run == run) {
             let _ = held

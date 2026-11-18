@@ -33,13 +33,10 @@ pub(crate) fn plan_reply(run: &RunId, revision: u32, approve: bool) -> Value {
     json!({"op":"plan_reply", "run":run, "revision":revision, "approve":approve})
 }
 
-/// Turns session approval on or extends it (`grant`), or stops it.
-pub(crate) fn session_grant(run: &RunId, revision: u32, grant: bool) -> Value {
-    if grant {
-        json!({"op":"grant_session", "run":run, "revision":revision})
-    } else {
-        json!({"op":"revoke_session", "run":run})
-    }
+/// Sets what the chat's browser runs may do without asking.
+#[cfg(feature = "rune-ui")]
+pub(crate) fn approval_mode(mode: crate::model::ApprovalMode) -> Value {
+    json!({"op":"set_approval_mode", "mode":mode})
 }
 
 pub(crate) enum PageTextPrompt {
@@ -941,22 +938,15 @@ impl FlowClient {
         revision: u32,
         approve: bool,
     ) -> Result<PageView> {
-        let available = self
-            .inner
-            .protocol
-            .borrow()
-            .latest
-            .as_ref()
-            .is_some_and(|view| {
-                self.is_connected()
-                    && view.selection == scope
-                    && view.active_run() == Some(&run)
-                    && view.task_plan.as_ref().is_some_and(|plan| {
-                        plan.run == run
-                            && plan.revision == revision
-                            && plan.state == crate::model::PlanState::Proposed
-                    })
-            });
+        let available = self.latest_is(|view| {
+            view.selection == scope
+                && view.active_run() == Some(&run)
+                && view.task_plan.as_ref().is_some_and(|plan| {
+                    plan.run == run
+                        && plan.revision == revision
+                        && plan.state == crate::model::PlanState::Proposed
+                })
+        });
         if !available {
             return Err(FlowError::InvalidInput(
                 "This task plan is no longer pending.".into(),
@@ -976,45 +966,25 @@ impl FlowClient {
         }
     }
 
-    pub(crate) async fn set_session_grant(
+    /// Saves the chat's approval mode; it applies to the next plan or step, also mid-run.
+    #[cfg(feature = "rune-ui")]
+    pub(crate) async fn set_approval_mode(
         &self,
         scope: metldr_history_pages::Scope,
-        run: RunId,
-        revision: u32,
-        grant: bool,
+        mode: crate::model::ApprovalMode,
     ) -> Result<PageView> {
-        let available = self
-            .inner
-            .protocol
-            .borrow()
-            .latest
-            .as_ref()
-            .is_some_and(|view| {
-                self.is_connected()
-                    && view.selection == scope
-                    && view.active_run() == Some(&run)
-                    && view.task_plan.as_ref().is_some_and(|plan| {
-                        plan.run == run
-                            && plan.revision == revision
-                            && plan.state == crate::model::PlanState::Approved
-                    })
-            });
-        if !available {
-            return Err(FlowError::InvalidInput(
-                "This task plan is no longer approved.".into(),
-            ));
+        if !self.latest_is(|view| view.selection == scope) {
+            return Err(FlowError::HistoryStale);
         }
         match self
             .request(
-                conversation(&scope, session_grant(&run, revision, grant)),
+                conversation(&scope, approval_mode(mode)),
                 ReplyKind::SelectedPage(scope),
             )
             .await?
         {
             Reply::Page(view) => Ok(self.check_source(view).await),
-            _ => Err(FlowError::Protocol(
-                "Expected the updated task plan view.".into(),
-            )),
+            _ => Err(FlowError::Protocol("Expected the updated chat view.".into())),
         }
     }
 
@@ -1025,20 +995,13 @@ impl FlowClient {
         revision: u64,
         approve: bool,
     ) -> Result<PageView> {
-        let available = self
-            .inner
-            .protocol
-            .borrow()
-            .latest
-            .as_ref()
-            .is_some_and(|view| {
-                self.is_connected()
-                    && view.browser_actions.iter().any(|item| {
-                        item.id == action
-                            && item.revision == revision
-                            && matches!(item.phase, crate::model::BrowserActionPhase::Pending)
-                    })
-            });
+        let available = self.latest_is(|view| {
+            view.browser_actions.iter().any(|item| {
+                item.id == action
+                    && item.revision == revision
+                    && matches!(item.phase, crate::model::BrowserActionPhase::Pending)
+            })
+        });
         if !available {
             return Err(FlowError::InvalidInput(
                 "This browser action is no longer pending.".into(),
@@ -1165,6 +1128,11 @@ impl FlowClient {
     pub(super) fn is_closed(&self) -> bool {
         self.inner.protocol.borrow().closed
     }
+    /// Whether the client is connected and its latest view satisfies `check`.
+    fn latest_is(&self, check: impl FnOnce(&PageView) -> bool) -> bool {
+        self.is_connected() && self.inner.protocol.borrow().latest.as_ref().is_some_and(check)
+    }
+
     pub(super) fn is_connected(&self) -> bool {
         self.inner.protocol.borrow().connected
     }
