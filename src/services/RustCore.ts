@@ -1,8 +1,9 @@
 import initCore, {
-  dictionary_request, gateway_complete, gateway_preferred, gateway_summarize, gateway_word_lookup,
+  dictionary_request, gateway_complete, gateway_page_summary, gateway_preferred, gateway_summarize,
+  gateway_word_lookup,
   stats_record, stats_summary, summary_cache_clear, summary_gate, summary_prefs_load, summary_prefs_save
 } from '../../crates/metldr-core/pkg/metldr_core'
-import type { WordLookupResult } from '../types'
+import type { ExtractedData, PageSummary, WordLookupResult } from '../types'
 import coreWasmUrl from '../../crates/metldr-core/pkg/metldr_core_bg.wasm?url'
 
 const LEADING_SLASH_PATTERN = /^\//
@@ -33,6 +34,12 @@ export interface SummaryRequest {
 export async function complete(request: CompleteRequest): Promise<ModelAnswer> {
   await loadRustCore()
   return gateway_complete(request)
+}
+
+// The page tools' summary of an extracted page, cached by address unless `force`.
+export async function pageSummary(page: ExtractedData, force: boolean): Promise<PageSummary> {
+  await loadRustCore()
+  return gateway_page_summary(page, force)
 }
 
 export async function summarize(request: SummaryRequest): Promise<ModelAnswer> {

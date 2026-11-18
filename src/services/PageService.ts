@@ -1,120 +1,33 @@
 import { cacheService } from './CacheService'
-import { complete, recordStat, summarize } from './RustCore'
-import type { ExtractedData, SummaryTiming, PageSummary, ChatMessage, ChatResult } from '../types'
+import { complete, pageSummary } from './RustCore'
+import type { ExtractedData, PageSummary, ChatMessage, ChatResult } from '../types'
 
 import { ragService } from './rag/RagService'
 
-const WHITESPACE_PATTERN = /\s+/
-const SUMMARY_BULLET_PATTERN = /^[-•*]|^\d+\./
-const BULLET_PREFIX_PATTERN = /^[-•*]\s*/
-const NUMBERED_PREFIX_PATTERN = /^\d+\.\s*/
-
 export class PageService {
-
+  // The page tools' summary: the Rust core reads the cache, asks the model, keeps and counts it;
+  // the page and a new summary are indexed for search here.
   static async summarize(extractedData: ExtractedData, force = false): Promise<PageSummary> {
-    const startTotal = performance.now()
-    const timing: SummaryTiming = { extraction: 0, llm: 0, total: 0 }
-    const { title, url, content, author, publishDate, publication, wordCount, readTime, extractionTime } = extractedData    
-    timing.extraction = extractionTime || 0
-    
+    const { title, url, content } = extractedData
+    const source = {
+      sourceId: url || '',
+      sourceUrl: url || '',
+      sourceType: 'article' as const,
+      title: title || url || 'Untitled Article'
+    }
     if (url && content) {
-      // broadcast progress to side panel
-      const broadcastProgress = (percent: number) => {
-        chrome.runtime.sendMessage({
-          type: 'INDEXING_PROGRESS',
-          sourceId: url,
-          percent
-        }).catch(() => {})
+      const progress = (percent: number) => {
+        chrome.runtime.sendMessage({ type: 'INDEXING_PROGRESS', sourceId: url, percent }).catch(() => {})
       }
-      
-      ragService.indexChunks(content, {
-        sourceId: url,
-        sourceUrl: url,
-        sourceType: 'article',
-        title: title || 'Untitled Article'
-      }, broadcastProgress).catch(err => console.warn('[PageService] Chunk indexing failed', err))
+      const failed = (err: unknown) => console.warn('[PageService] chunk indexing failed', err)
+      ragService.indexChunks(content, source, progress).catch(failed)
     }
-
-    if (!force && url) {
-      const cached = await cacheService.getPageSummary(url) as PageSummary | null
-      if (cached) {
-        cached.timing = { ...cached.timing, cached: true, total: Math.round(performance.now() - startTotal) }
-        return cached
-      }
+    const summary = await pageSummary(extractedData, force)
+    if (url && !summary.timing?.cached) {
+      const failed = (err: unknown) => console.warn('[PageService] summary indexing failed', err)
+      ragService.indexSummary(summary.bullets.join('\n'), source).catch(failed)
     }
-
-    let metadata = `ARTICLE METADATA:\n- Title: "${title}"\n`
-    if (author) metadata += `- Author: ${author}\n`
-    if (publication) metadata += `- Publication: ${publication}\n`
-    if (publishDate) metadata += `- Published: ${publishDate}\n`
-    metadata += '\n---\nARTICLE CONTENT:\n\n'
-
-    const fullContent = metadata + content
-    const llmStart = performance.now()
-
-    console.log('[PageService] summarizing, length:', fullContent.length)
-
-    const result = await summarize({
-      content: fullContent,
-      context: `This article is titled "${title}"`,
-      kind: 'key-points',
-      length: 'medium'
-    })
-    const summaryText = result.text
-
-    timing.llm = Math.round(performance.now() - llmStart)
-
-    const bullets = this._parseBullets(summaryText)
-
-    timing.total = Math.round(performance.now() - startTotal)
-    timing.cached = false
-    timing.model = result.model
-
-    const summary: PageSummary = {
-      title, author, publishDate, publication,
-      bullets: bullets.length ? bullets : ['could not generate summary'],
-      readTime, fullContent, wordCount,
-      timestamp: Date.now(),
-      timing
-    }
-
-    if (url) {
-      await cacheService.setPageSummary(url, summary, 3600)
-      // index summary for global search
-      ragService.indexSummary(
-        bullets.join('\n'),
-        { sourceId: url, sourceUrl: url, sourceType: 'article', title: title || url }
-      ).catch(() => {})
-    }
-
-    recordStat({
-      kind: 'summary',
-      email: false,
-      ms: timing.llm || 0,
-      wordsIn: wordCount || 0,
-      wordsOut: bullets.join(' ').split(WHITESPACE_PATTERN).length,
-      tokensOut: Math.round(summaryText.length / 4),
-      model: timing.model,
-      url
-    }).catch(() => {})
-
     return summary
-  }
-
-  private static _parseBullets(text: string): string[] {
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0)
-    
-    const bullets = lines
-      .filter(l => SUMMARY_BULLET_PATTERN.test(l))
-      .map(l => l.replace(BULLET_PREFIX_PATTERN, '').replace(NUMBERED_PREFIX_PATTERN, '').trim())
-      .filter(l => l.length > 10)
-      .slice(0, 5)
-
-    if (bullets.length === 0 && lines.length > 0) {
-      return lines.filter(l => l.length > 15).slice(0, 3)
-    }
-
-    return bullets
   }
 
   private static async _enhanceContextWithSummaries(

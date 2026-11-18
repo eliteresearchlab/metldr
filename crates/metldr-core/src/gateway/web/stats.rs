@@ -46,7 +46,7 @@ pub(super) async fn record_chat(usage: &Value, ms: f64, model: &str) {
 }
 
 /// `event` added to today's record in one read and one write; a failure only loses the count.
-async fn record(event: &stats::Event<'_>) {
+pub(super) async fn record(event: &stats::Event<'_>) {
     let Ok(db) = database().await else { return };
     let recorded = async {
         let tx = db

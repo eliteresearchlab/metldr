@@ -179,6 +179,33 @@ impl Sections {
     }
 }
 
+/// The points of a summary a model wrote: its bulleted or numbered lines without their marks,
+/// at most five; a reply without them gives its first three full lines.
+pub fn bullets(summary: &str) -> Vec<String> {
+    let lines: Vec<&str> = summary.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let marked = |line: &&str| {
+        let rest = line.trim_start_matches(|c: char| c.is_ascii_digit());
+        line.starts_with(['-', '•', '*']) || (rest.len() < line.len() && rest.starts_with('.'))
+    };
+    let unmarked = |line: &str| {
+        let line = line.strip_prefix(['-', '•', '*']).map_or(line, str::trim_start);
+        let digits = line.trim_start_matches(|c: char| c.is_ascii_digit());
+        match digits.strip_prefix('.') {
+            Some(rest) if digits.len() < line.len() => rest.trim_start(),
+            _ => line,
+        }
+        .trim()
+        .to_owned()
+    };
+    let points = lines.iter().filter(|l| marked(l)).map(|l| unmarked(l));
+    let points: Vec<String> = points.filter(|l| l.chars().count() > 10).take(5).collect();
+    if points.is_empty() {
+        let full = lines.into_iter().filter(|l| l.chars().count() > 15);
+        return full.take(3).map(str::to_owned).collect();
+    }
+    points
+}
+
 /// The section numbers `answer` cites as `[n]`, each once, in order, within `count` sections.
 pub fn cited(answer: &str, count: usize) -> Vec<usize> {
     let mut found = Vec::new();
@@ -232,6 +259,11 @@ mod tests {
         let mut outline = String::new();
         parts.write_outline(60, &mut outline);
         assert_eq!(outline, "[1] Part 0 (0.6 KB)\n[2] Part 1 (0.6 KB)\n[3] Part 2 (0.6 KB)\n");
+        let points = ["The North report gives 17 units.", "Shipping starts in May next year."];
+        let summary = format!("Here are the points:\n- {}\n2. {}\n* short\n", points[0], points[1]);
+        assert_eq!(bullets(&summary), points);
+        let plain = "No bullets here, only one plain sentence.";
+        assert_eq!(bullets(plain), [plain]);
         // A wall of text splits at character boundaries, and spans join sections back up.
         let wall = "word ".repeat(1000);
         let walled = Sections::new(wall.clone());

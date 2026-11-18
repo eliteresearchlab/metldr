@@ -684,7 +684,6 @@ export class BackgroundBootstrap {
                 title: filename.replace('.pdf', ''),
                 bullets: finalBullets,
                 readTime: `${readTimeMin} min`,
-                fullContent: result.fullText,
                 wordCount,
                 timestamp: Date.now(),
                 timing: { total: 0, cached: false }
