@@ -43,8 +43,7 @@ thread_local! {
 
 /// Whether the search model is ready to take. False offline or on a mismatch; search then runs
 /// on keywords alone.
-#[wasm_bindgen]
-pub async fn search_model_fetch() -> bool {
+pub(super) async fn search_model_fetch() -> bool {
     if SEARCH_READY.with_borrow(Option::is_some) {
         return true;
     }

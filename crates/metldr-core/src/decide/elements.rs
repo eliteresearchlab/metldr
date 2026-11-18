@@ -1,7 +1,8 @@
 //! Element scout (R14a): ranks a page's controls for the step an agent wants to take next,
-//! so the agent can read a short list instead of every control. 785 trained weights over
-//! lexical features (keyword rank, word, trigram and number overlap with the goal, the control's
-//! role and its parent's role); no embedding model. Read-only: it orders refs, it grants nothing.
+//! so the agent can read a short list instead of every control. 529 trained weights over
+//! lexical features (keyword rank, word, trigram and number overlap with the goal and the last
+//! acted controls, the name's length, the control's role); no embedding model. Read-only: it
+//! orders refs, it grants nothing.
 use metldr_retrieval::{Chunk, Index, tokenize};
 
 mod weights;

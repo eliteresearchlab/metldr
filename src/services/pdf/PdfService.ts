@@ -1,7 +1,6 @@
 import initPdf, { pdf_read } from '../../../crates/metldr-pdf/pkg/metldr_pdf'
 import pdfWasmUrl from '../../../crates/metldr-pdf/pkg/metldr_pdf_bg.wasm?url'
-import { summarize } from '../RustCore'
-import { ragService } from '../rag/RagService'
+import { search, summarize } from '../RustCore'
 
 // PDFs are read by the Rust PDF module (PDFium), loaded the first time one is read.
 const MAX_PAGES = 2000
@@ -28,7 +27,7 @@ async function fetchPdf(url: string): Promise<ArrayBuffer> {
 
 async function summarizeText(text: string, sourceUrl: string, title: string): Promise<string> {
   const summary = (await summarize({ content: text })).text
-  ragService.indexSummary(summary, { sourceId: sourceUrl, sourceUrl, sourceType: 'pdf', title })
+  search.indexSummary(summary, { sourceId: sourceUrl, sourceUrl, sourceType: 'pdf', title })
   return summary
 }
 

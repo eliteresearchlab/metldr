@@ -1,8 +1,6 @@
 import { cacheService } from './CacheService'
-import { complete, pageSummary } from './RustCore'
+import { complete, pageSummary, search } from './RustCore'
 import type { ExtractedData, PageSummary, ChatMessage, ChatResult } from '../types'
-
-import { ragService } from './rag/RagService'
 
 export class PageService {
   // The page tools' summary: the Rust core reads the cache, asks the model, keeps and counts it;
@@ -20,12 +18,12 @@ export class PageService {
         chrome.runtime.sendMessage({ type: 'INDEXING_PROGRESS', sourceId: url, percent }).catch(() => {})
       }
       const failed = (err: unknown) => console.warn('[PageService] chunk indexing failed', err)
-      ragService.indexChunks(content, source, progress).catch(failed)
+      search.index(content, source, progress).catch(failed)
     }
     const summary = await pageSummary(extractedData, force)
     if (url && !summary.timing?.cached) {
       const failed = (err: unknown) => console.warn('[PageService] summary indexing failed', err)
-      ragService.indexSummary(summary.bullets.join('\n'), source).catch(failed)
+      search.indexSummary(summary.bullets.join('\n'), source).catch(failed)
     }
     return summary
   }
@@ -85,7 +83,7 @@ export class PageService {
       return { ok: false, error: 'no user message' }
     }
     
-    const { context, sources } = await ragService.searchWithSources(lastUserMsg, 8)
+    const { context, sources } = await search.sources(lastUserMsg, 8)
     console.log('[PageService.globalChat] sources from RAG:', sources?.length, sources)
     
     if (!context) {
