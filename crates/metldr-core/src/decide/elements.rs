@@ -3,7 +3,6 @@
 //! lexical features (keyword rank, word, trigram and number overlap with the goal, the control's
 //! role and its parent's role); no embedding model. Read-only: it orders refs, it grants nothing.
 use metldr_retrieval::{Chunk, Index, tokenize};
-use std::collections::HashSet;
 
 mod weights;
 use weights::{HIDDEN, INPUTS, WEIGHTS};
@@ -28,9 +27,12 @@ const _: () = assert!(BASE == INPUTS && WEIGHTS.len() == HIDDEN * INPUTS + HIDDE
 /// The distinct words of `text` as 64-bit hashes, sorted, in `out`.
 fn words(text: &str, out: &mut Vec<u64>) {
     out.clear();
-    tokenize(text, &mut |w| {
-        out.push(w.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)));
-    });
+    // FNV-1a: two words collide about once in 2^64.
+    let hash = |w: &str| {
+        w.bytes()
+            .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+    };
+    tokenize(text, &mut |w| out.push(hash(w)));
     out.sort_unstable();
     out.dedup();
 }
@@ -60,8 +62,8 @@ fn shared<T: Ord>(items: &[T], set: &[T]) -> usize {
     items.iter().filter(|item| set.binary_search(item).is_ok()).count()
 }
 
-fn numbers(text: &str) -> HashSet<&str> {
-    text.split(|c: char| !c.is_ascii_digit()).filter(|n| !n.is_empty()).collect()
+fn numbers(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !c.is_ascii_digit()).filter(|n| !n.is_empty())
 }
 
 /// The keyword rank of each control for `query`: 1 for the best match, 1/2 for the next, 0 for none.
@@ -69,7 +71,8 @@ fn keyword(query: &str, texts: &[String]) -> Vec<f32> {
     let mut index = Index::default();
     let ids: Vec<String> = (0..texts.len()).map(|i| i.to_string()).collect();
     for (id, content) in ids.iter().zip(texts) {
-        index.add(&Chunk { id, kind: "page", title: "", content, source_url: id, source_id: id, summary: false });
+        let (source_url, source_id) = (id.as_str(), id.as_str());
+        index.add(&Chunk { id, kind: "page", title: "", content, source_url, source_id, summary: false });
     }
     let mut score = vec![0.0f32; texts.len()];
     for (rank, &slot) in index.keyword(query, texts.len()).iter().enumerate() {
@@ -91,7 +94,7 @@ pub fn scores(goal: &str, previous: &[&str], controls: &[Control]) -> Vec<f32> {
     words(goal, &mut goal_words);
     grams(goal, &mut goal_grams);
     words(&previous, &mut previous_words);
-    let goal_numbers = numbers(&goal_lower);
+    let goal_numbers: Vec<&str> = numbers(&goal_lower).collect();
     let (mut name, mut g) = (Vec::new(), Vec::new());
     let mut x = [0.0f32; INPUTS];
     controls
@@ -115,7 +118,8 @@ pub fn scores(goal: &str, previous: &[&str], controls: &[Control]) -> Vec<f32> {
             x[10] = 1.0;
             x[11] = if g.is_empty() { 0.0 } else { shared / g.len() as f32 };
             x[12] = shared / goal_grams.len().max(1) as f32;
-            x[13] = f32::from(u8::from(numbers(c.name).iter().any(|n| goal_numbers.contains(n))));
+            let number_in_goal = numbers(c.name).any(|n| goal_numbers.contains(&n));
+            x[13] = f32::from(u8::from(number_in_goal));
             x[14] = f32::from(u8::from(lower.len() >= 3 && goal_lower.contains(&lower)));
             if let Some(r) = ROLES.iter().position(|r| *r == c.role) {
                 x[15 + r] = 1.0;
@@ -157,11 +161,7 @@ fn parse(line: &str) -> Option<(&str, String, bool)> {
         let mut chars = quoted.char_indices();
         while let Some((i, c)) = chars.next() {
             match c {
-                '\\' => {
-                    if let Some((_, escaped)) = chars.next() {
-                        name.push(escaped);
-                    }
-                }
+                '\\' => name.extend(chars.next().map(|(_, escaped)| escaped)),
                 '"' => {
                     rest = &quoted[i + 1..];
                     break;

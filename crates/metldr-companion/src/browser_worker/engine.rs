@@ -219,7 +219,10 @@ impl Engine {
         Ok(serde_json::from_value(value)?)
     }
     pub(super) async fn snapshot(&self, args: Value) -> Result<Value> {
-        let previous: Vec<String> = self.acted.lock().map_or_else(|_| Vec::new(), |acted| acted.iter().rev().cloned().collect());
+        let previous: Vec<String> = match self.acted.lock() {
+            Ok(acted) => acted.iter().rev().cloned().collect(),
+            Err(_) => Vec::new(),
+        };
         self.page.snapshot(args, &previous).await
     }
     pub(super) async fn page_logs(&self) -> Result<Value> {
