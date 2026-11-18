@@ -4,11 +4,11 @@
 use super::*;
 use web_sys::{IdbDatabase, IdbOpenDbRequest, IdbTransactionMode};
 
-const URL: &str = "https://huggingface.co/WhiteHades/potion-retrieval-32M-int8/resolve/148c79c122336ab970ead7c89553dbd71d77fb6f/potion-retrieval-32M-int8.metldr";
-const SHA256: &str = "bcc991798206a8c135eb63493c2163b52740293d4b5ac613e4a096e7aad66961";
+const URL: &str = "https://huggingface.co/WhiteHades/blink-8M-int8/resolve/2358eb5a8035a4e87f66e32024824f7481dbca88/blink-8M-int8.metldr";
+const SHA256: &str = "a099b59e55dfd91474e3979c05727c2c8a6cc622a83907f6d7252b06b91a04a2";
 const DATABASE: &str = "metldr-models";
 const STORE: &str = "files";
-const KEY: &str = "potion-retrieval-32M-int8@148c79c1";
+const KEY: &str = "blink-8M-int8@2358eb5a";
 
 thread_local! {
     static READY: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
@@ -98,9 +98,10 @@ async fn store(db: &IdbDatabase, bytes: &[u8]) -> Result<(), Error> {
         .transaction_with_str_and_mode(STORE, IdbTransactionMode::Readwrite)
         .map_err(err)?;
     let value = js_sys::Uint8Array::from(bytes);
-    tx.object_store(STORE)
-        .and_then(|s| s.put_with_key(&value, &KEY.into()))
-        .map_err(err)?;
+    let files = tx.object_store(STORE).map_err(err)?;
+    // One model kept: a replaced one's bytes go in the same write.
+    files.clear().map_err(err)?;
+    files.put_with_key(&value, &KEY.into()).map_err(err)?;
     dictionary::finished(&tx).await
 }
 
