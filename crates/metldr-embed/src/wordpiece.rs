@@ -11,7 +11,11 @@ pub struct WordPiece {
 impl WordPiece {
     /// The tokenizer for `vocab`, one token per line in id order, `unk` its unknown token.
     pub fn new(vocab: &str, unk: u32) -> Self {
-        let vocab = vocab.split('\n').enumerate().map(|(id, token)| (token.to_owned(), id as u32)).collect();
+        let vocab = vocab
+            .split('\n')
+            .enumerate()
+            .map(|(id, token)| (token.to_owned(), id as u32))
+            .collect();
         Self { vocab, unk }
     }
 
@@ -99,13 +103,19 @@ fn is_cjk(c: char) -> bool {
         | 0x2B740..=0x2B81F | 0x2B820..=0x2CEAF | 0xF900..=0xFAFF | 0x2F800..=0x2FA1F)
 }
 
+/// Combining marks left by NFD, which accent stripping drops.
 fn is_mark(c: char) -> bool {
-    matches!(c as u32, 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F)
+    const MARKS: [(u32, u32); 5] =
+        [(0x0300, 0x036F), (0x1AB0, 0x1AFF), (0x1DC0, 0x1DFF), (0x20D0, 0x20FF), (0xFE20, 0xFE2F)];
+    MARKS.iter().any(|&(start, end)| (start..=end).contains(&(c as u32)))
 }
 
 fn is_punctuation(c: char) -> bool {
     let u = c as u32;
-    (33..=47).contains(&u) || (58..=64).contains(&u) || (91..=96).contains(&u) || (123..=126).contains(&u)
+    (33..=47).contains(&u)
+        || (58..=64).contains(&u)
+        || (91..=96).contains(&u)
+        || (123..=126).contains(&u)
         || (!c.is_alphanumeric() && !c.is_whitespace() && !c.is_control() && general_punct(u))
 }
 

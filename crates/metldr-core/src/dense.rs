@@ -61,7 +61,11 @@ impl Dense {
             return;
         }
         let dim = model.dim();
-        let scale = match self.restored.remove(id).filter(|(h, _, v)| *h == hash && v.len() == dim) {
+        let scale = match self
+            .restored
+            .remove(id)
+            .filter(|(h, _, v)| *h == hash && v.len() == dim)
+        {
             Some((_, scale, vector)) => {
                 self.quantized.clear();
                 self.quantized.extend_from_slice(&vector);
@@ -104,7 +108,9 @@ impl Dense {
 
     /// The ids of the `limit` chunks nearest `query`, nearest first.
     pub fn search(&mut self, query: &str, limit: usize) -> Vec<String> {
-        let Some(model) = &self.model else { return Vec::new() };
+        let Some(model) = &self.model else {
+            return Vec::new();
+        };
         let dim = model.dim();
         self.floats.resize(dim, 0.0);
         model.embed(query, &mut self.ids, &mut self.floats);
@@ -126,7 +132,10 @@ impl Dense {
             scored.truncate(limit);
         }
         scored.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
-        scored.into_iter().filter_map(|(_, slot)| self.owners[slot].as_deref().map(str::to_owned)).collect()
+        scored
+            .into_iter()
+            .filter_map(|(_, slot)| self.owners[slot].as_deref().map(str::to_owned))
+            .collect()
     }
 
     /// Every live vector as one blob: magic, dimension and count, then per chunk its id, text
@@ -142,7 +151,11 @@ impl Dense {
             out.extend_from_slice(id.as_bytes());
             out.extend_from_slice(&entry.hash.to_le_bytes());
             out.extend_from_slice(&entry.scale.to_le_bytes());
-            out.extend(self.vectors[entry.slot * dim..][..dim].iter().map(|&v| v as u8));
+            out.extend(
+                self.vectors[entry.slot * dim..][..dim]
+                    .iter()
+                    .map(|&v| v as u8),
+            );
         }
         out
     }
@@ -187,7 +200,12 @@ mod checks {
 
     fn model() -> Vec<u8> {
         let tokens = ["[UNK]", "cat", "dog", "fish"];
-        metldr_embed::pack(&tokens, 0, 3, &[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
+        metldr_embed::pack(
+            &tokens,
+            0,
+            3,
+            &[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        )
     }
 
     #[test]

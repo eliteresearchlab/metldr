@@ -8,6 +8,8 @@ const MODEL_PATH = 'models/potion-retrieval-32M.metldr'
 // Every chunk's vector, saved as one blob so a restart embeds only new or changed chunks.
 const VECTORS_KEY = 'system:vectors'
 const SAVE_DELAY_MS = 300
+
+interface SavedVectors { url: string; value: Uint8Array; timestamp: number }
 const CHUNK_TTL_MS = 24 * 60 * 60 * 1000 * 60 // 60 days
 
 // The stored chunks in IndexedDB and the Rust search index over them (keywords, meaning, fusion).
@@ -29,7 +31,7 @@ export class VectorStore {
     const index = new SearchIndex()
     const model = await fetch(chrome.runtime.getURL(MODEL_PATH))
     if (model.ok) index.load_model(new Uint8Array(await model.arrayBuffer()))
-    const saved = await databaseService.get<{ value: Uint8Array }>(DB_CONFIGS.cache, 'page_cache', VECTORS_KEY)
+    const saved = await databaseService.get<SavedVectors>(DB_CONFIGS.cache, 'page_cache', VECTORS_KEY)
     if (saved?.value) index.restore_vectors(saved.value)
     await this.eachStored(entry => this.remember(index, entry))
     this.scheduleSave()
@@ -89,7 +91,8 @@ export class VectorStore {
     if (!this.loading) return
     try {
       const value = (await this.index()).vectors()
-      await databaseService.put(DB_CONFIGS.cache, 'page_cache', { url: VECTORS_KEY, value, timestamp: Date.now() })
+      const record: SavedVectors = { url: VECTORS_KEY, value, timestamp: Date.now() }
+      await databaseService.put(DB_CONFIGS.cache, 'page_cache', record)
     } catch (err) {
       console.error('[VectorStore] Save failed:', err)
     }

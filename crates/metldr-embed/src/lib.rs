@@ -30,7 +30,12 @@ impl Model {
         if bytes.get(..8)? != MAGIC {
             return None;
         }
-        let (dim, tokens, unk, vocab_len) = (u32_at(&bytes, 8)?, u32_at(&bytes, 12)?, u32_at(&bytes, 16)?, u32_at(&bytes, 20)?);
+        let (dim, tokens, unk, vocab_len) = (
+            u32_at(&bytes, 8)?,
+            u32_at(&bytes, 12)?,
+            u32_at(&bytes, 16)?,
+            u32_at(&bytes, 20)?,
+        );
         let vocab_end = 24 + vocab_len;
         let scales = vocab_end;
         let rows = scales + tokens * 4;
@@ -39,7 +44,14 @@ impl Model {
         }
         let vocab = std::str::from_utf8(&bytes[24..vocab_end]).ok()?;
         let tokenizer = WordPiece::new(vocab, unk as u32);
-        Some(Self { bytes, dim, scales, rows, tokens, tokenizer })
+        Some(Self {
+            bytes,
+            dim,
+            scales,
+            rows,
+            tokens,
+            tokenizer,
+        })
     }
 
     pub fn dim(&self) -> usize {
@@ -52,9 +64,13 @@ impl Model {
         self.tokenizer.encode(text, ids);
         out.fill(0.0);
         let unk = self.tokenizer.unk();
-        for &id in ids.iter().filter(|&&id| id != unk && (id as usize) < self.tokens) {
+        for &id in ids
+            .iter()
+            .filter(|&&id| id != unk && (id as usize) < self.tokens)
+        {
             let id = id as usize;
-            let scale = f32::from_le_bytes(self.bytes[self.scales + id * 4..][..4].try_into().unwrap());
+            let scale =
+                f32::from_le_bytes(self.bytes[self.scales + id * 4..][..4].try_into().unwrap());
             let row = &self.bytes[self.rows + id * self.dim..][..self.dim];
             for (o, &v) in out.iter_mut().zip(row) {
                 *o += f32::from(v as i8) * scale;
@@ -88,15 +104,30 @@ pub fn dot(a: &[i8], b: &[i8]) -> i32 {
     use core::arch::wasm32::*;
     let mut sum = i32x4_splat(0);
     let (a_chunks, b_chunks) = (a.chunks_exact(16), b.chunks_exact(16));
-    let tail: i32 = a_chunks.remainder().iter().zip(b_chunks.remainder()).map(|(&x, &y)| i32::from(x) * i32::from(y)).sum();
+    let tail: i32 = a_chunks
+        .remainder()
+        .iter()
+        .zip(b_chunks.remainder())
+        .map(|(&x, &y)| i32::from(x) * i32::from(y))
+        .sum();
     for (x, y) in a_chunks.zip(b_chunks) {
         // SAFETY: `chunks_exact(16)` yields exactly 16 initialized bytes each, and `v128_load`
         // has no alignment requirement, so each load reads only within its chunk.
         let (x, y) = unsafe { (v128_load(x.as_ptr().cast()), v128_load(y.as_ptr().cast())) };
-        sum = i32x4_add(sum, i32x4_dot_i16x8(i16x8_extend_low_i8x16(x), i16x8_extend_low_i8x16(y)));
-        sum = i32x4_add(sum, i32x4_dot_i16x8(i16x8_extend_high_i8x16(x), i16x8_extend_high_i8x16(y)));
+        sum = i32x4_add(
+            sum,
+            i32x4_dot_i16x8(i16x8_extend_low_i8x16(x), i16x8_extend_low_i8x16(y)),
+        );
+        sum = i32x4_add(
+            sum,
+            i32x4_dot_i16x8(i16x8_extend_high_i8x16(x), i16x8_extend_high_i8x16(y)),
+        );
     }
-    i32x4_extract_lane::<0>(sum) + i32x4_extract_lane::<1>(sum) + i32x4_extract_lane::<2>(sum) + i32x4_extract_lane::<3>(sum) + tail
+    i32x4_extract_lane::<0>(sum)
+        + i32x4_extract_lane::<1>(sum)
+        + i32x4_extract_lane::<2>(sum)
+        + i32x4_extract_lane::<3>(sum)
+        + tail
 }
 
 /// The integer dot product of two int8 vectors, in independent lanes so it vectorizes.
@@ -104,7 +135,12 @@ pub fn dot(a: &[i8], b: &[i8]) -> i32 {
 pub fn dot(a: &[i8], b: &[i8]) -> i32 {
     let mut lanes = [0i32; 16];
     let (a_chunks, b_chunks) = (a.chunks_exact(16), b.chunks_exact(16));
-    let tail: i32 = a_chunks.remainder().iter().zip(b_chunks.remainder()).map(|(&x, &y)| i32::from(x) * i32::from(y)).sum();
+    let tail: i32 = a_chunks
+        .remainder()
+        .iter()
+        .zip(b_chunks.remainder())
+        .map(|(&x, &y)| i32::from(x) * i32::from(y))
+        .sum();
     for (x, y) in a_chunks.zip(b_chunks) {
         for i in 0..16 {
             lanes[i] += i32::from(x[i]) * i32::from(y[i]);

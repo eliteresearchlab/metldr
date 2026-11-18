@@ -28,19 +28,27 @@ fn main() -> ExitCode {
 fn pack(weights: &str, tokenizer: &str) -> Result<Vec<u8>, String> {
     let bytes = fs::read(weights).map_err(|e| format!("{weights}: {e}"))?;
     let n = u64::from_le_bytes(bytes.get(..8).ok_or("no header")?.try_into().unwrap()) as usize;
-    let header: serde_json::Value = serde_json::from_slice(&bytes[8..8 + n]).map_err(|e| e.to_string())?;
+    let header: serde_json::Value =
+        serde_json::from_slice(&bytes[8..8 + n]).map_err(|e| e.to_string())?;
     let tensor = &header["embeddings"];
     if tensor["dtype"] != "F32" {
         return Err("the embeddings are not F32".into());
     }
     let dim = tensor["shape"][1].as_u64().ok_or("no shape")? as usize;
-    let (start, end) = (tensor["data_offsets"][0].as_u64().ok_or("no offsets")? as usize, tensor["data_offsets"][1].as_u64().ok_or("no offsets")? as usize);
+    let (start, end) = (
+        tensor["data_offsets"][0].as_u64().ok_or("no offsets")? as usize,
+        tensor["data_offsets"][1].as_u64().ok_or("no offsets")? as usize,
+    );
     let vectors: Vec<f32> = bytes[8 + n + start..8 + n + end]
         .chunks_exact(4)
         .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
         .collect();
-    let json: serde_json::Value = serde_json::from_slice(&fs::read(tokenizer).map_err(|e| format!("{tokenizer}: {e}"))?).map_err(|e| e.to_string())?;
-    let vocab = json["model"]["vocab"].as_object().ok_or("no WordPiece vocabulary")?;
+    let json: serde_json::Value =
+        serde_json::from_slice(&fs::read(tokenizer).map_err(|e| format!("{tokenizer}: {e}"))?)
+            .map_err(|e| e.to_string())?;
+    let vocab = json["model"]["vocab"]
+        .as_object()
+        .ok_or("no WordPiece vocabulary")?;
     let mut tokens = vec![""; vocab.len()];
     for (token, id) in vocab {
         let id = id.as_u64().ok_or("bad id")? as usize;
@@ -49,7 +57,10 @@ fn pack(weights: &str, tokenizer: &str) -> Result<Vec<u8>, String> {
     if tokens.iter().any(|t| t.contains('\n')) {
         return Err("a token holds a line break".into());
     }
-    let unk = vocab.get("[UNK]").and_then(|v| v.as_u64()).ok_or("no [UNK]")? as u32;
+    let unk = vocab
+        .get("[UNK]")
+        .and_then(|v| v.as_u64())
+        .ok_or("no [UNK]")? as u32;
     if vectors.len() != tokens.len() * dim {
         return Err("vectors and vocabulary disagree".into());
     }
