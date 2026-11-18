@@ -38,7 +38,11 @@ export class PdfService {
     return summarizeText(text, url, url.split('/').pop() || 'PDF Document')
   }
 
-  async summarizeFromArrayBuffer(data: ArrayBuffer, filename?: string, sourceUrl?: string): Promise<{ summary: string; fullText: string }> {
+  async summarizeFromArrayBuffer(
+    data: ArrayBuffer,
+    filename?: string,
+    sourceUrl?: string
+  ): Promise<{ summary: string; fullText: string }> {
     const fullText = await read(data)
     const url = sourceUrl || `file://${filename || 'document.pdf'}`
     return { summary: await summarizeText(fullText, url, filename || 'PDF Document'), fullText }
@@ -52,10 +56,10 @@ export class PdfService {
     return read(data)
   }
 
-  // file picker summarize
   openAndSummarize(): Promise<{ summary: string; fullText: string; filename: string }> {
     return new Promise((resolve, reject) => {
-      const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.pdf,application/pdf', hidden: true })
+      const picker = { type: 'file', accept: '.pdf,application/pdf', hidden: true }
+      const input = Object.assign(document.createElement('input'), picker)
       document.body.appendChild(input)
       input.onchange = async () => {
         const file = input.files?.[0]

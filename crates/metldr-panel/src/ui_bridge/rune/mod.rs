@@ -394,7 +394,8 @@ impl State {
     /// Makes the read document the chat's source and asks for its summary.
     fn attach_document(&mut self, name: String, document: &str, error: Option<String>) {
         let (Some(gateway), Some(updates)) = (self.gateway().cloned(), self.updates.clone()) else {
-            return self.fail(FlowError::Host("PDFs open in the chat once it answers through the extension.".into()));
+            let gateway_only = "PDFs open in the chat once it answers through the extension.";
+            return self.fail(FlowError::Host(gateway_only.into()));
         };
         if let Some(error) = error {
             return self.fail(FlowError::Host(error));
@@ -404,7 +405,8 @@ impl State {
         }
         let markdown = gateway::document_markdown(document);
         if markdown.trim().is_empty() {
-            return self.fail(FlowError::Host("This PDF has no text to read. Scanned pages need text recognition, which is not available yet.".into()));
+            let scanned = "This PDF has no text to read. Scanned pages need text recognition, which is not available yet.";
+            return self.fail(FlowError::Host(scanned.into()));
         }
         spawn_local(async move {
             let done = gateway.attach(name, markdown, Rc::clone(&updates)).await;
@@ -2233,7 +2235,12 @@ fn ask_for_cjk() {
 }
 
 #[wasm_bindgen]
-pub fn start_rune_chat(capture: Function, pick: Function, fonts: js_sys::Array, want_fonts: Function) -> Result<(), JsValue> {
+pub fn start_rune_chat(
+    capture: Function,
+    pick: Function,
+    fonts: js_sys::Array,
+    want_fonts: Function,
+) -> Result<(), JsValue> {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if host.is_some() {

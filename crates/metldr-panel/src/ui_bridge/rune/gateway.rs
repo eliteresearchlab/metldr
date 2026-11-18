@@ -346,7 +346,12 @@ impl Gateway {
     }
 
     /// Makes the document `name`, read as `markdown`, the chat's source and asks for its summary.
-    pub(super) async fn attach(self: Rc<Self>, name: String, markdown: String, updates: Rc<Updates>) -> Result<(), FlowError> {
+    pub(super) async fn attach(
+        self: Rc<Self>,
+        name: String,
+        markdown: String,
+        updates: Rc<Updates>,
+    ) -> Result<(), FlowError> {
         self.everywhere.set(false);
         *self.document.borrow_mut() = Some((name, markdown));
         self.ask("Summarize this document.".into(), updates).await

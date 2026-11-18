@@ -127,15 +127,17 @@ const PDFIUM = {
   dir: join(homedir(), '.cache', 'metldr-pdfium', 'chromium_8058'),
 };
 
+const buildError = message => Object.assign(new Error(message), { exitCode: 1 });
+
 async function pdfiumEnv() {
   const lib = join(PDFIUM.dir, 'lib');
   if (!existsSync(join(lib, 'libpdfium.a'))) {
     const response = await fetch(PDFIUM.url);
-    if (!response.ok) throw Object.assign(new Error(`PDFium download failed: ${response.status}`), { exitCode: 1 });
+    if (!response.ok) throw buildError(`PDFium download failed: ${response.status}`);
     const archive = Buffer.from(await response.arrayBuffer());
     const found = createHash('sha256').update(archive).digest('hex');
     if (found !== PDFIUM.sha256) {
-      throw Object.assign(new Error(`PDFium archive hash ${found} is not the pinned ${PDFIUM.sha256}`), { exitCode: 1 });
+      throw buildError(`PDFium archive hash ${found} is not the pinned ${PDFIUM.sha256}`);
     }
     const staging = `${PDFIUM.dir}.tmp`;
     rmSync(staging, { recursive: true, force: true });
@@ -176,14 +178,16 @@ try {
   if (isCheck) {
     for (const crate of crates) {
       const args = ['check', ...cargoBuildArgs(crate)];
-      await runAsync('cargo', args, `Cargo (${crate.name})`, false, crate.pdfium ? await pdfiumEnv() : cargoEnv);
+      const env = crate.pdfium ? await pdfiumEnv() : cargoEnv;
+      await runAsync('cargo', args, `Cargo (${crate.name})`, false, env);
       if (failure) throw failure;
     }
   } else {
     await runPool(crates.map(crate => async () => {
       const targetDir = wasmTargetDir(crate);
       const args = ['build', '--profile', profile, ...cargoBuildArgs(crate), '--target-dir', targetDir];
-      await runAsync('cargo', args, `Cargo (${crate.name})`, false, crate.pdfium ? await pdfiumEnv() : cargoEnv);
+      const env = crate.pdfium ? await pdfiumEnv() : cargoEnv;
+      await runAsync('cargo', args, `Cargo (${crate.name})`, false, env);
       if (failure) return;
       const wasm = join(targetDir, 'wasm32-unknown-unknown', profile, `${crate.artifact ?? crate.module}.wasm`);
       // An unchanged wasm already has its bindings: skip wasm-bindgen when the wasm's hash

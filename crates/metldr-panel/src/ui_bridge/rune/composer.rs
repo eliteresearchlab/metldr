@@ -583,6 +583,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
             if marker != Some('/') && query.is_empty() {
                 // Without the companion a PDF becomes the chat's source; with it, files wait.
                 let can_attach = state.gateway().is_some();
+                let icon = if can_attach { p.ink_2 } else { p.ink_3 };
                 let mut files = row()
                     .key("rune-attach-document")
                     .w_full()
@@ -591,7 +592,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     .px(8.0)
                     .center_y()
                     .radius(6.0)
-                    .child(::rune::el::icon(&PAPERCLIP, 16.0).color(if can_attach { p.ink_2 } else { p.ink_3 }))
+                    .child(::rune::el::icon(&PAPERCLIP, 16.0).color(icon))
                     .child(
                         typography
                             .legend(if can_attach { "Attach a PDF" } else { "Photos and files" })
@@ -600,13 +601,23 @@ pub(super) fn menu(state: &State) -> Option<El> {
                             .color(p.ink),
                     );
                 if can_attach {
-                    files = files.hover(p.hover).focus_highlight(p.hover).press(p.line_strong).label("Attach a PDF");
+                    files = files
+                        .hover(p.hover)
+                        .focus_highlight(p.hover)
+                        .press(p.line_strong)
+                        .label("Attach a PDF");
                 } else {
                     files = files
-                        .child(typography.legend("Unavailable").font(typography.font(12.0, 400.0)).color(p.ink_3))
+                        .child(
+                            typography
+                                .legend("Unavailable")
+                                .font(typography.font(12.0, 400.0))
+                                .color(p.ink_3),
+                        )
                         .label("Photos and files, unavailable");
                 }
-                rows = rows.child(metldr_ui::combobox::option(files, !can_attach, false, State::pick_document));
+                let files = metldr_ui::combobox::option(files, !can_attach, false, State::pick_document);
+                rows = rows.child(files);
             }
             if marker == Some('/') || !show_page {
                 rows = rows.child(

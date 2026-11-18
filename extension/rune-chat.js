@@ -66,8 +66,10 @@ let pdfReader;
 async function attach(file, chat) {
   if (!file) return;
   try {
-    pdfReader ??= import(/* @vite-ignore */ new URL("/chat/pdf/metldr_pdf.js", location.href).href)
-      .then(async module => (await module.default({ module_or_path: new URL("/assets/metldr_pdf_bg.wasm", location.href) }), module));
+    pdfReader ??= import(/* @vite-ignore */ new URL("/chat/pdf/metldr_pdf.js", location.href).href).then(async module => {
+      await module.default({ module_or_path: new URL("/assets/metldr_pdf_bg.wasm", location.href) });
+      return module;
+    });
     const { pdf_read } = await pdfReader;
     chat.rune_chat_attach(file.name, await pdf_read(new Uint8Array(await file.arrayBuffer()), 2000));
   } catch (error) {
@@ -79,7 +81,8 @@ async function attach(file, chat) {
 
 // The file picker the chat opens from its sources menu, and PDFs dropped on the chat.
 function documents(chat) {
-  const input = Object.assign(document.createElement("input"), { type: "file", accept: "application/pdf,.pdf", hidden: true });
+  const picker = { type: "file", accept: "application/pdf,.pdf", hidden: true };
+  const input = Object.assign(document.createElement("input"), picker);
   input.addEventListener("change", () => {
     attach(input.files[0], chat);
     input.value = "";
@@ -88,7 +91,8 @@ function documents(chat) {
   window.addEventListener("dragover", event => event.preventDefault());
   window.addEventListener("drop", event => {
     event.preventDefault();
-    attach([...event.dataTransfer.files].find(file => file.type === "application/pdf" || file.name.endsWith(".pdf")), chat);
+    const isPdf = file => file.type === "application/pdf" || file.name.endsWith(".pdf");
+    attach([...event.dataTransfer.files].find(isPdf), chat);
   });
   return () => input.click();
 }
