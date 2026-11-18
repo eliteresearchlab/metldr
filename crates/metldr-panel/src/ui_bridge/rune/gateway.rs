@@ -48,6 +48,10 @@ pub(super) struct Gateway {
     page: RefCell<Option<String>>,
     /// Each question with its answer, as the reader saw them.
     shown: RefCell<Vec<(String, String)>>,
+    /// A page summary is on its way.
+    summarizing: Cell<bool>,
+    /// The page last summarized, by URL, so opening the panel again does not repeat it.
+    summarized: RefCell<Option<String>>,
 }
 
 /// Posts `message` on `port`.
@@ -103,6 +107,8 @@ impl Gateway {
             turns: RefCell::default(),
             page: RefCell::default(),
             shown: RefCell::default(),
+            summarizing: Cell::new(false),
+            summarized: RefCell::default(),
         });
         gateway.restore(updates).await;
         *opened.borrow_mut() = Some(Rc::clone(&gateway));
@@ -129,7 +135,45 @@ impl Gateway {
     }
 
     pub(super) fn streaming(&self) -> bool {
-        self.streaming.get().is_some()
+        self.streaming.get().is_some() || self.summarizing.get()
+    }
+
+    /// The active tab's summary from the extension's page tools: cached per page and, when not
+    /// `manual`, only where the summary settings call for one. It joins the chat as an exchange.
+    pub(super) async fn summarize(
+        self: Rc<Self>,
+        updates: Rc<Updates>,
+        manual: bool,
+    ) -> Result<(), FlowError> {
+        let (tab, url) = active_tab().await?;
+        if !manual && self.summarized.borrow().as_deref() == Some(url.as_str()) {
+            return Ok(());
+        }
+        self.summarizing.set(true);
+        updates.changed();
+        let trigger = if manual { "manual" } else { "auto" };
+        let request = json!({"type":"EXTRACT_AND_SUMMARIZE","tabId":tab,"force":manual,"trigger":trigger});
+        let reply = ask_extension(&request).await;
+        self.summarizing.set(false);
+        updates.changed();
+        let reply = reply.unwrap_or_default();
+        let Some(text) = summary_text(&reply["summary"]).filter(|_| reply["success"] == true) else {
+            return match reply["error"].as_str() {
+                Some(error) if manual => Err(FlowError::Host(error.to_owned())),
+                _ if manual && reply["skip"] == true => {
+                    Err(FlowError::Host("This page has too little text to summarize.".into()))
+                }
+                _ => Ok(()),
+            };
+        };
+        *self.summarized.borrow_mut() = Some(url);
+        let id = self.next.get();
+        self.next.set(id + 1);
+        show(&updates, &format!("gateway-{id}"), "Summarize page".into(), text.clone());
+        self.shown.borrow_mut().push(("Summarize page".into(), text));
+        spawn_local(save(self.saved()));
+        updates.changed();
+        Ok(())
     }
 
     /// Asks `text` about the page in the active tab, capturing it when the conversation starts
@@ -240,6 +284,7 @@ impl Gateway {
         self.turns.borrow_mut().clear();
         self.shown.borrow_mut().clear();
         *self.page.borrow_mut() = None;
+        *self.summarized.borrow_mut() = None;
         updates.presentation.borrow_mut().messages.messages.clear();
         spawn_local(save(Saved::default()));
         updates.changed();
@@ -310,18 +355,41 @@ fn ready_routes(reply: &Value) -> Option<(Vec<RouteChoice>, usize)> {
     (!routes.is_empty()).then_some((routes, chosen))
 }
 
+/// The extension's reply to `request` sent to its service worker, or None.
+async fn ask_extension(request: &Value) -> Option<Value> {
+    let runtime = crate::chrome_api("runtime").ok()?;
+    let message = crate::flow::json_value(request).ok()?;
+    json_of(&crate::await_call(&runtime, "sendMessage", &[message]).await.ok()?)
+}
+
+/// A page summary as markdown: its title in bold, then its points.
+fn summary_text(summary: &Value) -> Option<String> {
+    let bullets: Vec<&str> = summary["bullets"].as_array()?.iter().filter_map(Value::as_str).collect();
+    if bullets.is_empty() {
+        return None;
+    }
+    let mut text = summary["title"].as_str().map_or_else(String::new, |title| format!("**{title}**\n\n"));
+    text.push_str(&bullets.iter().map(|bullet| format!("- {bullet}")).collect::<Vec<_>>().join("\n"));
+    Some(text)
+}
+
+/// The active tab: its id and address.
+async fn active_tab() -> Result<(f64, String), FlowError> {
+    let failure = || FlowError::Host("Select a browser tab.".into());
+    let tabs = crate::chrome_api("tabs").map_err(|_| failure())?;
+    let query = crate::flow::json_value(&json!({"active":true,"lastFocusedWindow":true}))?;
+    let found = crate::await_call(&tabs, "query", &[query]).await;
+    let tab = js_sys::Array::from(&found.map_err(|_| failure())?).get(0);
+    let id = crate::get(&tab, "id").ok().and_then(|id| id.as_f64()).ok_or_else(failure)?;
+    let url = crate::string_property(&tab, "url").map_err(|_| failure())?;
+    Ok((id, url))
+}
+
 /// The active tab's main content as markdown, captured without the companion.
 async fn capture() -> Result<(String, String, String), FlowError> {
     let failure = |message: &str| FlowError::Host(message.into());
     let api = |name: &str| crate::chrome_api(name).map_err(|_| failure("The browser API is unavailable."));
-    let query = crate::flow::json_value(&json!({"active":true,"lastFocusedWindow":true}))?;
-    let found = crate::await_call(&api("tabs")?, "query", &[query]).await;
-    let tab = js_sys::Array::from(&found.map_err(|_| failure("Select a browser tab."))?).get(0);
-    let id = crate::get(&tab, "id").ok().and_then(|id| id.as_f64());
-    let url = crate::string_property(&tab, "url").ok();
-    let (Some(id), Some(url)) = (id, url) else {
-        return Err(failure("Select a browser tab."));
-    };
+    let (id, url) = active_tab().await?;
     let grant = crate::flow::json_value(&json!({"origins":[crate::site::permission(&url)?]}))?;
     let granted = crate::await_call(&api("permissions")?, "contains", &[grant]).await;
     if granted.ok().and_then(|granted| granted.as_bool()) != Some(true) {

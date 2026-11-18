@@ -369,6 +369,16 @@ impl State {
         crate::composer::choices::selected(Some(&core.page.view.borrow()), &self.selection)
     }
 
+    /// Without the companion: the page's summary, always when `manual`, else as the settings say.
+    fn summarize_page(&mut self, manual: bool) {
+        if let (Some(gateway), Some(updates)) = (self.gateway().cloned(), self.updates.clone()) {
+            spawn_local(async move {
+                let done = gateway.summarize(Rc::clone(&updates), manual).await;
+                updates.finish(done);
+            });
+        }
+    }
+
     /// Without the companion: answers with gateway route `index` from now on.
     pub(super) fn choose_gateway(&mut self, index: usize) {
         if self.running() {
@@ -912,8 +922,10 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
         }
     }
     if let Some(gateway) = updates.gateway.borrow_mut().take() {
-        state.session = Session::Gateway(gateway);
+        state.session = Session::Gateway(Rc::clone(&gateway));
         updates.presentation.borrow_mut().error = None;
+        // The page's summary, where the summary settings call for one.
+        state.summarize_page(false);
     }
     if let Some(core) = state.core().cloned() {
         let running = state.running();
@@ -1559,6 +1571,16 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                         .gap(12.0)
                         .items_center()
                         .child(typography.text(line).role("status").wrap().grow(1.0).color(palette.ink_2))
+                        .child(
+                            typography
+                                .text("Summarize page")
+                                .key("gateway-summarize")
+                                .role("button")
+                                .focusable(true)
+                                .disabled(gateway.streaming())
+                                .native_activation()
+                                .on_press_tx(|state: &mut State, _| state.summarize_page(true)),
+                        )
                         .child(
                             typography
                                 .text("New chat")
