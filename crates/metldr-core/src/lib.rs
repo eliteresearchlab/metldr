@@ -1,7 +1,7 @@
 mod chunking;
+pub mod decide;
 pub mod dense;
 pub mod gateway;
-pub mod summary_gate;
 pub mod word;
 pub mod dictionary;
 pub mod stats;

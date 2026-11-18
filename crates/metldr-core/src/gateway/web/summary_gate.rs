@@ -2,7 +2,7 @@
 //! them when a page is extracted.
 
 use super::*;
-use crate::summary_gate::{self, Form, Prefs};
+use crate::decide::summary::{self as summary_gate, Form, Prefs};
 
 const KEY: &str = "summaryPrefs";
 

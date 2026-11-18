@@ -81,6 +81,8 @@ pub(super) struct Engine {
     client: Client,
     tab: i32,
     page: page::Page,
+    /// The controls the agent named in its latest actions, newest last, for the element scout.
+    acted: std::sync::Mutex<Vec<String>>,
 }
 
 impl Engine {
@@ -175,6 +177,7 @@ impl Engine {
                 client,
                 tab: source.tab,
                 page,
+                acted: Default::default(),
             }),
             _ => {
                 shutdown.store(true, Ordering::Release);
@@ -216,7 +219,11 @@ impl Engine {
         Ok(serde_json::from_value(value)?)
     }
     pub(super) async fn snapshot(&self, args: Value) -> Result<Value> {
-        self.page.snapshot(args).await
+        let previous: Vec<String> = match self.acted.lock() {
+            Ok(acted) => acted.iter().rev().cloned().collect(),
+            Err(_) => Vec::new(),
+        };
+        self.page.snapshot(args, &previous).await
     }
     pub(super) async fn page_logs(&self) -> Result<Value> {
         self.request(Kind::PageLogs).await
@@ -227,7 +234,8 @@ impl Engine {
     /// The elements `args` names, as the latest snapshot showed them.
     async fn elements(&self, refs: &[&str]) -> Result<Vec<Element>> {
         let known = self.page.refs(refs).await?;
-        refs.iter()
+        let elements: Vec<Element> = refs
+            .iter()
             .zip(known)
             .map(|(reference, found)| {
                 let (role, name) = found.ok_or_else(|| {
@@ -241,7 +249,13 @@ impl Engine {
                     name: bound(name.as_deref().unwrap_or_default(), 256),
                 })
             })
-            .collect()
+            .collect::<Result<_>>()?;
+        if let Ok(mut acted) = self.acted.lock() {
+            acted.extend(elements.iter().map(|e| e.name.clone()).filter(|n| !n.is_empty()));
+            let drop = acted.len().saturating_sub(3);
+            acted.drain(..drop);
+        }
+        Ok(elements)
     }
     pub(super) async fn prepare_act(
         &self,
