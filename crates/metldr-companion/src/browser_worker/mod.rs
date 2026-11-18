@@ -2,7 +2,7 @@ mod engine;
 mod fields;
 mod protocol;
 
-pub(super) use fields::PlanRefusal;
+pub(super) use fields::Refusal;
 pub(crate) use fields::Tools;
 pub(crate) use metldr_browser_tools::{BROWSER_POLICY, Call, decode_call, definitions};
 
@@ -287,7 +287,7 @@ async fn execute(
             .await
         {
             Ok(result) => result,
-            Err(error) if error.is::<PlanRefusal>() => {
+            Err(error) if error.is::<Refusal>() => {
                 std::sync::Arc::new(json!({"error": error.to_string()}))
             }
             Err(error) => return Err(error),

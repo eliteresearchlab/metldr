@@ -19,19 +19,20 @@ use std::{
 };
 use tokio::sync::oneshot;
 
+/// A tool call refused before it had any effect: the model gets the reason as the call's result
+/// and can correct the call. Every other tool error ends the run.
 #[derive(Debug)]
-pub(crate) struct PlanRefusal(&'static str);
-impl std::fmt::Display for PlanRefusal {
+pub(crate) struct Refusal(pub(crate) String);
+impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
+        f.write_str(&self.0)
     }
 }
-impl std::error::Error for PlanRefusal {}
+impl std::error::Error for Refusal {}
 
 fn owner_error(error: String) -> Box<dyn std::error::Error + Send + Sync> {
     match error.as_str() {
-        "task plan declined" => Box::new(PlanRefusal("task plan declined")),
-        "call propose_task_plan first" => Box::new(PlanRefusal("call propose_task_plan first")),
+        "task plan declined" | "call propose_task_plan first" => Box::new(Refusal(error)),
         _ => error.into(),
     }
 }
@@ -372,13 +373,13 @@ mod failed_attach_check {
     use std::sync::mpsc;
 
     #[test]
-    fn only_plan_refusals_allow_the_run_to_continue() {
+    fn only_refusals_allow_the_run_to_continue() {
         for message in ["task plan declined", "call propose_task_plan first"] {
             let error = owner_error(message.into());
-            assert!(error.is::<PlanRefusal>());
+            assert!(error.is::<Refusal>());
             assert_eq!(error.to_string(), message);
         }
-        assert!(!owner_error("browser dispatch failed".into()).is::<PlanRefusal>());
+        assert!(!owner_error("browser dispatch failed".into()).is::<Refusal>());
     }
 
     fn source() -> Page {

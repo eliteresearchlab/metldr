@@ -230,7 +230,9 @@ impl Engine {
         refs.iter()
             .map(|reference| {
                 let (role, name) = known.get(*reference).ok_or_else(|| {
-                    format!("ref {reference} is not in the latest snapshot; take a new snapshot")
+                    super::Refusal(format!(
+                        "ref {reference} is not in the latest snapshot; take a new snapshot"
+                    ))
                 })?;
                 Ok(Element {
                     reference: (*reference).into(),
