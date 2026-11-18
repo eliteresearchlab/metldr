@@ -1,7 +1,6 @@
 import { cacheService } from './CacheService'
 import { AIPrompts } from './ai/AIPrompts'
-import { complete } from './RustCore'
-import { analyticsService } from './AnalyticsService'
+import { complete, recordStat } from './RustCore'
 import type {
   AmountFact,
   IdFact,
@@ -128,10 +127,10 @@ export class EmailService {
         ).catch(() => {})
       }
 
-      analyticsService.trackSummary({
-        type: 'email',
-        cached: false,
-        responseTimeMs: elapsed,
+      recordStat({
+        kind: 'summary',
+        email: true,
+        ms: elapsed,
         wordsIn: emailContent.split(WHITESPACE_REGEX).length,
         wordsOut: (summary.summary || '').split(WHITESPACE_REGEX).length,
         tokensOut: Math.round((summary.summary || '').length / 4),
@@ -195,7 +194,7 @@ export class EmailService {
         .filter(s => s.body && s.body.trim().length > 10)
       if (suggestions.length > 0) {
         if (emailId) await cacheService.setReplySuggestions(emailId, suggestions)
-        analyticsService.trackReplyGenerated(suggestions.length).catch(() => {})
+        recordStat({ kind: 'replies', count: suggestions.length }).catch(() => {})
       }
       return suggestions
     } catch (err) {

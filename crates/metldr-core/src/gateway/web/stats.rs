@@ -39,8 +39,14 @@ pub async fn stats_summary(days: u32) -> JsValue {
     to_js(&json!(stats::summarize(&all, &today(), days)))
 }
 
-/// Adds one answered chat to today's record; a failure only loses the count.
+/// Adds one answered chat to today's record.
 pub(super) async fn record_chat(usage: &Value, ms: f64, model: &str) {
+    let tokens = usage["input"].as_u64().zip(usage["output"].as_u64());
+    record(&stats::Event::Chat { tokens, ms, model }).await;
+}
+
+/// `event` added to today's record in one read and one write; a failure only loses the count.
+async fn record(event: &stats::Event<'_>) {
     let Ok(db) = database().await else { return };
     let recorded = async {
         let tx = db
@@ -49,14 +55,39 @@ pub(super) async fn record_chat(usage: &Value, ms: f64, model: &str) {
         let store = tx.object_store(DAYS).map_err(err)?;
         let date = today();
         let day = from_js(&keys::done(&store.get(&date.as_str().into()).map_err(err)?).await?);
-        let tokens = usage["input"].as_u64().zip(usage["output"].as_u64());
         store
-            .put(&to_js(&stats::record_chat(day, &date, tokens, ms, model)))
+            .put(&to_js(&stats::record(day, &date, event)))
             .map_err(err)?;
         dictionary::finished(&tx).await
     };
     let _ = recorded.await;
     db.close();
+}
+
+/// Counts what the extension's page tools did: `{kind: "summary", email, wordsIn, wordsOut,
+/// tokensOut, ms, model, url}`, `{kind: "lookup"}` or `{kind: "replies", count}`.
+#[wasm_bindgen]
+pub async fn stats_record(event: JsValue) {
+    let event = from_js(&event);
+    let number = |key: &str| event[key].as_f64().unwrap_or(0.0);
+    let text = |key: &str| event[key].as_str().unwrap_or_default();
+    match text("kind") {
+        "summary" => {
+            let summary = stats::Event::Summary {
+                email: event["email"] == true,
+                words_in: number("wordsIn"),
+                words_out: number("wordsOut"),
+                tokens_out: number("tokensOut"),
+                ms: number("ms"),
+                model: text("model"),
+                site: stats::site(text("url")),
+            };
+            record(&summary).await;
+        }
+        "lookup" => record(&stats::Event::Lookup).await,
+        "replies" => record(&stats::Event::Replies(number("count"))).await,
+        _ => {}
+    }
 }
 
 /// Today as the tracker keys it: the UTC date, YYYY-MM-DD.

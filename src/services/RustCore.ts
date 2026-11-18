@@ -1,6 +1,6 @@
 import initCore, {
   dictionary_request, gateway_complete, gateway_preferred, gateway_summarize, gateway_word_lookup,
-  stats_summary, summary_cache_clear, summary_gate, summary_prefs_load, summary_prefs_save
+  stats_record, stats_summary, summary_cache_clear, summary_gate, summary_prefs_load, summary_prefs_save
 } from '../../crates/metldr-core/pkg/metldr_core'
 import type { WordLookupResult } from '../types'
 import coreWasmUrl from '../../crates/metldr-core/pkg/metldr_core_bg.wasm?url'
@@ -62,6 +62,25 @@ export async function lookupWord(word: string, context: WordContext): Promise<Wo
 export async function dictionary(request: object): Promise<unknown> {
   await loadRustCore()
   return dictionary_request(request)
+}
+
+// Counts a page tool's work in the local stats: a summary, a word lookup or reply suggestions.
+interface SummaryStat {
+  kind: 'summary'
+  email: boolean
+  wordsIn: number
+  wordsOut: number
+  tokensOut: number
+  ms: number
+  model?: string
+  url?: string
+}
+
+export type StatEvent = SummaryStat | { kind: 'lookup' } | { kind: 'replies'; count: number }
+
+export async function recordStat(event: StatEvent): Promise<void> {
+  await loadRustCore()
+  await stats_record(event)
 }
 
 // The Stats page's numbers for the last `days` days, from the local records.

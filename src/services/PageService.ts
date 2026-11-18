@@ -1,6 +1,5 @@
 import { cacheService } from './CacheService'
-import { complete, summarize } from './RustCore'
-import { analyticsService } from './AnalyticsService'
+import { complete, recordStat, summarize } from './RustCore'
 import type { ExtractedData, SummaryTiming, PageSummary, ChatMessage, ChatResult } from '../types'
 
 import { ragService } from './rag/RagService'
@@ -88,10 +87,10 @@ export class PageService {
       ).catch(() => {})
     }
 
-    analyticsService.trackSummary({
-      type: 'page',
-      cached: false,
-      responseTimeMs: timing.llm || 0,
+    recordStat({
+      kind: 'summary',
+      email: false,
+      ms: timing.llm || 0,
       wordsIn: wordCount || 0,
       wordsOut: bullets.join(' ').split(WHITESPACE_PATTERN).length,
       tokensOut: Math.round(summaryText.length / 4),
