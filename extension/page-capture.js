@@ -19,7 +19,8 @@ export function capturePage() {
     if (element.matches(SKIP) || element.isContentEditable) return true;
     // A site header or footer is chrome; a header that holds the page's h1 is its title.
     if (element.tagName === "FOOTER" && !element.closest("article")) return true;
-    if (element.tagName === "HEADER" && !element.closest("article") && !element.querySelector("h1")) return true;
+    const header = element.tagName === "HEADER";
+    if (header && !element.closest("article") && !element.querySelector("h1")) return true;
     const label = `${element.id} ${typeof element.className === "string" ? element.className : ""}`;
     if (label.length > 1 && CLUTTER.test(label)) return true;
     return !element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
@@ -51,21 +52,33 @@ export function capturePage() {
       const tag = node.tagName;
       if (HEADING[tag]) { flush(); push(HEADING[tag], 0, clean(inline(node))); }
       else if (PARAGRAPH.has(tag)) { flush(); push("p", 0, clean(inline(node))); }
-      else if (tag === "LI") { flush(); push("li", depth + 1, clean(inline(node))); for (const list of node.children) if (LISTS.has(list.tagName) && !skipped(list)) walk(list, depth + 1); }
+      else if (tag === "LI") {
+        flush();
+        push("li", depth + 1, clean(inline(node)));
+        for (const list of node.children) if (LISTS.has(list.tagName) && !skipped(list)) walk(list, depth + 1);
+      }
       else if (tag === "PRE") { flush(); push("pre", 0, node.innerText.trimEnd()); }
       else if (tag === "BLOCKQUOTE") { flush(); push("quote", 0, clean(inline(node))); }
       // A row holding a table is page layout, not data: read inside it.
       else if (tag === "TR" && node.querySelector("table")) { flush(); walk(node, depth); flush(); }
-      else if (tag === "TR") { flush(); push("row", 0, [...node.cells].map((cell) => clean(inline(cell))).filter(Boolean).join(" | ")); }
+      else if (tag === "TR") {
+        flush();
+        const cells = [...node.cells].map((cell) => clean(inline(cell))).filter(Boolean);
+        push("row", 0, cells.join(" | "));
+      }
       else if (tag === "IMG" || tag === "PICTURE") continue;
-      else if (INLINE.has(tag) || getComputedStyle(node).display.startsWith("inline")) pending += ` ${inline(node)} `;
+      else if (INLINE.has(tag) || getComputedStyle(node).display.startsWith("inline")) {
+        pending += ` ${inline(node)} `;
+      }
       else { flush(); walk(node, depth); flush(); }
     }
   };
 
   // The main content: the page's one article; a page of several articles (an index) is read whole.
-  const articles = [...document.getElementsByTagName("article")].slice(0, 64).filter((article) => !skipped(article));
-  let root = articles.length === 1 ? articles[0] : document.querySelector("main,[role='main']") ?? document.body;
+  const articles = [...document.getElementsByTagName("article")].slice(0, 64);
+  const visible = articles.filter((article) => !skipped(article));
+  const main = document.querySelector("main,[role='main']") ?? document.body;
+  const root = visible.length === 1 ? visible[0] : main;
   if (!root) throw new Error("Page content is unavailable.");
   walk(root, 0);
   flush();

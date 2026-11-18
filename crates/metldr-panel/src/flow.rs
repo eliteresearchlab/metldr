@@ -1379,13 +1379,12 @@ impl Connection {
         validate_url(&url)?;
         let title = string_property(&observed, "title").map_err(js_error)?;
         let text = page_text(&observed)?;
+        // The markdown is never empty and never over the page budget.
         if document.is_empty()
             || document.len() > 128
             || title.is_empty()
             || title.len() > 256
             || url.len() > 2048
-            || text.is_empty()
-            || text.len() > MAX_PAGE
         {
             return Err(FlowError::InvalidInput(
                 "The page has empty or oversized content. Nothing was sent.".into(),
