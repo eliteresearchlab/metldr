@@ -129,6 +129,7 @@ mod language;
 mod model;
 pub(crate) use model::take_search_model;
 mod stats;
+mod page_summary;
 mod summary_gate;
 mod word;
 
@@ -1116,32 +1117,31 @@ struct Summarize {
 pub async fn gateway_summarize(request: JsValue) -> Result<JsValue, JsValue> {
     let request: Summarize = serde_json::from_value(from_js(&request))
         .map_err(|_| js_error("That summary request is not valid."))?;
+    let started = js_sys::Date::now();
+    let (text, route, model) = summarized(&request).await.map_err(js_error)?;
+    Ok(answer(text, route, &model, started))
+}
+
+/// A summary of `request` on the preferred route: its text, route and model.
+async fn summarized(request: &Summarize) -> Result<(String, &'static str, String), Error> {
     let kind = request.kind.as_deref().unwrap_or("key-points");
     let length = request.length.as_deref().unwrap_or("medium");
-    let target = target(None, None).await.map_err(js_error)?;
+    let target = target(None, None).await?;
     let (route, model) = (target.route.id, target.model.clone());
-    let started = js_sys::Date::now();
     let long = request.content.chars().count() > DIRECT_MAX;
     if target.route.protocol == Protocol::ChromeAi
         && !long
-        && let Some(text) = chrome_summary(&request, kind, length).await
+        && let Some(text) = chrome_summary(request, kind, length).await
     {
-        return Ok(answer(text, route, &model, started));
+        return Ok((text, route, model));
     }
     let text = if long {
-        map_reduce(&target, &request, kind, length).await
+        map_reduce(&target, request, kind, length).await
     } else {
-        summary(
-            target,
-            &request.content,
-            request.context.as_deref(),
-            kind,
-            length,
-        )
-        .await
-    }
-    .map_err(js_error)?;
-    Ok(answer(text, route, &model, started))
+        let context = request.context.as_deref();
+        summary(target, &request.content, context, kind, length).await
+    }?;
+    Ok((text, route, model))
 }
 
 /// Longest content summarized in one request; longer content is summarized in sections first.
@@ -1230,7 +1230,7 @@ async fn map_reduce(
     };
     let mut summaries = Vec::with_capacity(total);
     for (pair, texts) in sections.chunks(2).enumerate() {
-        let first = section(pair * 2 + 1, &texts[0]);
+        let first = section(pair * 2 + 1, texts[0]);
         match texts.get(1) {
             Some(second) => {
                 let (a, b) = join(first, section(pair * 2 + 2, second)).await;
