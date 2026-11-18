@@ -43,7 +43,7 @@ impl WordPiece {
         }
         let normal: String = normal.nfd().filter(|c| !is_mark(*c)).collect();
         let mut word = String::new();
-        let mut flush = |word: &mut String, out: &mut Vec<u32>| {
+        let flush = |word: &mut String, out: &mut Vec<u32>| {
             if !word.is_empty() {
                 self.pieces(word, out);
                 word.clear();
@@ -54,9 +54,7 @@ impl WordPiece {
                 flush(&mut word, out);
             } else if is_punctuation(c) {
                 flush(&mut word, out);
-                let mut p = String::new();
-                p.push(c);
-                self.pieces(&p, out);
+                self.pieces(c.encode_utf8(&mut [0; 4]), out);
             } else {
                 word.push(c);
             }
