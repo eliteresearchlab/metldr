@@ -53,6 +53,17 @@ pub(super) fn install_capture(capture: Function) {
     CAPTURE.with(|slot| *slot.borrow_mut() = Some(capture));
 }
 
+thread_local! { static PICK: RefCell<Option<Function>> = const { RefCell::new(None) }; }
+pub(super) fn install_pick(pick: Function) {
+    PICK.with(|slot| *slot.borrow_mut() = Some(pick));
+}
+
+/// Opens the page's file picker for a document to attach.
+#[cfg(feature = "rune-ui")]
+pub(crate) fn pick_document() -> bool {
+    PICK.with(|slot| slot.borrow().as_ref().is_some_and(|pick| pick.call0(&JsValue::NULL).is_ok()))
+}
+
 /// The page capture script, for capturing without the companion.
 #[cfg(feature = "rune-ui")]
 pub(crate) fn capture_function() -> Option<Function> {

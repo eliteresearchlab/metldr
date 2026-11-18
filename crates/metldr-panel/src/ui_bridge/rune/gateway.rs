@@ -19,6 +19,8 @@ const SEARCH_TURNS: usize = 7;
 const PAGE_BUDGET: usize = crate::MAX_PAGE;
 /// The unsent page text a later turn may add for its request, in bytes.
 const MORE_BUDGET: usize = 4_096;
+/// How an attached document's source is named, in place of a page URL.
+pub(super) const DOCUMENT: &str = "file:";
 /// The chat, kept in `chrome.storage.local` so it survives the panel closing.
 const SAVED: &str = "metldr.gateway.chat";
 /// Turns sent to the model: the first exchange (with the page) and the latest ones.
@@ -75,6 +77,10 @@ pub(super) struct Gateway {
     searches: RefCell<Vec<(&'static str, String)>>,
     /// The page last summarized, by URL, so opening the panel again does not repeat it.
     summarized: RefCell<Option<String>>,
+    /// An attached document, by name with its markdown: the source in place of the page until
+    /// New chat.
+    /// The markdown is empty once the sections hold it.
+    document: RefCell<Option<(String, String)>>,
 }
 
 /// Posts `message` on `port`.
@@ -135,6 +141,7 @@ impl Gateway {
             everywhere: Cell::new(false),
             searches: RefCell::default(),
             summarized: RefCell::default(),
+            document: RefCell::default(),
             sections: RefCell::default(),
             citations: RefCell::default(),
         });
@@ -277,14 +284,24 @@ impl Gateway {
         if self.everywhere.get() {
             return self.search(text, updates).await;
         }
-        let (url, title, markdown) = capture().await?;
+        // An attached document's text moves into the sections on its first turn; later turns
+        // find it there, so it is never copied or read again.
+        let attached = self.document.borrow_mut().as_mut().map(|(name, markdown)| {
+            (format!("{DOCUMENT}{name}"), name.clone(), std::mem::take(markdown))
+        });
+        let (url, title, markdown) = match attached {
+            Some(attached) => attached,
+            None => capture().await?,
+        };
         let same_page = self.page.borrow().as_deref() == Some(url.as_str());
         // The page goes into one buffer as numbered sections: the whole page when it fits, else
         // its outline and the sections ranked for the request; later turns add unsent sections.
         let mut sections = self.sections.borrow_mut();
         let mut content = String::new();
         if same_page {
-            sections.refresh(markdown);
+            if !markdown.is_empty() {
+                sections.refresh(markdown);
+            }
         } else {
             *sections = crate::reading::Sections::new(markdown);
             content = format!("Source: {title} ({url})\n\n");
@@ -326,6 +343,13 @@ impl Gateway {
         post(&self.port, &request)?;
         updates.changed();
         Ok(())
+    }
+
+    /// Makes the document `name`, read as `markdown`, the chat's source and asks for its summary.
+    pub(super) async fn attach(self: Rc<Self>, name: String, markdown: String, updates: Rc<Updates>) -> Result<(), FlowError> {
+        self.everywhere.set(false);
+        *self.document.borrow_mut() = Some((name, markdown));
+        self.ask("Summarize this document.".into(), updates).await
     }
 
     pub(super) fn stop(&self) -> Result<(), FlowError> {
@@ -421,6 +445,7 @@ impl Gateway {
         self.sections.take();
         *self.page.borrow_mut() = None;
         *self.summarized.borrow_mut() = None;
+        self.document.take();
         updates.presentation.borrow_mut().messages.messages.clear();
         spawn_local(save(Saved::default()));
         updates.changed();
@@ -489,6 +514,27 @@ fn ready_routes(reply: &Value) -> Option<(Vec<RouteChoice>, usize)> {
         .collect();
     let chosen = routes.iter().position(|choice| Some(choice.route.as_str()) == preferred).unwrap_or(0);
     (!routes.is_empty()).then_some((routes, chosen))
+}
+
+/// The PDF reader's `{pages: [{markdown}]}` as one markdown text, pages in order.
+pub(super) fn document_markdown(document: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Read {
+        pages: Vec<Page>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Page {
+        markdown: String,
+    }
+    let pages = serde_json::from_str::<Read>(document).map_or_else(|_| Vec::new(), |read| read.pages);
+    let mut out = String::with_capacity(pages.iter().map(|p| p.markdown.len() + 2).sum());
+    for page in pages.iter().filter(|p| !p.markdown.trim().is_empty()) {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&page.markdown);
+    }
+    out
 }
 
 /// The extension's reply to `request` sent to its service worker, or None.

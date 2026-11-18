@@ -60,6 +60,39 @@ function explain(detail) {
   if (detail) console.error("metldr chat could not start", detail);
 }
 
+// PDFs are read here, in the chat page, by the PDF module (PDFium, about 8 MB), which loads the
+// first time one is attached; the file never crosses to the service worker.
+let pdfReader;
+async function attach(file, chat) {
+  if (!file) return;
+  try {
+    pdfReader ??= import(/* @vite-ignore */ new URL("/chat/pdf/metldr_pdf.js", location.href).href)
+      .then(async module => (await module.default({ module_or_path: new URL("/assets/metldr_pdf_bg.wasm", location.href) }), module));
+    const { pdf_read } = await pdfReader;
+    chat.rune_chat_attach(file.name, await pdf_read(new Uint8Array(await file.arrayBuffer()), 2000));
+  } catch (error) {
+    pdfReader = undefined;
+    chat.rune_chat_attach(file.name, "", `${file.name} could not be read as a PDF.`);
+    console.error("metldr could not read a PDF", error);
+  }
+}
+
+// The file picker the chat opens from its sources menu, and PDFs dropped on the chat.
+function documents(chat) {
+  const input = Object.assign(document.createElement("input"), { type: "file", accept: "application/pdf,.pdf", hidden: true });
+  input.addEventListener("change", () => {
+    attach(input.files[0], chat);
+    input.value = "";
+  });
+  document.body.append(input);
+  window.addEventListener("dragover", event => event.preventDefault());
+  window.addEventListener("drop", event => {
+    event.preventDefault();
+    attach([...event.dataTransfer.files].find(file => file.type === "application/pdf" || file.name.endsWith(".pdf")), chat);
+  });
+  return () => input.click();
+}
+
 // The renderer's glue and the interface fonts load while the graphics check runs, instead of
 // after it: the check waits on the GPU process, and the chat needs both anyway. A failed load
 // reports itself only once the check has passed.
@@ -71,10 +104,11 @@ fonts.catch(() => {});
 if (!(await canDraw())) {
   explain();
 } else try {
-  const { default: init, start_rune_chat, stop_rune_chat, add_rune_chat_fonts } = await glue;
+  const chat = await glue;
+  const { default: init, start_rune_chat, stop_rune_chat, add_rune_chat_fonts } = chat;
   const [files] = await Promise.all([fonts, init()]);
   // The chat asks for the CJK collection (about 19.5 MB) only once it lays out CJK text.
-  start_rune_chat(capturePage, files, group => addGroup(add_rune_chat_fonts, group));
+  start_rune_chat(capturePage, documents(chat), files, group => addGroup(add_rune_chat_fonts, group));
   window.addEventListener("pagehide", stop_rune_chat, { once: true });
   // Two frames in, the chat has drawn; the other fallbacks follow.
   nextFrame().then(nextFrame).then(() => addGroup(add_rune_chat_fonts, "fallbacks"));

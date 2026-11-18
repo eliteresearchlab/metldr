@@ -84,6 +84,10 @@ async function options() {
 async function copyRune() {
   // The chat pages load the Rune renderer and its fonts; they ship beside it, not in the wasm.
   await cp(join(root, 'target/wasm/metldr-panel-rune/pkg'), join(output, 'rune'), { recursive: true });
+  // The PDF reader's glue, loaded by the chat page the first time a PDF is attached. Its wasm is
+  // the service worker's copy in assets/, so the package holds it once.
+  await mkdir(join(output, 'pdf'), { recursive: true });
+  await copyFile(join(root, 'crates/metldr-pdf/pkg/metldr_pdf.js'), join(output, 'pdf/metldr_pdf.js'));
   const source = await readFile(join(root, 'crates/metldr-panel/src/ui_bridge/rune/fonts.rs'), 'utf8');
   const list = constant => {
     const start = source.indexOf(`const ${constant}:`);
