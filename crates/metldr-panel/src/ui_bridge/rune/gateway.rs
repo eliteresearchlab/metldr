@@ -13,6 +13,8 @@ const SYSTEM: &str = "Answer the user's request about the page in the source. \
     answer. Cite the numbered sections you use, like [2]. Answer in the user's language, \
     briefly, in plain paragraphs or lists.";
 const DETECT: u64 = 1;
+/// The search messages the extension reads: the question and the six before it.
+const SEARCH_TURNS: usize = 7;
 /// The page text a conversation's first turn sends, in bytes.
 const PAGE_BUDGET: usize = crate::MAX_PAGE;
 /// The unsent page text a later turn may add for its request, in bytes.
@@ -65,8 +67,12 @@ pub(super) struct Gateway {
     sections: RefCell<crate::reading::Sections>,
     /// Citations by answer message id.
     citations: RefCell<std::collections::HashMap<String, Vec<Citation>>>,
-    /// A page summary is on its way.
-    summarizing: Cell<bool>,
+    /// A page summary or a search answer is on its way.
+    waiting: Cell<bool>,
+    /// Questions go to everything the reader has read and saved, not the page.
+    everywhere: Cell<bool>,
+    /// The search chat as the extension's search takes it: each question and answer.
+    searches: RefCell<Vec<(&'static str, String)>>,
     /// The page last summarized, by URL, so opening the panel again does not repeat it.
     summarized: RefCell<Option<String>>,
 }
@@ -125,7 +131,9 @@ impl Gateway {
             page: RefCell::default(),
             shown: RefCell::default(),
             shown_ids: RefCell::default(),
-            summarizing: Cell::new(false),
+            waiting: Cell::new(false),
+            everywhere: Cell::new(false),
+            searches: RefCell::default(),
             summarized: RefCell::default(),
             sections: RefCell::default(),
             citations: RefCell::default(),
@@ -167,8 +175,61 @@ impl Gateway {
         post(&self.port, &json!({"id":id,"op":"prefer","route":choice.route,"model":model}))
     }
 
+    /// Whether questions go to everything the reader has read, not the page.
+    pub(super) fn everywhere(&self) -> bool {
+        self.everywhere.get()
+    }
+
+    /// Sends questions to everything read, or back to the page; an earlier error no longer applies.
+    pub(super) fn set_everywhere(&self, on: bool, updates: &Updates) {
+        self.everywhere.set(on);
+        updates.presentation.borrow_mut().error = None;
+        updates.changed();
+    }
+
+    /// Asks `text` of everything the reader has read and saved, through the extension's search;
+    /// the sources the answer cites open their pages.
+    async fn search(self: Rc<Self>, text: String, updates: Rc<Updates>) -> Result<(), FlowError> {
+        let id = format!("gateway-{}", self.next.get());
+        self.next.set(self.next.get() + 1);
+        push_bounded(&mut self.searches.borrow_mut(), ("user", text.clone()));
+        show(&updates, &id, text.clone(), String::new());
+        updates.presentation.borrow_mut().error = None;
+        self.waiting.set(true);
+        updates.changed();
+
+        let reply = self.search_reply().await;
+        self.waiting.set(false);
+        let Some(answer) = reply["content"].as_str().filter(|_| reply["ok"] == true) else {
+            self.searches.borrow_mut().pop();
+            updates.changed();
+            let error = reply["error"].as_str().unwrap_or("Search could not answer.");
+            return Err(FlowError::Host(error.to_owned()));
+        };
+
+        self.citations.borrow_mut().insert(id.clone(), search_citations(answer, &reply["sources"]));
+        push_bounded(&mut self.searches.borrow_mut(), ("assistant", answer.to_owned()));
+        let mut presentation = updates.presentation.borrow_mut();
+        if let Some(AgUiMessage::Assistant { content, .. }) = presentation.messages.messages.last_mut() {
+            answer.clone_into(content);
+        }
+        drop(presentation);
+        self.shown.borrow_mut().push((text, answer.to_owned()));
+        self.shown_ids.borrow_mut().push(id);
+        spawn_local(save(self.saved()));
+        updates.changed();
+        Ok(())
+    }
+
+    /// The extension's search reply to the search chat so far.
+    async fn search_reply(&self) -> Value {
+        let message = |(role, content): &(&str, String)| json!({"role":role,"content":content});
+        let messages: Vec<Value> = self.searches.borrow().iter().map(message).collect();
+        ask_extension(&json!({"type":"GLOBAL_CHAT","messages":messages})).await.unwrap_or_default()
+    }
+
     pub(super) fn streaming(&self) -> bool {
-        self.streaming.get().is_some() || self.summarizing.get()
+        self.streaming.get().is_some() || self.waiting.get()
     }
 
     /// The active tab's summary from the extension's page tools: cached per page and, when not
@@ -182,12 +243,12 @@ impl Gateway {
         if !manual && self.summarized.borrow().as_deref() == Some(url.as_str()) {
             return Ok(());
         }
-        self.summarizing.set(true);
+        self.waiting.set(true);
         updates.changed();
         let trigger = if manual { "manual" } else { "auto" };
         let request = json!({"type":"EXTRACT_AND_SUMMARIZE","tabId":tab,"force":manual,"trigger":trigger});
         let reply = ask_extension(&request).await;
-        self.summarizing.set(false);
+        self.waiting.set(false);
         updates.changed();
         let reply = reply.unwrap_or_default();
         let Some(text) = summary_text(&reply["summary"]).filter(|_| reply["success"] == true) else {
@@ -213,6 +274,9 @@ impl Gateway {
     /// Asks `text` about the page in the active tab, capturing it when the conversation starts
     /// or the tab shows another page.
     pub(super) async fn ask(self: Rc<Self>, text: String, updates: Rc<Updates>) -> Result<(), FlowError> {
+        if self.everywhere.get() {
+            return self.search(text, updates).await;
+        }
         let (url, title, markdown) = capture().await?;
         let same_page = self.page.borrow().as_deref() == Some(url.as_str());
         // The page goes into one buffer as numbered sections: the whole page when it fits, else
@@ -352,6 +416,7 @@ impl Gateway {
         self.turns.borrow_mut().clear();
         self.shown.borrow_mut().clear();
         self.shown_ids.borrow_mut().clear();
+        self.searches.borrow_mut().clear();
         self.citations.borrow_mut().clear();
         self.sections.take();
         *self.page.borrow_mut() = None;
@@ -431,6 +496,37 @@ async fn ask_extension(request: &Value) -> Option<Value> {
     let runtime = crate::chrome_api("runtime").ok()?;
     let message = crate::flow::json_value(request).ok()?;
     json_of(&crate::await_call(&runtime, "sendMessage", &[message]).await.ok()?)
+}
+
+/// The sources `answer` cites, each by number with its title and the page it opens.
+fn search_citations(answer: &str, sources: &Value) -> Vec<Citation> {
+    let sources = sources.as_array().map(Vec::as_slice).unwrap_or_default();
+    let numbered = |n: usize| sources.iter().find(|s| s["index"].as_u64() == Some(n as u64));
+    let cite = |n: usize| {
+        let source = numbered(n)?;
+        let title = source["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Source");
+        Some((n, title.to_owned(), source_page(source["url"].as_str()?)?))
+    };
+    crate::reading::cited(answer, sources.len()).into_iter().filter_map(cite).collect()
+}
+
+/// Adds `turn` to the search chat, which keeps only what the extension reads.
+fn push_bounded(searches: &mut Vec<(&'static str, String)>, turn: (&'static str, String)) {
+    if searches.len() == SEARCH_TURNS {
+        searches.remove(0);
+    }
+    searches.push(turn);
+}
+
+/// The page a search source opens: its address, or the Gmail thread of a saved email.
+fn source_page(url: &str) -> Option<String> {
+    match url.strip_prefix("email://") {
+        Some(email) => {
+            let thread = email.rsplit('/').next()?;
+            Some(format!("https://mail.google.com/mail/u/0/#inbox/{thread}"))
+        }
+        None => url.starts_with("http").then(|| url.to_owned()),
+    }
 }
 
 /// A page summary as markdown: its title in bold, then its points.

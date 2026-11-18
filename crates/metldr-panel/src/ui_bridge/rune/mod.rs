@@ -390,6 +390,13 @@ impl State {
         });
     }
 
+    /// Without the companion: questions go to everything read, or back to the page.
+    fn search_everywhere(&mut self, on: bool) {
+        if let (Some(gateway), Some(updates)) = (self.gateway(), self.updates.as_ref()) {
+            gateway.set_everywhere(on, updates);
+        }
+    }
+
     /// Without the companion: answers with gateway route `index` from now on.
     pub(super) fn choose_gateway(&mut self, index: usize) {
         if self.running() {
@@ -1587,8 +1594,9 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             let presentation = state.updates.as_ref().map(|updates| updates.presentation.borrow());
             let error = presentation.as_ref().and_then(|presentation| presentation.error.clone());
             drop(presentation);
-            let line = error.unwrap_or_else(|| {
-                format!("Answering with {}, without the companion", gateway.route())
+            let line = error.unwrap_or_else(|| match gateway.everywhere() {
+                true => "Searching everything you have read and saved".to_owned(),
+                false => format!("Answering with {}, without the companion", gateway.route()),
             });
             let mut composer = col().w_full().max_w(720.0).child(composer::view(state, cx));
             if let Some(menu) = composer::menu(state) {
@@ -1600,13 +1608,21 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .fill(page)
                 .color(ink)
                 .child(thread.padding(16.0).grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }))
+                .child(typography.text(line).role("status").wrap().px(16.0).color(palette.ink_2))
                 .child(
                     row()
                         .w_full()
                         .px(16.0)
+                        .pt(6.0)
                         .gap(12.0)
+                        .flex_wrap()
                         .items_center()
-                        .child(typography.text(line).role("status").wrap().grow(1.0).color(palette.ink_2))
+                        .child(metldr_ui::toggle::toggle(
+                            typography.text("Search everything").key("gateway-everywhere"),
+                            metldr_ui::toggle::Props { disabled: gateway.streaming() },
+                            gateway.everywhere(),
+                            |state: &mut State, on, _| state.search_everywhere(on),
+                        ))
                         .child(
                             typography
                                 .text("Summarize page")
