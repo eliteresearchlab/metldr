@@ -128,6 +128,7 @@ mod dictionary;
 mod language;
 mod model;
 mod stats;
+mod global_chat;
 mod page_summary;
 mod search_store;
 mod summary_gate;

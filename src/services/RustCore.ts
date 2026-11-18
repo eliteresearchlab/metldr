@@ -1,5 +1,5 @@
 import initCore, {
-  dictionary_request, gateway_complete, gateway_page_summary, gateway_preferred, gateway_summarize,
+  dictionary_request, gateway_complete, gateway_global_chat, gateway_page_summary, gateway_preferred, gateway_summarize,
   gateway_word_lookup, search_context, search_ensure, search_has, search_index, search_index_summary,
   search_is_indexing, search_sources,
   stats_record, stats_summary, summary_cache_clear, summary_gate, summary_prefs_load, summary_prefs_save
@@ -162,6 +162,20 @@ export interface FoundSource {
   type: 'email' | 'page' | 'pdf'
   score: number
   snippet: string
+}
+
+// Global search chat: the last question answered from everything read, with its sources.
+export interface GlobalChatResult {
+  ok: boolean
+  content?: string
+  sources?: FoundSource[]
+  timing?: { total: number; model?: string }
+  error?: string
+}
+
+export async function globalChat(messages: Array<{ role: string; content: string }>): Promise<GlobalChatResult> {
+  await cacheReady()
+  return gateway_global_chat(messages)
 }
 
 export const search = {
