@@ -15,7 +15,7 @@ Each route sends content only to the destination listed for it.
 | Installed agents (Codex, Claude Code, OpenCode, Pi) | The agent on your computer, which sends what it needs to the account and model you configured for it |
 | Reading a page | When the page you ask about links to its own markdown copy on the same site over https, the extension fetches that copy from the site, without cookies, instead of reading the page's layout. No address on your computer or local network is fetched. |
 | Dictionary lookups | The selected word goes to api.dictionaryapi.dev. Dictionary data files come from media.githubusercontent.com. |
-| Search model | Once, on first use, the extension downloads its search model (8 MB) from huggingface.co (WhiteHades/blink-8M-int8, a fixed revision checked by its SHA-256). Nothing about you or your pages is sent; searches run on your device. |
+| Search and language models | Once, on first use, the extension downloads its search model (8 MB, WhiteHades/blink-8M-int8) and its language detector (5 MB, WhiteHades/py3langid-compact) from huggingface.co, each at a fixed revision checked by its SHA-256. Nothing about you or your pages is sent; searches and detection run on your device. |
 | Gmail features | The InboxSDK library runs on mail.google.com. It sends its own error reports and usage events to inboxsdk.com. |
 
 Installed agents' tools and metldr's browser tools can provide additional access, subject to the agent's permissions and metldr's browser approvals. Your provider's and agent's policies apply to their processing. Downloads you start contact the services that supply the requested files.

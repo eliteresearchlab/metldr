@@ -125,6 +125,7 @@ fn saved<'a>(settings: &'a Value, route: &str, field: &str) -> Option<&'a str> {
 }
 
 mod dictionary;
+mod language;
 mod model;
 pub(crate) use model::take_search_model;
 mod stats;
@@ -1338,32 +1339,13 @@ async fn chrome_summary(request: &Summarize, kind: &str, length: &str) -> Option
 
 /// The language of `text` as a two letter code. Chrome's own detector answers first since it
 /// costs no model call.
+/// The language of `text`: the compact py3langid model when it is loaded, else Chrome's built-in
+/// detector. No model call: detection costs no tokens and waits on no network.
 async fn detect_language(text: String) -> Result<String, JsValue> {
-    if let Some(found) = chrome_language(&text).await {
+    if let Some(found) = language::identify(&text) {
         return Ok(found);
     }
-    let target = target(None, None).await.map_err(js_error)?;
-    let system = "Detect the language of the text. \
-                  Reply with only its ISO 639-1 two letter code, such as en, de or ja.";
-    let messages = [Message {
-        role: Role::User,
-        content: text.chars().take(2000).collect(),
-    }];
-    let stop = AtomicBool::new(false);
-    let (code, _) = reply(target, system, &messages, None, &stop, &mut |_| {})
-        .await
-        .map_err(js_error)?;
-    let code: String = code
-        .trim()
-        .chars()
-        .take(2)
-        .flat_map(char::to_lowercase)
-        .collect();
-    if code.len() == 2 && code.bytes().all(|b| b.is_ascii_lowercase()) {
-        Ok(code)
-    } else {
-        Err(js_error("The language could not be told."))
-    }
+    chrome_language(&text).await.ok_or_else(|| js_error("The language could not be told."))
 }
 
 async fn chrome_language(text: &str) -> Option<String> {

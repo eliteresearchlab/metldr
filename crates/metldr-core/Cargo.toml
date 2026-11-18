@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 metldr-embed = { path = "../metldr-embed" }
+py3langid = { path = "../../vendor/py3langid" }
 metldr-retrieval = { path = "../metldr-retrieval" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.154"
@@ -36,6 +37,7 @@ web-sys = { version = "=0.3.105", features = [
   "IdbFactory",
   "IdbObjectStore",
   "IdbIndex",
+  "IdbKeyRange",
   "IdbObjectStoreParameters",
   "IdbOpenDbRequest",
   "IdbRequest",

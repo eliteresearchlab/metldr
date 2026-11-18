@@ -1,0 +1,27 @@
+[package]
+name = "py3langid"
+version = "0.4.1"
+edition = "2024"
+license = "BSD-3-Clause"
+description = "py3langid language identification with a compact model; vendored from rust-py3langid 0.4.1"
+repository = "https://github.com/markusmobius/rust-py3langid"
+publish = false
+
+[workspace]
+
+[lib]
+name = "py3langid"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pack-langid"
+path = "src/bin/pack.rs"
+required-features = ["pack"]
+
+[features]
+# Converting an upstream LIDG2 model to the compact form; not needed to identify.
+pack = ["dep:flate2"]
+
+[dependencies]
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
+unicode-normalization = "=0.1.25"
