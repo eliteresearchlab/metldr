@@ -118,13 +118,8 @@ impl Gateway {
         self.next.set(id + 1);
         self.turns.borrow_mut().push(("user", content));
         self.shown.borrow_mut().push((text.clone(), String::new()));
-        {
-            let mut presentation = updates.presentation.borrow_mut();
-            let shown = &mut presentation.messages.messages;
-            shown.push(AgUiMessage::User { id: format!("gateway-{id}-user"), content: text });
-            shown.push(AgUiMessage::Assistant { id: format!("gateway-{id}"), content: String::new() });
-            presentation.error = None;
-        }
+        show(&updates, &format!("gateway-{id}"), text, String::new());
+        updates.presentation.borrow_mut().error = None;
         self.streaming.set(Some(id));
         let turns = self.turns.borrow();
         let messages: Vec<Value> = turns
@@ -184,7 +179,10 @@ impl Gateway {
     /// The chat to save, bounded: the first exchange and the latest turns, the latest answers.
     fn saved(&self) -> Saved {
         let turns = self.turns.borrow();
-        let keep = |turns: &[(&str, String)]| turns.iter().map(|(role, text)| ((*role).to_owned(), text.clone())).collect::<Vec<_>>();
+        let keep = |turns: &[(&str, String)]| {
+            let owned = turns.iter().map(|(role, text)| ((*role).to_owned(), text.clone()));
+            owned.collect::<Vec<_>>()
+        };
         let turns = if turns.len() > KEPT_TURNS {
             let mut kept = keep(&turns[..2]);
             kept.extend(keep(&turns[turns.len() - (KEPT_TURNS - 2)..]));
@@ -203,21 +201,12 @@ impl Gateway {
     /// Brings back the saved chat: the model's turns and the reader's messages.
     async fn restore(&self, updates: &Updates) {
         let Some(saved) = load().await else { return };
-        let role = |role: &str| match role {
-            "user" => Some("user"),
-            "assistant" => Some("assistant"),
-            _ => None,
-        };
-        let Some(turns) = saved.turns.into_iter().map(|(r, text)| Some((role(&r)?, text))).collect::<Option<Vec<_>>>() else {
-            return;
-        };
+        let turns = saved.turns.into_iter().map(|(name, text)| Some((role(&name)?, text)));
+        let Some(turns) = turns.collect::<Option<Vec<_>>>() else { return };
         *self.turns.borrow_mut() = turns;
         *self.page.borrow_mut() = saved.page;
-        let mut presentation = updates.presentation.borrow_mut();
         for (n, (question, answer)) in saved.shown.iter().enumerate() {
-            let shown = &mut presentation.messages.messages;
-            shown.push(AgUiMessage::User { id: format!("gateway-saved-{n}-user"), content: question.clone() });
-            shown.push(AgUiMessage::Assistant { id: format!("gateway-saved-{n}"), content: answer.clone() });
+            show(updates, &format!("gateway-saved-{n}"), question.clone(), answer.clone());
         }
         *self.shown.borrow_mut() = saved.shown;
     }
@@ -234,6 +223,18 @@ impl Gateway {
         spawn_local(save(Saved::default()));
         updates.changed();
     }
+}
+
+/// A saved turn's role, from the two the model takes.
+fn role(name: &str) -> Option<&'static str> {
+    ["user", "assistant"].into_iter().find(|role| *role == name)
+}
+
+/// Shows one question and its answer (empty while it streams) under ids from `key`.
+fn show(updates: &Updates, key: &str, question: String, answer: String) {
+    let shown = &mut updates.presentation.borrow_mut().messages.messages;
+    shown.push(AgUiMessage::User { id: format!("{key}-user"), content: question });
+    shown.push(AgUiMessage::Assistant { id: key.to_owned(), content: answer });
 }
 
 fn storage() -> Option<JsValue> {

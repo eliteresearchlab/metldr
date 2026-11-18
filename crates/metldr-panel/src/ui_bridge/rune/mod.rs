@@ -1668,7 +1668,8 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                                 .disabled(gateway.streaming())
                                 .native_activation()
                                 .on_press_tx(|state: &mut State, _| {
-                                    if let (Some(gateway), Some(updates)) = (state.gateway().cloned(), state.updates.clone()) {
+                                    let updates = state.updates.clone();
+                                    if let (Some(gateway), Some(updates)) = (state.gateway(), updates) {
                                         gateway.clear(&updates);
                                     }
                                 }),
