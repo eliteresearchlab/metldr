@@ -38,7 +38,10 @@ pub const LETTERS: &[u8; 26] = b"abcdefghijklmnopqrstuvwxyz";
 
 /// The offered language with this code, as stored: its code is `'static`.
 pub fn language(code: &str) -> Option<&'static str> {
-    LANGUAGES.iter().find(|(c, ..)| *c == code).map(|(c, ..)| *c)
+    LANGUAGES
+        .iter()
+        .find(|(c, ..)| *c == code)
+        .map(|(c, ..)| *c)
 }
 
 /// The file of `code`'s words that start with letter number `index`.
@@ -104,7 +107,10 @@ pub fn records(body: &[u8]) -> Option<(Vec<u8>, usize)> {
 /// `word` as lookups key it, borrowed when it already is: most dictionary words are.
 fn lower(word: &str) -> Cow<'_, str> {
     let word = word.trim();
-    if word.bytes().any(|b| b.is_ascii_uppercase() || !b.is_ascii()) {
+    if word
+        .bytes()
+        .any(|b| b.is_ascii_uppercase() || !b.is_ascii())
+    {
         Cow::Owned(word.to_lowercase())
     } else {
         Cow::Borrowed(word)

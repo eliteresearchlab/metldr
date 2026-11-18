@@ -93,7 +93,12 @@ async fn chosen() -> Vec<String> {
     }
     stored
         .as_array()
-        .map(|list| list.iter().filter_map(Value::as_str).map(String::from).collect())
+        .map(|list| {
+            list.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -106,7 +111,11 @@ async fn load() {
     let started = read(DOWNLOADING).await.unwrap_or_default();
     DOWNLOADS.with_borrow_mut(|d| {
         d.loaded = true;
-        let started = started.as_array().into_iter().flatten().filter_map(Value::as_str);
+        let started = started
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str);
         for code in started.filter_map(dictionary::language) {
             let saved = &stored[code];
             let next = saved["nextIndex"].as_u64().unwrap_or(0) as usize;
@@ -123,13 +132,18 @@ async fn save() -> Result<(), Error> {
             .progress
             .iter()
             .map(|(code, (next, records))| {
-                ((*code).into(), json!({"nextIndex": next, "entriesProcessed": records}))
+                (
+                    (*code).into(),
+                    json!({"nextIndex": next, "entriesProcessed": records}),
+                )
             })
             .collect();
         (map, d.progress.keys().copied().collect::<Vec<_>>())
     });
     let items = to_js(&json!({PROGRESS: progress, DOWNLOADING: downloading}));
-    JsFuture::from(storage_set(&items).map_err(err)?).await.map_err(err)?;
+    JsFuture::from(storage_set(&items).map_err(err)?)
+        .await
+        .map_err(err)?;
     Ok(())
 }
 
@@ -180,9 +194,15 @@ async fn fill(db: &IdbDatabase, code: &'static str) -> Result<(), Error> {
     if records == 0 {
         DOWNLOADS.with_borrow_mut(|d| d.failed.push(code));
     } else {
-        let tx = db.transaction_with_str_and_mode(META, IdbTransactionMode::Readwrite).map_err(err)?;
-        let meta = to_js(&json!({"key": format!("lang-{code}"), "downloaded": true, "timestamp": js_sys::Date::now()}));
-        tx.object_store(META).and_then(|s| s.put(&meta)).map_err(err)?;
+        let tx = db
+            .transaction_with_str_and_mode(META, IdbTransactionMode::Readwrite)
+            .map_err(err)?;
+        let meta = to_js(
+            &json!({"key": format!("lang-{code}"), "downloaded": true, "timestamp": js_sys::Date::now()}),
+        );
+        tx.object_store(META)
+            .and_then(|s| s.put(&meta))
+            .map_err(err)?;
         finished(&tx).await?;
     }
     save().await
@@ -194,7 +214,9 @@ async fn store(db: &IdbDatabase, code: &str, body: &[u8]) -> Result<u32, Error> 
     // One parse of the whole letter, not one object built per record across the boundary.
     let text = std::str::from_utf8(&json).map_err(|_| "Not text.")?;
     let records: js_sys::Array = js_sys::JSON::parse(text).map_err(err)?.unchecked_into();
-    let tx = db.transaction_with_str_and_mode(code, IdbTransactionMode::Readwrite).map_err(err)?;
+    let tx = db
+        .transaction_with_str_and_mode(code, IdbTransactionMode::Readwrite)
+        .map_err(err)?;
     let store = tx.object_store(code).map_err(err)?;
     for record in records.iter() {
         store.put(&record).map_err(err)?;
@@ -230,7 +252,9 @@ async fn clear(db: &IdbDatabase, code: &str) -> Result<(), Error> {
 
 /// The languages marked downloaded, in offered order.
 async fn downloaded() -> Vec<String> {
-    let Ok(db) = database().await else { return Vec::new() };
+    let Ok(db) = database().await else {
+        return Vec::new();
+    };
     let all = db
         .transaction_with_str(META)
         .and_then(|tx| tx.object_store(META))
@@ -242,9 +266,18 @@ async fn downloaded() -> Vec<String> {
     db.close();
     let marked = |code: &str| {
         let key = format!("lang-{code}");
-        marks.as_array().into_iter().flatten().any(|m| m["key"] == key && m["downloaded"] == true)
+        marks
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|m| m["key"] == key && m["downloaded"] == true)
     };
-    LANGUAGES.iter().map(|(code, ..)| *code).filter(|c| marked(c)).map(String::from).collect()
+    LANGUAGES
+        .iter()
+        .map(|(code, ..)| *code)
+        .filter(|c| marked(c))
+        .map(String::from)
+        .collect()
 }
 
 /// The dictionary database, with a store for every offered language and `meta`.
@@ -256,7 +289,11 @@ async fn database() -> Result<IdbDatabase, Error> {
     let upgrade = Closure::once_into_js({
         let open = open.clone();
         move || {
-            let Some(db) = open.result().ok().and_then(|r| r.dyn_into::<IdbDatabase>().ok()) else {
+            let Some(db) = open
+                .result()
+                .ok()
+                .and_then(|r| r.dyn_into::<IdbDatabase>().ok())
+            else {
                 return;
             };
             let names = db.object_store_names();
@@ -314,15 +351,22 @@ pub async fn summary_cache_clear() -> Result<(), JsValue> {
         }
     });
     open.set_onupgradeneeded(Some(refuse.unchecked_ref()));
-    let Ok(db) = keys::done(&open).await.and_then(|db| db.dyn_into::<IdbDatabase>().map_err(|_| Error::new())) else {
+    let Ok(db) = keys::done(&open)
+        .await
+        .and_then(|db| db.dyn_into::<IdbDatabase>().map_err(|_| Error::new()))
+    else {
         return Ok(());
     };
     let cleared = async {
         if !db.object_store_names().contains(PAGES) {
             return Ok(());
         }
-        let tx = db.transaction_with_str_and_mode(PAGES, IdbTransactionMode::Readwrite).map_err(err)?;
-        tx.object_store(PAGES).and_then(|s| s.clear()).map_err(err)?;
+        let tx = db
+            .transaction_with_str_and_mode(PAGES, IdbTransactionMode::Readwrite)
+            .map_err(err)?;
+        tx.object_store(PAGES)
+            .and_then(|s| s.clear())
+            .map_err(err)?;
         finished(&tx).await
     }
     .await;
