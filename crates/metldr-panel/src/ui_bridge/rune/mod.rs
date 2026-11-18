@@ -1636,8 +1636,12 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
     let Some(core) = state.core() else {
         if let Some(gateway) = state.gateway() {
             // No companion: the chat, a line naming the route that answers, and the composer.
-            let error = state.updates.as_ref().and_then(|updates| updates.presentation.borrow().error.clone());
-            let line = error.unwrap_or_else(|| format!("Answering with {}, without the companion", gateway.route));
+            let presentation = state.updates.as_ref().map(|updates| updates.presentation.borrow());
+            let error = presentation.as_ref().and_then(|presentation| presentation.error.clone());
+            drop(presentation);
+            let line = error.unwrap_or_else(|| {
+                format!("Answering with {}, without the companion", gateway.route)
+            });
             let mut composer = col().w_full().max_w(720.0).child(composer::view(state, cx));
             if let Some(menu) = composer::menu(state) {
                 composer = composer.child(menu);

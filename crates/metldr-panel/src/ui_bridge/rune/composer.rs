@@ -307,8 +307,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     let typography = state.preferences.typography();
     // The label moves into the text node: a route label built for this frame is never copied again.
     let model_label: std::borrow::Cow<'static, str> = match state.selected_choice() {
-        None if state.gateway().is_some() => state.gateway().map(|g| g.route.clone()).unwrap_or_default().into(),
-        None => "Choose model".into(),
+        None => state.gateway().map_or_else(|| "Choose model".into(), |gateway| gateway.route.clone().into()),
         Some(choice) if supports_plan(&choice.value) && state.mode == Mode::Plan => {
             format!("Plan mode, {}", choice.label).into()
         }
