@@ -82,10 +82,12 @@ impl Sections {
     pub fn spans(&self, max: usize) -> Vec<&str> {
         let mut spans: Vec<std::ops::Range<usize>> = Vec::new();
         for range in &self.ranges {
+            let joins = |last: &std::ops::Range<usize>| {
+                let limit = if range.start == last.end { max.saturating_mul(2) } else { max };
+                range.end - last.start <= limit
+            };
             match spans.last_mut() {
-                Some(last) if range.end - last.start <= if range.start == last.end { max.saturating_mul(2) } else { max } => {
-                    last.end = range.end;
-                }
+                Some(last) if joins(last) => last.end = range.end,
                 _ => spans.push(range.clone()),
             }
         }
@@ -233,7 +235,8 @@ mod tests {
         // A wall of text splits at character boundaries, and spans join sections back up.
         let wall = "word ".repeat(1000);
         let walled = Sections::new(wall.clone());
-        assert!(walled.len() > 1 && (1..=walled.len()).all(|n| walled.get(n).is_some_and(|s| s.len() <= 2 * SECTION)));
+        let bounded = |n| walled.get(n).is_some_and(|s| s.len() <= 2 * SECTION);
+        assert!(walled.len() > 1 && (1..=walled.len()).all(bounded));
         assert_eq!(walled.spans(usize::MAX).concat(), wall.trim());
         assert!(walled.spans(2500).iter().all(|span| span.len() <= 5000));
     }

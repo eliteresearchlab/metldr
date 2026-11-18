@@ -6,6 +6,7 @@ use crate::{
     model::{Run, Source, Status},
     provider_settings::Protocol,
 };
+use metldr_core::page::ANSWER;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -149,14 +150,14 @@ impl Owner {
                         Protocol::Messages => {
                             profile
                                 .messages_client(&worker_stop)?
-                                .text(metldr_core::page::ANSWER, &input, &worker_stop, &mut emit)
+                                .text(ANSWER, &input, &worker_stop, &mut emit)
                                 .await?
                         }
                         Protocol::Responses => {
                             drop(emit);
                             return crate::presentation::run(
                                 profile.responses_client(&worker_stop)?,
-                                metldr_core::page::ANSWER,
+                                ANSWER,
                                 &input,
                                 &worker_run,
                                 &tx,
@@ -169,13 +170,13 @@ impl Owner {
                         Protocol::GoogleInteractions => {
                             profile
                                 .google_client(&worker_stop)?
-                                .text(metldr_core::page::ANSWER, &input, &worker_stop, &mut emit)
+                                .text(ANSWER, &input, &worker_stop, &mut emit)
                                 .await?
                         }
                         Protocol::ChatCompletions => {
                             profile
                                 .chat_client(&worker_stop)?
-                                .text(metldr_core::page::ANSWER, &input, &worker_stop, &mut emit)
+                                .text(ANSWER, &input, &worker_stop, &mut emit)
                                 .await?
                         }
                     };
