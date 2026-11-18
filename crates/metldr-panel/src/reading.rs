@@ -184,10 +184,13 @@ pub(crate) const FULL_PAGE: usize = 65_536;
 const SECTION: usize = 700;
 
 /// A page's markdown in numbered sections for citing, kept as byte ranges into the one text:
-/// paragraphs joined up to `SECTION` bytes, a heading always starting a new one.
+/// paragraphs joined up to `SECTION` bytes, a heading always starting a new one. A saved chat
+/// keeps only which sections were sent; the text comes back from the next capture.
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub(crate) struct Sections {
+    #[serde(skip)]
     text: String,
+    #[serde(skip)]
     ranges: Vec<std::ops::Range<usize>>,
     /// Whether the model has seen each section.
     sent: Vec<bool>,
@@ -207,6 +210,19 @@ impl Sections {
         }
         let sent = vec![false; ranges.len()];
         Self { text, ranges, sent }
+    }
+
+    /// Reads the page again from `text`, keeping which sections were sent while the page splits
+    /// the same way.
+    pub(crate) fn refresh(&mut self, text: String) {
+        if self.text == text {
+            return;
+        }
+        let sent = std::mem::take(&mut self.sent);
+        *self = Self::new(text);
+        if sent.len() == self.len() {
+            self.sent = sent;
+        }
     }
 
     pub(crate) fn len(&self) -> usize {

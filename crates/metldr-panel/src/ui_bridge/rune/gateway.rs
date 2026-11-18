@@ -219,7 +219,9 @@ impl Gateway {
         // its outline and the sections ranked for the request; later turns add unsent sections.
         let mut sections = self.sections.borrow_mut();
         let mut content = String::new();
-        if !same_page {
+        if same_page {
+            sections.refresh(markdown);
+        } else {
             *sections = crate::reading::Sections::new(markdown);
             content = format!("Source: {title} ({url})\n\n");
             *self.page.borrow_mut() = Some(url);
