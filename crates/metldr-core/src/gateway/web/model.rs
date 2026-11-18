@@ -1,70 +1,130 @@
-//! The search model, downloaded once from a pinned Hugging Face revision, checked by SHA-256 and
-//! kept in IndexedDB; the bytes stay in this module for the search index to take.
+//! The model store: each model the extension runs on its own is downloaded once from a pinned
+//! Hugging Face revision, checked by SHA-256 and kept in IndexedDB (compressed ones stay
+//! compressed and expand on load). A new version of a model replaces its old one in the same write.
 
 use super::*;
 use web_sys::{IdbDatabase, IdbOpenDbRequest, IdbTransactionMode};
 
-const URL: &str = "https://huggingface.co/WhiteHades/blink-8M-int8/resolve/2358eb5a8035a4e87f66e32024824f7481dbca88/blink-8M-int8.metldr";
-const SHA256: &str = "a099b59e55dfd91474e3979c05727c2c8a6cc622a83907f6d7252b06b91a04a2";
 const DATABASE: &str = "metldr-models";
 const STORE: &str = "files";
-const KEY: &str = "blink-8M-int8@2358eb5a";
 
-thread_local! {
-    static READY: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+/// One model at a pinned revision.
+pub(crate) struct Pinned {
+    /// The model, as its keys start; one version of it is kept.
+    pub name: &'static str,
+    pub version: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    /// The file is gzip, expanded by the browser on load.
+    pub gzip: bool,
 }
 
-/// Whether the search model is ready to take: read from IndexedDB, else downloaded, checked and
-/// stored. False offline or on a mismatch; search then runs on keywords alone.
+/// The search model (see `crate::dense`): blink-8M as int8, chosen on four retrieval benchmarks.
+pub(crate) const SEARCH: Pinned = Pinned {
+    name: "search",
+    version: "blink-8M-int8@2358eb5a",
+    url: "https://huggingface.co/WhiteHades/blink-8M-int8/resolve/2358eb5a8035a4e87f66e32024824f7481dbca88/blink-8M-int8.metldr",
+    sha256: "a099b59e55dfd91474e3979c05727c2c8a6cc622a83907f6d7252b06b91a04a2",
+    gzip: false,
+};
+
+/// The language detector (see `language.rs`): py3langid in compact form.
+pub(crate) const LANGUAGES: Pinned = Pinned {
+    name: "languages",
+    version: "py3langid-compact@21f3535a",
+    url: "https://huggingface.co/WhiteHades/py3langid-compact/resolve/21f3535ae230fc811e02a3b72696417d7dd3d866/py3langid-compact.lidc.gz",
+    sha256: "f76f8dab751f43eeea3877784629b000c87bb49dceaa61ffa21010a80681d3a2",
+    gzip: true,
+};
+
+thread_local! {
+    static SEARCH_READY: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+}
+
+/// Whether the search model is ready to take. False offline or on a mismatch; search then runs
+/// on keywords alone.
 #[wasm_bindgen]
 pub async fn search_model_fetch() -> bool {
-    if READY.with_borrow(Option::is_some) {
+    if SEARCH_READY.with_borrow(Option::is_some) {
         return true;
     }
-    let Ok(db) = database().await else {
-        return false;
-    };
-    let bytes = match stored(&db).await {
+    let bytes = fetch_pinned(&SEARCH).await;
+    let ready = bytes.is_some();
+    SEARCH_READY.with_borrow_mut(|slot| *slot = bytes);
+    ready
+}
+
+/// The fetched search model's bytes, once.
+pub(crate) fn take_search_model() -> Option<Vec<u8>> {
+    SEARCH_READY.with_borrow_mut(Option::take)
+}
+
+/// `model`'s bytes: from IndexedDB, else downloaded, checked and kept.
+pub(crate) async fn fetch_pinned(model: &Pinned) -> Option<Vec<u8>> {
+    let db = database().await.ok()?;
+    let key = format!("{}:{}", model.name, model.version);
+    let kept = match stored(&db, &key).await {
         Some(bytes) => Some(bytes),
-        None => match download().await {
+        None => match download(model).await {
             Ok(bytes) => {
-                let _ = store(&db, &bytes).await;
+                let _ = store(&db, model.name, &key, &bytes).await;
                 Some(bytes)
             }
             Err(_) => None,
         },
     };
     db.close();
-    let ready = bytes.is_some();
-    READY.with_borrow_mut(|slot| *slot = bytes);
-    ready
+    let kept = kept?;
+    if model.gzip {
+        gunzip(&kept).await.ok()
+    } else {
+        Some(kept)
+    }
 }
 
-/// The fetched model's bytes, once.
-pub(crate) fn take_search_model() -> Option<Vec<u8>> {
-    READY.with_borrow_mut(Option::take)
-}
-
-async fn download() -> Result<Vec<u8>, Error> {
+async fn download(model: &Pinned) -> Result<Vec<u8>, Error> {
     let init = web_sys::RequestInit::new();
     init.set_credentials(web_sys::RequestCredentials::Omit);
-    let response: web_sys::Response = JsFuture::from(fetch(URL, &init))
+    let response: web_sys::Response = JsFuture::from(fetch(model.url, &init))
         .await
         .map_err(err)?
         .unchecked_into();
     if !response.ok() {
-        return Err(format!(
-            "The search model could not download: {}",
-            response.status()
-        ));
+        return Err(format!("A model could not download: {}", response.status()));
     }
     let buffer = JsFuture::from(response.array_buffer().map_err(err)?)
         .await
         .map_err(err)?;
-    let digest = subtle_digest(&buffer).await?;
-    if digest != SHA256 {
-        return Err("The search model did not match its pinned hash.".into());
+    if subtle_digest(&buffer).await? != model.sha256 {
+        return Err("A model did not match its pinned hash.".into());
     }
+    Ok(js_sys::Uint8Array::new(&buffer).to_vec())
+}
+
+/// `bytes` expanded by the browser's own gzip decoder.
+async fn gunzip(bytes: &[u8]) -> Result<Vec<u8>, Error> {
+    let global = js_sys::global();
+    let construct = |name: &str, args: &js_sys::Array| -> Result<JsValue, Error> {
+        let class: js_sys::Function = get(&global, name)
+            .dyn_into()
+            .map_err(|_| format!("No {name} here."))?;
+        js_sys::Reflect::construct(&class, args).map_err(err)
+    };
+    let source = construct(
+        "Response",
+        &js_sys::Array::of1(&js_sys::Uint8Array::from(bytes)),
+    )?;
+    let decoder = construct("DecompressionStream", &js_sys::Array::of1(&"gzip".into()))?;
+    let body = get(&source, "body");
+    let pipe: js_sys::Function = get(&body, "pipeThrough")
+        .dyn_into()
+        .map_err(|_| "No streams here.")?;
+    let piped = pipe.call1(&body, &decoder).map_err(err)?;
+    let expanded: web_sys::Response =
+        construct("Response", &js_sys::Array::of1(&piped))?.unchecked_into();
+    let buffer = JsFuture::from(expanded.array_buffer().map_err(err)?)
+        .await
+        .map_err(err)?;
     Ok(js_sys::Uint8Array::new(&buffer).to_vec())
 }
 
@@ -82,26 +142,31 @@ async fn subtle_digest(buffer: &JsValue) -> Result<String, Error> {
     Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-async fn stored(db: &IdbDatabase) -> Option<Vec<u8>> {
+async fn stored(db: &IdbDatabase, key: &str) -> Option<Vec<u8>> {
     let store = db
         .transaction_with_str(STORE)
         .and_then(|tx| tx.object_store(STORE))
         .ok()?;
-    let found = keys::done(&store.get(&KEY.into()).ok()?).await.ok()?;
+    let found = keys::done(&store.get(&key.into()).ok()?).await.ok()?;
     found
         .dyn_ref::<js_sys::Uint8Array>()
         .map(js_sys::Uint8Array::to_vec)
 }
 
-async fn store(db: &IdbDatabase, bytes: &[u8]) -> Result<(), Error> {
+/// Keeps `bytes` under `key`, removing any other version of model `name` in the same write.
+async fn store(db: &IdbDatabase, name: &str, key: &str, bytes: &[u8]) -> Result<(), Error> {
     let tx = db
         .transaction_with_str_and_mode(STORE, IdbTransactionMode::Readwrite)
         .map_err(err)?;
-    let value = js_sys::Uint8Array::from(bytes);
     let files = tx.object_store(STORE).map_err(err)?;
-    // One model kept: a replaced one's bytes go in the same write.
-    files.clear().map_err(err)?;
-    files.put_with_key(&value, &KEY.into()).map_err(err)?;
+    // Every key of this model (`name:` up to `name;`), the old versions among them.
+    let versions =
+        web_sys::IdbKeyRange::bound(&format!("{name}:").into(), &format!("{name};").into())
+            .map_err(err)?;
+    files.delete(&versions).map_err(err)?;
+    files
+        .put_with_key(&js_sys::Uint8Array::from(bytes), &key.into())
+        .map_err(err)?;
     dictionary::finished(&tx).await
 }
 
