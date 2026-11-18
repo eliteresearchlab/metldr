@@ -1,55 +1,74 @@
 export function capturePage() {
-  // Chrome serializes this function without its module scope; cache per isolated document.
-  const whitespaceSource = "\\s+";
-  const whitespaceFlags = "gu";
-  const whitespaceKey = Symbol.for(`metldr.capture.regex.${whitespaceFlags}.${whitespaceSource}`);
-  const whitespacePattern = globalThis[whitespaceKey] ??= new RegExp(whitespaceSource, whitespaceFlags);
-  const omitted = (element) => {
-    if (element.matches("script,style,noscript,template,h1,h2,h3,form,input,textarea,select,button,nav,[hidden],[inert],[aria-hidden='true'],[role='textbox']") || element.isContentEditable) return true;
-    const style = getComputedStyle(element);
-    return style.display === "none" || style.visibility !== "visible" || Number(style.opacity) === 0 || style.contentVisibility === "hidden" || style.clipPath !== "none" || style.clip !== "auto";
-  };
-  const included = (candidate) => {
-    let depth = 0;
-    for (let element = candidate; element; element = element.parentElement) {
-      if (++depth > 64 || omitted(element)) return false;
-    }
-    return true;
-  };
-  const articles = document.getElementsByTagName("article");
-  let root = document.body;
-  for (let index = 0; index < Math.min(articles.length, 32); index++) {
-    if (included(articles[index])) { root = articles[index]; break; }
-  }
-  if (!root || !included(root)) throw new Error("Page content is unavailable.");
-  let nodes = 0;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      if (++nodes > 4096) throw new Error("Page content exceeds the capture limit.");
-      if (node.nodeType === Node.ELEMENT_NODE) return omitted(node) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-  const parts = [];
+  // Chrome serializes this function without its module scope: everything it uses lives inside.
+  // It returns the page's main content as blocks, [kind, depth, text]; Rust renders the markdown.
+  const BLOCK_LIMIT = 4000;
+  const TEXT_LIMIT = 65536;
+  const SKIP = "script,style,noscript,template,svg,canvas,iframe,object,embed,video,audio,form,fieldset,label:has(input,textarea,select),input,textarea,select,button,nav,aside,dialog,[hidden],[inert],[aria-hidden='true'],[role='navigation'],[role='banner'],[role='contentinfo'],[role='complementary'],[role='search'],[role='dialog'],[role='textbox']";
+  const CLUTTER = /(?:^|[\s_-])(share|sharing|social|comments?|related|promo|advert|advertisement|ads|sponsor(?:ed)?|cookie|consent|newsletter|subscribe|sidebar|breadcrumbs?|popup|modal|pagination|skip-link)(?:$|[\s_-])/i;
+  const HEADING = { H1: "h1", H2: "h2", H3: "h3", H4: "h4", H5: "h5", H6: "h6" };
+  const PARAGRAPH = new Set(["P", "DT", "DD", "FIGCAPTION", "SUMMARY", "CAPTION", "ADDRESS"]);
+  const LISTS = new Set(["UL", "OL", "MENU"]);
+  // Tags that are inline unless a stylesheet says otherwise; known without a style lookup.
+  const INLINE = new Set(["A", "SPAN", "EM", "STRONG", "B", "I", "U", "S", "CODE", "KBD", "SAMP", "VAR", "SMALL", "SUB", "SUP", "MARK", "ABBR", "TIME", "Q", "CITE", "DFN", "LABEL", "DATA", "BDI", "BDO", "INS", "DEL", "WBR"]);
+  const blocks = [];
   let size = 0;
-  let previousBlock;
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const text = node.data.replace(whitespacePattern, " ");
-    if (!text) continue;
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    if (![...range.getClientRects()].some((rect) => rect.width > 0 && rect.height > 0)) continue;
-    let block = node.parentElement;
-    while (block && block !== root && ["inline", "inline-block", "contents"].includes(getComputedStyle(block).display)) block = block.parentElement;
-    const separator = previousBlock && previousBlock !== block ? " " : "";
-    size += text.length + separator.length;
-    if (size > 8192) throw new Error("Page content exceeds the capture limit.");
-    parts.push(separator, text);
-    previousBlock = block;
-  }
-  return {
-    url: location.href,
-    title: document.title,
-    text: parts.join("").trim().replace(whitespacePattern, " "),
+  let truncated = false;
+  let pending = "";
+
+  const skipped = (element) => {
+    if (element.matches(SKIP) || element.isContentEditable) return true;
+    // A site header or footer is chrome; a header that holds the page's h1 is its title.
+    if (element.tagName === "FOOTER" && !element.closest("article")) return true;
+    if (element.tagName === "HEADER" && !element.closest("article") && !element.querySelector("h1")) return true;
+    const label = `${element.id} ${typeof element.className === "string" ? element.className : ""}`;
+    if (label.length > 1 && CLUTTER.test(label)) return true;
+    return !element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
   };
+  const clean = (text) => text.replace(/\s+/gu, " ").trim();
+  const push = (kind, depth, text) => {
+    if (!text || truncated) return;
+    if (blocks.length >= BLOCK_LIMIT || size + text.length > TEXT_LIMIT) { truncated = true; return; }
+    size += text.length;
+    blocks.push([kind, depth, text]);
+  };
+  const flush = () => { push("p", 0, clean(pending)); pending = ""; };
+  // The visible text inside an element, without nested lists (they become their own blocks).
+  const inline = (element) => {
+    let text = "";
+    for (const node of element.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) text += node.data;
+      else if (node.nodeType === Node.ELEMENT_NODE && !skipped(node) && !LISTS.has(node.tagName)) {
+        text += node.tagName === "BR" ? " " : ` ${inline(node)} `;
+      }
+    }
+    return text;
+  };
+  const walk = (element, depth) => {
+    for (const node of element.childNodes) {
+      if (truncated) return;
+      if (node.nodeType === Node.TEXT_NODE) { pending += node.data; continue; }
+      if (node.nodeType !== Node.ELEMENT_NODE || skipped(node)) continue;
+      const tag = node.tagName;
+      if (HEADING[tag]) { flush(); push(HEADING[tag], 0, clean(inline(node))); }
+      else if (PARAGRAPH.has(tag)) { flush(); push("p", 0, clean(inline(node))); }
+      else if (tag === "LI") { flush(); push("li", depth + 1, clean(inline(node))); for (const list of node.children) if (LISTS.has(list.tagName) && !skipped(list)) walk(list, depth + 1); }
+      else if (tag === "PRE") { flush(); push("pre", 0, node.innerText.trimEnd()); }
+      else if (tag === "BLOCKQUOTE") { flush(); push("quote", 0, clean(inline(node))); }
+      // A row holding a table is page layout, not data: read inside it.
+      else if (tag === "TR" && node.querySelector("table")) { flush(); walk(node, depth); flush(); }
+      else if (tag === "TR") { flush(); push("row", 0, [...node.cells].map((cell) => clean(inline(cell))).filter(Boolean).join(" | ")); }
+      else if (tag === "IMG" || tag === "PICTURE") continue;
+      else if (INLINE.has(tag) || getComputedStyle(node).display.startsWith("inline")) pending += ` ${inline(node)} `;
+      else { flush(); walk(node, depth); flush(); }
+    }
+  };
+
+  // The main content: the page's one article; a page of several articles (an index) is read whole.
+  const articles = [...document.getElementsByTagName("article")].slice(0, 64).filter((article) => !skipped(article));
+  let root = articles.length === 1 ? articles[0] : document.querySelector("main,[role='main']") ?? document.body;
+  if (!root) throw new Error("Page content is unavailable.");
+  walk(root, 0);
+  flush();
+  if (!blocks.length) throw new Error("Page content is unavailable.");
+  return { url: location.href, title: document.title, blocks, truncated };
 }
