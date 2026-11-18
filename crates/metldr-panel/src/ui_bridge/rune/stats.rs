@@ -41,7 +41,12 @@ pub(super) struct Stats {
 
 impl Default for Stats {
     fn default() -> Self {
-        Self { days: 30, summary: None, inbox: Rc::default(), wake: None }
+        Self {
+            days: 30,
+            summary: None,
+            inbox: Rc::default(),
+            wake: None,
+        }
     }
 }
 
@@ -54,8 +59,11 @@ impl Stats {
     pub(super) fn load(&mut self) {
         let (inbox, wake, days) = (Rc::clone(&self.inbox), self.wake.clone(), self.days);
         spawn_local(async move {
-            let reply = gateway::ask_extension(&json!({"type": "STATS_SUMMARY", "days": days})).await;
-            let summary = reply.and_then(|r| serde_json::from_value(r).ok()).unwrap_or_default();
+            let reply =
+                gateway::ask_extension(&json!({"type": "STATS_SUMMARY", "days": days})).await;
+            let summary = reply
+                .and_then(|r| serde_json::from_value(r).ok())
+                .unwrap_or_default();
             *inbox.borrow_mut() = Some(summary);
             if let Some(wake) = &wake {
                 wake();
@@ -83,42 +91,90 @@ impl Stats {
         let choices = PERIODS.into_iter().map(|(days, label)| {
             let checked = self.days == days;
             let key = format!("stats-period-{days}");
-            let el = super::preferences::outlined(typography, label, key)
-                .border(if checked { 1.5 } else { 1.0 }, if checked { typography.ink } else { typography.line });
-            metldr_ui::choice::radio(el, false, checked, move |state: &mut State, _| state.stats.period(days))
-                .press(typography.press)
+            let el = super::preferences::outlined(typography, label, key).border(
+                if checked { 1.5 } else { 1.0 },
+                if checked {
+                    typography.ink
+                } else {
+                    typography.line
+                },
+            );
+            metldr_ui::choice::radio(el, false, checked, move |state: &mut State, _| {
+                state.stats.period(days)
+            })
+            .press(typography.press)
         });
-        let group = metldr_ui::choice::GroupProps { axis: ::rune::FocusAxis::Horizontal, ..Default::default() };
-        let periods = metldr_ui::choice::radio_group(row().key("stats-period").gap(6.0), "Period", group);
+        let group = metldr_ui::choice::GroupProps {
+            axis: ::rune::FocusAxis::Horizontal,
+            ..Default::default()
+        };
+        let periods =
+            metldr_ui::choice::radio_group(row().key("stats-period").gap(6.0), "Period", group);
         let mut out = col().w_full().gap(12.0).child(periods.children(choices));
         let Some(s) = &self.summary else {
-            return out.child(typography.text("Loading stats.").key("stats-status").role("status"));
+            return out.child(
+                typography
+                    .text("Loading stats.")
+                    .key("stats-status")
+                    .role("status"),
+            );
         };
         let tiles = [
             ("Summaries", count(s.summaries)),
             ("Chat messages", count(s.chat_messages)),
             ("Words looked up", count(s.lookups)),
             ("Words read", count(s.words_read)),
-            ("Reading time saved", duration(s.time_saved_seconds * 1000.0)),
-            ("Pages, PDFs, emails", format!("{}, {}, {}", count(s.pages), count(s.pdfs), count(s.emails))),
-            ("Tokens in, out", format!("{}, {}", count(s.tokens_input), count(s.tokens_output))),
-            ("Average answer", s.avg_response_ms.map_or("None yet".into(), duration)),
-            ("Fastest answer", s.fastest_response_ms.map_or("None yet".into(), duration)),
-            ("Streak", format!("{} days, longest {}", s.current_streak, s.longest_streak)),
+            (
+                "Reading time saved",
+                duration(s.time_saved_seconds * 1000.0),
+            ),
+            (
+                "Pages, PDFs, emails",
+                format!("{}, {}, {}", count(s.pages), count(s.pdfs), count(s.emails)),
+            ),
+            (
+                "Tokens in, out",
+                format!("{}, {}", count(s.tokens_input), count(s.tokens_output)),
+            ),
+            (
+                "Average answer",
+                s.avg_response_ms.map_or("None yet".into(), duration),
+            ),
+            (
+                "Fastest answer",
+                s.fastest_response_ms.map_or("None yet".into(), duration),
+            ),
+            (
+                "Streak",
+                format!("{} days, longest {}", s.current_streak, s.longest_streak),
+            ),
         ];
-        let tiles = tiles.into_iter().map(|(label, value)| tile(typography, palette, label, value));
-        out = out.child(row().key("stats-tiles").w_full().gap(8.0).flex_wrap().children(tiles));
+        let tiles = tiles
+            .into_iter()
+            .map(|(label, value)| tile(typography, palette, label, value));
+        out = out.child(
+            row()
+                .key("stats-tiles")
+                .w_full()
+                .gap(8.0)
+                .flex_wrap()
+                .children(tiles),
+        );
         out = out.child(chart(typography, palette, &s.per_day));
         for (title, list) in [("Models", &s.models), ("Sites", &s.top_domains)] {
             if list.is_empty() {
                 continue;
             }
             let rows = list.iter().map(|(name, n)| {
-                row().w_full().gap(8.0)
+                row()
+                    .w_full()
+                    .gap(8.0)
                     .child(typography.text(name.as_str()).grow(1.0).truncate())
                     .child(typography.text(count(*n)).color(palette.ink_2))
             });
-            out = out.child(typography.text(title).role("heading")).child(col().w_full().gap(4.0).children(rows));
+            out = out
+                .child(typography.text(title).role("heading"))
+                .child(col().w_full().gap(4.0).children(rows));
         }
         out
     }
@@ -135,8 +191,19 @@ fn tile(typography: Typography, palette: &Palette, label: &str, value: String) -
         .radius(8.0)
         .fill(palette.field)
         .label(label_text)
-        .child(typography.legend(label).font(typography.font(11.5, 500.0)).color(palette.ink_2).a11y_hidden())
-        .child(typography.legend(value).font(typography.font(16.0, 600.0).features("'tnum' 1")).a11y_hidden())
+        .child(
+            typography
+                .legend(label)
+                .font(typography.font(11.5, 500.0))
+                .color(palette.ink_2)
+                .a11y_hidden(),
+        )
+        .child(
+            typography
+                .legend(value)
+                .font(typography.font(16.0, 600.0).features("'tnum' 1"))
+                .a11y_hidden(),
+        )
 }
 
 /// Interactions per day as bars, oldest on the left, named in words for screen readers.
@@ -144,19 +211,43 @@ fn chart(typography: Typography, palette: &Palette, per_day: &[f64]) -> El {
     let most = per_day.iter().copied().fold(0.0, f64::max);
     let total: f64 = per_day.iter().sum();
     let bars = per_day.iter().map(|&n| {
-        let h = if most > 0.0 { (n / most) as f32 * CHART_HEIGHT } else { 0.0 };
+        let h = if most > 0.0 {
+            (n / most) as f32 * CHART_HEIGHT
+        } else {
+            0.0
+        };
         col().grow(1.0).h(CHART_HEIGHT).justify_end().child(
-            ::rune::el().w_full().h(h.max(if n > 0.0 { 2.0 } else { 1.0 })).radius(2.0)
-                .fill(if n > 0.0 { palette.accent } else { palette.line }),
+            ::rune::el()
+                .w_full()
+                .h(h.max(if n > 0.0 { 2.0 } else { 1.0 }))
+                .radius(2.0)
+                .fill(if n > 0.0 {
+                    palette.accent
+                } else {
+                    palette.line
+                }),
         )
     });
     let label = format!(
         "Interactions per day over {} days: {} in all, at most {} in a day",
-        per_day.len(), count(total), count(most)
+        per_day.len(),
+        count(total),
+        count(most)
     );
-    col().w_full().gap(6.0)
+    col()
+        .w_full()
+        .gap(6.0)
         .child(typography.text("Activity").role("heading"))
-        .child(row().key("stats-chart").w_full().gap(2.0).items_end().role("img").label(label).children(bars.map(El::a11y_hidden)))
+        .child(
+            row()
+                .key("stats-chart")
+                .w_full()
+                .gap(2.0)
+                .items_end()
+                .role("img")
+                .label(label)
+                .children(bars.map(El::a11y_hidden)),
+        )
 }
 
 /// A count as people read it: 980, 1.25K, 12.5M, 125B.
@@ -169,9 +260,19 @@ fn count(n: f64) -> String {
     if unit.is_empty() {
         return format!("{}", value.round());
     }
-    let digits = if value >= 100.0 { 0 } else if value >= 10.0 { 1 } else { 2 };
+    let digits = if value >= 100.0 {
+        0
+    } else if value >= 10.0 {
+        1
+    } else {
+        2
+    };
     let text = format!("{value:.digits$}");
-    let text = if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.') } else { &text };
+    let text = if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        &text
+    };
     format!("{text}{unit}")
 }
 
@@ -198,8 +299,24 @@ mod checks {
 
     #[test]
     fn numbers_read_as_people_read_them() {
-        assert_eq!([count(980.0), count(1250.0), count(12_500_000.0), count(125e9)], ["980", "1.25K", "12.5M", "125B"]);
+        assert_eq!(
+            [
+                count(980.0),
+                count(1250.0),
+                count(12_500_000.0),
+                count(125e9)
+            ],
+            ["980", "1.25K", "12.5M", "125B"]
+        );
         assert_eq!(count(2000.0), "2K");
-        assert_eq!([duration(850.0), duration(4200.0), duration(192_000.0), duration(3_900_000.0)], ["850 ms", "4.2 s", "3 min 12 s", "1 h 05 min"]);
+        assert_eq!(
+            [
+                duration(850.0),
+                duration(4200.0),
+                duration(192_000.0),
+                duration(3_900_000.0)
+            ],
+            ["850 ms", "4.2 s", "3 min 12 s", "1 h 05 min"]
+        );
     }
 }

@@ -77,10 +77,16 @@ pub struct Summary {
 /// The summary of the `period` days up to `today` (YYYY-MM-DD, UTC), from every stored day;
 /// streaks look at all of them.
 pub fn summarize(all: &[Day], today: &str, period: u32) -> Summary {
-    let Some(today) = day_number(today) else { return Summary::default() };
+    let Some(today) = day_number(today) else {
+        return Summary::default();
+    };
     let period = period.clamp(1, 400);
     let first = today - i64::from(period) + 1;
-    let mut out = Summary { days: period, per_day: vec![0.0; period as usize], ..Summary::default() };
+    let mut out = Summary {
+        days: period,
+        per_day: vec![0.0; period as usize],
+        ..Summary::default()
+    };
     let mut weighted = 0.0;
     let mut samples = 0.0;
     let mut hours = [0.0; 24];
@@ -88,7 +94,9 @@ pub fn summarize(all: &[Day], today: &str, period: u32) -> Summary {
     let mut models: HashMap<&str, f64> = HashMap::new();
     let mut active: Vec<i64> = Vec::with_capacity(all.len());
     for day in all {
-        let Some(n) = day_number(&day.date) else { continue };
+        let Some(n) = day_number(&day.date) else {
+            continue;
+        };
         if day.active() {
             active.push(n);
         }
@@ -109,7 +117,8 @@ pub fn summarize(all: &[Day], today: &str, period: u32) -> Summary {
             weighted += day.avg_response_time_ms * day.response_time_samples;
             samples += day.response_time_samples;
             if let Some(fastest) = day.fastest_response_ms.filter(|ms| ms.is_finite()) {
-                out.fastest_response_ms = Some(out.fastest_response_ms.map_or(fastest, |f| f.min(fastest)));
+                out.fastest_response_ms =
+                    Some(out.fastest_response_ms.map_or(fastest, |f| f.min(fastest)));
             }
         }
         for (slot, value) in hours.iter_mut().zip(&day.hourly_activity) {
@@ -140,7 +149,10 @@ pub fn summarize(all: &[Day], today: &str, period: u32) -> Summary {
 fn top(counts: HashMap<&str, f64>) -> Vec<(String, f64)> {
     let mut list: Vec<_> = counts.into_iter().filter(|(_, c)| *c > 0.0).collect();
     list.sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-    list.into_iter().take(TOP).map(|(n, c)| (n.to_owned(), c)).collect()
+    list.into_iter()
+        .take(TOP)
+        .map(|(n, c)| (n.to_owned(), c))
+        .collect()
 }
 
 /// The run of active days ending today or yesterday, and the longest run.
@@ -164,7 +176,9 @@ pub fn day_number(date: &str) -> Option<i64> {
         return None;
     }
     let num = |s: &str| s.parse::<i64>().ok();
-    let (y, m, d) = (num(&date[..4])?, num(&date[5..7])?, num(&date[8..])?);
+    let y = num(&date[..4])?;
+    let m = num(&date[5..7])?;
+    let d = num(&date[8..])?;
     if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
         return None;
     }
@@ -213,7 +227,10 @@ pub fn record_chat(
     let average = number(&day, "avgResponseTimeMs");
     day["avgResponseTimeMs"] = json!((average * samples + ms) / (samples + 1.0));
     day["responseTimeSamples"] = json!(samples + 1.0);
-    let fastest = day["fastestResponseMs"].as_f64().filter(|f| f.is_finite()).map_or(ms, |f| f.min(ms));
+    let fastest = day["fastestResponseMs"]
+        .as_f64()
+        .filter(|f| f.is_finite())
+        .map_or(ms, |f| f.min(ms));
     day["fastestResponseMs"] = json!(fastest);
     day["slowestResponseMs"] = json!(number(&day, "slowestResponseMs").max(ms));
     day["usedChat"] = json!(true);
@@ -240,11 +257,15 @@ mod checks {
     fn a_period_sums_its_days_and_streaks_count_every_day() {
         let all = [
             day(json!({"date":"2026-11-10","summariesGenerated":1})),
-            day(json!({"date":"2026-11-16","chatMessagesSent":2,"chatMessagesReceived":2,
+            day(
+                json!({"date":"2026-11-16","chatMessagesSent":2,"chatMessagesReceived":2,
                 "totalWordsRead":400,"avgResponseTimeMs":900,"responseTimeSamples":2,
-                "fastestResponseMs":null,"modelUsage":{"m":2}})),
-            day(json!({"date":"2026-11-17","wordsLookedUp":3,"avgResponseTimeMs":300,
-                "responseTimeSamples":1,"fastestResponseMs":250,"hourlyActivity":[0,5]})),
+                "fastestResponseMs":null,"modelUsage":{"m":2}}),
+            ),
+            day(
+                json!({"date":"2026-11-17","wordsLookedUp":3,"avgResponseTimeMs":300,
+                "responseTimeSamples":1,"fastestResponseMs":250,"hourlyActivity":[0,5]}),
+            ),
         ];
         let s = summarize(&all, "2026-11-18", 7);
         assert_eq!(s.per_day, [0.0, 0.0, 0.0, 0.0, 4.0, 3.0, 0.0]);
@@ -252,7 +273,10 @@ mod checks {
         assert_eq!(s.time_saved_seconds, 120.0);
         assert_eq!(s.avg_response_ms, Some(700.0));
         assert_eq!(s.fastest_response_ms, Some(250.0));
-        assert_eq!((s.current_streak, s.longest_streak, s.peak_hour), (2, 2, Some(1)));
+        assert_eq!(
+            (s.current_streak, s.longest_streak, s.peak_hour),
+            (2, 2, Some(1))
+        );
         assert_eq!(s.models, [("m".to_owned(), 2.0)]);
         assert_eq!(day_number("1970-01-01"), Some(0));
         assert_eq!(day_number("2000-03-01"), Some(11_017));
@@ -263,9 +287,21 @@ mod checks {
         let new = record_chat(json!(null), "2026-11-18", Some((100, 20)), 800.0, "m");
         assert_eq!(new["date"], "2026-11-18");
         assert_eq!(new["hourlyActivity"].as_array().unwrap().len(), 24);
-        assert_eq!((new["chatMessagesSent"].as_f64(), new["tokensInput"].as_f64()), (Some(1.0), Some(100.0)));
+        assert_eq!(
+            (
+                new["chatMessagesSent"].as_f64(),
+                new["tokensInput"].as_f64()
+            ),
+            (Some(1.0), Some(100.0))
+        );
         let again = record_chat(new, "2026-11-18", None, 400.0, "m");
         assert_eq!(again["avgResponseTimeMs"], 600.0);
-        assert_eq!((again["fastestResponseMs"].as_f64(), again["modelUsage"]["m"].as_f64()), (Some(400.0), Some(2.0)));
+        assert_eq!(
+            (
+                again["fastestResponseMs"].as_f64(),
+                again["modelUsage"]["m"].as_f64()
+            ),
+            (Some(400.0), Some(2.0))
+        );
     }
 }
