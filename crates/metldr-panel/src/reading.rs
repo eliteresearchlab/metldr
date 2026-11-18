@@ -177,6 +177,52 @@ fn same_site(page: &str, href: &str) -> bool {
     }
 }
 
+/// The longest section a page is split into for citing, in bytes.
+const SECTION: usize = 700;
+
+/// `markdown` in numbered sections for citing: paragraphs joined up to `SECTION` bytes, a heading
+/// always starting a new one.
+pub(crate) fn sections(markdown: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for paragraph in markdown.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
+        let heading = paragraph.starts_with('#');
+        match out.last_mut() {
+            Some(last) if !heading && last.len() + paragraph.len() + 2 <= SECTION => {
+                last.push_str("\n\n");
+                last.push_str(paragraph);
+            }
+            _ => out.push(paragraph.to_owned()),
+        }
+    }
+    out
+}
+
+/// The section numbers `answer` cites as `[n]`, each once, in order, within `count` sections.
+pub(crate) fn cited(answer: &str, count: usize) -> Vec<usize> {
+    let mut found = Vec::new();
+    let mut rest = answer;
+    while let Some(open) = rest.find('[') {
+        let after = &rest[open + 1..];
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0 && after.as_bytes().get(digits) == Some(&b']') {
+            if let Ok(n) = after[..digits].parse::<usize>()
+                && (1..=count).contains(&n)
+                && !found.contains(&n)
+            {
+                found.push(n);
+            }
+        }
+        rest = after;
+    }
+    found
+}
+
+/// The first words of `section` as plain text, to name it and to find it on the page.
+pub(crate) fn opening(section: &str, words: usize) -> String {
+    let plain: String = section.chars().filter(|c| !matches!(c, '#' | '*' | '`' | '>' | '|' | '_')).collect();
+    plain.split_whitespace().take(words).collect::<Vec<_>>().join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +280,16 @@ mod tests {
         let long = format!("{}\nlast line", "line\n".repeat(3000));
         let cut = bounded(&long, 8192).unwrap();
         assert!(cut.len() <= 8192 && cut.ends_with(MORE) && !cut.contains("last line"));
+    }
+
+    #[test]
+    fn a_page_splits_into_sections_and_answers_cite_them() {
+        let page = "# North\n\nFirst part.\n\nSecond part.\n\n## Units\n\nSeventeen units.";
+        let parts = sections(page);
+        assert_eq!(parts, ["# North\n\nFirst part.\n\nSecond part.", "## Units\n\nSeventeen units."]);
+        assert_eq!(cited("It has 17 units [2], see [1] and [2] again; [9] and [x] are not sections.", 2), [2, 1]);
+        assert_eq!(opening("## Units\n\nSeventeen **units** here.", 3), "Units Seventeen units");
+        let long: String = (0..40).map(|n| format!("Paragraph {n} with some words.\n\n")).collect();
+        assert!(sections(&long).iter().all(|section| section.len() <= SECTION));
     }
 }

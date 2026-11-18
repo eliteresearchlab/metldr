@@ -1,6 +1,23 @@
-export function capturePage() {
+export function capturePage(find) {
   // Chrome serializes this function without its module scope: everything it uses lives inside.
   // It returns the page's main content as blocks, [kind, depth, text]; Rust renders the markdown.
+  // Given words to find instead, it selects their first match and scrolls it into view.
+  if (typeof find === "string") {
+    const words = find.replace(/\s+/gu, " ").trim();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.data.replace(/\s+/gu, " ").indexOf(words.slice(0, 40));
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, Math.min(node.data.length, at + words.length));
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+      node.parentElement?.scrollIntoView({ block: "center" });
+      return { found: true };
+    }
+    return { found: false };
+  }
   const BLOCK_LIMIT = 4000;
   const TEXT_LIMIT = 65536;
   const SKIP = "script,style,noscript,template,svg,canvas,iframe,object,embed,video,audio,form,fieldset,label:has(input,textarea,select),input,textarea,select,button,nav,aside,dialog,[hidden],[inert],[aria-hidden='true'],[role='navigation'],[role='banner'],[role='contentinfo'],[role='complementary'],[role='search'],[role='dialog'],[role='textbox']";

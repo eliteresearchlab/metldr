@@ -1,4 +1,4 @@
-export function capturePage(): {
+export function capturePage(find?: string): {
   url: string;
   title: string;
   blocks: [kind: string, depth: number, text: string][];

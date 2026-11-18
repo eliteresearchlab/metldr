@@ -379,6 +379,17 @@ impl State {
         }
     }
 
+    /// Selects the cited `words` on `page` and scrolls them into view.
+    fn show_on_page(&mut self, page: &str, words: &str) {
+        let (page, words) = (page.split('#').next().unwrap_or(page).to_owned(), words.to_owned());
+        let updates = self.updates.clone();
+        spawn_local(async move {
+            if let (Err(error), Some(updates)) = (gateway::show_words(&page, &words).await, updates) {
+                updates.finish(Err(error));
+            }
+        });
+    }
+
     /// Without the companion: answers with gateway route `index` from now on.
     pub(super) fn choose_gateway(&mut self, index: usize) {
         if self.running() {
@@ -1521,6 +1532,30 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                         .transition(theme::rise())
                 } else {
                     col().w_full().child(body)
+                };
+                let cites = if user { Vec::new() } else { state.gateway().map(|g| g.citations(id)).unwrap_or_default() };
+                let message = if cites.is_empty() {
+                    message
+                } else {
+                    // The sections the answer cites: each scrolls the page to its words.
+                    let chips = cites.into_iter().map(|(n, words, page)| {
+                        let label = format!("[{n}] {words}");
+                        typography
+                            .text(label.clone())
+                            .font(typography.font(12.0, 400.0))
+                            .color(palette.ink_2)
+                            .px(8.0)
+                            .py(4.0)
+                            .radius(8.0)
+                            .border(1.0, palette.line)
+                            .key(format!("cite-{id}-{n}"))
+                            .role("button")
+                            .label(format!("Show section {n} on the page: {words}"))
+                            .focusable(true)
+                            .native_activation()
+                            .on_press_tx(move |state: &mut State, _| state.show_on_page(&page, &words))
+                    });
+                    col().w_full().gap(6.0).child(message).child(row().w_full().flex_wrap().gap(6.0).children(chips))
                 };
                 let message = message.key(id);
                 thread = thread.child(if user {
