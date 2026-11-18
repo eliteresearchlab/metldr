@@ -23,43 +23,6 @@ export interface IntentStyle {
   text: string
 }
 
-export interface AmountFact {
-  label: string
-  value: string
-  currency: string | null
-}
-
-export interface IdFact {
-  label: string
-  value: string
-}
-
-export interface DateFact {
-  label: string
-  when: string
-}
-
-export interface ContactFact {
-  type: string
-  value: string
-}
-
-export interface LinkFact {
-  label: string
-  url: string
-}
-
-export interface ExtractedFacts {
-  amounts: AmountFact[]
-  ids: IdFact[]
-  dates: DateFact[]
-  contacts: ContactFact[]
-  links: LinkFact[]
-  people: string[]
-  locations: string[]
-  action_items: string[]
-}
-
 export interface EmailMetadata {
   from?: string | null
   sender?: string | null
@@ -112,43 +75,6 @@ export interface EmailSummary {
   ner_tags?: { label: string; score: number }[]
   entities?: { word: string; entity: string; score: number }[]
   confidence?: 'high' | 'medium' | 'low'
-}
-
-export interface EmailSession {
-  emailId: string
-  summary: EmailSummary | null
-  replySuggestions: ReplySuggestion[] | null
-  chatMessages: AppChatMessage[]
-  metadata: EmailMetadata | null
-  timestamp: number
-  ttl: number
-}
-
-export interface ParsedLLMSummary {
-  summary?: string
-  action_items?: string[]
-  intent?: string
-  tags?: string[]
-  domain?: string
-  reasoning?: string
-  urgency?: string
-  key_details?: {
-    main_date?: string
-    booking_reference?: string
-    amount?: string
-    sender_org?: string
-  }
-}
-
-export interface ParsedReply {
-  tone?: string
-  length?: string
-  body?: string
-  label?: string
-}
-
-export interface ParsedReplies {
-  replies?: ParsedReply[]
 }
 
 // page

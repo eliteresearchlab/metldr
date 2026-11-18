@@ -4,8 +4,6 @@ interface DatabaseConfig {
   stores: readonly { readonly name: string; readonly keyPath: string }[]
 }
 
-type TransactionMode = 'readonly' | 'readwrite'
-
 // the schema is exactly the config: stores it no longer names are deleted, and no store keeps an index
 function upgrade(request: IDBOpenDBRequest, config: DatabaseConfig): void {
   const db = request.result
@@ -94,44 +92,17 @@ class Databases {
       }
     })
   }
-
-  async transaction<T>(
-    config: DatabaseConfig,
-    storeNames: readonly string[],
-    mode: TransactionMode,
-    callback: (transaction: IDBTransaction) => T | Promise<T>
-  ): Promise<T> {
-    const db = await this.getDatabase(config)
-    const tx = db.transaction([...storeNames], mode)
-    const complete = new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve()
-      tx.onabort = () => reject(tx.error ?? new Error('Database transaction aborted'))
-    })
-    try {
-      const [value] = await Promise.all([callback(tx), complete])
-      return value
-    } catch (error) {
-      try { tx.abort() } catch { /* The transaction may already have finished. */ }
-      await complete.catch(() => {})
-      throw error
-    }
-  }
 }
 
 export const databaseService = new Databases()
-
-export const EMAIL_STORES = {
-  header: 'email_sessions',
-  summary: 'email_summaries',
-  replies: 'email_replies'
-} as const
 
 export const DB_CONFIGS = {
   cache: {
     name: 'metldr_cache',
     version: 9,
     stores: [
-      ...Object.values(EMAIL_STORES).map(name => ({ name, keyPath: 'emailId' })),
+      // email summaries, replies and message counts, read and written by the Rust core
+      ...['email_sessions', 'email_summaries', 'email_replies'].map(name => ({ name, keyPath: 'emailId' })),
       { name: 'page_cache', keyPath: 'url' },
       { name: 'rag_metadata', keyPath: 'sourceId' }
     ]
