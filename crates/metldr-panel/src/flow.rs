@@ -1346,14 +1346,13 @@ impl Connection {
         let url = string_property(&observed, "url").map_err(js_error)?;
         validate_url(&url)?;
         let title = string_property(&observed, "title").map_err(js_error)?;
-        let text = string_property(&observed, "text").map_err(js_error)?;
+        let text = page_text(&observed)?;
+        // The markdown is never empty and never over the page budget.
         if document.is_empty()
             || document.len() > 128
             || title.is_empty()
             || title.len() > 256
             || url.len() > 2048
-            || text.is_empty()
-            || text.len() > MAX_PAGE
         {
             return Err(FlowError::InvalidInput(
                 "The page has empty or oversized content. Nothing was sent.".into(),
@@ -1368,7 +1367,7 @@ impl Connection {
             || string_property(&confirmed, "documentId").map_err(js_error)? != document
             || string_property(&result, "url").map_err(js_error)? != url
             || string_property(&result, "title").map_err(js_error)? != title
-            || string_property(&result, "text").map_err(js_error)? != text
+            || page_text(&result)? != text
         {
             return Err(FlowError::Host(
                 "The selected page changed during capture. Nothing was sent.".into(),
@@ -1397,7 +1396,7 @@ impl Connection {
         Ok(if !same_document {
             SourceStatus::Saved
         } else if string_property(&observed, "title").map_err(js_error)? == source.title
-            && string_property(&observed, "text").map_err(js_error)? == source.text
+            && page_text(&observed)? == source.text
         {
             SourceStatus::Current
         } else {
@@ -1428,6 +1427,19 @@ impl Connection {
                 && string_property(&observed, "url").map_err(js_error)? == action.url,
         )
     }
+}
+
+/// The captured page's main content as markdown within the page budget.
+fn page_text(observed: &JsValue) -> Result<String> {
+    let raw = js_sys::JSON::stringify(observed)
+        .map_err(js_error)?
+        .as_string()
+        .ok_or_else(|| FlowError::InvalidInput("The page capture is malformed.".into()))?;
+    let capture: crate::reading::Capture = serde_json::from_str(&raw)
+        .map_err(|_| FlowError::InvalidInput("The page capture is malformed.".into()))?;
+    capture.markdown(MAX_PAGE).ok_or_else(|| {
+        FlowError::InvalidInput("The page has no readable content. Nothing was sent.".into())
+    })
 }
 
 pub(super) fn validate_url(url: &str) -> Result<()> {

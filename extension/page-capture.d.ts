@@ -1,1 +1,6 @@
-export function capturePage(): { url: string; title: string; text: string };
+export function capturePage(): {
+  url: string;
+  title: string;
+  blocks: [kind: string, depth: number, text: string][];
+  truncated: boolean;
+};

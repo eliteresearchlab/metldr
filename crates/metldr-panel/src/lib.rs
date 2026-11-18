@@ -32,6 +32,7 @@ mod display;
 mod preferences;
 mod profile;
 mod readiness;
+mod reading;
 #[cfg(feature = "rune-ui")]
 mod run_display;
 mod site;
