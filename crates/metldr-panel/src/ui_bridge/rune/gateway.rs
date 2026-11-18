@@ -296,7 +296,8 @@ fn ready_routes(reply: &Value) -> Option<(Vec<RouteChoice>, usize)> {
         .filter(|route| route["state"] == "ready")
         .filter_map(|route| {
             let name = route["route"].as_str()?;
-            let model = route["model"].as_str().filter(|model| !model.is_empty()).map(str::to_owned);
+            let model = route["model"].as_str().filter(|model| !model.is_empty());
+            let model = model.map(str::to_owned);
             let label = match (name, &model) {
                 ("chrome-ai", _) => "Chrome built-in AI".to_owned(),
                 (name, Some(model)) => format!("{model}, {name}"),
