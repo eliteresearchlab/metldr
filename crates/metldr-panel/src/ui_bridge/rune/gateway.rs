@@ -13,6 +13,8 @@ const SYSTEM: &str = "Answer the user's request about the page in the source. \
     answer. Cite the numbered sections you use, like [2]. Answer in the user's language, \
     briefly, in plain paragraphs or lists.";
 const DETECT: u64 = 1;
+/// The search messages the extension reads: the question and the six before it.
+const SEARCH_TURNS: usize = 7;
 /// The page text a conversation's first turn sends, in bytes.
 const PAGE_BUDGET: usize = crate::MAX_PAGE;
 /// The unsent page text a later turn may add for its request, in bytes.
@@ -190,7 +192,7 @@ impl Gateway {
     async fn search(self: Rc<Self>, text: String, updates: Rc<Updates>) -> Result<(), FlowError> {
         let id = format!("gateway-{}", self.next.get());
         self.next.set(self.next.get() + 1);
-        self.searches.borrow_mut().push(("user", text.clone()));
+        push_bounded(&mut self.searches.borrow_mut(), ("user", text.clone()));
         show(&updates, &id, text.clone(), String::new());
         updates.presentation.borrow_mut().error = None;
         self.summarizing.set(true);
@@ -212,7 +214,7 @@ impl Gateway {
             Some((n, title.to_owned(), source_page(found["url"].as_str()?)?))
         });
         self.citations.borrow_mut().insert(id.clone(), cites.collect());
-        self.searches.borrow_mut().push(("assistant", answer.to_owned()));
+        push_bounded(&mut self.searches.borrow_mut(), ("assistant", answer.to_owned()));
         if let Some(AgUiMessage::Assistant { content, .. }) = updates.presentation.borrow_mut().messages.messages.last_mut() {
             answer.clone_into(content);
         }
@@ -491,6 +493,14 @@ async fn ask_extension(request: &Value) -> Option<Value> {
     let runtime = crate::chrome_api("runtime").ok()?;
     let message = crate::flow::json_value(request).ok()?;
     json_of(&crate::await_call(&runtime, "sendMessage", &[message]).await.ok()?)
+}
+
+/// Adds `turn` to the search chat, which keeps only what the extension reads.
+fn push_bounded(searches: &mut Vec<(&'static str, String)>, turn: (&'static str, String)) {
+    if searches.len() == SEARCH_TURNS {
+        searches.remove(0);
+    }
+    searches.push(turn);
 }
 
 /// The page a search source opens: its address, or the Gmail thread of a saved email.
