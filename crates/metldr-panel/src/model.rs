@@ -181,6 +181,7 @@ pub(crate) struct PageView {
     pub(crate) codex_input: Option<CodexInputView>,
     pub(crate) browser_actions: Vec<BrowserActionView>,
     pub(crate) task_plan: Option<TaskPlanView>,
+    pub(crate) approval_mode: ApprovalMode,
     pub(crate) browser_route: Option<BrowserRouteView>,
     pub(crate) chat_route: Option<ChatRouteView>,
     pub(crate) responses_route: Option<ResponsesRouteView>,
@@ -202,16 +203,30 @@ pub(crate) struct TaskPlanView {
     pub(crate) scope: String,
     pub(crate) revision: u32,
     pub(crate) state: PlanState,
-    #[serde(default)]
-    pub(crate) session_grant: Option<SessionGrantView>,
 }
 
-/// An active session approval for the plan's run (decision 09, B3.2).
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct SessionGrantView {
-    pub(crate) remaining_s: u64,
-    pub(crate) bound: bool,
+/// What a chat's browser runs may do without asking (BR2b-2). Ask: the plan and every step
+/// ask. Auto: the plan asks, then steps that cannot submit, send, buy, pay or delete run. Full
+/// access: nothing asks. A secret entry always asks.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ApprovalMode {
+    Ask,
+    Auto,
+    Full,
+}
+
+#[cfg(feature = "rune-ui")]
+impl ApprovalMode {
+    pub(crate) const ALL: [Self; 3] = [Self::Ask, Self::Auto, Self::Full];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Ask => "Ask",
+            Self::Auto => "Auto",
+            Self::Full => "Full access",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -1258,6 +1273,7 @@ struct WireView {
     browser_actions: Vec<BrowserActionView>,
     #[serde(default)]
     task_plan: Option<TaskPlanView>,
+    approval_mode: ApprovalMode,
     #[serde(default, deserialize_with = "Option::deserialize")]
     browser_route: Option<BrowserRouteView>,
     #[serde(default, deserialize_with = "Option::deserialize")]
@@ -1455,9 +1471,6 @@ impl PageView {
                     !s.is_empty() && s.len() <= max && !s.chars().any(char::is_control)
                 };
                 plan.revision == 0
-                    || plan.session_grant.as_ref().is_some_and(|grant| {
-                        plan.state != PlanState::Approved || grant.remaining_s > 1800
-                    })
                     || !valid(&plan.goal, 1024)
                     || !valid(&plan.scope, 1024)
                     || plan.intended_effects.len() > 16
@@ -1912,6 +1925,7 @@ impl PageView {
             codex_input: wire.codex_input,
             browser_actions: wire.browser_actions,
             task_plan: wire.task_plan,
+            approval_mode: wire.approval_mode,
             browser_route: wire.browser_route,
             chat_route: wire.chat_route,
             responses_route: wire.responses_route,
@@ -2141,7 +2155,7 @@ mod tests {
     }
 
     const STORE: &str = "0123456789abcdef0123456789abcdef";
-    const VALID: &str = r#"{"sequence":2,"store":"0123456789abcdef0123456789abcdef","selection":{"store":"0123456789abcdef0123456789abcdef","conversation":"0123456789abcdef0123456789abcdef:100","epoch":"1"},"source":{"id":"0123456789abcdef0123456789abcdef:1","tab":4,"document":"doc-1","url":"http://127.0.0.1:43123/article","title":"North report","text":"The North project reports an amount of 17 units."},"runs":[{"id":"0123456789abcdef0123456789abcdef:2","source":"0123456789abcdef0123456789abcdef:1","kind":"summary","question":null,"status":"complete","output":"North reports 17 units.","conversation":[],"error":null,"route":{"kind":"fixture"},"activity":[],"corrections":{"total":0,"entries":[]}}],"native_correction":null,"pi_profile":null,"agent_sessions":[],"browser_route":null}"#;
+    const VALID: &str = r#"{"approval_mode":"ask","sequence":2,"store":"0123456789abcdef0123456789abcdef","selection":{"store":"0123456789abcdef0123456789abcdef","conversation":"0123456789abcdef0123456789abcdef:100","epoch":"1"},"source":{"id":"0123456789abcdef0123456789abcdef:1","tab":4,"document":"doc-1","url":"http://127.0.0.1:43123/article","title":"North report","text":"The North project reports an amount of 17 units."},"runs":[{"id":"0123456789abcdef0123456789abcdef:2","source":"0123456789abcdef0123456789abcdef:1","kind":"summary","question":null,"status":"complete","output":"North reports 17 units.","conversation":[],"error":null,"route":{"kind":"fixture"},"activity":[],"corrections":{"total":0,"entries":[]}}],"native_correction":null,"pi_profile":null,"agent_sessions":[],"browser_route":null}"#;
 
     #[test]
     fn task_plan_decodes_only_for_a_current_run() {

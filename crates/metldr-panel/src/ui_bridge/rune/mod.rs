@@ -523,45 +523,29 @@ impl State {
         });
     }
 
-    fn session_plan(&mut self, plan: crate::model::TaskPlanView, grant: bool, tx: &mut Tx) {
-        if !tx.consume_activation(&session_key(&plan, grant)) {
-            return;
-        }
-        let Some(core) = self.core().cloned() else {
+    /// The chat's approval mode; Ask until the companion's view says otherwise.
+    pub(super) fn approval_mode(&self) -> crate::model::ApprovalMode {
+        self.core().map_or(crate::model::ApprovalMode::Ask, |core| core.page.view.borrow().approval_mode)
+    }
+
+    /// Saves the chat's approval mode from the model menu.
+    pub(super) fn set_approval(&mut self, mode: crate::model::ApprovalMode) {
+        let (Some(core), Some(updates)) = (self.core().cloned(), self.updates.clone()) else {
             return;
         };
-        let Some(updates) = self.updates.clone() else {
-            return;
-        };
-        let valid = core.ensure_current().is_ok()
-            && core.flow().is_connected()
-            && !core.page.recovery.borrow().active()
-            && !core.page.settings.borrow().blocked()
-            && !core.page.navigating.get()
-            && core.page.view.borrow().task_plan.as_ref() == Some(&plan)
-            && core.page.view.borrow().active_run() == Some(&plan.run)
-            && plan.state == crate::model::PlanState::Approved;
-        if !valid {
+        if core.ensure_current().is_err()
+            || !core.flow().is_connected()
+            || core.page.view.borrow().approval_mode == mode
+        {
             return;
         }
-        let mut pending = core.plan_operation.borrow_mut();
-        if pending.as_ref() == Some(&(plan.run.clone(), plan.revision)) {
-            return;
-        }
-        *pending = Some((plan.run.clone(), plan.revision));
-        drop(pending);
-        self.sound(if grant {
-            crate::interaction_audio::Cue::Press
-        } else {
-            crate::interaction_audio::Cue::Release
-        });
+        self.sound(crate::interaction_audio::Cue::Press);
         spawn_local(async move {
             let result = core
                 .flow()
-                .set_session_grant(core.scope.clone(), plan.run.clone(), plan.revision, grant)
+                .set_approval_mode(core.scope.clone(), mode)
                 .await
                 .and_then(|view| core.accept(view).map(|_| ()));
-            finish_plan(&core.plan_operation, &plan.run, plan.revision);
             updates.finish(result);
         });
     }
@@ -1074,7 +1058,6 @@ mod followup_tests {
             scope: "One site".into(),
             revision: 7,
             state,
-            session_grant: None,
         }
     }
 
@@ -1086,7 +1069,6 @@ mod followup_tests {
                 true,
                 preferences::Typography::new(1.0, &preferences::Palette::for_theme("light")),
                 State::decide_plan,
-                State::session_plan,
             )
         }
         let mut rt = Runtime::new(State::default(), view, (640.0, 300.0), Env::default());
@@ -1108,22 +1090,12 @@ mod followup_tests {
         assert_ne!(plan_key(&plan, true), plan_key(&plan, false));
     }
 
-    fn granted_plan() -> crate::model::TaskPlanView {
-        let mut plan = sample_plan(crate::model::PlanState::Approved);
-        plan.session_grant = Some(crate::model::SessionGrantView {
-            remaining_s: 1201,
-            bound: true,
-        });
-        plan
-    }
-
     fn plan_card(plan: &crate::model::TaskPlanView) -> El {
         plan_view(
             plan,
             true,
             preferences::Typography::new(1.0, &preferences::Palette::for_theme("light")),
             State::decide_plan,
-            State::session_plan,
         )
     }
 
@@ -1147,23 +1119,15 @@ mod followup_tests {
     }
 
     #[test]
-    fn approved_plan_offers_session_approval_and_shows_an_active_grant() {
+    fn an_approved_plan_has_no_buttons_and_the_mode_command_names_the_mode() {
         fn approved(_: &State, _: &mut Cx<State>) -> El {
             plan_card(&sample_plan(crate::model::PlanState::Approved))
         }
-        fn granted(_: &State, _: &mut Cx<State>) -> El {
-            plan_card(&granted_plan())
-        }
         let (buttons, _) = card_buttons_and_status(approved);
-        assert_eq!(buttons, ["Auto-approve safe steps for 30 minutes"]);
-        let (buttons, status) = card_buttons_and_status(granted);
-        assert_eq!(buttons, ["Extend 30 minutes", "Stop auto-approval"]);
-        assert_eq!(status, ["Safe steps are auto-approved for 21 more min"]);
-        let plan = granted_plan();
-        assert!(!Tx::default().consume_activation(&session_key(&plan, false)));
+        assert!(buttons.is_empty());
         assert_eq!(
-            crate::flow::session_grant(&plan.run, plan.revision, false),
-            serde_json::json!({"op":"revoke_session", "run":plan.run})
+            crate::flow::approval_mode(crate::model::ApprovalMode::Full),
+            serde_json::json!({"op":"set_approval_mode", "mode":"full"})
         );
     }
 
@@ -1185,11 +1149,6 @@ mod followup_tests {
                 state
                     .replies
                     .push(crate::flow::plan_reply(&plan.run, plan.revision, approve));
-            },
-            |state: &mut PlanTest, plan, grant, _| {
-                state
-                    .replies
-                    .push(crate::flow::session_grant(&plan.run, plan.revision, grant));
             },
         )
     }
@@ -1399,48 +1358,6 @@ fn plan_key(plan: &crate::model::TaskPlanView, approve: bool) -> String {
     )
 }
 
-fn session_key(plan: &crate::model::TaskPlanView, grant: bool) -> String {
-    format!(
-        "plan-session:{}:{}:{}",
-        plan.run.as_str(),
-        plan.revision,
-        u8::from(grant)
-    )
-}
-
-fn plan_button<S: 'static>(
-    typography: preferences::Typography,
-    key: String,
-    label: &'static str,
-    enabled: bool,
-    plan: &crate::model::TaskPlanView,
-    flag: bool,
-    act: fn(&mut S, crate::model::TaskPlanView, bool, &mut Tx),
-) -> El {
-    let press_plan = plan.clone();
-    let key_plan = plan.clone();
-    typography
-        .text(label)
-        .key(key)
-        .role("button")
-        .label(label)
-        .focusable(enabled)
-        .disabled(!enabled)
-        .native_activation()
-        .press(typography.press)
-        .press_scale(theme::PRESS_SCALE)
-        .on_press_tx(move |state: &mut S, tx| act(state, press_plan.clone(), flag, tx))
-        .on_key(move |state: &mut S, key, tx| {
-            if key.key != ::rune::Key::Enter {
-                return false;
-            }
-            if !tx.key_repeat() {
-                act(state, key_plan.clone(), flag, tx);
-            }
-            true
-        })
-}
-
 fn finish_plan(pending: &RefCell<Option<(RunId, u32)>>, run: &RunId, revision: u32) {
     let mut pending = pending.borrow_mut();
     if pending
@@ -1456,7 +1373,6 @@ fn plan_view<S: 'static>(
     enabled: bool,
     typography: preferences::Typography,
     decide: fn(&mut S, crate::model::TaskPlanView, bool, &mut Tx),
-    session: fn(&mut S, crate::model::TaskPlanView, bool, &mut Tx),
 ) -> El {
     use crate::model::PlanState;
     let mut card = col()
@@ -1477,49 +1393,7 @@ fn plan_view<S: 'static>(
     }
     card = card.child(typography.text(format!("Scope: {}", plan.scope)).wrap());
     match plan.state {
-        PlanState::Approved => {
-            card = card.child(typography.text("Approved"));
-            match &plan.session_grant {
-                None => card.child(plan_button(
-                    typography,
-                    session_key(plan, true),
-                    "Auto-approve safe steps for 30 minutes",
-                    enabled,
-                    plan,
-                    true,
-                    session,
-                )),
-                Some(grant) => {
-                    let minutes = grant.remaining_s.div_ceil(60);
-                    let status = if grant.bound {
-                        format!("Safe steps are auto-approved for {minutes} more min")
-                    } else {
-                        format!(
-                            "Safe steps are auto-approved for {minutes} more min after you approve the next one"
-                        )
-                    };
-                    card.child(typography.text(status).wrap().role("status"))
-                        .child(plan_button(
-                            typography,
-                            session_key(plan, true),
-                            "Extend 30 minutes",
-                            enabled,
-                            plan,
-                            true,
-                            session,
-                        ))
-                        .child(plan_button(
-                            typography,
-                            session_key(plan, false),
-                            "Stop auto-approval",
-                            enabled,
-                            plan,
-                            false,
-                            session,
-                        ))
-                }
-            }
-        }
+        PlanState::Approved => card.child(typography.text("Approved")),
         PlanState::Declined => card.child(typography.text("Declined")),
         PlanState::Proposed => {
             for (approve, label) in [(true, "Approve"), (false, "Decline")] {
@@ -1762,7 +1636,6 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             enabled,
             typography,
             State::decide_plan,
-            State::session_plan,
         ));
     }
     // Layout follows whether the chat has messages, so it does not jump when history finishes
