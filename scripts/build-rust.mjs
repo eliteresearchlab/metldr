@@ -13,7 +13,8 @@ const crates = [
   { name: 'metldr-panel', module: 'metldr_panel', pkg: 'crates/metldr-panel/pkg' },
   { name: 'metldr-panel', variant: 'rune', module: 'metldr_panel', pkg: 'target/wasm/metldr-panel-rune/pkg', features: 'rune-ui' },
   { name: 'metldr-welcome', module: 'welcome_runtime', pkg: 'public/welcome/pkg' },
-  { name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg' },
+  // The core's search compares int8 vectors with wasm SIMD, 16 lanes at once.
+  { name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg', simd: true },
   { name: 'metldr-pdf', module: 'metldr_pdf', pkg: 'crates/metldr-pdf/pkg', pdfium: true },
   { name: 'metldr-answer-codec', artifact: 'metldr_answer_codec', module: 'answer_codec', pkg: 'crates/metldr-answer-codec/pkg', features: 'guest' },
 ];
@@ -127,6 +128,7 @@ const PDFIUM = {
   dir: join(homedir(), '.cache', 'metldr-pdfium', 'chromium_8058'),
 };
 
+const simdEnv = { ...cargoEnv, CARGO_ENCODED_RUSTFLAGS: '-Ctarget-feature=+simd128' };
 const buildError = message => Object.assign(new Error(message), { exitCode: 1 });
 
 async function pdfiumEnv() {
@@ -178,7 +180,7 @@ try {
   if (isCheck) {
     for (const crate of crates) {
       const args = ['check', ...cargoBuildArgs(crate)];
-      const env = crate.pdfium ? await pdfiumEnv() : cargoEnv;
+      const env = crate.pdfium ? await pdfiumEnv() : crate.simd ? simdEnv : cargoEnv;
       await runAsync('cargo', args, `Cargo (${crate.name})`, false, env);
       if (failure) throw failure;
     }
@@ -186,7 +188,7 @@ try {
     await runPool(crates.map(crate => async () => {
       const targetDir = wasmTargetDir(crate);
       const args = ['build', '--profile', profile, ...cargoBuildArgs(crate), '--target-dir', targetDir];
-      const env = crate.pdfium ? await pdfiumEnv() : cargoEnv;
+      const env = crate.pdfium ? await pdfiumEnv() : crate.simd ? simdEnv : cargoEnv;
       await runAsync('cargo', args, `Cargo (${crate.name})`, false, env);
       if (failure) return;
       const wasm = join(targetDir, 'wasm32-unknown-unknown', profile, `${crate.artifact ?? crate.module}.wasm`);
