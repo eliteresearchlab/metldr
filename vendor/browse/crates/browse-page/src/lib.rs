@@ -49,11 +49,10 @@ pub async fn resolve_element(ctx: &ToolContext, tab: TabId, reference: Option<&s
     Ok((page, resolved.element, resolved.label))
 }
 
-/// The refs of the tab's latest compact snapshot: id, role and accessible name.
-pub async fn snapshot_refs(ctx: &ToolContext, tab: TabId) -> anyhow::Result<Vec<(String, String, Option<String>)>> {
+/// The role and accessible name of each of `ids` in the tab's latest compact snapshot; `None` for
+/// an id the snapshot does not hold.
+pub async fn snapshot_ref_names(ctx: &ToolContext, tab: TabId, ids: &[&str]) -> anyhow::Result<Vec<Option<(String, Option<String>)>>> {
     let tab_state = state::tab(ctx, tab).await?;
     let refs = tab_state.refs.lock().unwrap();
-    let mut list: Vec<(String, String, Option<String>)> = refs.selectors.iter().map(|(id, t)| (id.clone(), t.role.clone(), t.name.clone())).collect();
-    list.sort_by_key(|(id, _, _)| id.trim_start_matches('e').parse::<u64>().unwrap_or(0));
-    Ok(list)
+    Ok(ids.iter().map(|id| refs.selectors.get(*id).map(|t| (t.role.clone(), t.name.clone()))).collect())
 }

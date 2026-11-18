@@ -239,15 +239,14 @@ impl Page {
         Ok(json!({ "kind": "page_snapshot", "text": self.tool("snapshot", args).await? }))
     }
 
-    /// The role and accessible name of each ref of the latest snapshot.
-    pub(super) async fn refs(
-        &self,
-    ) -> crate::Result<std::collections::HashMap<String, (String, String)>> {
-        Ok(browse_page::snapshot_refs(&self.context, self.tab)
+    /// The role and accessible name of each of `ids` in the latest snapshot, `None` for an id it
+    /// does not hold. Looks up only those ids: an action names one or two of a page's refs.
+    pub(super) async fn refs(&self, ids: &[&str]) -> crate::Result<Vec<Option<(String, String)>>> {
+        Ok(browse_page::snapshot_ref_names(&self.context, self.tab, ids)
             .await
             .map_err(|error| error.to_string())?
             .into_iter()
-            .map(|(reference, role, name)| (reference, (role, name.unwrap_or_default())))
+            .map(|found| found.map(|(role, name)| (role, name.unwrap_or_default())))
             .collect())
     }
 

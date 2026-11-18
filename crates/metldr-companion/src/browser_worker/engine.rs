@@ -226,18 +226,19 @@ impl Engine {
     }
     /// The elements `args` names, as the latest snapshot showed them.
     async fn elements(&self, refs: &[&str]) -> Result<Vec<Element>> {
-        let known = self.page.refs().await?;
+        let known = self.page.refs(refs).await?;
         refs.iter()
-            .map(|reference| {
-                let (role, name) = known.get(*reference).ok_or_else(|| {
+            .zip(known)
+            .map(|(reference, found)| {
+                let (role, name) = found.ok_or_else(|| {
                     super::Refusal(format!(
                         "ref {reference} is not in the latest snapshot; take a new snapshot"
                     ))
                 })?;
                 Ok(Element {
                     reference: (*reference).into(),
-                    role: bound(role, 64),
-                    name: bound(name, 256),
+                    role: bound(&role, 64),
+                    name: bound(&name, 256),
                 })
             })
             .collect()
