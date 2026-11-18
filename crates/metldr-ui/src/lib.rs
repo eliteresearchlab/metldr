@@ -16,6 +16,7 @@ pub mod press;
 pub mod scroll_area;
 pub mod select;
 pub mod tabs;
+pub mod theme;
 pub mod toggle;
 pub mod toolbar;
 pub mod tooltip;

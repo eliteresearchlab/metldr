@@ -73,7 +73,7 @@ mod tests {
     //! path), page scroll locking (Rune scrolls only what is under the pointer), forms with
     //! method dialog, and the confirm helper.
     use super::*;
-    use rune::{Cx, Env, Key, KeyEvent, Mods, Runtime, col, oklch, row, text};
+    use rune::{Cx, Env, Key, KeyEvent, Mods, Runtime, col, row, text};
     use serde_json::Value;
 
     #[derive(Default)]
@@ -105,7 +105,7 @@ mod tests {
             if app.nested {
                 body = body.child(backdrop(
                     dialog(col().key("inner").w(160.0).child(field("inner-field")), "More", None, "more", Props::default(), |a: &mut App| a.nested = false),
-                    oklch(0.0, 0.0, 0.0).alpha(0.3),
+                    crate::theme::Palette::for_theme("dark").scrim,
                 ));
             }
             let props = Props { alert: app.alert, ..Props::default() };
@@ -114,7 +114,7 @@ mod tests {
                     a.open = false;
                     a.closed += 1;
                 }),
-                oklch(0.0, 0.0, 0.0).alpha(0.3),
+                crate::theme::Palette::for_theme("dark").scrim,
             ));
         }
         page
