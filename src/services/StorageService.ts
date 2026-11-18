@@ -5,9 +5,6 @@ type StorageKey =
   | 'wordPopupEnabled'
   | 'summaryPrefs'
   | 'selectedLanguages'
-  | 'dictionarySource'
-  | 'dictDownloadProgress'
-  | 'downloadingLanguages'
   | 'fontSize'
   | 'donationState'
 

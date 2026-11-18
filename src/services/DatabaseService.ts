@@ -268,14 +268,6 @@ export const DB_CONFIGS = {
     version: 8,
     stores: CACHE_STORE_CONFIGS
   },
-  dictionary: {
-    name: 'metldr-dictionary',
-    version: 3,
-    stores: [
-      { name: 'words', keyPath: 'word' },
-      { name: 'metadata', keyPath: 'lang' }
-    ]
-  },
   analytics: {
     name: 'metldr-analytics',
     version: 2,
