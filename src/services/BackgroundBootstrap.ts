@@ -1,12 +1,11 @@
 import { cacheService } from './CacheService'
-import { clearSummaryCache, dictionary, lookupWord, statsSummary, summaryGate } from './RustCore'
+import { clearSummaryCache, dictionary, lookupWord, recordStat, statsSummary, summaryGate } from './RustCore'
 import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
 import { logger } from './LoggerService'
 import { ragService } from './rag/RagService'
 import { concurrencyManager } from './ConcurrencyManager'
-import { analyticsService } from './AnalyticsService'
 
 
 import type {
@@ -334,7 +333,7 @@ export class BackgroundBootstrap {
     }
     lookupWord(word, context ?? {})
       .then(result => {
-        analyticsService.trackWordLookup(word, result.source === 'local').catch(err => log.error('word lookup analytics', (err as Error).message))
+        recordStat({ kind: 'lookup' }).catch(err => log.error('word lookup stats', (err as Error).message))
         respond({ success: true, result })
       })
       .catch(err => respond({ success: false, error: (err as Error).message || 'lookup failed' }))

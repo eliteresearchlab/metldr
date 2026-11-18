@@ -9,7 +9,7 @@ use std::collections::HashMap;
 const WORDS_PER_MINUTE: f64 = 200.0;
 const TOP: usize = 5;
 
-/// One day's record, as both the TypeScript tracker and [`record_chat`] write it. Unknown
+/// One day's record, as [`record`] writes it (older ones from the TypeScript tracker too). Unknown
 /// fields are kept by the writer and ignored here.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -190,58 +190,117 @@ pub fn day_number(date: &str) -> Option<i64> {
     Some(era * 146_097 + doe - 719_468)
 }
 
-/// One answered chat added to `day` (a stored record, or null for a new day `date`): a message
-/// each way, its tokens when the route reported them, its time to the full answer and its model.
-/// Every field the tracker writes is kept, so both writers share the record.
-pub fn record_chat(
-    day: serde_json::Value,
-    date: &str,
-    tokens: Option<(u64, u64)>,
-    ms: f64,
-    model: &str,
-) -> serde_json::Value {
+/// One thing metldr did, as the day's record counts it.
+pub enum Event<'a> {
+    /// An answered chat: its tokens when the route reported them, its time and model.
+    Chat {
+        tokens: Option<(u64, u64)>,
+        ms: f64,
+        model: &'a str,
+    },
+    /// A page or email summary: the words read and written, its time, model and site.
+    Summary {
+        email: bool,
+        words_in: f64,
+        words_out: f64,
+        tokens_out: f64,
+        ms: f64,
+        model: &'a str,
+        site: &'a str,
+    },
+    /// A word looked up in the popup.
+    Lookup,
+    /// Reply suggestions written for an email.
+    Replies(f64),
+}
+
+/// `event` added to `day` (a stored record, or null for a new day `date`). Fields the record
+/// already holds and this does not touch are kept.
+pub fn record(day: serde_json::Value, date: &str, event: &Event) -> serde_json::Value {
     use serde_json::{Value, json};
     let mut day = match day {
         Value::Object(map) => Value::Object(map),
-        _ => json!({
-            "date": date, "timeInPanel": 0, "timeInGmail": 0, "timeInArticles": 0,
-            "timeInSettings": 0, "timeInStats": 0, "hourlyActivity": vec![0u8; 24],
-            "summariesGenerated": 0, "chatMessagesSent": 0, "chatMessagesReceived": 0,
-            "wordsLookedUp": 0, "replySuggestionsGenerated": 0, "replySuggestionsUsed": 0,
-            "tokensInput": 0, "tokensOutput": 0, "emailsProcessed": 0, "pagesProcessed": 0,
-            "pdfsProcessed": 0, "totalWordsRead": 0, "totalWordsSummarized": 0,
-            "avgResponseTimeMs": 0, "responseTimeSamples": 0, "fastestResponseMs": null,
-            "slowestResponseMs": 0, "topDomains": {}, "modelUsage": {}, "errorCount": 0,
-            "usedChat": false, "usedSummary": false, "usedWordLookup": false
-        }),
+        _ => {
+            json!({"date": date, "hourlyActivity": vec![0u8; 24], "topDomains": {}, "modelUsage": {}})
+        }
     };
     let number = |day: &Value, key: &str| day[key].as_f64().unwrap_or(0.0);
     let add = |day: &mut Value, key: &str, by: f64| day[key] = json!(number(day, key) + by);
-    add(&mut day, "chatMessagesSent", 1.0);
-    add(&mut day, "chatMessagesReceived", 1.0);
-    if let Some((input, output)) = tokens {
-        add(&mut day, "tokensInput", input as f64);
-        add(&mut day, "tokensOutput", output as f64);
-    }
-    let samples = number(&day, "responseTimeSamples");
-    let average = number(&day, "avgResponseTimeMs");
-    day["avgResponseTimeMs"] = json!((average * samples + ms) / (samples + 1.0));
-    day["responseTimeSamples"] = json!(samples + 1.0);
-    let fastest = day["fastestResponseMs"]
-        .as_f64()
-        .filter(|f| f.is_finite())
-        .map_or(ms, |f| f.min(ms));
-    day["fastestResponseMs"] = json!(fastest);
-    day["slowestResponseMs"] = json!(number(&day, "slowestResponseMs").max(ms));
-    day["usedChat"] = json!(true);
-    if !model.is_empty() {
-        let used = day["modelUsage"][model].as_f64().unwrap_or(0.0);
-        if !day["modelUsage"].is_object() {
-            day["modelUsage"] = json!({});
+    let timed = |day: &mut Value, ms: f64| {
+        let samples = number(day, "responseTimeSamples");
+        let average = number(day, "avgResponseTimeMs");
+        day["avgResponseTimeMs"] = json!((average * samples + ms) / (samples + 1.0));
+        day["responseTimeSamples"] = json!(samples + 1.0);
+        let fastest = day["fastestResponseMs"]
+            .as_f64()
+            .filter(|f| f.is_finite())
+            .map_or(ms, |f| f.min(ms));
+        day["fastestResponseMs"] = json!(fastest);
+        day["slowestResponseMs"] = json!(number(day, "slowestResponseMs").max(ms));
+    };
+    let count = |day: &mut Value, map: &str, key: &str| {
+        if key.is_empty() {
+            return;
         }
-        day["modelUsage"][model] = json!(used + 1.0);
+        if !day[map].is_object() {
+            day[map] = json!({});
+        }
+        let used = day[map][key].as_f64().unwrap_or(0.0);
+        day[map][key] = json!(used + 1.0);
+    };
+    match *event {
+        Event::Chat { tokens, ms, model } => {
+            add(&mut day, "chatMessagesSent", 1.0);
+            add(&mut day, "chatMessagesReceived", 1.0);
+            if let Some((input, output)) = tokens {
+                add(&mut day, "tokensInput", input as f64);
+                add(&mut day, "tokensOutput", output as f64);
+            }
+            timed(&mut day, ms);
+            day["usedChat"] = json!(true);
+            count(&mut day, "modelUsage", model);
+        }
+        Event::Summary {
+            email,
+            words_in,
+            words_out,
+            tokens_out,
+            ms,
+            model,
+            site,
+        } => {
+            add(&mut day, "summariesGenerated", 1.0);
+            add(
+                &mut day,
+                if email {
+                    "emailsProcessed"
+                } else {
+                    "pagesProcessed"
+                },
+                1.0,
+            );
+            add(&mut day, "totalWordsRead", words_in);
+            add(&mut day, "totalWordsSummarized", words_out);
+            add(&mut day, "tokensOutput", tokens_out);
+            timed(&mut day, ms);
+            day["usedSummary"] = json!(true);
+            count(&mut day, "modelUsage", model);
+            count(&mut day, "topDomains", site);
+        }
+        Event::Lookup => {
+            add(&mut day, "wordsLookedUp", 1.0);
+            day["usedWordLookup"] = json!(true);
+        }
+        Event::Replies(n) => add(&mut day, "replySuggestionsGenerated", n),
     }
     day
+}
+
+/// The site of `url` as stats count it: its host without `www.`.
+pub fn site(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    host.strip_prefix("www.").unwrap_or(host)
 }
 
 #[cfg(test)]
@@ -283,10 +342,14 @@ mod checks {
     }
 
     #[test]
-    fn a_recorded_chat_keeps_the_trackers_fields() {
-        let new = record_chat(json!(null), "2026-11-18", Some((100, 20)), 800.0, "m");
+    fn events_add_to_the_day_and_keep_its_other_fields() {
+        let chat = Event::Chat {
+            tokens: Some((100, 20)),
+            ms: 800.0,
+            model: "m",
+        };
+        let new = record(json!(null), "2026-11-18", &chat);
         assert_eq!(new["date"], "2026-11-18");
-        assert_eq!(new["hourlyActivity"].as_array().unwrap().len(), 24);
         assert_eq!(
             (
                 new["chatMessagesSent"].as_f64(),
@@ -294,14 +357,39 @@ mod checks {
             ),
             (Some(1.0), Some(100.0))
         );
-        let again = record_chat(new, "2026-11-18", None, 400.0, "m");
-        assert_eq!(again["avgResponseTimeMs"], 600.0);
+        let mut old = new.clone();
+        old["timeInGmail"] = json!(12);
+        let summary = Event::Summary {
+            email: false,
+            words_in: 900.0,
+            words_out: 60.0,
+            tokens_out: 80.0,
+            ms: 400.0,
+            model: "m",
+            site: "example.com",
+        };
+        let day = record(
+            record(old, "2026-11-18", &summary),
+            "2026-11-18",
+            &Event::Lookup,
+        );
+        assert_eq!(day["avgResponseTimeMs"], 600.0);
         assert_eq!(
             (
-                again["fastestResponseMs"].as_f64(),
-                again["modelUsage"]["m"].as_f64()
+                day["fastestResponseMs"].as_f64(),
+                day["modelUsage"]["m"].as_f64()
             ),
             (Some(400.0), Some(2.0))
         );
+        assert_eq!(
+            (
+                day["pagesProcessed"].as_f64(),
+                day["wordsLookedUp"].as_f64(),
+                day["timeInGmail"].as_f64()
+            ),
+            (Some(1.0), Some(1.0), Some(12.0))
+        );
+        assert_eq!(day["topDomains"]["example.com"], 1.0);
+        assert_eq!(site("https://www.example.com/a?b"), "example.com");
     }
 }
