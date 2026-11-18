@@ -1526,7 +1526,29 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .fill(page)
                 .color(ink)
                 .child(thread.padding(16.0).grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }))
-                .child(typography.text(line).role("status").wrap().px(16.0).color(palette.ink_2))
+                .child(
+                    row()
+                        .w_full()
+                        .px(16.0)
+                        .gap(12.0)
+                        .items_center()
+                        .child(typography.text(line).role("status").wrap().grow(1.0).color(palette.ink_2))
+                        .child(
+                            typography
+                                .text("New chat")
+                                .key("gateway-new-chat")
+                                .role("button")
+                                .focusable(true)
+                                .disabled(gateway.streaming())
+                                .native_activation()
+                                .on_press_tx(|state: &mut State, _| {
+                                    let updates = state.updates.clone();
+                                    if let (Some(gateway), Some(updates)) = (state.gateway(), updates) {
+                                        gateway.clear(&updates);
+                                    }
+                                }),
+                        ),
+                )
                 .child(col().w_full().items_center().padding(12.0).child(composer));
         }
         if matches!(state.session, Session::Failed) {
