@@ -2,3 +2,4 @@
 //! on its own benchmark (R14). They run on this device; hosted decision routes join through the
 //! gateway.
 pub mod elements;
+pub mod summary;
