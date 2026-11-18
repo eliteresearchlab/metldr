@@ -1,0 +1,4308 @@
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
+
+use crate::error::LiteParseError;
+use crate::ocr::{OcrEngine, OcrImage, OcrOptions, OcrResult};
+use crate::types::{CutAxis, Page, ParsedPage, Rect, Region, RegionKind, TextItem, WordBox};
+#[cfg(target_arch = "wasm32")]
+use futures_util::{
+    FutureExt,
+    stream::{FuturesUnordered, StreamExt},
+};
+use pdfium::{Document, ImageBounds};
+use serde::{Deserialize, Serialize};
+
+/// Minimum dark filled-path area (pt², ~72 DPI page space) not covered by
+/// native text before a page is sent to OCR. 400 pt² is roughly one word at
+/// a 10–12pt size; anything smaller is likely a bullet, icon, dot leader, or
+/// decoration whose loss is acceptable. A false trigger only costs an extra
+/// OCR pass (the overlap filter discards OCR results that duplicate native
+/// text); measured on a 121-page financial report, the trigger fires on ~3
+/// pages at this threshold.
+const UNCOVERED_VECTOR_AREA_THRESHOLD: f32 = 400.0;
+/// Native characters at which a sparse, raster-free page's text layer is taken as its content
+/// (OCR then runs only for vector-drawn text, see `calculate_page_complexity`).
+const SPARSE_TEXT_TRUSTED_LEN: usize = 500;
+
+/// Minimum side length (pt) for a raster image object to count toward image
+/// coverage; smaller objects (rule lines, bullets, icons) are ignored.
+const MIN_IMAGE_SIZE_PT: f32 = 25.0;
+
+/// A single image at or above this fraction of the page is treated as a
+/// full-page background and ignored.
+const MAX_IMAGE_PAGE_COVERAGE: f32 = 0.9;
+
+/// An XY-cut subtree must hold at least this many text items to count as a
+/// text column, regardless of page size.
+const MIN_COLUMN_ITEMS: usize = 8;
+
+/// ...and at least this fraction of the page's text items. Together with
+/// `MIN_COLUMN_ITEMS` this keeps thin sidebars, figure captions, and margin
+/// notes from flagging a page as multi-column.
+const MIN_COLUMN_ITEM_FRACTION: f32 = 0.15;
+
+/// Figure coverage at or above this fraction of the page area flags
+/// `DenseGraphics`.
+const DENSE_GRAPHICS_MIN_COVERAGE: f32 = 0.2;
+
+/// Owned OCR image (pixels or original encoded bytes), plus the page facts the merge needs
+/// to judge the engine's output. Produced by [`render_pages_for_ocr`],
+/// consumed by [`recognize_rasters`]; the non-pixel facts are carried into
+/// the [`PageOcrOutcome`] so [`merge_ocr_results`] never needs the raster or
+/// the document again.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrRaster {
+    /// 1-based source page number. Outcomes are matched back to pages by
+    /// this number, so a raster can be merged into any page slice that
+    /// contains its page.
+    pub page_number: usize,
+    pub image: OcrImage,
+    /// DPI this page was actually rendered at (the long-edge cap can lower it
+    /// below the requested DPI). Pixel → point scale is `72 / dpi`.
+    pub dpi: f32,
+    /// The page has real native text (it was not sent to OCR as scanned,
+    /// blank, or garbled). OCR is then an enrichment pass over native text,
+    /// and the merge applies the stricter artifact filters.
+    pub has_native_text: bool,
+    /// Embedded raster figure rects (viewport pt, excluding full-page
+    /// backgrounds). Carried for consumers of the stages API; the merge
+    /// itself does not filter on them.
+    pub image_rects: Vec<Rect>,
+    /// The page's native text is an invisible OCR layer the new OCR replaces
+    /// ([`ComplexityReason::InvisibleTextLayer`]).
+    #[serde(default)]
+    pub replace_native: bool,
+    /// Form fields for this page's OCR request: the base
+    /// [`OcrRenderOptions::request_fields`] with the page's own
+    /// [`OcrRenderOptions::page_request_fields`] merged over them.
+    #[serde(default)]
+    pub request_fields: BTreeMap<String, String>,
+}
+
+/// How [`render_pages_for_ocr`] picks and rasterizes pages.
+///
+/// `Default` renders every page that needs OCR at
+/// [`DEFAULT_DPI`](crate::config::DEFAULT_DPI) in RGB, in one round, with
+/// no form rendering or re-flattening.
+#[derive(Debug, Clone)]
+pub struct OcrRenderOptions {
+    /// Stop after this many rasters (`0` = no limit), so a long document can
+    /// be processed in bounded rounds; the function returns where to resume.
+    pub max_rasters: usize,
+    /// Requested render resolution; lowered per page by `max_long_edge` and
+    /// by the built-in long-edge limit.
+    pub dpi: f32,
+    /// Full-page image paths supplied by the caller, keyed by 1-based source page.
+    /// A supplied image replaces rendering only after the normal OCR gate;
+    /// it retains its dimensions regardless of render DPI or `max_long_edge`.
+    pub page_images: HashMap<u32, String>,
+    /// Largest long edge, in pixels, a raster may have. Each page renders at
+    /// `dpi` or, when that would exceed the cap, at the lower dpi whose long
+    /// edge is exactly the cap, so pages of different sizes get different
+    /// dpis in one call (the raster's `dpi` reports which). `None` or
+    /// `Some(0)` leaves `dpi` alone.
+    pub max_long_edge: Option<u32>,
+    /// Use luma instead of RGB when rendering or materializing pixels for
+    /// masking. Encoded inputs retain their format; recognizers choose how
+    /// to decode them (see `OcrEngine::prefers_grayscale`).
+    pub grayscale: bool,
+    /// Paint form-field appearances into the raster (runs document actions).
+    pub render_form_fields: bool,
+    /// Keep going when one page fails to render (it keeps its native text).
+    pub continue_on_page_error: bool,
+    /// Pages extraction flattened widget annotations on, which must be
+    /// flattened again on this (reopened) document so the raster shows what
+    /// extraction saw. See `ExtractedPages::flattened_page_numbers`.
+    pub reflatten_pages: HashSet<u32>,
+    /// Explicit 1-based page selection. `None` lets the page-complexity
+    /// scoring decide which pages need OCR (the default parse behaviour);
+    /// `Some` renders exactly these pages, whatever the scoring says, so a
+    /// caller with its own routing can override it.
+    pub selection: Option<HashSet<u32>>,
+    /// Remove dot-screen specks from rasters of speckled 1-bit full-page scans
+    /// (see `LiteParseConfig::ocr_despeckle_scans`).
+    pub despeckle_scans: bool,
+    /// Form fields every raster's OCR request carries
+    /// (`LiteParseConfig::ocr_request_fields`).
+    pub request_fields: HashMap<String, String>,
+    /// Per-page form fields merged over `request_fields`, keyed by 1-based
+    /// page number (`LiteParseConfig::ocr_page_request_fields`).
+    pub page_request_fields: HashMap<u32, HashMap<String, String>>,
+}
+
+impl Default for OcrRenderOptions {
+    fn default() -> Self {
+        Self {
+            max_rasters: 0,
+            dpi: crate::config::DEFAULT_DPI,
+            page_images: HashMap::new(),
+            max_long_edge: None,
+            grayscale: false,
+            render_form_fields: false,
+            continue_on_page_error: false,
+            reflatten_pages: HashSet::new(),
+            selection: None,
+            despeckle_scans: true,
+            request_fields: HashMap::new(),
+            page_request_fields: HashMap::new(),
+        }
+    }
+}
+
+type OcrTaskResult = Result<Vec<OcrResult>, Box<dyn std::error::Error + Send + Sync>>;
+
+impl PageOcrOutcome {
+    /// The outcome for `raster` before recognition: its page facts, no
+    /// results yet. Lets the image go to the engine while the small facts
+    /// wait for the result.
+    fn pending(raster: &OcrRaster) -> Self {
+        Self {
+            page_number: raster.page_number,
+            dpi: raster.dpi,
+            has_native_text: raster.has_native_text,
+            image_rects: raster.image_rects.clone(),
+            replace_native: raster.replace_native,
+            results: Vec::new(),
+            error: None,
+        }
+    }
+
+    fn with_result(mut self, result: OcrTaskResult) -> Self {
+        match result {
+            Ok(results) => self.results = results,
+            Err(error) => self.error = Some(error.to_string()),
+        }
+        self
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+type OcrJob = std::pin::Pin<Box<dyn std::future::Future<Output = (usize, PageOcrOutcome)>>>;
+
+/// At most `max_workers` recognitions in flight; a slot frees as soon as its
+/// recognition finishes, so the caller can refill it without waiting on the
+/// slowest request.
+///
+/// On native targets, recognition runs on a Tokio blocking thread
+/// because engines such as Tesseract perform CPU-intensive work.
+/// A task starts only when a slot is free, so at most `max_workers`
+/// blocking threads are ever in use. That bound is load-bearing: the HTTP
+/// engine's client resolves DNS through its own `spawn_blocking`, and if
+/// every pool thread were parked waiting for a slot, that lookup could never
+/// run and the whole OCR pass would deadlock.
+///
+/// On WASM, `FuturesUnordered` polls recognition futures, which can
+/// await JavaScript promises.
+///
+/// Dropping the pool aborts native async tasks. Active blocking calls and
+/// JavaScript promises can continue after the pool is dropped.
+pub(crate) struct OcrTaskPool {
+    max_workers: usize,
+    engine: Arc<dyn OcrEngine>,
+    language: String,
+    #[cfg(not(target_arch = "wasm32"))]
+    tasks: tokio::task::JoinSet<OcrTaskResult>,
+    #[cfg(target_arch = "wasm32")]
+    tasks: FuturesUnordered<OcrJob>,
+    /// Submission index and pending outcome for each native task.
+    #[cfg(not(target_arch = "wasm32"))]
+    running: HashMap<tokio::task::Id, (usize, PageOcrOutcome)>,
+    completed: Vec<(usize, PageOcrOutcome)>,
+    submitted: usize,
+}
+
+impl OcrTaskPool {
+    pub(crate) fn new(engine: Arc<dyn OcrEngine>, language: &str, num_workers: usize) -> Self {
+        Self {
+            max_workers: num_workers.max(1),
+            engine,
+            language: language.to_string(),
+            #[cfg(not(target_arch = "wasm32"))]
+            tasks: tokio::task::JoinSet::new(),
+            #[cfg(target_arch = "wasm32")]
+            tasks: FuturesUnordered::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            running: HashMap::new(),
+            completed: Vec::new(),
+            submitted: 0,
+        }
+    }
+
+    pub(crate) fn available_capacity(&self) -> usize {
+        self.max_workers - self.tasks.len()
+    }
+
+    /// Start recognition for `raster`, first waiting for a free slot if the
+    /// pool is full.
+    pub(crate) async fn submit(&mut self, raster: OcrRaster) {
+        while self.available_capacity() == 0 {
+            self.complete_one().await;
+        }
+
+        let pending = PageOcrOutcome::pending(&raster);
+        let engine = self.engine.clone();
+        let options = OcrOptions {
+            language: self.language.clone(),
+            dpi: raster.dpi,
+            request_fields: raster.request_fields.clone(),
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let runtime = tokio::runtime::Handle::current();
+            let task = self.tasks.spawn(async move {
+                match tokio::task::spawn_blocking(move || {
+                    runtime.block_on(engine.recognize_image(&raster.image, &options))
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(join_err) => Err(Box::new(join_err) as _),
+                }
+            });
+            self.running.insert(task.id(), (self.submitted, pending));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let order = self.submitted;
+            self.tasks.push(Box::pin(async move {
+                let result = engine.recognize_image(&raster.image, &options).await;
+                (order, pending.with_result(result))
+            }));
+        }
+        self.submitted += 1;
+    }
+
+    /// Wait for one running recognition to finish and record it. Returns
+    /// `false` (without waiting) when nothing is running.
+    pub(crate) async fn complete_one(&mut self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            match self.tasks.join_next_with_id().await {
+                Some(joined) => {
+                    self.record_completion(joined);
+                    true
+                }
+                None => false,
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            match self.tasks.next().await {
+                Some(outcome) => {
+                    self.completed.push(outcome);
+                    true
+                }
+                None => false,
+            }
+        }
+    }
+
+    pub(crate) fn complete_ready(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        while let Some(joined) = self.tasks.try_join_next_with_id() {
+            self.record_completion(joined);
+        }
+        #[cfg(target_arch = "wasm32")]
+        while let Some(Some(outcome)) = self.tasks.next().now_or_never() {
+            self.completed.push(outcome);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn record_completion(
+        &mut self,
+        joined: Result<(tokio::task::Id, OcrTaskResult), tokio::task::JoinError>,
+    ) {
+        let (id, result) = match joined {
+            Ok((id, result)) => (id, result),
+            Err(join_err) => (join_err.id(), Err(Box::new(join_err) as _)),
+        };
+        let (order, pending) = self
+            .running
+            .remove(&id)
+            .expect("every spawned OCR task is tracked");
+        self.completed.push((order, pending.with_result(result)));
+    }
+
+    /// Wait for the remaining recognitions. Outcomes come back in submission
+    /// order, not completion order, so the result (and which failure the
+    /// merge reports first) does not depend on request timing.
+    pub(crate) async fn finish(mut self) -> Vec<PageOcrOutcome> {
+        while self.complete_one().await {}
+        self.take_completed()
+    }
+
+    pub(crate) fn take_completed(&mut self) -> Vec<PageOcrOutcome> {
+        self.completed.sort_by_key(|(order, _)| *order);
+        std::mem::take(&mut self.completed)
+            .into_iter()
+            .map(|(_, outcome)| outcome)
+            .collect()
+    }
+}
+
+/// Why a page was flagged as needing more than the cheap text-only path.
+/// Multiple reasons can apply to one page (e.g. a sparse page whose little
+/// text is also garbled). Empty exactly when `needs_ocr` is false.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComplexityReason {
+    /// A single raster covers essentially the whole page and there is little or
+    /// no extractable text behind it — a scanned/photographed page.
+    Scanned,
+    /// Almost no extractable native text, and no full-page raster behind it
+    /// (a blank page, or a near-empty cover/divider). Check for a companion
+    /// `AnnotationText` before treating the page as blank — it means the text
+    /// is there, just outside the extractable surface.
+    NoText,
+    /// Some real text, but it covers very little of the page — typically a
+    /// figure-heavy page with only thin captions.
+    SparseText,
+    /// Substantial embedded raster figures sit alongside the native text.
+    EmbeddedImages,
+    /// The native text decodes to garbage (broken cmap / Type3 char-code
+    /// fallback), so the visible glyphs and the extracted text disagree.
+    Garbled,
+    /// Text is painted as filled vector outlines, outside the text layer, so
+    /// no native text items represent it.
+    VectorText,
+    /// The page's own content stream has (almost) no text, but an annotation
+    /// paints text through its appearance stream. PDFium extracts the content
+    /// stream only, so this text is invisible to the text-only path even
+    /// though the page renders — and OCR does recover it. Always accompanied
+    /// by `NoText` or `Scanned`; it tells a genuinely blank page apart from
+    /// one whose body text simply lives out of reach.
+    AnnotationText,
+    /// A scanned page (full-page raster) whose native text is an invisible
+    /// layer (render mode 3) - an earlier OCR pass baked into the PDF. Its
+    /// misreads cost as much as missing text, so the page is OCR'd again and
+    /// the new OCR replaces the layer.
+    InvisibleTextLayer,
+}
+
+impl ComplexityReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ComplexityReason::Scanned => "scanned",
+            ComplexityReason::NoText => "no-text",
+            ComplexityReason::SparseText => "sparse-text",
+            ComplexityReason::EmbeddedImages => "embedded-images",
+            ComplexityReason::Garbled => "garbled",
+            ComplexityReason::VectorText => "vector-text",
+            ComplexityReason::AnnotationText => "annotation-text",
+            ComplexityReason::InvisibleTextLayer => "invisible-text-layer",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageComplexityStats {
+    pub page_number: usize,
+    pub text_length: usize,
+    pub text_coverage: f32,
+    pub has_substantial_images: bool,
+    /// Number of raster image objects counted on the page, after the size and
+    /// single-image coverage filters.
+    pub image_block_count: usize,
+    /// Combined area of the counted images over the page area, clamped to 1.0.
+    /// Stacked or overlapping images can inflate the raw sum past the truly
+    /// covered fraction, hence the clamp — read it as "summed image-bbox area,"
+    /// not unique covered area.
+    pub image_coverage: f32,
+    /// Area of the single largest counted image over the page area, clamped to
+    /// 1.0. Useful for telling a single full-bleed scan apart from many small
+    /// inline figures that sum to a similar `image_coverage`.
+    pub largest_image_coverage: f32,
+    /// A single raster covering ≥90% of the page is present. Such full-page
+    /// backgrounds are excluded from `image_coverage`/`largest_image_coverage`
+    /// (they're not inline figures), so this flag is the only signal that
+    /// distinguishes a scan from a genuinely blank page — both otherwise report
+    /// no text and no counted images.
+    pub full_page_image: bool,
+    /// Filled vector-outline area not covered by native text, in pt². `None`
+    /// when a cheaper predicate already flagged the page for OCR, so this
+    /// expensive page-object walk was skipped (it wasn't the deciding signal).
+    pub uncovered_vector_area: Option<f32>,
+    pub is_garbled: bool,
+    pub page_area: f32,
+    /// Whether the page needs more than the cheap text-only path. Equivalent to
+    /// `!reasons.is_empty()`; kept as a flat bool for the common predicate case
+    /// and as the internal per-page OCR gate.
+    pub needs_ocr: bool,
+    /// Every reason the page was flagged, in no particular priority order.
+    pub reasons: Vec<ComplexityReason>,
+    /// Layout-difficulty signals (columns, tables, dense graphics), computed
+    /// from the post-projection page. Orthogonal to `needs_ocr`/`reasons`:
+    /// none of these imply OCR. `None` in the internal per-page OCR gate
+    /// (`render_pages_for_ocr`), which never runs projection — only
+    /// `is_complex()` and `include_complexity` parses populate it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<LayoutComplexityStats>,
+}
+
+/// Share of a page's visible-glyph characters (whitespace and generated
+/// characters aside) at or above which its text counts as an invisible layer.
+const INVISIBLE_LAYER_MIN_SHARE: f32 = 0.9;
+
+/// Fraction of the page's top-level text objects painted before (under) its first
+/// full-page raster. Archive scans often carry their OCR text in render mode 0 but
+/// hidden beneath the page image, which the reader never sees; born-digital pages
+/// with a background image paint their text on top of it.
+fn hidden_under_scan_share(page_obj: &pdfium::Page) -> f32 {
+    let (pw, ph) = (page_obj.width(), page_obj.height());
+    let mut text_before = 0usize;
+    let mut text_total = 0usize;
+    let mut seen_scan = false;
+    for i in 0..page_obj.object_count() {
+        let Some(obj) = page_obj.object(i) else {
+            continue;
+        };
+        match obj.kind() {
+            pdfium::PageObjectKind::Image if !seen_scan => {
+                if let Some(b) = obj.bounds() {
+                    seen_scan = (b.right - b.left) > pw * MAX_IMAGE_PAGE_COVERAGE
+                        && (b.top - b.bottom).abs() > ph * MAX_IMAGE_PAGE_COVERAGE;
+                }
+            }
+            pdfium::PageObjectKind::Text => {
+                text_total += 1;
+                if !seen_scan {
+                    text_before += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    if !seen_scan || text_total == 0 {
+        0.0
+    } else {
+        text_before as f32 / text_total as f32
+    }
+}
+
+/// Fraction of the page's characters drawn invisibly (text render mode 3).
+fn invisible_text_share(page_obj: &pdfium::Page) -> f32 {
+    let Ok(tp) = page_obj.text() else {
+        return 0.0;
+    };
+    let (mut invisible, mut total) = (0usize, 0usize);
+    for ch in tp.chars() {
+        if ch.is_generated()
+            || char::from_u32(ch.unicode()).is_none_or(|c| c.is_whitespace() || c.is_control())
+        {
+            continue;
+        }
+        total += 1;
+        if ch.text_render_mode() == Some(3) {
+            invisible += 1;
+        }
+    }
+    if total == 0 {
+        0.0
+    } else {
+        invisible as f32 / total as f32
+    }
+}
+
+pub(crate) fn calculate_page_complexity(
+    page: &Page,
+    page_obj: &pdfium::Page,
+) -> Result<PageComplexityStats, LiteParseError> {
+    // Count only usable native text. Substitution-cipher-style corrupt
+    // encodings (e.g. PDFs with a broken cmap) produce long "text" that looks
+    // populated but is unreadable — without this, such pages bypass OCR
+    // because text_length >= 20 and coverage looks fine. The same applies to
+    // unmappable items (Type3 fonts with no ToUnicode), whose text is a
+    // char-code fallback and whose bounding boxes come from deceptive
+    // declared metrics.
+    let text_length: usize = page
+        .text_items
+        .iter()
+        .filter(|item| !is_unusable_native(item))
+        .map(|item| item.text.len())
+        .sum();
+    // Collect every raster ≥ MIN_IMAGE_SIZE_PT, including full-page ones, so a
+    // scan can be told apart from a blank page. The "counted" subset below then
+    // drops full-page backgrounds, matching the old
+    // `image_bounds(.., MAX_IMAGE_PAGE_COVERAGE)` behaviour for inline figures.
+    let pw = page.page_width;
+    let ph = page.page_height;
+    let all_images = page_obj.image_bounds(MIN_IMAGE_SIZE_PT, f32::INFINITY);
+    let is_full_page = |b: &ImageBounds| {
+        b.width > pw * MAX_IMAGE_PAGE_COVERAGE && b.height > ph * MAX_IMAGE_PAGE_COVERAGE
+    };
+    let full_page_image = all_images.iter().any(is_full_page);
+    let image_bounds: Vec<&ImageBounds> = all_images.iter().filter(|b| !is_full_page(b)).collect();
+    let has_images = !image_bounds.is_empty();
+
+    let page_area = pw * ph;
+
+    let (image_area_sum, largest_image_area) =
+        image_bounds
+            .iter()
+            .fold((0.0_f32, 0.0_f32), |(sum, max), b| {
+                let area = b.width.max(0.0) * b.height.max(0.0);
+                (sum + area, max.max(area))
+            });
+    let (image_coverage, largest_image_coverage) = if page_area > 0.0 {
+        (
+            (image_area_sum / page_area).min(1.0),
+            (largest_image_area / page_area).min(1.0),
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    let text_bbox_area: f32 = page
+        .text_items
+        .iter()
+        .filter(|item| !is_unusable_native(item))
+        .map(|item| item.width * item.height)
+        .sum();
+    let text_coverage = if page_area > 0.0 {
+        text_bbox_area / page_area
+    } else {
+        0.0
+    };
+
+    // Low spatial coverage only signals a scan/sparse page when there also
+    // isn't much native text. A text-dense page (e.g. a ruled table with
+    // wide intra-cell whitespace) is spatially sparse but needs no OCR.
+    let sparse_text = text_length < 2000 && text_coverage < 0.15;
+    let is_garbled = page_is_garbled(page);
+
+    let mut reasons = Vec::new();
+    if text_length < MIN_NATIVE_TEXT_LEN {
+        // Too little text to be the page's content. A full-page raster behind
+        // it means a scan; otherwise it's effectively blank.
+        reasons.push(if full_page_image {
+            ComplexityReason::Scanned
+        } else {
+            ComplexityReason::NoText
+        });
+        // ...unless the text is there and simply out of PDFium's reach: text
+        // painted by an annotation appearance stream renders (so OCR gets it)
+        // but is never tokenized by the text API. Only checked on pages that
+        // already look empty, so the annotation walk stays off the hot path.
+        if page_obj.has_annotation_text() {
+            reasons.push(ComplexityReason::AnnotationText);
+        }
+    } else if sparse_text && (full_page_image || text_length < SPARSE_TEXT_TRUSTED_LEN) {
+        // There is real text, but it's too thin to be the whole page. A page that already
+        // carries plenty of native text and no raster at all has nothing else for OCR to read
+        // but text drawn as vector outlines, which the vector check below measures; OCR'ing it
+        // anyway only re-reads the native text (every result then dropped as overlapping).
+        reasons.push(ComplexityReason::SparseText);
+    }
+    if has_images {
+        reasons.push(ComplexityReason::EmbeddedImages);
+    }
+    if is_garbled {
+        reasons.push(ComplexityReason::Garbled);
+    }
+    if full_page_image
+        && text_length >= MIN_NATIVE_TEXT_LEN
+        && (invisible_text_share(page_obj) >= INVISIBLE_LAYER_MIN_SHARE
+            || hidden_under_scan_share(page_obj) >= INVISIBLE_LAYER_MIN_SHARE)
+    {
+        reasons.push(ComplexityReason::InvisibleTextLayer);
+    }
+    let mut needs_ocr = !reasons.is_empty();
+
+    // Text drawn as filled vector outlines lives outside the text layer
+    // entirely: no text items, no image XObjects, so none of the cheap
+    // predicates fire on such a text-dense page. Detect it by measuring filled
+    // path area that native text doesn't account for. Checked last so this
+    // relatively expensive page-object walk only runs when the cheap predicates
+    // all pass; when they don't, the area is left unmeasured (`None`).
+    let uncovered_vector_area = if !needs_ocr {
+        let path_bounds = page_obj.filled_path_bounds(3.0, 0.9);
+        let uncovered = uncovered_path_area(&path_bounds, &page.text_items);
+        if uncovered >= UNCOVERED_VECTOR_AREA_THRESHOLD {
+            needs_ocr = true;
+            reasons.push(ComplexityReason::VectorText);
+        }
+        Some(uncovered)
+    } else {
+        None
+    };
+
+    Ok(PageComplexityStats {
+        page_number: page.page_number,
+        text_length,
+        text_coverage,
+        has_substantial_images: has_images,
+        image_block_count: image_bounds.len(),
+        image_coverage,
+        largest_image_coverage,
+        full_page_image,
+        uncovered_vector_area,
+        is_garbled,
+        page_area,
+        needs_ocr,
+        reasons,
+        layout: None,
+    })
+}
+
+/// Native-office analogue of [`calculate_page_complexity`] +
+/// [`calculate_layout_complexity`] in one: the facts a PDF object walk digs
+/// out arrive here as source-document data. `image_rects` are the page's
+/// placed media rects (viewport pt), `table_count` the page's table blocks,
+/// `column_count` the section-declared column count.
+///
+/// Deliberate divergences from the PDF pair, all following from "the source
+/// states it":
+/// - `uncovered_vector_area` is `Some(0.0)` when no cheaper predicate fired —
+///   text painted as vector outlines cannot exist on this path (every glyph
+///   the layout draws is in the text stream), so the area is a known zero,
+///   not an unmeasured `None`.
+/// - No `AnnotationText` reason: there are no PDF annotations to paint text.
+/// - `ruled_table_coverage` stays 0.0 and `text_table_run_count` 0: blocks
+///   carry no geometry, and the ruled/borderless split is a PDF-detector
+///   concept — `ruled_table_count` carries the (exact) table count and drives
+///   `TableLikely` on its own.
+/// - `figure_count`/`figure_coverage` count placed images rather than
+///   vector-graphic clusters — the closest native analogue.
+pub fn calculate_native_page_complexity(
+    page: &Page,
+    image_rects: &[crate::types::Rect],
+    table_count: usize,
+    column_count: usize,
+) -> PageComplexityStats {
+    let pw = page.page_width;
+    let ph = page.page_height;
+    let page_area = pw * ph;
+
+    // Same "usable text only" filter as the PDF path. Native text should
+    // never trip it, but sharing the predicate keeps the two paths honest.
+    let text_length: usize = page
+        .text_items
+        .iter()
+        .filter(|item| !is_unusable_native(item))
+        .map(|item| item.text.len())
+        .sum();
+
+    // Same filters as the PDF path's `image_bounds(MIN_IMAGE_SIZE_PT, ∞)` +
+    // full-page split: tiny decorations dropped, full-page backgrounds
+    // excluded from inline-figure coverage but remembered as the scan signal.
+    let sized: Vec<&crate::types::Rect> = image_rects
+        .iter()
+        .filter(|r| r.width >= MIN_IMAGE_SIZE_PT && r.height >= MIN_IMAGE_SIZE_PT)
+        .collect();
+    let is_full_page = |r: &crate::types::Rect| {
+        r.width > pw * MAX_IMAGE_PAGE_COVERAGE && r.height > ph * MAX_IMAGE_PAGE_COVERAGE
+    };
+    let full_page_image = sized.iter().any(|r| is_full_page(r));
+    let counted: Vec<&crate::types::Rect> =
+        sized.iter().copied().filter(|r| !is_full_page(r)).collect();
+    let has_images = !counted.is_empty();
+
+    let (image_area_sum, largest_image_area) =
+        counted.iter().fold((0.0_f32, 0.0_f32), |(sum, max), r| {
+            let area = r.width.max(0.0) * r.height.max(0.0);
+            (sum + area, max.max(area))
+        });
+    let (image_coverage, largest_image_coverage) = if page_area > 0.0 {
+        (
+            (image_area_sum / page_area).min(1.0),
+            (largest_image_area / page_area).min(1.0),
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    let text_bbox_area: f32 = page
+        .text_items
+        .iter()
+        .filter(|item| !is_unusable_native(item))
+        .map(|item| item.width * item.height)
+        .sum();
+    let text_coverage = if page_area > 0.0 {
+        text_bbox_area / page_area
+    } else {
+        0.0
+    };
+
+    let sparse_text = text_length < 2000 && text_coverage < 0.15;
+    // Native text comes straight from the source XML — a garbled result would
+    // be an engine bug, not a font-encoding casualty. Run the shared detector
+    // anyway so the two paths can never silently diverge on the predicate.
+    let is_garbled = page_is_garbled(page);
+
+    let mut reasons = Vec::new();
+    if text_length < MIN_NATIVE_TEXT_LEN {
+        reasons.push(if full_page_image {
+            ComplexityReason::Scanned
+        } else {
+            ComplexityReason::NoText
+        });
+    } else if sparse_text {
+        reasons.push(ComplexityReason::SparseText);
+    }
+    if has_images {
+        reasons.push(ComplexityReason::EmbeddedImages);
+    }
+    if is_garbled {
+        reasons.push(ComplexityReason::Garbled);
+    }
+    let needs_ocr = !reasons.is_empty();
+    let uncovered_vector_area = (!needs_ocr).then_some(0.0);
+
+    // Layout half. `figure` coverage from ALL placed images (the PDF layout
+    // half counts every figure region, full-page ones included).
+    let all_image_area: f32 = image_rects
+        .iter()
+        .map(|r| r.width.max(0.0) * r.height.max(0.0))
+        .sum();
+    let figure_coverage = if page_area > 0.0 && all_image_area > 0.0 {
+        (all_image_area / page_area).min(1.0)
+    } else {
+        0.0
+    };
+    let column_count = column_count.max(1);
+    let mut layout_reasons = Vec::new();
+    if column_count >= 2 {
+        layout_reasons.push(LayoutComplexityReason::MultiColumn);
+    }
+    if table_count > 0 {
+        layout_reasons.push(LayoutComplexityReason::TableLikely);
+    }
+    if figure_coverage >= DENSE_GRAPHICS_MIN_COVERAGE {
+        layout_reasons.push(LayoutComplexityReason::DenseGraphics);
+    }
+    let layout = LayoutComplexityStats {
+        column_count,
+        ruled_table_count: table_count,
+        ruled_table_coverage: 0.0,
+        text_table_run_count: 0,
+        figure_count: image_rects.len(),
+        figure_coverage,
+        is_complex: !layout_reasons.is_empty(),
+        reasons: layout_reasons,
+    };
+
+    PageComplexityStats {
+        page_number: page.page_number,
+        text_length,
+        text_coverage,
+        has_substantial_images: has_images,
+        image_block_count: counted.len(),
+        image_coverage,
+        largest_image_coverage,
+        full_page_image,
+        uncovered_vector_area,
+        is_garbled,
+        page_area,
+        needs_ocr,
+        reasons,
+        layout: Some(layout),
+    }
+}
+
+/// Why a page's layout is expected to be hard to reconstruct faithfully.
+/// Orthogonal to `ComplexityReason`: none of these imply OCR — they signal
+/// that the text-only path may mangle reading order or structure, so a caller
+/// can route the page to a higher-accuracy pipeline. Same leniency contract
+/// as `ComplexityReason`: new variants will be added, treat unknowns kindly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LayoutComplexityReason {
+    /// The XY-cut layout tree splits the page into two or more side-by-side
+    /// regions that each hold a substantial share of the text.
+    MultiColumn,
+    /// Table structure detected: ruled-line grid(s) and/or borderless
+    /// column-aligned text runs — the same detectors the markdown emitter
+    /// uses. Description lists (label/value pairs) do not count.
+    TableLikely,
+    /// Figure regions (charts, diagrams, decorated boxes) cover a large
+    /// fraction of the page; their vector content is invisible to text
+    /// extraction.
+    DenseGraphics,
+}
+
+impl LayoutComplexityReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LayoutComplexityReason::MultiColumn => "multi-column",
+            LayoutComplexityReason::TableLikely => "table-likely",
+            LayoutComplexityReason::DenseGraphics => "dense-graphics",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutComplexityStats {
+    /// Side-by-side text columns found by the XY-cut layout pass (1 = single
+    /// column). Only subtrees holding a substantial share of the page's text
+    /// count, so a thin sidebar or caption does not inflate this.
+    pub column_count: usize,
+    /// Validated ruled-table runs on the page: grid components confirmed
+    /// against the projected text, so a boxed callout or a chart's axis
+    /// gridlines — lines without cell structure — don't count.
+    pub ruled_table_count: usize,
+    /// Combined validated ruled-table area (text extent) over page area,
+    /// clamped to 1.0.
+    pub ruled_table_coverage: f32,
+    /// Borderless table runs found by the emitter's track-alignment detector
+    /// over the projected lines (description lists excluded). Ruled tables'
+    /// text rows also align to tracks, so this overlaps `ruled_table_count`
+    /// and must not be summed with it.
+    pub text_table_run_count: usize,
+    /// Figure regions clustered from vector graphics.
+    pub figure_count: usize,
+    /// Combined figure area over page area, clamped to 1.0. Overlapping rects
+    /// can inflate the sum past the truly covered fraction — same caveat as
+    /// `image_coverage`.
+    pub figure_coverage: f32,
+    /// Whether any layout reason fired. Equivalent to `!reasons.is_empty()`,
+    /// kept flat for the common predicate case (mirrors `needs_ocr`).
+    pub is_complex: bool,
+    pub reasons: Vec<LayoutComplexityReason>,
+}
+
+/// Compute layout-difficulty signals from a projected page. Read-only over
+/// structures projection already built: the XY-cut region tree for columns,
+/// `figures` for graphics density, and the emitter's own table detectors —
+/// validated ruled grids and borderless track-aligned runs — over the
+/// projected lines and vector primitives.
+pub(crate) fn calculate_layout_complexity(page: &ParsedPage) -> LayoutComplexityStats {
+    let page_area = page.page_width * page.page_height;
+    let total_items = page.text_items.len();
+
+    let column_count = count_columns(&page.regions, total_items).max(1);
+
+    let table_rects = crate::markdown_layout::validated_ruled_table_rects(
+        &page.projected_lines,
+        &page.graphics,
+        page.page_width,
+        page.page_height,
+    );
+    let text_table_run_count = crate::markdown_layout::count_text_table_runs(&page.projected_lines);
+    let table_area: f32 = table_rects
+        .iter()
+        .map(|r| r.width.max(0.0) * r.height.max(0.0))
+        .sum();
+    let figure_area: f32 = page
+        .figures
+        .iter()
+        .map(|r| r.width.max(0.0) * r.height.max(0.0))
+        .sum();
+    // The `area > 0.0` guard also normalizes the `-0.0` an empty `f32` sum
+    // yields, which would otherwise serialize as `-0.0` in JSON.
+    let coverage = |area: f32| {
+        if page_area > 0.0 && area > 0.0 {
+            (area / page_area).min(1.0)
+        } else {
+            0.0
+        }
+    };
+    let ruled_table_coverage = coverage(table_area);
+    let figure_coverage = coverage(figure_area);
+
+    let mut reasons = Vec::new();
+    if column_count >= 2 {
+        reasons.push(LayoutComplexityReason::MultiColumn);
+    }
+    if !table_rects.is_empty() || text_table_run_count > 0 {
+        reasons.push(LayoutComplexityReason::TableLikely);
+    }
+    if figure_coverage >= DENSE_GRAPHICS_MIN_COVERAGE {
+        reasons.push(LayoutComplexityReason::DenseGraphics);
+    }
+
+    LayoutComplexityStats {
+        column_count,
+        ruled_table_count: table_rects.len(),
+        ruled_table_coverage,
+        text_table_run_count,
+        figure_count: page.figures.len(),
+        figure_coverage,
+        is_complex: !reasons.is_empty(),
+        reasons,
+    }
+}
+
+fn region_item_count(region: &Region) -> usize {
+    match &region.kind {
+        RegionKind::Leaf { item_indices } => item_indices.len(),
+        RegionKind::Split { children, .. } => children.iter().map(region_item_count).sum(),
+    }
+}
+
+/// Count side-by-side text columns in an XY-cut subtree. Subtrees below the
+/// substantiality bar contribute zero. Vertical splits sum their children
+/// (side-by-side regions), horizontal splits take the max of theirs (stacked
+/// bands — a full-width title above a two-column body is a two-column page).
+/// Nested vertical splits therefore count correctly: a three-column page cut
+/// as `V(a, V(b, c))` yields 3.
+fn count_columns(region: &Region, total_items: usize) -> usize {
+    let min_items =
+        MIN_COLUMN_ITEMS.max((total_items as f32 * MIN_COLUMN_ITEM_FRACTION).ceil() as usize);
+    if region_item_count(region) < min_items {
+        return 0;
+    }
+    match &region.kind {
+        RegionKind::Leaf { .. } => 1,
+        RegionKind::Split { axis, children } => {
+            let counts = children.iter().map(|c| count_columns(c, total_items));
+            match axis {
+                CutAxis::Vertical => counts.sum(),
+                CutAxis::Horizontal => counts.max().unwrap_or(0),
+            }
+        }
+    }
+}
+
+/// Cap on the rendered long edge (in pixels) for OCR page rasters
+/// to avoid excessive memory usage.
+pub(crate) const MAX_OCR_RENDER_LONG_EDGE_PX: f32 = 4096.0;
+
+/// Despeckle thresholds for [`OcrRenderOptions::despeckle_scans`], in pixels at
+/// [`DESPECKLE_REF_DPI`] and scaled with the render dpi. Dot-screen backgrounds on
+/// 300 dpi 1-bit scans are blobs of 1 to 10 px area and at most 3 px across;
+/// periods, colon dots and decimal points start around 40 px area and 6 px across.
+const DESPECKLE_REF_DPI: f32 = 300.0;
+const DESPECKLE_MAX_AREA_PX: f32 = 10.0;
+const DESPECKLE_MAX_SIDE_PX: f32 = 5.0;
+/// Below this render dpi pdfium's downsampling already averages the dots into
+/// grey, and punctuation shrinks towards dot size, so the page is left alone.
+const DESPECKLE_MIN_DPI: f32 = 200.0;
+/// Speckles per square inch of page before a page counts as speckled. Dotted
+/// backgrounds run in the hundreds; a clean scan has a handful.
+const DESPECKLE_MIN_DENSITY_PER_SQ_IN: f32 = 50.0;
+
+/// True if a top-level 1-bpp image covers the page. Checks both orientations
+/// because object bounds ignore `/Rotate`.
+fn is_bilevel_scan(page_obj: &pdfium::Page) -> bool {
+    let (pw, ph) = (page_obj.width(), page_obj.height());
+    let covers = |w: f32, h: f32| {
+        (w > pw * MAX_IMAGE_PAGE_COVERAGE && h > ph * MAX_IMAGE_PAGE_COVERAGE)
+            || (w > ph * MAX_IMAGE_PAGE_COVERAGE && h > pw * MAX_IMAGE_PAGE_COVERAGE)
+    };
+    (0..page_obj.object_count()).any(|i| {
+        let Some(obj) = page_obj.object(i) else {
+            return false;
+        };
+        if !matches!(obj.kind(), pdfium::PageObjectKind::Image) {
+            return false;
+        }
+        let Some(b) = obj.bounds() else {
+            return false;
+        };
+        covers(b.right - b.left, (b.top - b.bottom).abs())
+            && obj.image_metadata().is_some_and(|m| m.bits_per_pixel == 1)
+    })
+}
+
+/// Remove the isolated specks of a dotted or dithered scan background from an
+/// interleaved 8-bit raster rendered at `dpi`, in place. A speck is an
+/// 8-connected blob of dark (mean < 128) pixels at most `DESPECKLE_MAX_AREA_PX`
+/// in area and `DESPECKLE_MAX_SIDE_PX` on each side, both scaled to `dpi`. Specks
+/// are painted white only when the page holds at least
+/// `DESPECKLE_MIN_DENSITY_PER_SQ_IN` of them, so a clean page, and the
+/// punctuation on it, is never touched. Returns how many specks were removed.
+fn despeckle(pixels: &mut [u8], width: usize, height: usize, channels: usize, dpi: f32) -> usize {
+    if width == 0 || height == 0 || dpi < DESPECKLE_MIN_DPI {
+        return 0;
+    }
+    let scale = dpi / DESPECKLE_REF_DPI;
+    let max_area = (DESPECKLE_MAX_AREA_PX * scale * scale).round() as usize;
+    let max_side = (DESPECKLE_MAX_SIDE_PX * scale).round() as usize;
+    let row = width * channels;
+    let dark = |y: usize, x: usize| {
+        let px = &pixels[y * row + x * channels..y * row + (x + 1) * channels];
+        px.iter().map(|&v| v as usize).sum::<usize>() < 128 * channels
+    };
+
+    // Runs of dark pixels, row by row: (y, x0, x1) inclusive.
+    let mut runs: Vec<(usize, usize, usize)> = Vec::new();
+    let mut row_start = Vec::with_capacity(height + 1);
+    for y in 0..height {
+        row_start.push(runs.len());
+        let mut x = 0;
+        while x < width {
+            if dark(y, x) {
+                let x0 = x;
+                while x < width && dark(y, x) {
+                    x += 1;
+                }
+                runs.push((y, x0, x - 1));
+            } else {
+                x += 1;
+            }
+        }
+    }
+    row_start.push(runs.len());
+
+    // Union runs that touch a run on the row above, diagonals included.
+    let mut parent: Vec<usize> = (0..runs.len()).collect();
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for y in 1..height {
+        let (above, here) = (
+            row_start[y - 1]..row_start[y],
+            row_start[y]..row_start[y + 1],
+        );
+        let mut j = above.start;
+        for i in here {
+            let (_, x0, x1) = runs[i];
+            while j < above.end && runs[j].2 + 1 < x0 {
+                j += 1;
+            }
+            let mut k = j;
+            while k < above.end && runs[k].1 <= x1 + 1 {
+                let (a, b) = (find(&mut parent, i), find(&mut parent, k));
+                if a != b {
+                    parent[a] = b;
+                }
+                k += 1;
+            }
+        }
+    }
+
+    // Area and bounds per blob.
+    let mut stats: Vec<(usize, usize, usize, usize, usize)> =
+        vec![(0, usize::MAX, 0, usize::MAX, 0); runs.len()];
+    for (i, &(y, x0, x1)) in runs.iter().enumerate() {
+        let r = find(&mut parent, i);
+        let s = &mut stats[r];
+        s.0 += x1 - x0 + 1;
+        s.1 = s.1.min(x0);
+        s.2 = s.2.max(x1);
+        s.3 = s.3.min(y);
+        s.4 = s.4.max(y);
+    }
+    let speck = |s: &(usize, usize, usize, usize, usize)| {
+        s.0 > 0 && s.0 <= max_area && s.2 - s.1 < max_side && s.4 - s.3 < max_side
+    };
+    let specks = stats.iter().filter(|s| speck(s)).count();
+    let sq_in = (width as f32 / dpi) * (height as f32 / dpi);
+    if (specks as f32) < DESPECKLE_MIN_DENSITY_PER_SQ_IN * sq_in {
+        return 0;
+    }
+    for (i, &(y, x0, x1)) in runs.iter().enumerate() {
+        if speck(&stats[find(&mut parent, i)]) {
+            pixels[y * row + x0 * channels..y * row + (x1 + 1) * channels].fill(255);
+        }
+    }
+    specks
+}
+
+/// Render the pages in `pages[start..]` that need OCR from an already-open
+/// document, stopping once `options.max_rasters` of them have been rendered.
+/// Returns the rasters plus the index to resume scanning from, so a caller
+/// can process a long document in bounded rounds.
+///
+/// The pdfium `Document` holds raw pointers that are not `Send`, so callers
+/// must drop it before awaiting the OCR engine.
+pub fn render_pages_for_ocr(
+    document: &Document,
+    pages: &[Page],
+    start: usize,
+    options: &OcrRenderOptions,
+) -> Result<(Vec<OcrRaster>, usize), LiteParseError> {
+    render_pages_for_ocr_capped(document, pages, start, options, options.max_rasters)
+}
+
+/// Infer resolution from the full-page image and PDF viewport. The longer
+/// page axis minimizes relative raster rounding error; the other axis must
+/// agree within one pixel. Embedded image DPI metadata is not used.
+fn load_ocr_page_image(path: &str, page: &Page) -> Result<(OcrImage, f32), LiteParseError> {
+    let image = OcrImage::from_file(path)?;
+    let (width, height) = image.dimensions();
+    let pixels_per_point = if page.page_width >= page.page_height {
+        width as f32 / page.page_width
+    } else {
+        height as f32 / page.page_height
+    };
+    let dpi = pixels_per_point * 72.0;
+    if width == 0
+        || height == 0
+        || !page.page_width.is_finite()
+        || page.page_width <= 0.0
+        || !page.page_height.is_finite()
+        || page.page_height <= 0.0
+        || !dpi.is_finite()
+        || dpi <= 0.0
+        || (width as f32 - page.page_width * pixels_per_point).abs() > 1.0
+        || (height as f32 - page.page_height * pixels_per_point).abs() > 1.0
+    {
+        return Err(LiteParseError::Config(format!(
+            "OCR image for page {} is {}x{}; expected a full-page image matching the {:.1}x{:.1} point page in corrected viewport orientation",
+            page.page_number, width, height, page.page_width, page.page_height
+        )));
+    }
+    Ok((image, dpi))
+}
+
+/// [`render_pages_for_ocr`] with `max_rasters` overriding the one in
+/// `options`, so a caller sizing each round to its free OCR slots need not
+/// clone the options.
+pub(crate) fn render_pages_for_ocr_capped(
+    document: &Document,
+    pages: &[Page],
+    start: usize,
+    options: &OcrRenderOptions,
+    max_rasters: usize,
+) -> Result<(Vec<OcrRaster>, usize), LiteParseError> {
+    let OcrRenderOptions {
+        max_rasters: _,
+        dpi,
+        page_images,
+        max_long_edge,
+        grayscale,
+        render_form_fields,
+        continue_on_page_error,
+        reflatten_pages: flatten_page_numbers,
+        selection,
+        despeckle_scans,
+        request_fields,
+        page_request_fields,
+    } = options;
+    let (dpi, grayscale, render_form_fields, continue_on_page_error) = (
+        *dpi,
+        *grayscale,
+        *render_form_fields,
+        *continue_on_page_error,
+    );
+    let mut rendered = Vec::new();
+    // With `render_form_fields`, draw form-field appearances into the OCR
+    // raster so filled-in form values are visible to the OCR engine (matches
+    // the LlamaParse extract binary's screenshot rendering). Opt-in because
+    // the form environment runs the document's open/JS actions.
+    let form = render_form_fields
+        .then(|| document.form_environment())
+        .flatten();
+    if let Some(form) = form.as_ref() {
+        form.run_document_actions();
+    }
+    let mut next_start = pages.len();
+    for (idx, page) in pages.iter().enumerate().skip(start) {
+        if let Some(selection) = selection
+            && !selection.contains(&(page.page_number as u32))
+        {
+            continue;
+        }
+        let page_render = (|| -> Result<Option<OcrRaster>, LiteParseError> {
+            let page_index = (page.page_number - 1) as i32;
+            // Text extraction may have flattened THIS page's widget
+            // annotations into page content. When the caller hands us a
+            // freshly reopened document, re-apply the flatten on exactly the
+            // pages extraction flattened, so the raster shows the same
+            // content extraction saw. Never flatten any other page:
+            // flattening hides a page's non-widget annotations (stamps,
+            // highlights, free text) from the raster, losing their text.
+            let page_obj = if flatten_page_numbers.contains(&(page.page_number as u32)) {
+                match document.flatten_form_widgets(page_index)? {
+                    Some(flattened_page) => flattened_page,
+                    None => document.page(page_index)?,
+                }
+            } else {
+                document.page(page_index)?
+            };
+            // `has_native_text` drives the merge's artifact filters: true
+            // when the page was not sent to OCR as scanned, blank, garbled or
+            // annotation-only. With an explicit selection the OCR gate is the
+            // caller's decision, so the page-object walk in
+            // `calculate_page_complexity` is skipped and the signal is derived
+            // from the text items alone (which is all those reasons read).
+            let mut replace_native = false;
+            let has_native_text = match selection {
+                Some(_) => {
+                    native_text_length(page) >= MIN_NATIVE_TEXT_LEN && !page_is_garbled(page)
+                }
+                None => {
+                    let page_complexity = calculate_page_complexity(page, &page_obj)?;
+                    if !page_complexity.needs_ocr {
+                        return Ok(None);
+                    }
+                    replace_native = page_complexity
+                        .reasons
+                        .contains(&ComplexityReason::InvisibleTextLayer);
+                    !page_complexity.reasons.iter().any(|r| {
+                        matches!(
+                            r,
+                            ComplexityReason::Scanned
+                                | ComplexityReason::NoText
+                                | ComplexityReason::Garbled
+                                | ComplexityReason::AnnotationText
+                                | ComplexityReason::InvisibleTextLayer
+                        )
+                    })
+                }
+            };
+
+            // A page whose native text the merge keeps as is: blank that text out of the raster.
+            // The merge drops every OCR line overlapping kept native text, so reading those
+            // lines was wasted; OCR now only sees what the text layer doesn't cover (figures,
+            // scanned inserts, outlined text). Pages where OCR replaces native text (garbled
+            // fonts, an invisible OCR layer) keep the whole raster.
+            let mask_native = has_native_text
+                && !replace_native
+                && matches!(garbled_scope(page), GarbledScope::None);
+            let (mut image, eff_dpi) = if let Some(source) =
+                page_images.get(&(page.page_number as u32))
+            {
+                load_ocr_page_image(source, page)?
+            } else {
+                // Fit the caller's cap, then clamp so the long edge stays within the raster budget.
+                let long_edge_pt = page.page_width.max(page.page_height);
+                let mut eff_dpi = fitting_dpi(
+                    page.page_width,
+                    page.page_height,
+                    dpi,
+                    max_long_edge.unwrap_or(0),
+                );
+                if long_edge_pt > 0.0 {
+                    let max_dpi = MAX_OCR_RENDER_LONG_EDGE_PX * 72.0 / long_edge_pt;
+                    if eff_dpi > max_dpi {
+                        eff_dpi = max_dpi;
+                    }
+                }
+                let bitmap = page_obj.render_with_form(eff_dpi, form.as_ref())?;
+                let width = bitmap.width() as u32;
+                let height = bitmap.height() as u32;
+                // Grayscale or RGB per the engine; see `OcrEngine::prefers_grayscale`.
+                let mut data = if grayscale {
+                    bitmap.to_luma()
+                } else {
+                    bitmap.to_rgb()
+                };
+                // A 1-bit scan on a dotted or dithered background: drop the specks before OCR.
+                // Rendered at the scan's resolution they read as diacritics and stray
+                // punctuation, and a server that downscales for detection aliases them.
+                if *despeckle_scans && eff_dpi >= DESPECKLE_MIN_DPI && is_bilevel_scan(&page_obj) {
+                    despeckle(
+                        &mut data,
+                        width as usize,
+                        height as usize,
+                        if grayscale { 1 } else { 3 },
+                        eff_dpi,
+                    );
+                }
+                (
+                    OcrImage::Pixels {
+                        data,
+                        width,
+                        height,
+                        grayscale,
+                    },
+                    eff_dpi,
+                )
+            };
+            // Edits materialize pixels and replace the whole image, so the OCR
+            // engine can never receive stale encoded bytes after native masking.
+            if mask_native {
+                let (width, height) = image.dimensions();
+                let mut data = image.into_pixels(grayscale)?;
+                mask_native_text(
+                    &mut data,
+                    width,
+                    height,
+                    page,
+                    if grayscale { 1 } else { 3 },
+                );
+                image = OcrImage::Pixels {
+                    data,
+                    width,
+                    height,
+                    grayscale,
+                };
+            }
+
+            let image_rects = if has_native_text {
+                let pw = page.page_width;
+                let ph = page.page_height;
+                page_obj
+                    .image_bounds(MIN_IMAGE_SIZE_PT, f32::INFINITY)
+                    .into_iter()
+                    .filter(|b| {
+                        !(b.width > pw * MAX_IMAGE_PAGE_COVERAGE
+                            && b.height > ph * MAX_IMAGE_PAGE_COVERAGE)
+                    })
+                    .map(|b| Rect {
+                        x: b.x,
+                        y: b.y,
+                        width: b.width,
+                        height: b.height,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            Ok(Some(OcrRaster {
+                page_number: page.page_number,
+                image,
+                dpi: eff_dpi,
+                has_native_text,
+                image_rects,
+                replace_native,
+                // Later entries win, so the page's own fields override the base.
+                request_fields: request_fields
+                    .iter()
+                    .chain(
+                        page_request_fields
+                            .get(&(page.page_number as u32))
+                            .into_iter()
+                            .flatten(),
+                    )
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            }))
+        })();
+        match page_render {
+            Ok(Some(render)) => {
+                rendered.push(render);
+                if max_rasters > 0 && rendered.len() >= max_rasters {
+                    next_start = idx + 1;
+                    break;
+                }
+            }
+            Ok(None) => {}
+            // The page already extracted successfully, so a tolerant parse
+            // keeps its native text and only forgoes the OCR enrichment.
+            Err(error) if continue_on_page_error => eprintln!(
+                "[ocr] render failed for page {}: {} — keeping native text without OCR (continue_on_page_error)",
+                page.page_number, error
+            ),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok((rendered, next_start))
+}
+
+/// The render dpi for a `width` x `height` pt page: `dpi`, lowered so the long
+/// edge (`pt * dpi / 72`, rounded as pdfium sizes the bitmap) is at most
+/// `max_long_edge` pixels. A cap of 0, or a page with no size, keeps `dpi`.
+fn fitting_dpi(width: f32, height: f32, dpi: f32, max_long_edge: u32) -> f32 {
+    let long_edge_pt = width.max(height);
+    if max_long_edge == 0 || long_edge_pt <= 0.0 {
+        return dpi;
+    }
+    dpi.min(max_long_edge as f32 * 72.0 / long_edge_pt)
+}
+
+/// One page's recognition outcome: what the engine returned for one
+/// [`OcrRaster`], plus the raster's page facts so the merge is a pure
+/// function of `(pages, outcomes)`. The pixels are gone — this is the small
+/// payload that crosses a stage boundary, not the bitmap.
+///
+/// `error` is set when the engine failed on this page (`results` is then
+/// empty); the merge counts failures to tell a systemic engine problem from
+/// a flaky page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageOcrOutcome {
+    /// 1-based source page number the raster came from.
+    pub page_number: usize,
+    /// DPI the raster was rendered at; pixel → point scale is `72 / dpi`.
+    pub dpi: f32,
+    pub has_native_text: bool,
+    pub image_rects: Vec<Rect>,
+    /// See [`OcrRaster::replace_native`].
+    #[serde(default)]
+    pub replace_native: bool,
+    /// Engine output in raster pixel coordinates. Empty when the engine
+    /// failed (see `error`) or found nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub results: Vec<OcrResult>,
+    /// The engine's error message when recognition failed on this page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Run `ocr_engine` over pre-rendered page bitmaps, at most `num_workers`
+/// pages at a time, returning one outcome per raster in the order given.
+/// Pure recognition: nothing is merged, and a failed page is reported as an
+/// `Err` outcome rather than aborting the batch.
+pub async fn recognize_rasters(
+    rendered: Vec<OcrRaster>,
+    ocr_engine: Arc<dyn OcrEngine>,
+    ocr_language: &str,
+    num_workers: usize,
+) -> Vec<PageOcrOutcome> {
+    let mut pool = OcrTaskPool::new(ocr_engine, ocr_language, num_workers);
+    for raster in rendered {
+        pool.submit(raster).await;
+    }
+    pool.finish().await
+}
+
+/// Merge recognition outcomes into `pages`, in place. Pure: needs neither the
+/// document nor the rasters, only the outcomes [`recognize_rasters`] produced
+/// (or an equivalent a caller built from its own OCR engine's output).
+///
+/// Per page, unusable native text (garbled fonts, unmappable Type3) is dropped
+/// first so OCR can replace it; then each result is filtered against rule
+/// artifacts and overlap with surviving native text before
+/// being appended as an `OCR`-font [`TextItem`] in viewport points.
+///
+/// Outcomes are matched to pages by `page_number`; an outcome for a page not
+/// in `pages` is an error rather than a panic, so a caller can merge a
+/// subset of pages or hand-built outcomes safely.
+///
+/// `emit_word_boxes` must match `LiteParseConfig::effective_emit_word_boxes`
+/// from extraction. Each surviving result becomes one [`TextItem`] whose word
+/// boxes the projection preserves when merging neighbours. When `false`, no
+/// word boxes are allocated.
+pub fn merge_ocr_results(
+    pages: &mut [Page],
+    outcomes: Vec<PageOcrOutcome>,
+    ocr_failure_fatal: bool,
+    emit_word_boxes: bool,
+) -> Result<(), LiteParseError> {
+    let mut state = OcrMergeState::default();
+    state.merge(pages, outcomes, emit_word_boxes)?;
+    state.finish(ocr_failure_fatal)
+}
+
+/// Merge OCR results in separate calls, with one final failure check.
+/// Stores counters and the first error in merge order.
+#[derive(Default)]
+pub struct OcrMergeState {
+    total_tasks: usize,
+    failed_tasks: usize,
+    failed_sparse_text_page: bool,
+    first_error: Option<String>,
+}
+
+impl OcrMergeState {
+    /// Merge completed results into their pages. Supply each outcome only once.
+    /// Call [`Self::finish`] after all outcomes to check the failure policy.
+    pub fn merge(
+        &mut self,
+        pages: &mut [Page],
+        outcomes: Vec<PageOcrOutcome>,
+        emit_word_boxes: bool,
+    ) -> Result<(), LiteParseError> {
+        merge_ocr_outcomes(pages, outcomes, emit_word_boxes, self)
+    }
+
+    /// Apply the failure policy to all outcomes received by this state.
+    pub fn finish(self, ocr_failure_fatal: bool) -> Result<(), LiteParseError> {
+        let Self {
+            total_tasks,
+            failed_tasks,
+            failed_sparse_text_page,
+            first_error,
+        } = self;
+        // If every OCR task failed *and* at least one of those failures was on a
+        // sparse-text page (the same length/coverage predicate that sends pages to
+        // OCR as text-poor in `render_pages_for_ocr`), treat it as a systemic
+        // failure. Returning an error surfaces the root cause (e.g. missing language
+        // data) instead of silently emitting an empty or mostly-empty page. We
+        // deliberately do NOT fail when the only failures were on pages that already
+        // had substantial native text and were merely rendered for image-based OCR
+        // enrichment — a broken OCR setup must not abort an otherwise-good
+        // native-text document.
+        if total_tasks > 0 && failed_tasks == total_tasks && failed_sparse_text_page {
+            let detail = first_error.unwrap_or_else(|| "unknown error".to_string());
+            if ocr_failure_fatal {
+                return Err(LiteParseError::Ocr(format!(
+                    "OCR failed for all {} page(s): {}",
+                    total_tasks, detail
+                )));
+            }
+            // Non-fatal mode: the caller prefers partial results over a hard abort,
+            // so keep whatever native text was extracted and continue. Surface the
+            // root cause as a warning so a broken OCR setup is still visible.
+            eprintln!(
+                "[ocr] OCR failed for all {} page(s): {} — continuing with partial (native-text) results (ocr_failure_fatal=false)",
+                total_tasks, detail
+            );
+        }
+
+        // Surface a concise summary for partial failures without flooding stderr.
+        if failed_tasks > 0 {
+            eprintln!(
+                "[ocr] {}/{} page(s) failed OCR; continuing with partial results",
+                failed_tasks, total_tasks
+            );
+        }
+
+        Ok(())
+    }
+}
+
+fn merge_ocr_outcomes(
+    pages: &mut [Page],
+    outcomes: Vec<PageOcrOutcome>,
+    emit_word_boxes: bool,
+    state: &mut OcrMergeState,
+) -> Result<(), LiteParseError> {
+    state.total_tasks += outcomes.len();
+
+    let index_by_page_number: HashMap<usize, usize> = pages
+        .iter()
+        .enumerate()
+        .map(|(idx, page)| (page.page_number, idx))
+        .collect();
+
+    for outcome in outcomes {
+        let PageOcrOutcome {
+            page_number,
+            dpi: page_dpi,
+            has_native_text,
+            image_rects: _,
+            replace_native,
+            results: ocr_results,
+            error,
+        } = outcome;
+        let Some(&idx) = index_by_page_number.get(&page_number) else {
+            return Err(LiteParseError::Other(format!(
+                "OCR outcome for page {page_number} has no matching page among the {} page(s) being merged",
+                pages.len()
+            )));
+        };
+        if let Some(msg) = error {
+            state.failed_tasks += 1;
+            state.failed_sparse_text_page |= page_has_sparse_native_text(&pages[idx]);
+            if state.first_error.is_none() {
+                eprintln!("[ocr] failed for page {}: {}", page_number, msg);
+                state.first_error = Some(msg);
+            }
+            continue;
+        }
+
+        if ocr_results.is_empty() {
+            continue;
+        }
+
+        // Pixel -> PDF-point scale for the DPI this page was actually rendered
+        // at (the long-edge cap can lower it below the configured DPI).
+        let scale_factor = 72.0 / page_dpi;
+
+        let page = &mut pages[idx];
+        // Drop unusable native items (substitution-cipher cmap corruption, or
+        // unmappable Type3 text) so OCR can replace them. Without this,
+        // garbled-but-spatially-present native text suppresses every OCR
+        // result that overlaps it via the overlap check below, leaving the
+        // output stuck with unreadable text. We apply per-item, per-font, and
+        // per-page checks: short garbled labels ("GDWH", "XVG") can't be
+        // flagged alone, but their font group or host page can.
+        // An invisible OCR layer on a scan steps aside for the new OCR (which
+        // came back non-empty, so the page keeps text either way).
+        let scope = if replace_native {
+            GarbledScope::WholePage
+        } else {
+            garbled_scope(page)
+        };
+        // Some fonts dropped, the rest kept: OCR fills lines the dropped fonts held, and a kept
+        // glyph inside such a line (a bullet, a drop cap) must not veto it (see below).
+        let partial = matches!(scope, GarbledScope::Fonts(_));
+        match scope {
+            GarbledScope::None => page.text_items.retain(|item| !is_unusable_native(item)),
+            GarbledScope::WholePage => page.text_items.clear(),
+            // Only the corrupt font's items go; text in the page's healthy
+            // fonts is still the best source for its part of the page, and
+            // keeping it lets the overlap check below suppress redundant OCR
+            // there while OCR fills in what was dropped.
+            GarbledScope::Fonts(fonts) => page
+                .text_items
+                .retain(|item| !fonts.contains(&item.font_name) && !is_unusable_native(item)),
+        }
+
+        // Only check overlap against native (already-extracted) PDF text. Comparing
+        // each OCR result against previously-accepted OCR results caused adjacent
+        // OCR lines whose bounding boxes touched within tolerance to suppress each
+        // other, dropping every second line on scanned pages.
+        let native_count = page.text_items.len();
+        // Kept native items an OCR line superseded on a partial page (see `partial`).
+        let mut superseded = vec![false; native_count];
+        let debug_ocr = std::env::var_os("LITEPARSE_DEBUG_OCR").is_some();
+        // A skewed scan: when all of the page's text is OCR, rotate the items upright about the
+        // page centre. Axis-aligned boxes of tilted lines overlap the lines above and below,
+        // and the projection then merges and reorders them. The tilt is recorded on the page
+        // and the output boxes are rotated back after layout (`stages::rotate_back_ocr_deskew`).
+        let deskew = if native_count == 0 {
+            ocr_page_skew(&ocr_results)
+        } else {
+            None
+        };
+        page.ocr_deskew = deskew;
+        let (cx, cy) = (page.page_width / 2.0, page.page_height / 2.0);
+        let upright = |x: f32, y: f32| -> (f32, f32) {
+            match deskew {
+                Some(deg) => rotate_about(x, y, cx, cy, -deg),
+                None => (x, y),
+            }
+        };
+        // An axis-aligned pixel box in page points. Under a deskew the box moves with its
+        // centre and keeps its size, so rotating the centre back restores it (parser.rs).
+        let to_page = |b: [f32; 4]| -> (f32, f32, f32, f32) {
+            let (w, h) = ((b[2] - b[0]) * scale_factor, (b[3] - b[1]) * scale_factor);
+            match deskew {
+                Some(_) => {
+                    let (mx, my) = upright(
+                        (b[0] + b[2]) / 2.0 * scale_factor,
+                        (b[1] + b[3]) / 2.0 * scale_factor,
+                    );
+                    (mx - w / 2.0, my - h / 2.0, w, h)
+                }
+                None => (b[0] * scale_factor, b[1] * scale_factor, w, h),
+            }
+        };
+        // Page-point bounds of a pixel box, or of its quad when the engine sent one. Without a
+        // deskew the quad's points stay in image pixels until the bounds are taken, so the
+        // boxes match the un-deskewed arithmetic exactly.
+        let page_bounds = |bbox: [f32; 4], poly: Option<[[f32; 2]; 4]>| {
+            let Some(poly) = poly else {
+                return to_page(bbox);
+            };
+            let (s, pts) = match deskew {
+                Some(_) => (
+                    1.0,
+                    poly.map(|[x, y]| upright(x * scale_factor, y * scale_factor)),
+                ),
+                None => (scale_factor, poly.map(|[x, y]| (x, y))),
+            };
+            let x_min = pts.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
+            let x_max = pts.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max);
+            let y_min = pts.iter().map(|p| p.1).fold(f32::INFINITY, f32::min);
+            let y_max = pts.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max);
+            (
+                x_min * s,
+                y_min * s,
+                (x_max - x_min) * s,
+                (y_max - y_min) * s,
+            )
+        };
+        if debug_ocr {
+            eprintln!(
+                "[ocr-merge] page {} native_items={} ocr_results={} dpi={}",
+                page_number,
+                native_count,
+                ocr_results.len(),
+                page_dpi
+            );
+        }
+        for r in &ocr_results {
+            if r.confidence <= 0.1 {
+                continue;
+            }
+
+            // The polygon's bounds give a rotated detection a tight upright box. The
+            // rotation (the engine's angle, else the polygon's point order) sends rotated
+            // sidebar text through the projector's rotation reading-order handler.
+            let (ocr_x, ocr_y, ocr_w, ocr_h) = page_bounds(r.bbox, r.polygon);
+            let rotation = match r.rotation {
+                Some(deg) => canonical_quarter(deg) as f32,
+                None => r.polygon.map_or(0.0, |p| polygon_rotation_deg(&p)),
+            };
+
+            // On pages that already have native text, OCR only enriches:
+            // a bar-shaped single glyph is a table border / rule misread
+            // (Tesseract reads vertical rules as `|`/`I`), and a result with
+            // no letters or digits is decoration. Both would otherwise be
+            // glued onto the adjacent native line by the projection's
+            // item-merge pass, corrupting cell text.
+            if has_native_text && is_rule_artifact(&r.text, ocr_w, ocr_h) {
+                if debug_ocr {
+                    eprintln!(
+                        "[ocr-merge]   skip(rule-artifact) {:?} w={:.1} h={:.1}",
+                        r.text, ocr_w, ocr_h
+                    );
+                }
+                continue;
+            }
+            // Native items inside a line that, on a partial page, supersedes them once added.
+            let mut inside = Vec::new();
+            let overlaps = if partial {
+                // On a partial page the line is the kept text's only when kept native text
+                // covers most of it; otherwise the native items inside it give way to it.
+                let natives = &page.text_items[..native_count];
+                let covered = native_width_coverage(natives, ocr_x, ocr_y, ocr_w, ocr_h);
+                if covered < PARTIAL_NATIVE_COVERAGE {
+                    inside = (0..native_count)
+                        .filter(|&i| {
+                            let it = &natives[i];
+                            let (cx, cy) = (it.x + it.width / 2.0, it.y + it.height / 2.0);
+                            cx >= ocr_x && cx <= ocr_x + ocr_w && cy >= ocr_y && cy <= ocr_y + ocr_h
+                        })
+                        .collect();
+                }
+                covered >= PARTIAL_NATIVE_COVERAGE
+            } else {
+                overlaps_existing_text(
+                    &page.text_items[..native_count],
+                    ocr_x,
+                    ocr_y,
+                    ocr_w,
+                    ocr_h,
+                    2.0,
+                )
+            };
+            if debug_ocr {
+                eprintln!(
+                    "[ocr-merge]   {} conf={:.2} x={:.1} y={:.1} w={:.1} h={:.1} {:?}",
+                    if overlaps { "skip(overlap)" } else { "ADD" },
+                    r.confidence,
+                    ocr_x,
+                    ocr_y,
+                    ocr_w,
+                    ocr_h,
+                    r.text
+                );
+            }
+            if overlaps {
+                continue;
+            }
+
+            let cleaned = clean_ocr_table_artifacts(&r.text);
+            if cleaned.is_empty() {
+                continue;
+            }
+
+            // For native rotated text the font_size approximates line height,
+            // which for 90/270° rotations corresponds to the *narrow* screen
+            // dimension. Use the perpendicular extent for rotated OCR text so
+            // downstream font-size heuristics stay sane.
+            // A tilted line's axis-aligned box is taller than its glyphs (a 3° tilt over a
+            // 400 px line adds 20 px), which reads as a larger font and promotes body lines
+            // to headings; the polygon's own side is the line height.
+            let poly_h = r
+                .polygon
+                .map(|p| (p[3][0] - p[0][0]).hypot(p[3][1] - p[0][1]) * scale_factor);
+            let font_size_hint = if rotation == 90.0 || rotation == 270.0 {
+                ocr_w.max(1.0)
+            } else {
+                poly_h.filter(|h| *h > 0.0).map_or(ocr_h, |h| h.min(ocr_h))
+            };
+
+            let words = if emit_word_boxes {
+                let word = |text: &str, (x, y, width, height): (f32, f32, f32, f32)| WordBox {
+                    text: text.to_string(),
+                    x,
+                    y,
+                    width,
+                    height,
+                };
+                // Engine boxes move by their centres so the rotate-back after layout restores
+                // each one. A count mismatch after cleaning keeps the line's own box.
+                if cleaned.split_whitespace().count() == r.words.len() {
+                    cleaned
+                        .split_whitespace()
+                        .zip(&r.words)
+                        .map(|(text, measured)| word(text, to_page(measured.bbox)))
+                        .collect()
+                } else {
+                    vec![word(&cleaned, to_page(r.bbox))]
+                }
+            } else {
+                Vec::new()
+            };
+
+            page.text_items.push(TextItem {
+                text: cleaned,
+                x: ocr_x,
+                y: ocr_y,
+                width: ocr_w,
+                height: ocr_h,
+                rotation,
+                font_name: Some("OCR".to_string()),
+                font_size: Some(font_size_hint),
+                confidence: Some((r.confidence * 1000.0).round() / 1000.0),
+                words,
+                ..Default::default()
+            });
+            for i in inside {
+                superseded[i] = true;
+            }
+        }
+        if superseded.iter().any(|&s| s) {
+            let mut i = 0;
+            page.text_items.retain(|_| {
+                let keep = i >= native_count || !superseded[i];
+                i += 1;
+                keep
+            });
+        }
+        if !has_native_text {
+            upright_rotated_scan(page);
+        }
+    }
+
+    Ok(())
+}
+
+/// Tilt range a page is deskewed over: below it rows already group correctly, above it the
+/// "tilt" is more likely rotated or curved text than a skewed scan.
+const DESKEW_MIN_DEG: f32 = 0.3;
+const DESKEW_MAX_DEG: f32 = 10.0;
+
+/// Share of a page's OCR text (by characters) that must share one quarter-turn rotation for the
+/// page to be read as a scan turned on its side or upside down.
+const ROTATED_SCAN_MIN_SHARE: f32 = 0.7;
+
+/// A scan whose text all runs one way other than upright (a page fed sideways or upside down):
+/// re-express every item in the upright page's frame and clear its rotation, so reading order and
+/// layout work on the page as written. The rotation handler in projection is built for a few
+/// rotated labels on an upright page (pin labels, margin stamps), not a whole rotated page, which
+/// came out reversed (180) or shredded into fake tables (90 / 270). Item boxes, and for quarter
+/// turns the page size, are then in the upright frame.
+fn upright_rotated_scan(page: &mut Page) {
+    let mut chars = [0usize; 4];
+    for it in &page.text_items {
+        chars[(canonical_quarter(it.rotation) / 90) as usize] += it.text.chars().count();
+    }
+    let total: usize = chars.iter().sum();
+    let (q, &top) = chars.iter().enumerate().max_by_key(|&(_, c)| *c).unwrap();
+    if q == 0 || total < 20 || (top as f32) < total as f32 * ROTATED_SCAN_MIN_SHARE {
+        return;
+    }
+    let (w, h) = (page.page_width, page.page_height);
+    let turn = |(x, y, bw, bh): (f32, f32, f32, f32)| match q {
+        // reading bottom-to-top: the page's top edge is on the left
+        1 => (h - (y + bh), x, bh, bw),
+        2 => (w - (x + bw), h - (y + bh), bw, bh),
+        // reading top-to-bottom: the page's top edge is on the right
+        _ => (y, w - (x + bw), bh, bw),
+    };
+    for it in &mut page.text_items {
+        (it.x, it.y, it.width, it.height) = turn((it.x, it.y, it.width, it.height));
+        it.rotation = 0.0;
+        for wb in &mut it.words {
+            (wb.x, wb.y, wb.width, wb.height) = turn((wb.x, wb.y, wb.width, wb.height));
+        }
+    }
+    if q != 2 {
+        (page.page_width, page.page_height) = (h, w);
+    }
+}
+
+/// 0, 90, 180 or 270 for an item rotation in degrees.
+fn canonical_quarter(rot: f32) -> u32 {
+    ((rot.rem_euclid(360.0) / 90.0).round() as u32 % 4) * 90
+}
+
+/// The page's tilt in degrees (image frame, y down: positive = lines descend to the right),
+/// as the length-weighted median angle of its long, near-horizontal OCR lines (length >= 4x
+/// height): a long line's angle is reliable, a short piece's (a list marker, one word) is
+/// often 0 or noise, and a plain median of a page with few long lines lands between the two.
+/// `None` below three such lines or outside the deskew range.
+fn ocr_page_skew(results: &[OcrResult]) -> Option<f32> {
+    let mut lines: Vec<(f32, f32)> = results
+        .iter()
+        .filter_map(|r| {
+            let p = r.polygon?;
+            let (dx, dy) = (p[1][0] - p[0][0], p[1][1] - p[0][1]);
+            let len = dx.hypot(dy);
+            let h = (p[3][0] - p[0][0]).hypot(p[3][1] - p[0][1]);
+            let deg = dy.atan2(dx).to_degrees();
+            (len >= 4.0 * h && len > 0.0 && deg.abs() <= 45.0).then_some((deg, len))
+        })
+        .collect();
+    if lines.len() < 3 {
+        return None;
+    }
+    lines.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let half = lines.iter().map(|l| l.1).sum::<f32>() / 2.0;
+    let mut acc = 0.0;
+    let mid = lines
+        .iter()
+        .find(|l| {
+            acc += l.1;
+            acc >= half
+        })
+        .map_or(0.0, |l| l.0);
+    (DESKEW_MIN_DEG..=DESKEW_MAX_DEG)
+        .contains(&mid.abs())
+        .then_some(mid)
+}
+
+/// Rotate (x, y) by `deg` degrees about (cx, cy), in the y-down page frame.
+pub(crate) fn rotate_about(x: f32, y: f32, cx: f32, cy: f32, deg: f32) -> (f32, f32) {
+    let (s, c) = deg.to_radians().sin_cos();
+    let (dx, dy) = (x - cx, y - cy);
+    (cx + dx * c - dy * s, cy + dx * s + dy * c)
+}
+
+/// True when the page's native (already-extracted) text is sparse enough that
+/// OCR is likely its primary text source. Mirrors the non-image predicates in
+/// `render_pages_for_ocr` (`text_length < 20 || text_coverage < 0.15`) so the
+/// systemic-failure guard matches the same pages that were rendered because
+/// their native text was insufficient.
+fn page_has_sparse_native_text(page: &Page) -> bool {
+    let text_length = native_text_length(page);
+    let page_area = page.page_width * page.page_height;
+    let text_bbox_area: f32 = page
+        .text_items
+        .iter()
+        .filter(|item| !is_unusable_native(item))
+        .map(|item| item.width * item.height)
+        .sum();
+    let text_coverage = if page_area > 0.0 {
+        text_bbox_area / page_area
+    } else {
+        0.0
+    };
+
+    text_length < MIN_NATIVE_TEXT_LEN || text_coverage < 0.15
+}
+
+/// Below this many bytes of usable native text a page counts as having no
+/// text of its own (`NoText` / `Scanned`), so OCR is its primary source.
+const MIN_NATIVE_TEXT_LEN: usize = 20;
+
+/// Bytes of native text on the page, excluding items OCR would replace
+/// anyway (see `is_unusable_native`).
+fn native_text_length(page: &Page) -> usize {
+    page.text_items
+        .iter()
+        .filter(|item| !is_unusable_native(item))
+        .map(|item| item.text.len())
+        .sum()
+}
+
+/// A native text item that cannot be trusted as a text source: either its
+/// Unicode mapping failed outright (Type3 fonts with no ToUnicode — the text
+/// is a char-code fallback and the bbox comes from deceptive declared
+/// metrics), or its content looks substitution-cipher garbled.
+/// Paint the boxes of the native text items the merge keeps (`!is_unusable_native`) white in an
+/// OCR raster of `page` (`channels` 1 or 3, tightly packed), widened by `MASK_MARGIN_PT`.
+fn mask_native_text(pixels: &mut [u8], width: u32, height: u32, page: &Page, channels: usize) {
+    const MASK_MARGIN_PT: f32 = 1.0;
+    if page.page_width <= 0.0 || page.page_height <= 0.0 {
+        return;
+    }
+    let (w, h) = (width as usize, height as usize);
+    let (sx, sy) = (
+        width as f32 / page.page_width,
+        height as f32 / page.page_height,
+    );
+    for item in page
+        .text_items
+        .iter()
+        .filter(|i| !is_unusable_native(i) && !i.text.trim().is_empty())
+    {
+        let x0 = ((item.x - MASK_MARGIN_PT) * sx).floor().max(0.0) as usize;
+        let y0 = ((item.y - MASK_MARGIN_PT) * sy).floor().max(0.0) as usize;
+        let x1 = (((item.x + item.width + MASK_MARGIN_PT) * sx).ceil() as usize).min(w);
+        let y1 = (((item.y + item.height + MASK_MARGIN_PT) * sy).ceil() as usize).min(h);
+        if x0 >= x1 || y0 >= y1 {
+            continue;
+        }
+        for y in y0..y1 {
+            pixels[(y * w + x0) * channels..(y * w + x1) * channels].fill(255);
+        }
+    }
+}
+
+fn is_unusable_native(item: &TextItem) -> bool {
+    item.has_unicode_map_error || is_likely_garbled(&item.text)
+}
+
+/// Total area of filled vector paths not accounted for by native text items.
+/// Glyph outlines drawn as paths produce filled regions with no overlapping
+/// text item; rules and table borders are stroke-only and already excluded
+/// upstream, and shading rects behind real text are subtracted away by the
+/// text overlap. Coverage is approximated by summing per-item intersections
+/// (clamped to the path's own area), which can only over-estimate coverage —
+/// i.e. err toward not triggering OCR.
+fn uncovered_path_area(paths: &[ImageBounds], items: &[TextItem]) -> f32 {
+    let mut uncovered = 0.0f32;
+    for p in paths {
+        let p_area = p.width * p.height;
+        if p_area <= 0.0 {
+            continue;
+        }
+        let mut covered = 0.0f32;
+        for item in items {
+            let ix = (p.x + p.width).min(item.x + item.width) - p.x.max(item.x);
+            let iy = (p.y + p.height).min(item.y + item.height) - p.y.max(item.y);
+            if ix > 0.0 && iy > 0.0 {
+                covered += ix * iy;
+                if covered >= p_area {
+                    break;
+                }
+            }
+        }
+        uncovered += (p_area - covered).max(0.0);
+    }
+    uncovered
+}
+
+/// Heuristic for substitution-cipher / broken-cmap garbling: real Latin-script
+/// text has a vowel ratio of roughly 30–45%, but a substitution permutation
+/// almost always maps the original A/E/I/O/U onto non-vowel letters, driving
+/// the apparent vowel ratio to near zero. Texts without enough ASCII letters
+/// to judge (non-Latin scripts, numbers, short labels) are treated as fine.
+fn is_likely_garbled(text: &str) -> bool {
+    let (letters, vowels) = count_letters_and_vowels(text);
+    if letters < 10 {
+        return false;
+    }
+    vowels * 10 < letters
+}
+
+/// Precomposed Latin vowels carrying diacritics, lowercase. Without these,
+/// languages that put a mark on most vowels (Vietnamese, tone-marked pinyin)
+/// lose their vowels from the count while keeping their plain consonants, so
+/// clean text drops below the garble floor. Covers Latin-1, Latin Extended-A/B
+/// and the Vietnamese block of Latin Extended Additional.
+const ACCENTED_VOWELS: &str = "àáâãäåāăąǎȁȃȧ\
+    ạảấầẩẫậắằẳẵặ\
+    èéêëēĕėęěȅȇ\
+    ẹẻẽếềểễệ\
+    ìíîïĩīĭįǐȉȋ\
+    ỉị\
+    òóôõöøōŏőǒȍȏȯ\
+    ọỏốồổỗộơớờởỡợ\
+    ùúûüũūŭůűųǔǖǘǚǜȕȗ\
+    ụủưứừửữự";
+
+fn count_letters_and_vowels(text: &str) -> (usize, usize) {
+    let mut letters = 0usize;
+    let mut vowels = 0usize;
+    for ch in text.chars() {
+        if ch.is_ascii_alphabetic() {
+            letters += 1;
+            if matches!(ch.to_ascii_lowercase(), 'a' | 'e' | 'i' | 'o' | 'u') {
+                vowels += 1;
+            }
+        } else if !ch.is_ascii() && ch.to_lowercase().any(|c| ACCENTED_VOWELS.contains(c)) {
+            letters += 1;
+            vowels += 1;
+        }
+    }
+    (letters, vowels)
+}
+
+/// Minimum ASCII letters before a group of text is worth judging for garbling.
+/// Below this the vowel ratio is too noisy — an acronym run or a short label
+/// can sit near zero without being corrupt.
+const GARBLE_MIN_LETTERS: usize = 30;
+
+/// A font group must hold at least this share of the page's letters before its
+/// own vowel ratio can flag the page. Corruption travels with a font, so a
+/// broken map affects a substantial block of the page; requiring a real share
+/// keeps a stray caption or ticker run in an odd font from flagging a healthy
+/// page.
+const GARBLE_MIN_FONT_SHARE: f32 = 0.15;
+
+/// True when a body of text's vowel ratio is below the natural-language floor.
+/// Real Latin-script vowel ratios sit ~30–45% across English, Portuguese,
+/// Spanish, French, etc. A ratio under 20% is well outside any natural-language
+/// range and signals substitution-style corruption. (A simple +3 Caesar shift
+/// still leaves some U/Y letters from the original O/Y mapping, so a 10% bound
+/// is too tight to catch this in practice.)
+fn ratio_is_garbled(letters: usize, vowels: usize) -> bool {
+    letters >= GARBLE_MIN_LETTERS && vowels * 5 < letters
+}
+
+/// Which of a page's native text items are untrustworthy because they decode
+/// to garbage. Corruption is a property of a *font's* ToUnicode map, not of the
+/// page, so this is resolved per font group as well as page-wide.
+pub(crate) enum GarbledScope {
+    /// Nothing looks garbled.
+    None,
+    /// The page's text as a whole decodes to garbage — every native item is
+    /// suspect, including items too short to judge on their own.
+    WholePage,
+    /// Specific font groups are garbled while the rest of the page extracts
+    /// fine. Holds the `font_name` of each flagged group.
+    Fonts(HashSet<Option<String>>),
+}
+
+/// Page-level garbled check: even when individual items are too short to judge
+/// in isolation (e.g. "GDWH", "FXUUHQFB XVG"), text whose aggregate vowel ratio
+/// collapses is almost certainly substitution-encoded. Used to drop untrusted
+/// native items before OCR merge, so short garbled labels don't suppress
+/// overlapping OCR results.
+///
+/// Judged per font group, not only page-wide: a page mixing a healthy standard
+/// font with an embedded font whose ToUnicode map is wrong averages out to a
+/// natural-looking ratio, so a page-wide sum alone reports the page as clean
+/// while half its text is corrupt. The page-wide check is still applied first,
+/// since it catches pages whose fonts are individually too small to judge (and
+/// pages whose items carry no font name at all).
+fn garbled_scope(page: &Page) -> GarbledScope {
+    let mut total_letters = 0usize;
+    let mut total_vowels = 0usize;
+    // Keyed by font name, so text sharing a ToUnicode map is judged together.
+    let mut per_font: HashMap<Option<&str>, (usize, usize)> = HashMap::new();
+    // Complex-script text with unmapped conjunct / ligature glyphs (see `script_intrusions`).
+    let mut per_font_script: HashMap<Option<&str>, (usize, usize)> = HashMap::new();
+    let (mut total_script, mut total_intrusions) = (0usize, 0usize);
+    // Legacy-encoded Indic fonts and cipher-like maps (see `symbol_intrusions`).
+    let mut per_font_symbol: HashMap<Option<&str>, (usize, usize)> = HashMap::new();
+    let (mut total_sym_letters, mut total_sym) = (0usize, 0usize);
+    // Control characters and malformed tokens (see `control_chars`, `token_is_malformed`).
+    let mut per_font_ctrl: HashMap<Option<&str>, (usize, usize)> = HashMap::new();
+    let (mut total_ctrl, mut total_chars) = (0usize, 0usize);
+    let mut per_font_tok: HashMap<Option<&str>, (usize, usize)> = HashMap::new();
+    let (mut total_judged, mut total_malformed) = (0usize, 0usize);
+    // Misread glyphs (see `misread_glyphs`), per base font: intruding char -> its distinct words
+    // and the distinct tails it opens.
+    let mut per_base_misread: HashMap<Option<&str>, MisreadByChar> = HashMap::new();
+    for it in &page.text_items {
+        if !it.math && !is_symbol_font(it.font_name.as_deref()) {
+            let words = per_base_misread
+                .entry(it.font_name.as_deref().map(base_font_name))
+                .or_default();
+            for m in misread_glyphs(&it.text) {
+                let e = words.entry(m.ch).or_default();
+                e.0.insert(m.word);
+                e.1.insert(m.tail);
+            }
+        }
+        // math items carry the TeX pass's own LaTeX (and its fonts' control-position glyphs)
+        if !it.math && !is_symbol_font(it.font_name.as_deref()) {
+            let (c, n) = control_chars(&it.text);
+            total_ctrl += c;
+            total_chars += n;
+            let e = per_font_ctrl
+                .entry(it.font_name.as_deref())
+                .or_insert((0, 0));
+            e.0 += c;
+            e.1 += n;
+            let (j, m) = malformed_tokens(&it.text);
+            total_judged += j;
+            total_malformed += m;
+            let e = per_font_tok
+                .entry(it.font_name.as_deref())
+                .or_insert((0, 0));
+            e.0 += j;
+            e.1 += m;
+        }
+        let (l, v) = count_letters_and_vowels(&it.text);
+        total_letters += l;
+        total_vowels += v;
+        let entry = per_font.entry(it.font_name.as_deref()).or_insert((0, 0));
+        entry.0 += l;
+        entry.1 += v;
+        let (sc, intr) = script_intrusions(&it.text);
+        total_script += sc;
+        total_intrusions += intr;
+        let e = per_font_script
+            .entry(it.font_name.as_deref())
+            .or_insert((0, 0));
+        e.0 += sc;
+        e.1 += intr;
+        let (lt, sy) = symbol_intrusions(&it.text);
+        total_sym_letters += lt;
+        total_sym += sy;
+        let e = per_font_symbol
+            .entry(it.font_name.as_deref())
+            .or_insert((0, 0));
+        e.0 += lt;
+        e.1 += sy;
+    }
+
+    if ratio_is_garbled(total_letters, total_vowels)
+        || intrusions_are_garbled(total_script, total_intrusions)
+        || symbols_are_garbled(total_sym_letters, total_sym)
+        || controls_are_garbled(total_ctrl, total_chars)
+        || tokens_are_garbled(total_judged, total_malformed)
+    {
+        return GarbledScope::WholePage;
+    }
+
+    let min_share = (total_letters as f32 * GARBLE_MIN_FONT_SHARE).ceil() as usize;
+    let mut fonts: HashSet<Option<String>> = per_font
+        .into_iter()
+        .filter(|&(_, (letters, vowels))| letters >= min_share && ratio_is_garbled(letters, vowels))
+        .map(|(font, _)| font.map(str::to_string))
+        .collect();
+    fonts.extend(
+        per_font_script
+            .into_iter()
+            .filter(|&(_, (sc, intr))| intrusions_are_garbled(sc, intr))
+            .map(|(font, _)| font.map(str::to_string)),
+    );
+    fonts.extend(
+        per_font_symbol
+            .into_iter()
+            .filter(|&(_, (lt, sy))| symbols_are_garbled(lt, sy))
+            .map(|(font, _)| font.map(str::to_string)),
+    );
+
+    fonts.extend(
+        per_font_ctrl
+            .into_iter()
+            .filter(|&(_, (c, n))| controls_are_garbled(c, n))
+            .map(|(font, _)| font.map(str::to_string)),
+    );
+    fonts.extend(
+        per_font_tok
+            .into_iter()
+            .filter(|&(_, (j, m))| tokens_are_garbled(j, m))
+            .map(|(font, _)| font.map(str::to_string)),
+    );
+    // A misread glyph condemns every subset of its base font on the page: a producer that
+    // wrote one subset's map wrong wrote the others the same way, and the body subset's few
+    // misreads ("maGor") are too sparse to judge alone.
+    let misread_bases: HashSet<Option<&str>> = per_base_misread
+        .into_iter()
+        .filter(|(_, words)| {
+            words
+                .values()
+                .any(|(w, tails)| w.len() >= MISREAD_MIN_WORDS && tails.len() >= MISREAD_MIN_TAILS)
+        })
+        .map(|(base, _)| base)
+        .collect();
+    if !misread_bases.is_empty() {
+        fonts.extend(
+            page.text_items
+                .iter()
+                .filter(|it| misread_bases.contains(&it.font_name.as_deref().map(base_font_name)))
+                .map(|it| it.font_name.clone()),
+        );
+    }
+
+    if fonts.is_empty() {
+        GarbledScope::None
+    } else {
+        GarbledScope::Fonts(fonts)
+    }
+}
+
+/// Fewest stray ASCII characters inside complex-script words, and their least rate per script
+/// character, for a font's text to count as garbled (see [`script_intrusions`]).
+const INTRUSION_MIN: usize = 5;
+const INTRUSION_MIN_RATE: f32 = 0.015;
+
+/// Complex scripts whose shaped forms (Indic conjuncts and matras, Arabic / Hebrew joining
+/// forms and ligatures, Thai / Khmer / Myanmar clusters) a subset font draws from glyphs that
+/// often lack a ToUnicode entry.
+fn is_complex_script(c: char) -> bool {
+    matches!(c as u32,
+        0x0590..=0x05FF | 0x0600..=0x06FF | 0x0750..=0x077F | 0x08A0..=0x08FF | 0x0900..=0x0DFF
+        | 0x0E00..=0x0EFF | 0x1000..=0x109F | 0x1780..=0x17FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
+}
+
+/// (complex-script characters, ASCII intrusions) in `text`. An intrusion is a printable ASCII
+/// character wedged between two complex-script characters with no space: where a conjunct
+/// or ligature glyph has no Unicode mapping, PDF text extraction yields a stray `(`, `@`, `/`
+/// or Latin letter inside the word ("आ(का", "ب)مه", "خر/داران"). Correctly encoded text in
+/// these scripts essentially never mixes ASCII into a word.
+fn script_intrusions(text: &str) -> (usize, usize) {
+    let cs: Vec<char> = text.chars().collect();
+    let script = cs.iter().filter(|&&c| is_complex_script(c)).count();
+    let intrusions = (1..cs.len().saturating_sub(1))
+        .filter(|&i| {
+            cs[i].is_ascii_graphic() && is_complex_script(cs[i - 1]) && is_complex_script(cs[i + 1])
+        })
+        .count();
+    (script, intrusions)
+}
+
+/// Fewest symbol intrusions, and their least rate per letter, for text to count as garbled
+/// (see [`symbol_intrusions`]). On ParseBench v2 the garbled pages sit at 5.2-8.0%, the
+/// highest clean one at 2.2%.
+const SYMBOL_MIN: usize = 20;
+const SYMBOL_MIN_RATE: f32 = 0.03;
+
+/// (letters, symbol intrusions) in `text`: a symbol such as `$ ¥ © « @ § ¶ ®` wedged
+/// between two letters. Text drawn with a legacy 8-bit Indic font (the glyph codes are ASCII /
+/// Latin-1 positions, "H¥$VrH$m`©H«$_mMr") or a cipher-like ToUnicode map ("PFDKFCF@") is
+/// full of them; real text, code and URLs included, rarely puts them inside a word.
+fn symbol_intrusions(text: &str) -> (usize, usize) {
+    // Only symbols legacy / cipher fonts produce and real text doesn't put inside words. LaTeX and
+    // math symbols (^ { } \ ` ~ | ± × ÷ ° ² ³ µ ·) are out: the TeX math path writes `x^{2}`,
+    // `\alpha` into text items before this check runs, and with them every math page read as
+    // garbled (OPB math 53.6 -> 33.2, 2026-10-30).
+    const SYM: &str = "$¥©«»@¢£¤¦§¨ª¬®¯¶¸º¼½¾¿";
+    let cs: Vec<char> = text.chars().collect();
+    let letters = cs.iter().filter(|c| c.is_alphabetic()).count();
+    let n = (1..cs.len().saturating_sub(1))
+        .filter(|&i| SYM.contains(cs[i]) && cs[i - 1].is_alphabetic() && cs[i + 1].is_alphabetic())
+        .count();
+    (letters, n)
+}
+
+/// Dingbat / symbol fonts map their glyphs (bullets, arrows, checkboxes) to control and
+/// private codes by design; that is not a broken map, so they never count as garbled.
+fn is_symbol_font(name: Option<&str>) -> bool {
+    name.is_some_and(|n| {
+        let n = n.to_ascii_lowercase();
+        let base = n.split_once('+').map_or(n.as_str(), |(_, b)| b);
+        ["wingding", "webding", "dingbat", "symbol", "zapf", "math", "sym", "greekwith"]
+            .iter()
+            .any(|s| base.contains(s))
+            // TeX math fonts (Computer Modern / AMS / txfonts / xy-pic): glyph codes for
+            // operators and delimiters map to control positions by design.
+            || ["cmex", "cmsy", "cmmi", "msam", "msbm", "rtxm", "rtxs", "txex", "txsy", "xyatip",
+                "xydash", "eufm", "esint", "stmary", "wasy"]
+                .iter()
+                .any(|p| base.starts_with(p))
+    })
+}
+
+/// Control characters (other than tab / newline / carriage return) in extracted text. A
+/// correct ToUnicode map never yields them; a cipher-like or truncated map does, often as the
+/// space glyph (`\x03`), digits (`\x13\x14`) or punctuation ("$SULO \x15\x15\x0f" = "April 22,").
+fn control_chars(text: &str) -> (usize, usize) {
+    let mut ctrl = 0;
+    let mut visible = 0;
+    for c in text.chars() {
+        if c.is_control() && !matches!(c, '\t' | '\n' | '\r') {
+            ctrl += 1;
+        } else if !c.is_whitespace() {
+            visible += 1;
+        }
+    }
+    (ctrl, visible + ctrl)
+}
+
+const CONTROL_MIN: usize = 5;
+const CONTROL_MIN_RATE: f32 = 0.02;
+
+fn controls_are_garbled(ctrl: usize, chars: usize) -> bool {
+    ctrl >= CONTROL_MIN && ctrl as f32 >= chars as f32 * CONTROL_MIN_RATE
+}
+
+/// Coarse script of a letter for [`token_is_malformed`]: 0 Latin, 1 CJK (Han, kana, Hangul and
+/// their fullwidth forms, which share tokens with Latin and each other in unspaced text),
+/// otherwise an id per script from a table of the scripts we can tell apart (so Tamil and Telugu
+/// differ, while the blocks of one script agree); unlisted scripts share one id.
+fn script_of(c: char) -> u32 {
+    let o = c as u32;
+    match o {
+        0..=0x24F | 0x1E00..=0x1EFF | 0x2C60..=0x2C7F | 0xA720..=0xA7FF => 0,
+        0x1100..=0x11FF
+        | 0x3000..=0x30FF
+        | 0x3400..=0x9FFF
+        | 0xAC00..=0xD7AF
+        | 0xF900..=0xFAFF
+        | 0xFF00..=0xFFEF => 1,
+        // Scripts whose letters span several blocks are one script each: polytonic Greek and
+        // Coptic, Cyrillic extensions, Hebrew / Arabic presentation forms, Ethiopic, Georgian.
+        0x0370..=0x03FF | 0x1F00..=0x1FFF | 0x2C80..=0x2CFF => 0x370,
+        0x0400..=0x052F | 0x1C80..=0x1C8F | 0x2DE0..=0x2DFF | 0xA640..=0xA69F => 0x400,
+        0x0590..=0x05FF | 0xFB1D..=0xFB4F => 0x590,
+        0x0600..=0x06FF | 0x0750..=0x077F | 0x0860..=0x08FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF => {
+            0x600
+        }
+        0x1200..=0x139F | 0x2D80..=0x2DDF | 0xAB00..=0xAB2F => 0x1200,
+        0x10A0..=0x10FF | 0x1C90..=0x1CBF | 0x2D00..=0x2D2F => 0x10A0,
+        0x1780..=0x17FF | 0x19E0..=0x19FF => 0x1780,
+        0x1000..=0x109F | 0xA9E0..=0xA9FF | 0xAA60..=0xAA7F => 0x1000,
+        0x0530..=0x058F | 0xFB13..=0xFB17 => 0x530,
+        0x0700..=0x074F => 0x700,
+        // Indic scripts sit in exact 128-codepoint blocks
+        0x0900..=0x0DFF => o & !0x7F,
+        0x0E00..=0x0E7F => 0xE00,
+        0x0E80..=0x0EFF => 0xE80,
+        0x0F00..=0x0FFF => 0xF00,
+        // anything else is one bucket: never counted as a script mix
+        _ => 2,
+    }
+}
+
+/// A token whose shape no correctly decoded text has (see [`garbled_scope`]):
+/// - a case flip into a short lowercase run, or two flips, inside a word ("hZeY", "cVdaVTe",
+///   "ÞkusLkkykuÚke"); camelCase starts a real sub-word ("DataEncoder", "iPhone") and
+///   identifiers with `_` `.` `/` are skipped;
+/// - `;` or `=` between letters ("iNdm;s;=udf.a", legacy Sinhala / Tamil fonts);
+/// - letters of two different non-Latin, non-CJK scripts ("ࡶڜటర"), or an accented Latin letter
+///   glued to one ("ประสงคŤ", Thai tone marks mapped into Latin Extended).
+///
+/// `None` when the token is too short to judge.
+fn token_is_malformed(tok: &str) -> Option<bool> {
+    if tok.contains('$') || tok.contains('\\') {
+        return None; // LaTeX written by the TeX math pass
+    }
+    let t = tok.trim_matches(|c: char| !c.is_alphanumeric());
+    let cs: Vec<char> = t.chars().collect();
+    if cs.len() < 3 || cs.iter().filter(|c| c.is_alphabetic()).count() < 2 {
+        return None;
+    }
+    if !cs.iter().any(|&c| matches!(c, '_' | '.' | '/' | '@')) {
+        let mut flips = 0;
+        let mut short = false;
+        for i in 1..cs.len().saturating_sub(1) {
+            if cs[i - 1].is_lowercase() && cs[i].is_uppercase() && cs[i + 1].is_lowercase() {
+                flips += 1;
+                let run = cs[i + 1..].iter().take_while(|c| c.is_lowercase()).count();
+                short |= run < 3;
+            }
+        }
+        if flips >= 2 || short {
+            return Some(true);
+        }
+    }
+    if (1..cs.len().saturating_sub(1)).any(|i| {
+        matches!(cs[i], ';' | '=') && cs[i - 1].is_alphabetic() && cs[i + 1].is_alphabetic()
+    }) {
+        return Some(true);
+    }
+    let other =
+        |c: char| c.is_alphabetic() && !(0x300..=0x36F).contains(&(c as u32)) && script_of(c) > 1;
+    let mut seen: Option<u32> = None;
+    for &c in &cs {
+        if other(c) {
+            let s = script_of(c);
+            if seen.is_some_and(|p| p != s) {
+                return Some(true);
+            }
+            seen = Some(s);
+        }
+    }
+    let accented = |c: char| c.is_alphabetic() && (0xC0..=0x24F).contains(&(c as u32));
+    if cs
+        .windows(2)
+        .any(|w| (accented(w[0]) && other(w[1])) || (other(w[0]) && accented(w[1])))
+    {
+        return Some(true);
+    }
+    Some(false)
+}
+
+/// (judged tokens, malformed tokens) in `text`, control characters read as spaces.
+fn malformed_tokens(text: &str) -> (usize, usize) {
+    let clean: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    clean
+        .split_whitespace()
+        .filter_map(token_is_malformed)
+        .fold((0, 0), |(n, b), m| (n + 1, b + m as usize))
+}
+
+const MALFORMED_MIN: usize = 10;
+const MALFORMED_MIN_RATE: f32 = 0.2;
+
+fn tokens_are_garbled(judged: usize, malformed: usize) -> bool {
+    malformed >= MALFORMED_MIN && malformed as f32 >= judged as f32 * MALFORMED_MIN_RATE
+}
+
+fn symbols_are_garbled(letters: usize, intrusions: usize) -> bool {
+    intrusions >= SYMBOL_MIN && intrusions as f32 >= letters as f32 * SYMBOL_MIN_RATE
+}
+
+/// Fewest distinct words one misread character must turn up in for its font to count as
+/// garbled (see [`misread_glyphs`]). Brand and camel-case names ("arXiv", "iPad", "McRae")
+/// repeat one word; a wrong map entry hits every word with that glyph. On ParseBench v2 text,
+/// tables and opendataloader (1,210 pages) the broken fonts reach 3-50 words, clean text 2.
+const MISREAD_MIN_WORDS: usize = 3;
+
+/// ...and, for a misread capital, at least this many distinct tails it opens: compound names
+/// end in one repeated part ("HistoAge", "PhenoAge", "GrimAge"), a wrong map entry lands
+/// mid-word in different places ("executiMe", "achieMed").
+const MISREAD_MIN_TAILS: usize = 2;
+
+/// Per misread char: the distinct words it sits in and the distinct tails it opens.
+type MisreadByChar = HashMap<char, (HashSet<String>, HashSet<String>)>;
+
+/// One misread character (see [`misread_glyphs`]): the char, the word it sits in (letters,
+/// lowercased), and the text from it to the word's end (for a symbol, the whole word).
+#[derive(Debug)]
+struct Misread {
+    ch: char,
+    word: String,
+    tail: String,
+}
+
+/// A font's name without its subset tag ("AAAAAB+Futura" -> "Futura").
+fn base_font_name(name: &str) -> &str {
+    name.split_once('+').map_or(name, |(_, b)| b)
+}
+
+/// Characters a font map put where a letter belongs, each with the word (its letters,
+/// lowercased) it sits in. A map that is wrong for only a few glyphs leaves text that reads
+/// almost right, so none of the font-wide rates above catch it:
+/// - `! % *` between two Latin, Greek or Cyrillic letters ("va!í", "kter*ch": č, š, ý lost);
+/// - a capital inside a lowercase word whose lowercase tail (under 3 letters) ends the word
+///   ("maGor", "OecutiMe", "horiQon"). A capital in second place ("iPad"), words with digits
+///   ("dBm", "o9A") and identifiers are skipped.
+///
+/// `"` is no intruder: a quotation printed without its leading space ("expression"put") is real.
+fn misread_glyphs(text: &str) -> Vec<Misread> {
+    let mut out = Vec::new();
+    for tok in text.split_whitespace() {
+        let t = tok.trim_matches(|c: char| {
+            matches!(
+                c,
+                '.' | ',' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}' | '\'' | '"' | '!' | '?'
+            ) || "«»“”‘’".contains(c)
+        });
+        if t.starts_with("http") || t.chars().any(|c| matches!(c, '_' | '@' | '\\' | '$' | '/')) {
+            continue;
+        }
+        let cs: Vec<char> = t.chars().collect();
+        if cs.len() < 3 {
+            continue;
+        }
+        let word = || -> String {
+            cs.iter()
+                .filter(|c| c.is_alphabetic())
+                .flat_map(|c| c.to_lowercase())
+                .collect()
+        };
+        let alphabetic = |c: char| c.is_alphabetic() && matches!(script_of(c), 0 | 0x370 | 0x400);
+        for i in 1..cs.len() - 1 {
+            if matches!(cs[i], '!' | '%' | '*') && alphabetic(cs[i - 1]) && alphabetic(cs[i + 1]) {
+                out.push(Misread {
+                    ch: cs[i],
+                    word: word(),
+                    tail: word(),
+                });
+            }
+        }
+        if cs.iter().any(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        for i in 2..cs.len() - 1 {
+            if cs[i - 1].is_lowercase() && cs[i].is_uppercase() && cs[i + 1].is_lowercase() {
+                let tail = cs[i + 1..].iter().take_while(|c| c.is_lowercase()).count();
+                if i + 1 + tail == cs.len() && tail < 3 {
+                    out.push(Misread {
+                        ch: cs[i],
+                        word: word(),
+                        tail: cs[i..].iter().collect(),
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
+fn intrusions_are_garbled(script: usize, intrusions: usize) -> bool {
+    intrusions >= INTRUSION_MIN && intrusions as f32 >= script as f32 * INTRUSION_MIN_RATE
+}
+
+/// Page-level garbled signal: substitution-cipher text (see [`garbled_scope`])
+/// or a substantial share of text whose Unicode mapping failed outright.
+fn page_is_garbled(page: &Page) -> bool {
+    !matches!(garbled_scope(page), GarbledScope::None) || page_has_unmapped_text(page)
+}
+
+/// True when text with a failed Unicode mapping is both a real amount (not a
+/// stray Type3 symbol glyph) and a real share of the page's native text.
+fn page_has_unmapped_text(page: &Page) -> bool {
+    let (unmapped, total) = page.text_items.iter().fold((0usize, 0usize), |(u, t), it| {
+        let n = it.text.chars().filter(|c| !c.is_whitespace()).count();
+        (u + if it.has_unicode_map_error { n } else { 0 }, t + n)
+    });
+    unmapped >= GARBLE_MIN_LETTERS && unmapped as f32 >= total as f32 * GARBLE_MIN_FONT_SHARE
+}
+
+/// Recover a discrete CCW rotation in degrees from a 4-point OCR polygon.
+/// Returns one of 0.0, 90.0, 180.0, 270.0 — snapping to the nearest right
+/// angle — or 0.0 for nearly-square/degenerate polygons.
+///
+/// Point ordering varies between OCR engines: some emit TL→TR→BR→BL in the
+/// glyphs' upright reading frame (so poly[0]→poly[1] is always the reading
+/// direction), but others (notably PaddleOCR 3.x with
+/// `use_textline_orientation=True`) emit polygons in screen-axis order, where
+/// poly[0]→poly[1] is always horizontal in screen space regardless of how the
+/// text actually reads. To handle both, we pick the *longer* of the two
+/// adjacent edges as the reading direction — the text always runs along the
+/// long axis of its bounding quadrilateral.
+fn polygon_rotation_deg(poly: &[[f32; 2]; 4]) -> f32 {
+    let e0 = [poly[1][0] - poly[0][0], poly[1][1] - poly[0][1]];
+    let e1 = [poly[2][0] - poly[1][0], poly[2][1] - poly[1][1]];
+    let len0 = (e0[0] * e0[0] + e0[1] * e0[1]).sqrt();
+    let len1 = (e1[0] * e1[0] + e1[1] * e1[1]).sqrt();
+    if len0.max(len1) < 1.0 {
+        return 0.0;
+    }
+    // Treat near-square polygons as un-rotated — there's no reliable reading
+    // axis to pick from. Single-char/CJK detections fall in here.
+    let (longer, shorter) = if len0 >= len1 {
+        (len0, len1)
+    } else {
+        (len1, len0)
+    };
+    if shorter > 0.0 && longer / shorter < 1.3 {
+        return 0.0;
+    }
+    let reading = if len0 >= len1 { e0 } else { e1 };
+    // atan2 with screen-down y; negate to get the conventional CCW angle.
+    canonical_quarter(-reading[1].atan2(reading[0]).to_degrees()) as f32
+}
+
+/// Check if an OCR bounding box overlaps with any existing text item.
+/// Maximum width/height ratio for a single-glyph OCR result to count as a
+/// misread rule: real narrow glyphs ("1", "l", "I") in a tight OCR box sit
+/// around 0.3–0.5 of their height; a table border is a hairline.
+const RULE_ARTIFACT_MAX_ASPECT: f32 = 0.35;
+
+/// An OCR result that is a misread of a rule/border or pure decoration, not
+/// text: no letters or digits at all, or a single bar-like glyph in a box far
+/// narrower than it is tall.
+fn is_rule_artifact(text: &str, w: f32, h: f32) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || !trimmed.chars().any(|c| c.is_alphanumeric()) {
+        return true;
+    }
+    let mut chars = trimmed.chars();
+    let (first, rest) = (chars.next(), chars.next());
+    if rest.is_none() {
+        if let Some(c) = first {
+            if matches!(
+                c,
+                '|' | 'I'
+                    | 'l'
+                    | '1'
+                    | '!'
+                    | 'i'
+                    | 'j'
+                    | '['
+                    | ']'
+                    | '('
+                    | ')'
+                    | '{'
+                    | '}'
+                    | '/'
+                    | '\\'
+            ) && h > 0.0
+                && w < RULE_ARTIFACT_MAX_ASPECT * h
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Least share of an OCR line's width that kept native text must cover, on a page whose
+/// garbled fonts were dropped, for the line to count as already present (see `partial`).
+const PARTIAL_NATIVE_COVERAGE: f32 = 0.5;
+
+/// Share of the box's width covered by native items on its line (vertical overlap of at
+/// least half the shorter height), their horizontal extents merged.
+fn native_width_coverage(items: &[TextItem], x: f32, y: f32, w: f32, h: f32) -> f32 {
+    if w <= 0.0 {
+        return 1.0;
+    }
+    let mut spans: Vec<(f32, f32)> = items
+        .iter()
+        .filter(|it| {
+            let v = (y + h).min(it.y + it.height) - y.max(it.y);
+            v > 0.5 * h.min(it.height)
+        })
+        .map(|it| (it.x.max(x), (it.x + it.width).min(x + w)))
+        .filter(|(a, b)| b > a)
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut covered, mut end) = (0.0f32, f32::NEG_INFINITY);
+    for (a, b) in spans {
+        if b > end {
+            covered += b - a.max(end);
+            end = b;
+        }
+    }
+    covered / w
+}
+
+fn overlaps_existing_text(
+    items: &[TextItem],
+    ocr_x: f32,
+    ocr_y: f32,
+    ocr_w: f32,
+    ocr_h: f32,
+    tolerance: f32,
+) -> bool {
+    for item in items {
+        let item_right = item.x + item.width;
+        let item_bottom = item.y + item.height;
+
+        let overlap_x = ocr_x < item_right + tolerance && ocr_x + ocr_w > item.x - tolerance;
+        let overlap_y = ocr_y < item_bottom + tolerance && ocr_y + ocr_h > item.y - tolerance;
+
+        if overlap_x && overlap_y {
+            return true;
+        }
+    }
+    false
+}
+
+/// Clean common OCR artifacts from table border misreads.
+/// OCR often misreads vertical table border lines as bracket-like characters.
+fn clean_ocr_table_artifacts(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // Strip leading/trailing border artifact characters: | [ ] ( ) { }
+    let without_artifacts: &str = trimmed
+        .trim_start_matches(['|', '[', ']', '(', ')', '{', '}'])
+        .trim_end_matches(['|', '[', ']', '(', ')', '{', '}'])
+        .trim();
+
+    if without_artifacts.is_empty() {
+        return trimmed.to_string();
+    }
+
+    // Only use cleaned version if core content looks numeric-ish
+    // This avoids incorrectly stripping brackets from content like "(note)"
+    let is_numeric_ish = without_artifacts
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, ',' | '.' | ' ' | '%' | '-' | '+' | '*' | '/'))
+        || without_artifacts == "N/A"
+        || without_artifacts == "Z"
+        || without_artifacts == "-";
+
+    if is_numeric_ish {
+        // Parentheses directly around a number mark it negative, e.g. "(78,939)",
+        // so keep that pair; only what lies outside it is a border misread.
+        if let Some((before, after)) = trimmed.split_once(without_artifacts)
+            && before.ends_with('(')
+            && after.starts_with(')')
+        {
+            return format!("({without_artifacts})");
+        }
+        without_artifacts.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ocr::OcrWord;
+    use crate::types::Rect;
+
+    /// A 1-inch square 300 dpi grey raster: white, with 2x2 px dots every 8 px.
+    fn dotted_inch() -> Vec<u8> {
+        (0..300 * 300)
+            .map(|i| {
+                if (i % 300) % 8 < 2 && (i / 300) % 8 < 2 {
+                    0
+                } else {
+                    255
+                }
+            })
+            .collect()
+    }
+
+    fn paint(pixels: &mut [u8], x: usize, y: usize, w: usize, h: usize) {
+        for row in y..y + h {
+            pixels[row * 300 + x..row * 300 + x + w].fill(0);
+        }
+    }
+
+    #[test]
+    fn despeckle_removes_dots_and_keeps_punctuation_and_rules() {
+        let mut px = dotted_inch();
+        paint(&mut px, 100, 100, 7, 7); // a 300 dpi period
+        paint(&mut px, 20, 200, 260, 2); // a hairline rule
+        paint(&mut px, 150, 51, 1, 4); // a thin 1x4 mark touching a dot: still a speck
+        let removed = despeckle(&mut px, 300, 300, 1, 300.0);
+        assert!(removed > 1000, "{removed}");
+        let dark = |x: usize, y: usize| px[y * 300 + x] == 0;
+        assert!(dark(103, 103), "the period was removed");
+        assert!(dark(150, 201), "the rule was removed");
+        assert!(!dark(0, 0) && !dark(8, 8), "a dot survived");
+    }
+
+    #[test]
+    fn despeckle_leaves_a_clean_page_and_low_dpi_alone() {
+        // A few specks on a clean page are under the density gate.
+        let mut clean = vec![255u8; 300 * 300 * 3];
+        for i in 0..10 {
+            let o = (i * 20 * 300 + i * 20) * 3;
+            clean[o..o + 3].fill(0);
+        }
+        let before = clean.clone();
+        assert_eq!(despeckle(&mut clean, 300, 300, 3, 300.0), 0);
+        assert_eq!(clean, before);
+        // Below the minimum dpi nothing runs, however dotted.
+        let mut low = dotted_inch();
+        let before = low.clone();
+        assert_eq!(despeckle(&mut low, 300, 300, 1, 150.0), 0);
+        assert_eq!(low, before);
+    }
+
+    #[test]
+    fn malformed_tokens_flag_cipher_and_legacy_fonts() {
+        // Shifted / cipher ToUnicode maps (ParseBench v2 att10k, financial tables, legacy Indic).
+        for t in [
+            "hZeY",
+            "cVdaVTe",
+            "bViZgAVah",
+            "ÞkusLkkykuÚke",
+            "iNdm;s;=udf.a",
+            "ࡶڜటర",
+            "ประสงคŤ",
+        ] {
+            assert_eq!(token_is_malformed(t), Some(true), "{t}");
+        }
+        // camelCase, brand casing, identifiers, CJK with Latin, ordinary words and codes.
+        for t in [
+            "DataEncoder",
+            "ShannonOverbrook",
+            "iPhone",
+            "McDonald",
+            "fact_api.FactApi",
+            "ExpRatio_Excluded",
+            "iPhone発売",
+            "Washington",
+            "1G1FJ3D6&H",
+            "W3GG",
+            "ἀρχῇ",
+            "ⲁⲣⲭⲏ",
+            "ሀገርሰላም",
+            "Ϣⲁⲣⲉ",
+            "հոկտեմբերի",
+            "Հանրապետությունում",
+            "བསྟན་པའི",
+        ] {
+            assert_eq!(token_is_malformed(t), Some(false), "{t}");
+        }
+        assert_eq!(token_is_malformed("ab"), None);
+    }
+
+    #[test]
+    fn control_chars_flag_broken_maps_not_dingbats() {
+        // "April 22, 2025 - Page" through a -3 shift with digits mapped to control codes.
+        let (c, n) = control_chars("$SULO \u{15}\u{15}\u{f} \u{15}\u{13}\u{15}\u{18} \u{10} 3DJH");
+        assert!(controls_are_garbled(c, n));
+        assert_eq!(control_chars("Plain text\twith tabs\n"), (0, 17));
+        assert!(is_symbol_font(Some("ZQNKFZ+Wingdings2")));
+        assert!(is_symbol_font(Some("VTJFIN+Webdings")));
+        assert!(!is_symbol_font(Some("ArialMT")));
+        assert!(is_symbol_font(Some("ABCDEF+CMEX10")));
+        assert!(is_symbol_font(Some("Universal-GreekwithMathPi")));
+        assert!(!is_symbol_font(Some("TimesNewRomanPS-ItalicMT")));
+    }
+
+    #[test]
+    fn rule_artifact_catches_bars_and_decoration() {
+        // Tesseract reading a table border / hairline.
+        assert!(is_rule_artifact("|", 4.3, 12.5));
+        assert!(is_rule_artifact("I", 1.0, 7.2));
+        assert!(is_rule_artifact("|  |", 3.0, 12.0));
+        assert!(is_rule_artifact("—", 20.0, 3.0));
+        assert!(is_rule_artifact("  ", 1.0, 1.0));
+        // Real narrow glyphs sit well above the hairline aspect.
+        assert!(!is_rule_artifact("1", 5.0, 12.0));
+        assert!(!is_rule_artifact("I", 4.0, 10.0));
+        // Anything with letters/digits and more than one char is text.
+        assert!(!is_rule_artifact("If", 1.0, 12.0));
+        assert!(!is_rule_artifact("N/A", 12.0, 8.0));
+    }
+
+    fn leaf(n: usize) -> Region {
+        Region {
+            bbox: Rect::default(),
+            kind: RegionKind::Leaf {
+                item_indices: (0..n).collect(),
+            },
+        }
+    }
+
+    fn split(axis: CutAxis, children: Vec<Region>) -> Region {
+        Region {
+            bbox: Rect::default(),
+            kind: RegionKind::Split { axis, children },
+        }
+    }
+
+    #[test]
+    fn test_count_columns_single_leaf() {
+        assert_eq!(count_columns(&leaf(50), 50), 1);
+    }
+
+    #[test]
+    fn test_count_columns_two_columns() {
+        let root = split(CutAxis::Vertical, vec![leaf(40), leaf(40)]);
+        assert_eq!(count_columns(&root, 80), 2);
+    }
+
+    #[test]
+    fn test_count_columns_nested_three_columns() {
+        // Three-column page cut as V(a, V(b, c)).
+        let inner = split(CutAxis::Vertical, vec![leaf(30), leaf(30)]);
+        let root = split(CutAxis::Vertical, vec![leaf(40), inner]);
+        assert_eq!(count_columns(&root, 100), 3);
+    }
+
+    #[test]
+    fn test_count_columns_header_over_two_columns() {
+        // Full-width title band stacked above a two-column body: the page is
+        // still two-column (horizontal splits take the max of their bands).
+        let body = split(CutAxis::Vertical, vec![leaf(40), leaf(40)]);
+        let root = split(CutAxis::Horizontal, vec![leaf(20), body]);
+        assert_eq!(count_columns(&root, 100), 2);
+    }
+
+    #[test]
+    fn test_count_columns_thin_sidebar_not_a_column() {
+        // A 6-item sidebar next to a 94-item body fails both the absolute
+        // (8-item) and fractional (15%) bars.
+        let root = split(CutAxis::Vertical, vec![leaf(6), leaf(94)]);
+        assert_eq!(count_columns(&root, 100), 1);
+    }
+
+    #[test]
+    fn test_count_columns_narrow_table_slices_not_columns() {
+        // Four narrow slices (10 items each of 100): each fails the 15%
+        // fractional bar, so none count — table-ish V-splits stay quiet.
+        let root = split(
+            CutAxis::Vertical,
+            vec![leaf(10), leaf(10), leaf(10), leaf(10)],
+        );
+        assert_eq!(count_columns(&root, 100), 0);
+    }
+
+    #[test]
+    fn test_count_columns_empty_page() {
+        assert_eq!(count_columns(&leaf(0), 0), 0);
+    }
+
+    mod native {
+        use super::super::*;
+        use crate::types::Rect;
+
+        fn item(text: &str, x: f32, y: f32, w: f32, h: f32) -> TextItem {
+            TextItem {
+                text: text.to_string(),
+                x,
+                y,
+                width: w,
+                height: h,
+                ..TextItem::default()
+            }
+        }
+
+        fn page(items: Vec<TextItem>) -> Page {
+            Page {
+                ocr_deskew: None,
+                page_number: 1,
+                page_label: None,
+                page_width: 612.0,
+                page_height: 792.0,
+                content_bounds: None,
+                text_items: items,
+                graphics: Vec::new(),
+                vector_graphics: None,
+                struct_nodes: Vec::new(),
+                image_refs: Vec::new(),
+                annotations: None,
+                form_fields: None,
+                structure_tree: None,
+            }
+        }
+
+        fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
+            Rect {
+                x,
+                y,
+                width: w,
+                height: h,
+            }
+        }
+
+        #[test]
+        fn text_dense_page_is_simple_with_known_zero_vector_area() {
+            // 40 wide items -> text_length >= 20 and coverage >= 15%.
+            let items: Vec<TextItem> = (0..40)
+                .map(|i| item("some meaningful text", 40.0, 20.0 * i as f32, 500.0, 18.0))
+                .collect();
+            let stats = calculate_native_page_complexity(&page(items), &[], 0, 1);
+            assert!(!stats.needs_ocr);
+            assert!(stats.reasons.is_empty());
+            // Known zero, not unmeasured: vector text cannot exist natively.
+            assert_eq!(stats.uncovered_vector_area, Some(0.0));
+            let layout = stats.layout.expect("native stats always carry layout");
+            assert_eq!(layout.column_count, 1);
+            assert!(!layout.is_complex);
+        }
+
+        #[test]
+        fn tables_columns_and_images_drive_layout_reasons() {
+            let items = vec![item(
+                "cell text and more cell text",
+                40.0,
+                40.0,
+                500.0,
+                700.0,
+            )];
+            // One large inline figure (not full-page).
+            let figures = [rect(100.0, 100.0, 400.0, 300.0)];
+            let stats = calculate_native_page_complexity(&page(items), &figures, 2, 2);
+            assert!(
+                stats.reasons.contains(&ComplexityReason::EmbeddedImages),
+                "sized inline image counts"
+            );
+            let layout = stats.layout.unwrap();
+            assert_eq!(layout.ruled_table_count, 2);
+            assert_eq!(layout.column_count, 2);
+            assert!(
+                layout
+                    .reasons
+                    .contains(&LayoutComplexityReason::TableLikely)
+            );
+            assert!(
+                layout
+                    .reasons
+                    .contains(&LayoutComplexityReason::MultiColumn)
+            );
+            assert!(
+                layout
+                    .reasons
+                    .contains(&LayoutComplexityReason::DenseGraphics),
+                "400x300 over 612x792 is ~25% coverage"
+            );
+            assert!(layout.is_complex);
+        }
+
+        #[test]
+        fn full_page_image_with_no_text_reads_as_scanned() {
+            let figures = [rect(0.0, 0.0, 612.0, 792.0)];
+            let stats = calculate_native_page_complexity(&page(Vec::new()), &figures, 0, 1);
+            assert!(stats.reasons.contains(&ComplexityReason::Scanned));
+            assert!(stats.full_page_image);
+            assert_eq!(
+                stats.image_block_count, 0,
+                "full-page background is not an inline figure"
+            );
+            // The cheap predicate fired, so the (zero) vector walk is skipped,
+            // mirroring the PDF flow's None.
+            assert_eq!(stats.uncovered_vector_area, None);
+        }
+
+        #[test]
+        fn tiny_decorations_are_ignored() {
+            let items: Vec<TextItem> = (0..40)
+                .map(|i| item("some meaningful text", 40.0, 20.0 * i as f32, 500.0, 18.0))
+                .collect();
+            // A 10pt icon: below MIN_IMAGE_SIZE_PT on both axes.
+            let figures = [rect(40.0, 40.0, 10.0, 10.0)];
+            let stats = calculate_native_page_complexity(&page(items), &figures, 0, 1);
+            assert!(!stats.has_substantial_images);
+            assert!(!stats.needs_ocr);
+        }
+    }
+
+    /// The bitmap size pdfium renders a `pt` edge to at `dpi`.
+    fn rendered_px(pt: f32, dpi: f32) -> u32 {
+        (pt * (dpi / 72.0)).round() as u32
+    }
+
+    #[test]
+    fn capped_page_renders_to_exactly_the_cap() {
+        // Letter, A4, Legal, a landscape slide, a tall receipt and a poster
+        // that is over the cap even at 72 dpi.
+        let sizes = [
+            (612.0, 792.0),
+            (595.28, 841.89),
+            (612.0, 1008.0),
+            (960.0, 540.0),
+            (226.77, 2834.65),
+            (2592.0, 3456.0),
+        ];
+        for cap in [300, 1600, 2400, 4000] {
+            for (w, h) in sizes {
+                let dpi = fitting_dpi(w, h, 300.0, cap);
+                let long_edge = rendered_px(w, dpi).max(rendered_px(h, dpi));
+                if dpi < 300.0 {
+                    assert_eq!(long_edge, cap, "{w}x{h} pt at cap {cap}");
+                } else {
+                    assert!(long_edge <= cap, "{w}x{h} pt at cap {cap}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn page_under_the_cap_keeps_the_configured_dpi() {
+        assert_eq!(fitting_dpi(612.0, 792.0, 150.0, 2400), 150.0);
+    }
+
+    #[test]
+    fn zero_cap_or_empty_page_keeps_the_configured_dpi() {
+        assert_eq!(fitting_dpi(612.0, 792.0, 300.0, 0), 300.0);
+        assert_eq!(fitting_dpi(0.0, 0.0, 300.0, 2400), 300.0);
+    }
+
+    #[test]
+    fn test_polygon_rotation_horizontal() {
+        let p = [[0.0, 0.0], [100.0, 0.0], [100.0, 20.0], [0.0, 20.0]];
+        assert_eq!(polygon_rotation_deg(&p), 0.0);
+    }
+
+    #[test]
+    fn test_polygon_rotation_90_ccw() {
+        // Upright text rotated 90° CCW: TL→TR edge points upward (screen y decreasing).
+        let p = [[10.0, 100.0], [10.0, 0.0], [30.0, 0.0], [30.0, 100.0]];
+        assert_eq!(polygon_rotation_deg(&p), 90.0);
+    }
+
+    #[test]
+    fn test_polygon_rotation_270_ccw() {
+        // Upright text rotated 270° CCW (= 90° CW): TL→TR edge points downward.
+        let p = [[10.0, 0.0], [10.0, 100.0], [30.0, 100.0], [30.0, 0.0]];
+        assert_eq!(polygon_rotation_deg(&p), 270.0);
+    }
+
+    #[test]
+    fn test_polygon_rotation_screen_axis_vertical() {
+        // PaddleOCR-style: tall+narrow sidebar polygon in screen-axis order
+        // (smallest-y first). poly[0]→poly[1] is the SHORT horizontal edge,
+        // not the reading direction. The longer edge picks out the rotation.
+        let p = [[20.0, 50.0], [50.0, 50.0], [50.0, 750.0], [20.0, 750.0]];
+        let r = polygon_rotation_deg(&p);
+        assert!(r == 90.0 || r == 270.0, "expected 90 or 270, got {r}");
+    }
+
+    #[test]
+    fn test_polygon_rotation_near_square() {
+        // Single-char detections (CJK glyphs, etc.) should not be classified
+        // as rotated — there's no reliable reading axis.
+        let p = [[0.0, 0.0], [20.0, 0.0], [20.0, 22.0], [0.0, 22.0]];
+        assert_eq!(polygon_rotation_deg(&p), 0.0);
+    }
+
+    #[test]
+    fn test_polygon_rotation_180() {
+        let p = [[100.0, 20.0], [0.0, 20.0], [0.0, 0.0], [100.0, 0.0]];
+        assert_eq!(polygon_rotation_deg(&p), 180.0);
+    }
+
+    #[test]
+    fn test_clean_ocr_table_artifacts() {
+        assert_eq!(clean_ocr_table_artifacts("44520]"), "44520");
+        assert_eq!(clean_ocr_table_artifacts("|123"), "123");
+        assert_eq!(clean_ocr_table_artifacts("0.3|"), "0.3");
+        assert_eq!(clean_ocr_table_artifacts("(note)"), "(note)");
+        assert_eq!(clean_ocr_table_artifacts("|hello|"), "|hello|");
+        assert_eq!(clean_ocr_table_artifacts("N/A"), "N/A");
+        assert_eq!(clean_ocr_table_artifacts(""), "");
+        assert_eq!(clean_ocr_table_artifacts("|||"), "|||");
+    }
+
+    #[test]
+    fn test_clean_ocr_keeps_accounting_negatives() {
+        // Parentheses around a number mark it negative (issue #468).
+        assert_eq!(clean_ocr_table_artifacts("(78,939)"), "(78,939)");
+        assert_eq!(clean_ocr_table_artifacts("(12.5%)"), "(12.5%)");
+        // Border misreads next to them are still removed.
+        assert_eq!(clean_ocr_table_artifacts("(78,939)|"), "(78,939)");
+        assert_eq!(clean_ocr_table_artifacts("|(78,939)]"), "(78,939)");
+        // A lone parenthesis is still treated as a border misread.
+        assert_eq!(clean_ocr_table_artifacts("78,939)"), "78,939");
+        assert_eq!(clean_ocr_table_artifacts("(78,939"), "78,939");
+    }
+
+    fn make_item(x: f32, y: f32, w: f32, h: f32) -> TextItem {
+        TextItem {
+            text: "x".into(),
+            x,
+            y,
+            width: w,
+            height: h,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_overlaps_existing_text_inside() {
+        let items = vec![make_item(10.0, 10.0, 20.0, 5.0)];
+        assert!(overlaps_existing_text(&items, 12.0, 11.0, 5.0, 2.0, 2.0));
+    }
+
+    #[test]
+    fn test_overlaps_existing_text_disjoint() {
+        let items = vec![make_item(10.0, 10.0, 20.0, 5.0)];
+        assert!(!overlaps_existing_text(&items, 100.0, 100.0, 5.0, 5.0, 2.0));
+    }
+
+    #[test]
+    fn test_overlaps_existing_text_tolerance() {
+        let items = vec![make_item(10.0, 10.0, 20.0, 5.0)];
+        // Just outside but within tolerance
+        assert!(overlaps_existing_text(&items, 31.0, 10.0, 5.0, 5.0, 2.0));
+        // Beyond tolerance
+        assert!(!overlaps_existing_text(&items, 35.0, 10.0, 5.0, 5.0, 2.0));
+    }
+
+    #[test]
+    fn test_overlaps_empty() {
+        assert!(!overlaps_existing_text(&[], 0.0, 0.0, 1.0, 1.0, 0.0));
+    }
+
+    fn pb(x: f32, y: f32, w: f32, h: f32) -> ImageBounds {
+        ImageBounds {
+            x,
+            y,
+            width: w,
+            height: h,
+        }
+    }
+
+    #[test]
+    fn test_uncovered_path_area_no_text() {
+        // A sentence-sized outlined region with no native text at all.
+        let paths = vec![pb(50.0, 300.0, 200.0, 12.0)];
+        let area = uncovered_path_area(&paths, &[]);
+        assert!((area - 2400.0).abs() < 1.0);
+        assert!(area >= UNCOVERED_VECTOR_AREA_THRESHOLD);
+    }
+
+    #[test]
+    fn test_uncovered_path_area_fully_covered_by_text() {
+        // Shading rect behind real text: fully covered, must not trigger.
+        let paths = vec![pb(50.0, 300.0, 200.0, 12.0)];
+        let items = vec![make_item(40.0, 295.0, 250.0, 25.0)];
+        let area = uncovered_path_area(&paths, &items);
+        assert_eq!(area, 0.0);
+    }
+
+    #[test]
+    fn test_uncovered_path_area_partial_coverage() {
+        // Half the outlined region is covered by a text item.
+        let paths = vec![pb(0.0, 0.0, 100.0, 10.0)];
+        let items = vec![make_item(0.0, 0.0, 50.0, 10.0)];
+        let area = uncovered_path_area(&paths, &items);
+        assert!((area - 500.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_uncovered_path_area_small_decoration_below_threshold() {
+        // A few bullet-sized filled paths shouldn't reach the threshold.
+        let paths = vec![pb(10.0, 10.0, 8.0, 8.0), pb(10.0, 30.0, 8.0, 8.0)];
+        let area = uncovered_path_area(&paths, &[]);
+        assert!(area < UNCOVERED_VECTOR_AREA_THRESHOLD);
+    }
+
+    #[test]
+    fn test_unusable_native_unicode_map_error() {
+        let mut item = make_item(0.0, 0.0, 10.0, 10.0);
+        assert!(!is_unusable_native(&item));
+        item.has_unicode_map_error = true;
+        assert!(is_unusable_native(&item));
+    }
+
+    #[test]
+    fn test_clean_ocr_keeps_whitespace_trimmed() {
+        assert_eq!(clean_ocr_table_artifacts("   "), "");
+        assert_eq!(clean_ocr_table_artifacts(" 123 "), "123");
+    }
+
+    // A mock OCR engine that always fails, simulating a systemic error such as
+    // missing Tesseract language data (the root cause behind issue #253).
+    struct FailingEngine;
+    impl OcrEngine for FailingEngine {
+        fn name(&self) -> &str {
+            "failing"
+        }
+        fn recognize<'a, 'b: 'a, 'c: 'a>(
+            &'a self,
+            _image_data: &'c [u8],
+            _width: u32,
+            _height: u32,
+            _options: &'b OcrOptions,
+        ) -> std::pin::Pin<
+            Box<
+                dyn Future<
+                        Output = Result<Vec<OcrResult>, Box<dyn std::error::Error + Send + Sync>>,
+                    > + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async move { Err("Error opening data file tessdata/eng.traineddata".into()) })
+        }
+    }
+
+    fn make_blank_page(page_number: usize) -> Page {
+        Page {
+            ocr_deskew: None,
+            page_number,
+            page_label: None,
+            page_width: 100.0,
+            page_height: 100.0,
+            content_bounds: None,
+            text_items: Vec::new(),
+            graphics: Vec::new(),
+            vector_graphics: None,
+            struct_nodes: Vec::new(),
+            image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
+        }
+    }
+
+    /// A page whose items carry per-item `(font_name, text)` pairs. Geometry is
+    /// irrelevant to the garble checks, so every item shares one bbox.
+    fn make_font_page(items: &[(&str, &str)]) -> Page {
+        let mut page = make_blank_page(1);
+        page.text_items = items
+            .iter()
+            .map(|(font, text)| TextItem {
+                text: (*text).into(),
+                font_name: Some((*font).to_string()),
+                width: 10.0,
+                height: 10.0,
+                ..Default::default()
+            })
+            .collect();
+        page
+    }
+
+    /// Caesar-shifted table text: the +11 letter / +3 digit map from the
+    /// mixed-font fixture in issue #413, applied to the visible row text.
+    const GARBLED_ROWS: &[&str] = &[
+        "Tepx Nzop Opdnctaetzy Bflyetej Cpgtph Olep",
+        "KI-334 Cpawlnpxpye Qtwepc Lddpxmwj 44 5359-30-34",
+        "KI-335 Azcelmwp Dpydzc Wzfdtyr 45 5359-30-35",
+        "KI-336 Nlwtmcletzy Mclnvpe 46 5359-30-36",
+    ];
+
+    const HEALTHY_PARAGRAPH: &[&str] = &[
+        "This fictional report is a public parser-routing fixture.",
+        "The upper section uses a standard font and extracts normally.",
+        "All names, identifiers, quantities, and dates are fabricated.",
+        "A PDF viewer still renders both sections as readable text.",
+    ];
+
+    /// Clean Vietnamese: most vowels carry a diacritic. Counting ASCII letters
+    /// only, this paragraph's vowel ratio is ~0.18 and the page was flagged
+    /// garbled although the text layer is intact.
+    const VIETNAMESE_PARAGRAPH: &[&str] = &[
+        "Trường học tổ chức buổi họp phụ huynh vào sáng thứ bảy tuần trước.",
+        "Những người tham dự đã thảo luận về chương trình học kỳ mới.",
+        "Thầy hiệu trưởng nhấn mạnh việc rèn luyện thể chất cho học sinh.",
+        "Cuối buổi, phụ huynh được nhận tài liệu hướng dẫn chi tiết.",
+    ];
+
+    /// Tone-marked Hanyu pinyin: same failure mode, more severe.
+    const PINYIN_PARAGRAPH: &[&str] = &[
+        "Rénrén shēng ér zìyóu, zài zūnyán hé quánlì shàng yīlǜ píngděng.",
+        "Tāmen fùyǒu lǐxìng hé liángxīn, bìng yīng yǐ xiōngdì guānxì de jīngshén xiāng duìdài.",
+    ];
+
+    #[test]
+    fn test_accented_vowels_are_not_garbled() {
+        for para in [VIETNAMESE_PARAGRAPH, PINYIN_PARAGRAPH] {
+            let items: Vec<(&str, &str)> = para.iter().map(|t| ("ArialUnicodeMS", *t)).collect();
+            let page = make_font_page(&items);
+            assert!(
+                matches!(garbled_scope(&page), GarbledScope::None),
+                "{:?}",
+                para[0]
+            );
+            assert!(!page_is_garbled(&page));
+        }
+    }
+
+    #[test]
+    fn test_count_letters_and_vowels_accented() {
+        // NFC and NFD spellings of the same word count the same.
+        assert_eq!(count_letters_and_vowels("trường"), (6, 2));
+        assert_eq!(
+            count_letters_and_vowels("tru\u{031b}o\u{031b}\u{0300}ng"),
+            (6, 2)
+        );
+        // Non-Latin scripts still contribute nothing.
+        assert_eq!(count_letters_and_vowels("مرحبا こんにちは"), (0, 0));
+    }
+
+    #[test]
+    fn test_garbled_scope_clean_page() {
+        let items: Vec<(&str, &str)> = HEALTHY_PARAGRAPH
+            .iter()
+            .map(|t| ("Helvetica", *t))
+            .collect();
+        let page = make_font_page(&items);
+        assert!(matches!(garbled_scope(&page), GarbledScope::None));
+        assert!(!page_is_garbled(&page));
+    }
+
+    #[test]
+    fn test_garbled_scope_whole_page() {
+        let items: Vec<(&str, &str)> = GARBLED_ROWS.iter().map(|t| ("BadFont", *t)).collect();
+        let page = make_font_page(&items);
+        assert!(matches!(garbled_scope(&page), GarbledScope::WholePage));
+    }
+
+    /// Issue #413: healthy text in one font must not mask a corrupt ToUnicode
+    /// map in another. Page-wide the vowel ratio lands ~0.28 (natural-looking),
+    /// while the corrupt font group alone sits ~0.19.
+    #[test]
+    fn test_garbled_scope_mixed_fonts_flags_only_bad_font() {
+        let mut items: Vec<(&str, &str)> = HEALTHY_PARAGRAPH
+            .iter()
+            .map(|t| ("Helvetica", *t))
+            .collect();
+        items.extend(GARBLED_ROWS.iter().map(|t| ("BitstreamVeraSans-Roman", *t)));
+        let page = make_font_page(&items);
+
+        // The page-wide sum alone does not trip: this is the regression.
+        let (letters, vowels) = page.text_items.iter().fold((0, 0), |(l, v), it| {
+            let (il, iv) = count_letters_and_vowels(&it.text);
+            (l + il, v + iv)
+        });
+        assert!(!ratio_is_garbled(letters, vowels));
+
+        match garbled_scope(&page) {
+            GarbledScope::Fonts(fonts) => {
+                assert_eq!(fonts.len(), 1);
+                assert!(fonts.contains(&Some("BitstreamVeraSans-Roman".to_string())));
+            }
+            _ => panic!("expected only the corrupt font group to be flagged"),
+        }
+        assert!(page_is_garbled(&page));
+    }
+
+    /// A page of unmappable text (PUA char-code fallback) has no ASCII letters
+    /// for the vowel ratio to judge, and every item is excluded from
+    /// `text_length` — it must still report as garbled.
+    #[test]
+    fn test_page_is_garbled_unmapped_text() {
+        let mut page = make_font_page(&[
+            (
+                "T3Font",
+                "\u{E001}\u{E002}\u{E003}\u{E004}\u{E005}\u{E006}\u{E007}\u{E008}",
+            ),
+            (
+                "T3Font",
+                "\u{E011}\u{E012}\u{E013}\u{E014}\u{E015}\u{E016}\u{E017}\u{E018}",
+            ),
+            (
+                "T3Font",
+                "\u{E021}\u{E022}\u{E023}\u{E024}\u{E025}\u{E026}\u{E027}\u{E028}",
+            ),
+            (
+                "T3Font",
+                "\u{E031}\u{E032}\u{E033}\u{E034}\u{E035}\u{E036}\u{E037}\u{E038}",
+            ),
+        ]);
+        for it in &mut page.text_items {
+            it.has_unicode_map_error = true;
+        }
+        assert!(matches!(garbled_scope(&page), GarbledScope::None));
+        assert_eq!(native_text_length(&page), 0);
+        assert!(page_is_garbled(&page));
+    }
+
+    /// A stray unmappable symbol glyph (e.g. a Type3 checkmark) on a healthy
+    /// page must not flag it.
+    #[test]
+    fn test_page_is_garbled_ignores_stray_unmapped_glyph() {
+        let mut items: Vec<(&str, &str)> = HEALTHY_PARAGRAPH
+            .iter()
+            .map(|t| ("Helvetica", *t))
+            .collect();
+        items.push(("T3Font", "\u{E001}"));
+        let mut page = make_font_page(&items);
+        page.text_items.last_mut().unwrap().has_unicode_map_error = true;
+        assert!(!page_is_garbled(&page));
+    }
+
+    /// A font map wrong for a few glyphs (č -> `"`, ý -> `*`, j -> `G`) leaves text that reads
+    /// almost right. One misread char across three or more words condemns every subset of
+    /// that base font on the page; the healthy font's text stays.
+    #[test]
+    fn misread_glyphs_flag_every_subset_of_the_base_font() {
+        let mut items: Vec<(&str, &str)> = HEALTHY_PARAGRAPH
+            .iter()
+            .map(|t| ("Helvetica", *t))
+            .collect();
+        items.push(("AAAAAB+Futura", "Tato kter*ch nabíječka je jednou z jin*m"));
+        items.push(("AAAAAC+Futura", "nejnověj*ch a b*t"));
+        items.push(("AAAAAD+Futura", "Kontakt"));
+        let page = make_font_page(&items);
+        match garbled_scope(&page) {
+            GarbledScope::Fonts(fonts) => {
+                assert!(fonts.contains(&Some("AAAAAB+Futura".to_string())));
+                assert!(fonts.contains(&Some("AAAAAD+Futura".to_string())));
+                assert!(!fonts.contains(&Some("Helvetica".to_string())));
+            }
+            _ => panic!("expected the Futura subsets to be flagged"),
+        }
+    }
+
+    /// Compound names ending in one repeated part are no broken map either.
+    #[test]
+    fn misread_glyphs_ignore_compound_names_with_one_tail() {
+        let mut items: Vec<(&str, &str)> = HEALTHY_PARAGRAPH
+            .iter()
+            .map(|t| ("Helvetica", *t))
+            .collect();
+        items.push((
+            "STIX-Regular",
+            "HistoAge PhenoAge GrimAge pTau acceleration",
+        ));
+        let page = make_font_page(&items);
+        assert!(matches!(garbled_scope(&page), GarbledScope::None));
+    }
+
+    /// Brand and camel-case names repeat one word, quotations lack a leading space, units carry
+    /// digits: none of them is a misread glyph.
+    #[test]
+    fn misread_glyphs_ignore_names_quotes_and_units() {
+        for text in [
+            "arXiv arXiv arXiv iPad iPad McRae McRae",
+            "the expression\"put out fire\" and emerging\"care in parentheses\"exemplified",
+            "70dBc -94dBc 21dBm 25dBm PubTabNet",
+        ] {
+            let found = misread_glyphs(text);
+            let words: HashSet<&str> = found.iter().map(|m| m.word.as_str()).collect();
+            assert!(words.len() < MISREAD_MIN_WORDS, "{text:?} -> {found:?}");
+        }
+        let found = misread_glyphs("maGor OecutiMe horiQon va!í");
+        assert_eq!(found.iter().map(|m| m.ch).collect::<String>(), "GMQ!");
+        assert_eq!(found[0].word, "magor");
+    }
+
+    /// Kept native glyphs inside an OCR line cover only a sliver of its width.
+    #[test]
+    fn native_width_coverage_merges_overlapping_spans() {
+        let items = vec![
+            make_item(0.0, 0.0, 10.0, 10.0),
+            make_item(5.0, 0.0, 10.0, 10.0),
+        ];
+        assert!((native_width_coverage(&items, 0.0, 0.0, 100.0, 10.0) - 0.15).abs() < 1e-4);
+        // a line above or below does not count
+        assert_eq!(native_width_coverage(&items, 0.0, 20.0, 100.0, 10.0), 0.0);
+    }
+
+    /// A small run of low-vowel text (acronyms, tickers, part numbers) in its
+    /// own font must not flag an otherwise healthy page.
+    #[test]
+    fn test_garbled_scope_ignores_small_low_vowel_font() {
+        let mut items: Vec<(&str, &str)> = HEALTHY_PARAGRAPH
+            .iter()
+            .map(|t| ("Helvetica", *t))
+            .collect();
+        items.push(("TickerFont", "NYSE NASDAQ FTSE DAX SPX"));
+        let page = make_font_page(&items);
+        assert!(matches!(garbled_scope(&page), GarbledScope::None));
+    }
+
+    /// Items with no font name still fall back to the page-wide verdict.
+    #[test]
+    fn test_garbled_scope_without_font_names() {
+        let mut page = make_blank_page(1);
+        page.text_items = GARBLED_ROWS
+            .iter()
+            .map(|text| TextItem {
+                text: (*text).into(),
+                font_name: None,
+                ..Default::default()
+            })
+            .collect();
+        assert!(matches!(garbled_scope(&page), GarbledScope::WholePage));
+    }
+
+    fn make_rendered(idx: usize) -> OcrRaster {
+        OcrRaster {
+            has_native_text: false,
+            image_rects: Vec::new(),
+            replace_native: false,
+            request_fields: Default::default(),
+            page_number: idx + 1,
+            // 1x1 grayscale pixel; the engine never inspects it.
+            image: OcrImage::Pixels {
+                data: vec![0u8],
+                width: 1,
+                height: 1,
+                grayscale: true,
+            },
+            dpi: 72.0,
+        }
+    }
+
+    fn merge_outcome(page_number: usize, error: Option<&str>) -> PageOcrOutcome {
+        PageOcrOutcome {
+            page_number,
+            dpi: 144.0,
+            has_native_text: false,
+            image_rects: Vec::new(),
+            replace_native: false,
+            results: if error.is_some() {
+                Vec::new()
+            } else {
+                vec![OcrResult {
+                    text: format!("page {page_number}"),
+                    bbox: [10.0, 120.0, 60.0, 140.0],
+                    confidence: 0.9,
+                    polygon: None,
+                    words: Vec::new(),
+                    rotation: None,
+                }]
+            },
+            error: error.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn test_incremental_merge_matches_batch_and_updates_pages_at_once() {
+        let mut incremental = vec![make_native_text_page(1), make_blank_page(2)];
+        let mut batch = incremental.clone();
+        let outcomes = vec![merge_outcome(2, None), merge_outcome(1, None)];
+        merge_ocr_results(&mut batch, outcomes.clone(), true, true).unwrap();
+
+        let mut state = OcrMergeState::default();
+        state
+            .merge(&mut incremental[1..], vec![outcomes[0].clone()], true)
+            .unwrap();
+        assert_eq!(incremental[0].text_items.len(), 1);
+        assert_eq!(incremental[1].text_items[0].text, "page 2");
+        assert_eq!(incremental[1].text_items[0].y, 60.0);
+        assert_eq!(incremental[1].text_items[0].words.len(), 1);
+        state
+            .merge(&mut incremental[..1], vec![outcomes[1].clone()], true)
+            .unwrap();
+        state.finish(true).unwrap();
+        assert_eq!(
+            serde_json::to_value(incremental).unwrap(),
+            serde_json::to_value(batch).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_incremental_error_cause_matches_batch_merge_order() {
+        for order in [[1, 2], [2, 1]] {
+            for incremental in [true, false] {
+                let mut pages = [make_blank_page(1), make_blank_page(2)];
+                let outcomes: Vec<_> = order
+                    .into_iter()
+                    .map(|page| {
+                        merge_outcome(
+                            page,
+                            Some(if page == 1 {
+                                "first page failure"
+                            } else {
+                                "second page failure"
+                            }),
+                        )
+                    })
+                    .collect();
+                let result = if incremental {
+                    let mut state = OcrMergeState::default();
+                    for outcome in outcomes {
+                        state.merge(&mut pages, vec![outcome], false).unwrap();
+                    }
+                    state.finish(true)
+                } else {
+                    merge_ocr_results(&mut pages, outcomes, true, false)
+                };
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    format!(
+                        "OCR failed: OCR failed for all 2 page(s): {} page failure",
+                        if order[0] == 1 { "first" } else { "second" }
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_incremental_merge_keeps_document_failure_policy() {
+        for errors in [[true, true], [true, false], [false, true], [false, false]] {
+            for fatal in [true, false] {
+                let mut pages = [make_blank_page(1), make_blank_page(2)];
+                let mut state = OcrMergeState::default();
+                for (index, failed) in errors.into_iter().enumerate() {
+                    state
+                        .merge(
+                            &mut pages[index..=index],
+                            vec![merge_outcome(
+                                index + 1,
+                                failed.then_some("test OCR failure"),
+                            )],
+                            false,
+                        )
+                        .unwrap();
+                }
+                let result = state.finish(fatal);
+                assert_eq!(
+                    result.is_err(),
+                    fatal && errors.iter().all(|failed| *failed)
+                );
+                if let Err(error) = result {
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("OCR failed for all 2 page(s): test OCR failure")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_incremental_merge_empty_success_is_not_failure() {
+        let mut pages = [make_blank_page(1), make_blank_page(2)];
+        let mut state = OcrMergeState::default();
+        state
+            .merge(
+                &mut pages[..1],
+                vec![merge_outcome(1, Some("failed"))],
+                false,
+            )
+            .unwrap();
+        let mut empty = merge_outcome(2, None);
+        empty.results.clear();
+        state.merge(&mut pages[1..], vec![empty], false).unwrap();
+        state.finish(true).unwrap();
+        OcrMergeState::default().finish(true).unwrap();
+    }
+
+    #[test]
+    fn test_incremental_merge_preserves_native_text_on_failure() {
+        let mut pages = vec![make_native_text_page(1)];
+        let before = serde_json::to_value(&pages).unwrap();
+        let mut state = OcrMergeState::default();
+        state
+            .merge(&mut pages, vec![merge_outcome(1, Some("failed"))], false)
+            .unwrap();
+        state.finish(true).unwrap();
+        assert_eq!(serde_json::to_value(&pages).unwrap(), before);
+    }
+
+    #[test]
+    fn test_incremental_merge_rejects_unknown_page() {
+        let mut state = OcrMergeState::default();
+        let error = state
+            .merge(
+                &mut [make_blank_page(1)],
+                vec![merge_outcome(2, None)],
+                false,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("no matching page"));
+    }
+
+    /// The pre-split entry point, kept for these tests: recognition followed
+    /// by the merge, exactly as `parse()` composes the two stages.
+    async fn ocr_and_merge_rendered(
+        pages: &mut [Page],
+        rendered: Vec<OcrRaster>,
+        engine: Arc<dyn OcrEngine>,
+        language: &str,
+        num_workers: usize,
+        ocr_failure_fatal: bool,
+        emit_word_boxes: bool,
+    ) -> Result<(), LiteParseError> {
+        let outcomes = recognize_rasters(rendered, engine, language, num_workers).await;
+        merge_ocr_results(pages, outcomes, ocr_failure_fatal, emit_word_boxes)
+    }
+
+    // A page that already has substantial native text coverage, as would be the
+    // case for a native-text PDF page that was only rendered for OCR because it
+    // also contains an image.
+    fn make_native_text_page(page_number: usize) -> Page {
+        Page {
+            ocr_deskew: None,
+            page_number,
+            page_label: None,
+            page_width: 100.0,
+            page_height: 100.0,
+            content_bounds: None,
+            text_items: vec![TextItem {
+                text: "this page already has real native text content".into(),
+                x: 0.0,
+                y: 0.0,
+                width: 50.0,
+                height: 50.0,
+                ..Default::default()
+            }],
+            graphics: Vec::new(),
+            vector_graphics: None,
+            struct_nodes: Vec::new(),
+            image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
+        }
+    }
+
+    // A page with >20 bytes of native text but very low page coverage. These
+    // are still text-poor enough that `render_pages_for_ocr` sends them to OCR
+    // (`text_coverage < 0.15`), so a systemic OCR failure should not be silently
+    // swallowed.
+    fn make_low_coverage_text_page(page_number: usize) -> Page {
+        Page {
+            ocr_deskew: None,
+            page_number,
+            page_label: None,
+            page_width: 100.0,
+            page_height: 100.0,
+            content_bounds: None,
+            text_items: vec![TextItem {
+                text: "small native header that is not enough".into(),
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 5.0,
+                ..Default::default()
+            }],
+            graphics: Vec::new(),
+            vector_graphics: None,
+            struct_nodes: Vec::new(),
+            image_refs: Vec::new(),
+            annotations: None,
+            form_fields: None,
+            structure_tree: None,
+        }
+    }
+
+    // When every OCR task fails (e.g. missing language data), the function must
+    // return an error instead of silently reporting success with no OCR text.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_all_pages_fail_returns_error() {
+        let mut pages = vec![make_blank_page(1), make_blank_page(2)];
+        let rendered = vec![make_rendered(0), make_rendered(1)];
+        let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
+
+        let result =
+            ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true, false).await;
+
+        let err = result.expect_err("expected systemic OCR failure to be surfaced");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("OCR failed for all 2 page(s)"),
+            "unexpected error message: {msg}"
+        );
+        assert!(
+            msg.contains("traineddata"),
+            "error should carry the underlying cause: {msg}"
+        );
+    }
+
+    /// Sleeps longer for lower DPIs, then fails with a message naming the DPI,
+    /// so completion order is the reverse of submission order and each
+    /// outcome shows which raster it came from.
+    struct ReverseLatencyEngine;
+
+    impl OcrEngine for ReverseLatencyEngine {
+        fn name(&self) -> &str {
+            "reverse-latency"
+        }
+
+        fn recognize<'a, 'b: 'a, 'c: 'a>(
+            &'a self,
+            _image_data: &'c [u8],
+            _width: u32,
+            _height: u32,
+            options: &'b OcrOptions,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = OcrTaskResult> + Send + 'a>>
+        {
+            let dpi = options.dpi;
+            Box::pin(async move {
+                let delay = (100.0 - dpi).max(0.0) as u64 * 5;
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                Err(format!("dpi {dpi}").into())
+            })
+        }
+    }
+
+    // Outcomes come back in submission order whatever order recognitions
+    // finish in, with each result attached to its own raster's facts. Five
+    // rasters over two workers also exercises `submit` waiting for a slot.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_recognize_returns_submission_order() {
+        let rendered = (0..5)
+            .map(|i| OcrRaster {
+                dpi: 72.0 + i as f32 * 4.0,
+                ..make_rendered(i)
+            })
+            .collect();
+        let engine: Arc<dyn OcrEngine> = Arc::new(ReverseLatencyEngine);
+
+        let outcomes = recognize_rasters(rendered, engine, "eng", 2).await;
+
+        let got: Vec<(usize, String)> = outcomes
+            .iter()
+            .map(|o| (o.page_number, o.error.clone().unwrap_or_default()))
+            .collect();
+        let want: Vec<(usize, String)> = (0..5)
+            .map(|i| (i + 1, format!("dpi {}", 72.0 + i as f32 * 4.0)))
+            .collect();
+        assert_eq!(got, want);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_empty_pool_complete_one_does_not_wait() {
+        let mut pool = OcrTaskPool::new(Arc::new(FailingEngine), "eng", 2);
+        assert!(!pool.complete_one().await);
+        assert!(pool.finish().await.is_empty());
+    }
+
+    // With no rendered pages there is nothing to OCR; this must remain a no-op
+    // success rather than tripping the all-failed guard.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_no_rendered_pages_is_ok() {
+        let mut pages = vec![make_blank_page(1)];
+        let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
+
+        let result =
+            ocr_and_merge_rendered(&mut pages, Vec::new(), engine, "eng", 2, true, false).await;
+
+        assert!(result.is_ok(), "empty OCR set should succeed: {result:?}");
+    }
+
+    // Regression guard: when OCR fails but every failing page already had native
+    // text (it was only rendered for image-based enrichment), a broken OCR setup
+    // must NOT abort the parse — the native text is still valid output.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_native_text_pages_not_failed_on_ocr_error() {
+        let mut pages = vec![make_native_text_page(1), make_native_text_page(2)];
+        let rendered = vec![make_rendered(0), make_rendered(1)];
+        let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
+
+        let result =
+            ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true, false).await;
+
+        assert!(
+            result.is_ok(),
+            "OCR failure on already-native-text pages must not abort the parse: {result:?}"
+        );
+        // Native text is preserved untouched.
+        assert_eq!(pages[0].text_items.len(), 1);
+        assert_eq!(pages[1].text_items.len(), 1);
+    }
+
+    // When failures span both a sparse-text page and a native-text page, the
+    // sparse-text page lost its likely primary text source, so we still fail
+    // loud.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_mixed_failure_with_sparse_text_page_returns_error() {
+        let mut pages = vec![make_native_text_page(1), make_blank_page(2)];
+        let rendered = vec![make_rendered(0), make_rendered(1)];
+        let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
+
+        let result =
+            ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true, false).await;
+
+        let err = result.expect_err("a text-starved page losing all OCR must surface an error");
+        assert!(
+            err.to_string().contains("OCR failed for all 2 page(s)"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    // Regression guard for the review finding: low-coverage pages are rendered
+    // for OCR even when their native text length is >20 bytes. A systemic OCR
+    // failure on such pages must still surface as an error.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_low_coverage_text_page_failure_returns_error() {
+        let mut pages = vec![make_low_coverage_text_page(1)];
+        let rendered = vec![make_rendered(0)];
+        let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
+
+        let result =
+            ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, true, false).await;
+
+        let err = result.expect_err("low-coverage text page losing OCR must surface an error");
+        assert!(
+            err.to_string().contains("OCR failed for all 1 page(s)"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    // With `ocr_failure_fatal = false`, a systemic OCR failure that would
+    // normally abort (every task failed, a sparse-text page among them) must
+    // instead return Ok and preserve whatever native text was extracted, so a
+    // caller with its own fallback gets partial results rather than nothing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_non_fatal_systemic_failure_returns_partial() {
+        let mut pages = vec![make_native_text_page(1), make_blank_page(2)];
+        let rendered = vec![make_rendered(0), make_rendered(1)];
+        let engine: Arc<dyn OcrEngine> = Arc::new(FailingEngine);
+
+        let result =
+            ocr_and_merge_rendered(&mut pages, rendered, engine, "eng", 2, false, false).await;
+
+        assert!(
+            result.is_ok(),
+            "non-fatal mode must not abort on systemic OCR failure: {result:?}"
+        );
+        // The native-text page keeps its text; the blank page simply has no OCR.
+        assert_eq!(pages[0].text_items.len(), 1);
+    }
+
+    /// An OCR-sourced `TextItem` must carry a word box the way a native one
+    /// does. The engine already reports one word per result (`RIL_WORD` for
+    /// Tesseract), so the item's own text and box are the word box. Without
+    /// it the projection pass has nothing to carry forward when it joins
+    /// neighbouring OCR items into a run, so a caller asking for word boxes
+    /// gets them on native text only and none on scanned pages (#473).
+    #[test]
+    fn test_ocr_items_carry_word_boxes_when_enabled() {
+        let outcome = |page_number: usize| PageOcrOutcome {
+            page_number,
+            dpi: 72.0,
+            has_native_text: false,
+            image_rects: Vec::new(),
+            replace_native: false,
+            results: vec![
+                OcrResult {
+                    text: "hello".into(),
+                    bbox: [10.0, 20.0, 60.0, 30.0],
+                    confidence: 0.9,
+                    polygon: None,
+                    rotation: None,
+                    words: Vec::new(),
+                },
+                OcrResult {
+                    text: "world".into(),
+                    bbox: [62.0, 20.0, 110.0, 30.0],
+                    confidence: 0.9,
+                    polygon: None,
+                    rotation: None,
+                    words: Vec::new(),
+                },
+            ],
+            error: None,
+        };
+
+        let mut enabled = vec![make_blank_page(1)];
+        merge_ocr_results(&mut enabled, vec![outcome(1)], false, true).unwrap();
+        assert_eq!(enabled[0].text_items.len(), 2);
+        for item in &enabled[0].text_items {
+            assert_eq!(
+                item.words.len(),
+                1,
+                "OCR item {:?} should carry one word box",
+                item.text
+            );
+            let word = &item.words[0];
+            assert_eq!(word.text, item.text);
+            assert_eq!(
+                (word.x, word.y, word.width, word.height),
+                (item.x, item.y, item.width, item.height),
+                "the word box is the result's own box"
+            );
+        }
+
+        // The same input with word boxes off must stay allocation-free, as
+        // `LiteParseConfig::emit_word_boxes` promises for native text.
+        let mut disabled = vec![make_blank_page(1)];
+        merge_ocr_results(&mut disabled, vec![outcome(1)], false, false).unwrap();
+        assert_eq!(disabled[0].text_items.len(), 2);
+        assert!(disabled[0].text_items.iter().all(|i| i.words.is_empty()));
+    }
+
+    /// One page of OCR results merged with word boxes on, at `dpi`.
+    fn merge_ocr_page(results: Vec<OcrResult>, dpi: f32) -> Page {
+        let outcome = PageOcrOutcome {
+            page_number: 1,
+            dpi,
+            has_native_text: false,
+            image_rects: Vec::new(),
+            replace_native: false,
+            results,
+            error: None,
+        };
+        let mut pages = vec![make_blank_page(1)];
+        merge_ocr_results(&mut pages, vec![outcome], false, true).unwrap();
+        pages.remove(0)
+    }
+
+    fn word_rects(item: &TextItem) -> Vec<(&str, f32, f32, f32, f32)> {
+        item.words
+            .iter()
+            .map(|w| (w.text.as_str(), w.x, w.y, w.width, w.height))
+            .collect()
+    }
+
+    fn ocr_word(text: &str, bbox: [f32; 4]) -> OcrWord {
+        OcrWord {
+            text: text.into(),
+            bbox,
+        }
+    }
+
+    /// Measured words become the word boxes when they pair one per word of the
+    /// cleaned text. Any other count keeps one box for the line: no words,
+    /// fewer words, one fallback word for the whole line, or a measured `|`
+    /// border that table-artifact cleaning dropped from the text.
+    #[test]
+    fn test_measured_ocr_word_boxes_pair_one_per_word() {
+        let line = |text: &str, words: Vec<OcrWord>| OcrResult {
+            text: text.into(),
+            bbox: [10.0, 20.0, 200.0, 30.0],
+            confidence: 0.9,
+            polygon: None,
+            words,
+            rotation: None,
+        };
+        let measured = vec![
+            ocr_word("Invoice", [11.0, 21.0, 60.0, 29.0]),
+            ocr_word("total", [70.0, 21.0, 100.0, 29.0]),
+            ocr_word("42.50", [160.0, 22.0, 199.0, 29.0]),
+        ];
+        // 144 dpi pixels are half a point each.
+        let merged = |result: OcrResult| {
+            let page = merge_ocr_page(vec![result], 144.0);
+            word_rects(&page.text_items[0])
+                .into_iter()
+                .map(|(t, x, y, w, h)| (t.to_string(), x, y, w, h))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            merged(line("Invoice total 42.50", measured.clone())),
+            vec![
+                ("Invoice".to_string(), 5.5, 10.5, 24.5, 4.0),
+                ("total".to_string(), 35.0, 10.5, 15.0, 4.0),
+                ("42.50".to_string(), 80.0, 11.0, 19.5, 3.5),
+            ]
+        );
+        let whole_line = ocr_word("Invoice total 42.50", [10.0, 20.0, 200.0, 30.0]);
+        for words in [Vec::new(), measured[..2].to_vec(), vec![whole_line]] {
+            assert_eq!(
+                merged(line("Invoice total 42.50", words)),
+                vec![("Invoice total 42.50".to_string(), 5.0, 10.0, 95.0, 5.0)]
+            );
+        }
+        let bordered = vec![
+            ocr_word("|", [10.0, 20.0, 14.0, 30.0]),
+            ocr_word("1", [40.0, 20.0, 50.0, 30.0]),
+            ocr_word("9999999", [120.0, 20.0, 200.0, 30.0]),
+        ];
+        assert_eq!(
+            merged(line("| 1 9999999", bordered)),
+            vec![("1 9999999".to_string(), 5.0, 10.0, 95.0, 5.0)]
+        );
+    }
+
+    /// A scan fed sideways is turned upright as a whole page; each measured
+    /// word box turns with its line and keeps its own place along it.
+    #[test]
+    fn test_uprighted_scan_turns_each_measured_word_box() {
+        let line = OcrResult {
+            text: "Invoice total amount".into(),
+            bbox: [10.0, 5.0, 20.0, 95.0],
+            confidence: 0.9,
+            // Reads bottom to top: 90° counter-clockwise.
+            polygon: Some([[10.0, 95.0], [10.0, 5.0], [20.0, 5.0], [20.0, 95.0]]),
+            rotation: None,
+            words: vec![
+                ocr_word("Invoice", [10.0, 60.0, 20.0, 95.0]),
+                ocr_word("total", [10.0, 35.0, 20.0, 55.0]),
+                ocr_word("amount", [10.0, 5.0, 20.0, 30.0]),
+            ],
+        };
+        let page = merge_ocr_page(vec![line], 72.0);
+        let item = &page.text_items[0];
+        assert_eq!(
+            (item.rotation, item.x, item.y, item.width, item.height),
+            (0.0, 5.0, 10.0, 90.0, 10.0)
+        );
+        assert_eq!(
+            word_rects(item),
+            vec![
+                ("Invoice", 5.0, 10.0, 35.0, 10.0),
+                ("total", 45.0, 10.0, 20.0, 10.0),
+                ("amount", 70.0, 10.0, 25.0, 10.0)
+            ]
+        );
+    }
+
+    /// The engine's angle decides a line's rotation over its quad's point order,
+    /// including the 90/270 choice on a vertical line. A line read at 180° keeps
+    /// its quad's bounds and its words in reading order, right to left on
+    /// screen.
+    #[test]
+    fn test_engine_rotation_overrides_polygon_order() {
+        let merged = |polygon: [[f32; 2]; 4], words: Vec<OcrWord>, rotation: Option<f32>| {
+            let xs = polygon.map(|p| p[0]);
+            let ys = polygon.map(|p| p[1]);
+            let min = |v: [f32; 4]| v.into_iter().fold(f32::INFINITY, f32::min);
+            let max = |v: [f32; 4]| v.into_iter().fold(f32::NEG_INFINITY, f32::max);
+            let line = OcrResult {
+                text: "Invoice total".into(),
+                bbox: [min(xs), min(ys), max(xs), max(ys)],
+                confidence: 0.9,
+                polygon: Some(polygon),
+                words,
+                rotation,
+            };
+            merge_ocr_page(vec![line], 144.0).text_items.remove(0)
+        };
+        // Alone, each quad's point order reads as the angle in its name.
+        let flat_0 = [[10.0, 20.0], [210.0, 20.0], [210.0, 40.0], [10.0, 40.0]];
+        let up_90 = [[10.0, 200.0], [10.0, 20.0], [20.0, 20.0], [20.0, 200.0]];
+        let down_270 = [[20.0, 20.0], [20.0, 200.0], [10.0, 200.0], [10.0, 20.0]];
+
+        let read_turned = vec![
+            ocr_word("Invoice", [110.0, 20.0, 210.0, 40.0]),
+            ocr_word("total", [10.0, 20.0, 100.0, 40.0]),
+        ];
+        let turned = merged(flat_0, read_turned, Some(180.0));
+        assert_eq!(turned.rotation, 180.0);
+        assert_eq!(
+            (turned.x, turned.y, turned.width, turned.height),
+            (5.0, 10.0, 100.0, 10.0)
+        );
+        assert_eq!(
+            word_rects(&turned)
+                .into_iter()
+                .map(|(t, x, _, w, _)| (t, x, w))
+                .collect::<Vec<_>>(),
+            vec![("Invoice", 55.0, 50.0), ("total", 5.0, 45.0)]
+        );
+
+        assert_eq!(merged(up_90, Vec::new(), Some(270.0)).rotation, 270.0);
+        assert_eq!(merged(down_270, Vec::new(), Some(90.0)).rotation, 90.0);
+        assert_eq!(merged(up_90, Vec::new(), None).rotation, 90.0);
+    }
+
+    /// A scanned figure on a page with a typed footer keeps all its OCR text,
+    /// even when most recognised words are short ("et", "de", "la") or noise.
+    /// A chart filter that dropped such figures wholesale lost the body of
+    /// scanned French cover pages (#538).
+    #[test]
+    fn test_figure_ocr_with_short_words_is_kept() {
+        let mut page = make_blank_page(1);
+        page.text_items.push(TextItem {
+            text: "Guide de Performance".into(),
+            x: 10.0,
+            y: 92.0,
+            width: 60.0,
+            height: 4.0,
+            ..Default::default()
+        });
+        let word = |text: &str, x: f32, y: f32| OcrResult {
+            text: text.into(),
+            bbox: [x, y, x + 8.0, y + 4.0],
+            confidence: 0.9,
+            polygon: None,
+            rotation: None,
+            words: Vec::new(),
+        };
+        let results = vec![
+            word("Logement", 10.0, 10.0),
+            word("et", 20.0, 10.0),
+            word("de", 30.0, 10.0),
+            word("la", 40.0, 10.0),
+            word("ES", 10.0, 20.0),
+            word("à", 20.0, 20.0),
+            word("Abordable", 30.0, 20.0),
+        ];
+        let outcome = PageOcrOutcome {
+            page_number: 1,
+            dpi: 72.0,
+            has_native_text: true,
+            image_rects: vec![Rect {
+                x: 5.0,
+                y: 5.0,
+                width: 80.0,
+                height: 60.0,
+            }],
+            replace_native: false,
+            results,
+            error: None,
+        };
+        let mut pages = vec![page];
+        merge_ocr_results(&mut pages, vec![outcome], false, false).unwrap();
+        let texts: Vec<&str> = pages[0]
+            .text_items
+            .iter()
+            .map(|i| i.text.as_str())
+            .collect();
+        for w in ["Logement", "et", "de", "la", "ES", "à", "Abordable"] {
+            assert!(
+                texts.contains(&w),
+                "figure word {w:?} was dropped: {texts:?}"
+            );
+        }
+    }
+}

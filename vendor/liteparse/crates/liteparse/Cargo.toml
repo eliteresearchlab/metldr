@@ -1,0 +1,45 @@
+[package]
+name = "liteparse"
+version = "2.20.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/run-llama/liteparse"
+description = "Fast, lightweight PDF and document parsing with spatial text extraction"
+readme = "README.md"
+
+[lib]
+name = "liteparse"
+
+[features]
+default = []
+
+[dependencies]
+base64 = "0.22"
+blake3 = "1"
+clap = { version = "4.5.55", features = ["derive"] }
+file-format = { version = "0.29.0", features = ["reader"] }
+image = { version = "0.25", default-features = false, features = ["default-formats"] }
+memchr = "2"
+ordered-float = "5.3.0"
+pdfium = { package = "liteparse-pdfium", version = "=1.14.0" }
+pdfium-sys = { package = "liteparse-pdfium-sys", version = "=1.14.0" }
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "form", "multipart", "rustls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tempfile = "3.27.0"
+thiserror = "2"
+tokio = { version = "1.52.3", features = ["rt", "macros", "sync", "time", "io-util"] }
+url = "2"
+web-time = "1.1.0"
+flate2 = "1.1.9"
+resvg = "0.44"
+usvg = "0.44"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+lopdf = { version = "0.42", default-features = false }
+rmp = "0.8"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "fs", "process"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
