@@ -1,0 +1,30 @@
+[package]
+name = "metldr-embed"
+version = "0.1.0"
+edition = "2024"
+license = "PolyForm-Noncommercial-1.0.0"
+publish = false
+
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "pack-model"
+path = "src/bin/pack.rs"
+
+[dependencies]
+unicode-normalization = "0.1.24"
+serde_json = "1.0.154"
+
+[dev-dependencies]
+
+[lints.rust]
+# Denied everywhere; only the wasm SIMD dot product loads 16 bytes at once (see `dot`).
+unsafe_code = "deny"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

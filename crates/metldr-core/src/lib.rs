@@ -1,4 +1,5 @@
 mod chunking;
+pub mod dense;
 pub mod gateway;
 pub mod summary_gate;
 pub mod word;
@@ -19,15 +20,35 @@ mod wasm {
             .map_err(|_| JsError::new("could not encode chunks"))
     }
 
-    /// The keyword half of retrieval and the fusion with the dense half (see `metldr_retrieval`).
+    /// Search over the stored chunks: keywords (`metldr_retrieval`), the static embeddings
+    /// (`crate::dense`) and their fusion.
     #[wasm_bindgen]
-    pub struct KeywordIndex(metldr_retrieval::Index);
+    #[derive(Default)]
+    pub struct SearchIndex {
+        keywords: metldr_retrieval::Index,
+        dense: crate::dense::Dense,
+    }
 
     #[wasm_bindgen]
-    impl KeywordIndex {
+    impl SearchIndex {
         #[wasm_bindgen(constructor)]
         pub fn new() -> Self {
-            Self(metldr_retrieval::Index::default())
+            Self::default()
+        }
+
+        /// Loads the packed embedding model; false when the bytes are not one.
+        pub fn load_model(&mut self, bytes: Vec<u8>) -> bool {
+            self.dense.load_model(bytes)
+        }
+
+        /// Keeps a saved vector blob for the chunks added next (see `Dense::restore`).
+        pub fn restore_vectors(&mut self, blob: &[u8]) {
+            self.dense.restore(blob);
+        }
+
+        /// Every chunk's vector, to save.
+        pub fn vectors(&self) -> Vec<u8> {
+            self.dense.blob()
         }
 
         #[allow(clippy::too_many_arguments)]
@@ -41,38 +62,38 @@ mod wasm {
             source_id: &str,
             summary: bool,
         ) {
-            let chunk = Chunk {
-                id,
-                kind,
-                title,
-                content,
-                source_url,
-                source_id,
-                summary,
-            };
-            self.0.add(&chunk);
+            let chunk = Chunk { id, kind, title, content, source_url, source_id, summary };
+            self.keywords.add(&chunk);
+            self.dense.add(id, content);
         }
 
         pub fn remove(&mut self, id: &str) {
-            self.0.remove(id);
+            self.keywords.remove(id);
+            self.dense.remove(id);
         }
 
         pub fn clear(&mut self) {
-            self.0.clear();
+            self.keywords.clear();
+            self.dense.clear();
         }
 
         #[wasm_bindgen(getter)]
         pub fn size(&self) -> u32 {
-            self.0.len() as u32
+            self.keywords.len() as u32
         }
 
         pub fn has_source(&self, source: &str) -> bool {
-            self.0.has_source(source)
+            self.keywords.has_source(source)
+        }
+
+        /// The ids of the `limit` chunks nearest `query` by meaning, nearest first.
+        pub fn dense(&mut self, query: &str, limit: u32) -> Vec<String> {
+            self.dense.search(query, limit as usize)
         }
 
         /// Page chat context for `focused` (see `Index::context`); `page` may be empty.
         pub fn context(&self, focused: &str, dense: Vec<String>, limit: u32, page: &str) -> String {
-            self.0.context(focused, &dense, limit as usize, page)
+            self.keywords.context(focused, &dense, limit as usize, page)
         }
 
         /// `{context, sources: [{index, title, url, type, score, snippet}]}` as JSON.
@@ -83,7 +104,7 @@ mod wasm {
             dense: Vec<String>,
             limit: u32,
         ) -> Result<String, JsError> {
-            let sources = self.0.sources(question, focused, &dense, limit as usize);
+            let sources = self.keywords.sources(question, focused, &dense, limit as usize);
             serde_json::to_string(&sources).map_err(|_| JsError::new("could not encode sources"))
         }
     }
