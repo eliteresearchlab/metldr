@@ -56,6 +56,18 @@ pub(super) fn install_capture(capture: Function) {
     CAPTURE.with(|slot| *slot.borrow_mut() = Some(capture));
 }
 
+/// The page capture script, for capturing without the companion.
+#[cfg(feature = "rune-ui")]
+pub(crate) fn capture_function() -> Option<Function> {
+    CAPTURE.with(|slot| slot.borrow().clone())
+}
+
+/// `value` as a JavaScript value within the frame limit.
+#[cfg(feature = "rune-ui")]
+pub(crate) fn json_value(value: &Value) -> Result<JsValue> {
+    json_js(value)
+}
+
 #[derive(Clone)]
 pub(crate) struct FlowClient {
     inner: Rc<Connection>,
@@ -1462,7 +1474,7 @@ impl Connection {
 }
 
 /// The captured page's main content as markdown within the page budget.
-fn page_text(observed: &JsValue) -> Result<String> {
+pub(crate) fn page_text(observed: &JsValue) -> Result<String> {
     let raw = js_sys::JSON::stringify(observed)
         .map_err(js_error)?
         .as_string()
