@@ -177,6 +177,81 @@ fn same_site(page: &str, href: &str) -> bool {
     }
 }
 
+/// The longest section a page is split into for citing, in bytes.
+const SECTION: usize = 700;
+
+/// A page's markdown in numbered sections for citing, kept as byte ranges into the one text:
+/// paragraphs joined up to `SECTION` bytes, a heading always starting a new one.
+#[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Sections {
+    text: String,
+    ranges: Vec<std::ops::Range<usize>>,
+}
+
+impl Sections {
+    pub(crate) fn new(text: String) -> Self {
+        let base = text.as_ptr() as usize;
+        let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+        for paragraph in text.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
+            let start = paragraph.as_ptr() as usize - base;
+            let end = start + paragraph.len();
+            match ranges.last_mut() {
+                Some(last) if !paragraph.starts_with('#') && end - last.start <= SECTION => last.end = end,
+                _ => ranges.push(start..end),
+            }
+        }
+        Self { text, ranges }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.ranges.len()
+    }
+
+    /// Section `n`, counted from one.
+    fn get(&self, n: usize) -> Option<&str> {
+        self.text.get(self.ranges.get(n.checked_sub(1)?)?.clone())
+    }
+
+    /// Writes every section after its number, `[1] ...`, a blank line apart.
+    pub(crate) fn write_numbered(&self, out: &mut String) {
+        use std::fmt::Write;
+        out.reserve(self.text.len() + self.ranges.len() * 8);
+        for n in 1..=self.len() {
+            if n > 1 {
+                out.push_str("\n\n");
+            }
+            let _ = write!(out, "[{n}] {}", self.get(n).unwrap_or_default());
+        }
+    }
+
+    /// The first `words` words of section `n` as plain text, to name it and find it on the page.
+    pub(crate) fn opening(&self, n: usize, words: usize) -> Option<String> {
+        let markup = |c: &char| matches!(c, '#' | '*' | '`' | '>' | '|' | '_');
+        let plain: String = self.get(n)?.chars().filter(|c| !markup(c)).collect();
+        Some(plain.split_whitespace().take(words).collect::<Vec<_>>().join(" "))
+    }
+}
+
+/// The section numbers `answer` cites as `[n]`, each once, in order, within `count` sections.
+pub(crate) fn cited(answer: &str, count: usize) -> Vec<usize> {
+    let mut found = Vec::new();
+    let mut rest = answer;
+    while let Some(open) = rest.find('[') {
+        let after = &rest[open + 1..];
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0
+            && after.as_bytes().get(digits) == Some(&b']')
+            && let Ok(n) = after[..digits].parse::<usize>()
+            && (1..=count).contains(&n)
+            && !found.contains(&n)
+        {
+            found.push(n);
+        }
+        rest = after;
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +309,21 @@ mod tests {
         let long = format!("{}\nlast line", "line\n".repeat(3000));
         let cut = bounded(&long, 8192).unwrap();
         assert!(cut.len() <= 8192 && cut.ends_with(MORE) && !cut.contains("last line"));
+    }
+
+    #[test]
+    fn a_page_splits_into_sections_and_answers_cite_them() {
+        let page = "# North\n\nFirst part.\n\nSecond part.\n\n## Units\n\nSeventeen units.";
+        let parts = Sections::new(page.into());
+        let mut numbered = String::new();
+        parts.write_numbered(&mut numbered);
+        assert_eq!(numbered, "[1] # North\n\nFirst part.\n\nSecond part.\n\n[2] ## Units\n\nSeventeen units.");
+        let answer = "It has 17 units [2], see [1] and [2] again; [9] and [x] are not sections.";
+        assert_eq!(cited(answer, 2), [2, 1]);
+        let units = Sections::new("## Units\n\nSeventeen **units** here.".into());
+        assert_eq!(units.opening(1, 3).as_deref(), Some("Units Seventeen units"));
+        let paragraphs = (0..40).map(|n| format!("Paragraph {n} with some words.\n\n"));
+        let long = Sections::new(paragraphs.collect());
+        assert!((1..=long.len()).all(|n| long.get(n).is_some_and(|section| section.len() <= SECTION)));
     }
 }
