@@ -259,9 +259,11 @@ mod tests {
         let mut outline = String::new();
         parts.write_outline(60, &mut outline);
         assert_eq!(outline, "[1] Part 0 (0.6 KB)\n[2] Part 1 (0.6 KB)\n[3] Part 2 (0.6 KB)\n");
-        let summary = "Here are the points:\n- The North report gives 17 units.\n2. Shipping starts in May next year.\n* short\n";
-        assert_eq!(bullets(summary), ["The North report gives 17 units.", "Shipping starts in May next year."]);
-        assert_eq!(bullets("No bullets here, only one plain sentence."), ["No bullets here, only one plain sentence."]);
+        let points = ["The North report gives 17 units.", "Shipping starts in May next year."];
+        let summary = format!("Here are the points:\n- {}\n2. {}\n* short\n", points[0], points[1]);
+        assert_eq!(bullets(&summary), points);
+        let plain = "No bullets here, only one plain sentence.";
+        assert_eq!(bullets(plain), [plain]);
         // A wall of text splits at character boundaries, and spans join sections back up.
         let wall = "word ".repeat(1000);
         let walled = Sections::new(wall.clone());

@@ -77,7 +77,8 @@ async fn keep(url: &str, summary: &Value) {
 #[wasm_bindgen]
 pub async fn gateway_page_summary(page: JsValue, force: bool) -> Result<JsValue, JsValue> {
     let started = js_sys::Date::now();
-    let page: Page = serde_json::from_value(from_js(&page)).map_err(|_| js_error("That page is not valid."))?;
+    let page: Page = serde_json::from_value(from_js(&page))
+        .map_err(|_| js_error("That page is not valid."))?;
     let url = page.url.as_deref().filter(|url| !url.is_empty());
     if !force && let Some(mut summary) = match url {
         Some(url) => cached(url).await,
@@ -88,7 +89,8 @@ pub async fn gateway_page_summary(page: JsValue, force: bool) -> Result<JsValue,
         return Ok(to_js(&summary));
     }
     let mut content = format!("ARTICLE METADATA:\n- Title: \"{}\"\n", page.title);
-    for (label, value) in [("Author", &page.author), ("Publication", &page.publication), ("Published", &page.publish_date)] {
+    let about = [("Author", &page.author), ("Publication", &page.publication), ("Published", &page.publish_date)];
+    for (label, value) in about {
         if let Some(value) = value.as_deref().filter(|v| !v.is_empty()) {
             content.push_str(&format!("- {label}: {value}\n"));
         }

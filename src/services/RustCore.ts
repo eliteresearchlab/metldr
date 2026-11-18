@@ -1,5 +1,6 @@
 import initCore, {
-  dictionary_request, gateway_complete, gateway_page_summary, gateway_preferred, gateway_summarize, gateway_word_lookup,
+  dictionary_request, gateway_complete, gateway_page_summary, gateway_preferred, gateway_summarize,
+  gateway_word_lookup,
   stats_record, stats_summary, summary_cache_clear, summary_gate, summary_prefs_load, summary_prefs_save
 } from '../../crates/metldr-core/pkg/metldr_core'
 import type { ExtractedData, PageSummary, WordLookupResult } from '../types'
