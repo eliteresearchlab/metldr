@@ -330,7 +330,7 @@ impl Default for LiteParseConfig {
             // WASM, an `ocrEngine` callback). That explicit request still fails
             // fast if no engine is reachable, so a real misconfiguration is
             // never silently swallowed.
-            ocr_enabled: cfg!(feature = "tesseract"),
+            ocr_enabled: false,
             ocr_page_images: HashMap::new(),
             ocr_server_url: None,
             ocr_server_headers: Vec::new(),
@@ -494,7 +494,7 @@ mod tests {
         let c = LiteParseConfig::default();
         assert_eq!(c.ocr_language, "eng");
         // OCR defaults on only when a built-in engine is compiled in.
-        assert_eq!(c.ocr_enabled, cfg!(feature = "tesseract"));
+        assert!(!c.ocr_enabled);
         assert_eq!(c.max_pages, 1000);
         assert!(!c.extract_screenshots);
         assert!(!c.continue_on_page_error);

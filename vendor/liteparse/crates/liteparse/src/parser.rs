@@ -14,8 +14,6 @@ use crate::error::LiteParseError;
 use crate::ocr::OcrEngine;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ocr::http_simple::HttpOcrEngine;
-#[cfg(feature = "tesseract")]
-use crate::ocr::tesseract::TesseractOcrEngine;
 
 use crate::stages;
 use crate::types::{
@@ -430,16 +428,7 @@ impl LiteParse {
                     }),
                 )));
             }
-            #[cfg(feature = "tesseract")]
-            {
-                Ok(Some(std::sync::Arc::new(TesseractOcrEngine::new(
-                    self.config.tessdata_path.clone(),
-                ))))
-            }
-            #[cfg(not(feature = "tesseract"))]
-            {
-                Err("OCR enabled but no --ocr-server-url provided and tesseract feature is disabled".into())
-            }
+            Err("OCR enabled but no --ocr-server-url provided and tesseract feature is disabled".into())
         }
         #[cfg(target_arch = "wasm32")]
         {

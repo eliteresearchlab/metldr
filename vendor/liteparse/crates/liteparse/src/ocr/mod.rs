@@ -4,10 +4,6 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod http_simple;
-#[cfg(all(feature = "oar-ocr", not(target_arch = "wasm32")))]
-pub mod oar;
-#[cfg(all(feature = "tesseract", not(target_arch = "wasm32")))]
-pub mod tesseract;
 
 /// One OCR detection, a word or a line, with its box and confidence.
 #[derive(Debug, Clone, Serialize, Deserialize)]
