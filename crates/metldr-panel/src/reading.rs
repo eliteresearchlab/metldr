@@ -180,21 +180,55 @@ fn same_site(page: &str, href: &str) -> bool {
 /// The longest section a page is split into for citing, in bytes.
 const SECTION: usize = 700;
 
-/// `markdown` in numbered sections for citing: paragraphs joined up to `SECTION` bytes, a heading
-/// always starting a new one.
-pub(crate) fn sections(markdown: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for paragraph in markdown.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
-        let heading = paragraph.starts_with('#');
-        match out.last_mut() {
-            Some(last) if !heading && last.len() + paragraph.len() + 2 <= SECTION => {
-                last.push_str("\n\n");
-                last.push_str(paragraph);
+/// A page's markdown in numbered sections for citing, kept as byte ranges into the one text:
+/// paragraphs joined up to `SECTION` bytes, a heading always starting a new one.
+#[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
+pub(crate) struct Sections {
+    text: String,
+    ranges: Vec<std::ops::Range<usize>>,
+}
+
+impl Sections {
+    pub(crate) fn new(text: String) -> Self {
+        let base = text.as_ptr() as usize;
+        let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+        for paragraph in text.split("\n\n").map(str::trim).filter(|p| !p.is_empty()) {
+            let start = paragraph.as_ptr() as usize - base;
+            let end = start + paragraph.len();
+            match ranges.last_mut() {
+                Some(last) if !paragraph.starts_with('#') && end - last.start <= SECTION => last.end = end,
+                _ => ranges.push(start..end),
             }
-            _ => out.push(paragraph.to_owned()),
+        }
+        Self { text, ranges }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.ranges.len()
+    }
+
+    /// Section `n`, counted from one.
+    fn get(&self, n: usize) -> Option<&str> {
+        self.text.get(self.ranges.get(n.checked_sub(1)?)?.clone())
+    }
+
+    /// Writes every section after its number, `[1] ...`, a blank line apart.
+    pub(crate) fn write_numbered(&self, out: &mut String) {
+        use std::fmt::Write;
+        out.reserve(self.text.len() + self.ranges.len() * 8);
+        for n in 1..=self.len() {
+            if n > 1 {
+                out.push_str("\n\n");
+            }
+            let _ = write!(out, "[{n}] {}", self.get(n).unwrap_or_default());
         }
     }
-    out
+
+    /// The first `words` words of section `n` as plain text, to name it and find it on the page.
+    pub(crate) fn opening(&self, n: usize, words: usize) -> Option<String> {
+        let plain: String = self.get(n)?.chars().filter(|c| !matches!(c, '#' | '*' | '`' | '>' | '|' | '_')).collect();
+        Some(plain.split_whitespace().take(words).collect::<Vec<_>>().join(" "))
+    }
 }
 
 /// The section numbers `answer` cites as `[n]`, each once, in order, within `count` sections.
@@ -215,12 +249,6 @@ pub(crate) fn cited(answer: &str, count: usize) -> Vec<usize> {
         rest = after;
     }
     found
-}
-
-/// The first words of `section` as plain text, to name it and to find it on the page.
-pub(crate) fn opening(section: &str, words: usize) -> String {
-    let plain: String = section.chars().filter(|c| !matches!(c, '#' | '*' | '`' | '>' | '|' | '_')).collect();
-    plain.split_whitespace().take(words).collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
@@ -285,11 +313,13 @@ mod tests {
     #[test]
     fn a_page_splits_into_sections_and_answers_cite_them() {
         let page = "# North\n\nFirst part.\n\nSecond part.\n\n## Units\n\nSeventeen units.";
-        let parts = sections(page);
-        assert_eq!(parts, ["# North\n\nFirst part.\n\nSecond part.", "## Units\n\nSeventeen units."]);
+        let parts = Sections::new(page.into());
+        let mut numbered = String::new();
+        parts.write_numbered(&mut numbered);
+        assert_eq!(numbered, "[1] # North\n\nFirst part.\n\nSecond part.\n\n[2] ## Units\n\nSeventeen units.");
         assert_eq!(cited("It has 17 units [2], see [1] and [2] again; [9] and [x] are not sections.", 2), [2, 1]);
-        assert_eq!(opening("## Units\n\nSeventeen **units** here.", 3), "Units Seventeen units");
-        let long: String = (0..40).map(|n| format!("Paragraph {n} with some words.\n\n")).collect();
-        assert!(sections(&long).iter().all(|section| section.len() <= SECTION));
+        assert_eq!(Sections::new("## Units\n\nSeventeen **units** here.".into()).opening(1, 3).as_deref(), Some("Units Seventeen units"));
+        let long = Sections::new((0..40).map(|n| format!("Paragraph {n} with some words.\n\n")).collect());
+        assert!((1..=long.len()).all(|n| long.get(n).is_some_and(|section| section.len() <= SECTION)));
     }
 }

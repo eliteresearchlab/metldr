@@ -27,7 +27,7 @@ struct Saved {
     turns: Vec<(String, String)>,
     shown: Vec<(String, String)>,
     /// The page's sections, numbered from one, for its citations.
-    sections: Vec<String>,
+    sections: crate::reading::Sections,
     /// Each shown answer's citations: section number, its opening words and the page.
     cited: Vec<Vec<Citation>>,
 }
@@ -58,7 +58,7 @@ pub(super) struct Gateway {
     shown: RefCell<Vec<(String, String)>>,
     shown_ids: RefCell<Vec<String>>,
     /// The current page's sections, numbered from one in what the model saw.
-    sections: RefCell<Vec<String>>,
+    sections: RefCell<crate::reading::Sections>,
     /// Citations by answer message id.
     citations: RefCell<std::collections::HashMap<String, Vec<Citation>>>,
     /// A page summary is on its way.
@@ -145,7 +145,7 @@ impl Gateway {
         let sections = self.sections.borrow();
         let page = self.page.borrow().clone().unwrap_or_default();
         let cited = crate::reading::cited(answer, sections.len());
-        cited.into_iter().map(|n| (n, crate::reading::opening(&sections[n - 1], 8), page.clone())).collect()
+        cited.into_iter().filter_map(|n| Some((n, sections.opening(n, 8)?, page.clone()))).collect()
     }
 
     /// The citations under answer `id`.
@@ -214,9 +214,12 @@ impl Gateway {
         let content = if same_page {
             text.clone()
         } else {
-            let sections = crate::reading::sections(&markdown);
-            let numbered: Vec<String> = sections.iter().enumerate().map(|(n, s)| format!("[{}] {s}", n + 1)).collect();
-            let content = format!("Source: {title} ({url})\n\n{}\n\nRequest: {text}", numbered.join("\n\n"));
+            // The page goes once into one buffer: numbered sections, ranges into the kept text.
+            let sections = crate::reading::Sections::new(markdown);
+            let mut content = format!("Source: {title} ({url})\n\n");
+            sections.write_numbered(&mut content);
+            content.push_str("\n\nRequest: ");
+            content.push_str(&text);
             *self.sections.borrow_mut() = sections;
             *self.page.borrow_mut() = Some(url);
             content
@@ -331,7 +334,7 @@ impl Gateway {
         self.shown.borrow_mut().clear();
         self.shown_ids.borrow_mut().clear();
         self.citations.borrow_mut().clear();
-        self.sections.borrow_mut().clear();
+        self.sections.take();
         *self.page.borrow_mut() = None;
         *self.summarized.borrow_mut() = None;
         updates.presentation.borrow_mut().messages.messages.clear();
