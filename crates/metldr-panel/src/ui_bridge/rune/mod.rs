@@ -369,6 +369,32 @@ impl State {
         crate::composer::choices::selected(Some(&core.page.view.borrow()), &self.selection)
     }
 
+    /// Without the companion: answers with gateway route `index` from now on.
+    pub(super) fn choose_gateway(&mut self, index: usize) {
+        if self.running() {
+            return;
+        }
+        if let (Some(gateway), Some(updates)) = (self.gateway().cloned(), self.updates.clone()) {
+            self.sound(crate::interaction_audio::Cue::Press);
+            updates.finish(gateway.choose(index));
+            updates.changed();
+        }
+    }
+
+    /// Opens the extension's setup page, where routes are found and keys are added.
+    pub(super) fn open_setup(&mut self) {
+        let runtime = crate::chrome_api("runtime");
+        let url = runtime.and_then(|runtime| crate::call(&runtime, "getURL", &["welcome.html".into()]));
+        let created = url.and_then(|url| {
+            let details = js_sys::Object::new();
+            js_sys::Reflect::set(&details, &"url".into(), &url)?;
+            crate::call(&crate::chrome_api("tabs")?, "create", &[details.into()])
+        });
+        if created.is_err() {
+            self.fail(FlowError::Host("The setup page could not open.".into()));
+        }
+    }
+
     fn gateway(&self) -> Option<&Rc<gateway::Gateway>> {
         match &self.session {
             Session::Gateway(gateway) => Some(gateway),
@@ -1640,7 +1666,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
             let error = presentation.as_ref().and_then(|presentation| presentation.error.clone());
             drop(presentation);
             let line = error.unwrap_or_else(|| {
-                format!("Answering with {}, without the companion", gateway.route)
+                format!("Answering with {}, without the companion", gateway.route())
             });
             let mut composer = col().w_full().max_w(720.0).child(composer::view(state, cx));
             if let Some(menu) = composer::menu(state) {

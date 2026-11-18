@@ -307,7 +307,7 @@ pub(super) fn view(state: &State, cx: &Cx<State>) -> El {
     let typography = state.preferences.typography();
     // The label moves into the text node: a route label built for this frame is never copied again.
     let model_label: std::borrow::Cow<'static, str> = match state.selected_choice() {
-        None => state.gateway().map_or_else(|| "Choose model".into(), |gateway| gateway.route.clone().into()),
+        None => state.gateway().map_or_else(|| "Choose model".into(), |gateway| gateway.route().to_owned().into()),
         Some(choice) if supports_plan(&choice.value) && state.mode == Mode::Plan => {
             format!("Plan mode, {}", choice.label).into()
         }
@@ -642,6 +642,9 @@ pub(super) fn menu(state: &State) -> Option<El> {
             Some(list.focus_return("rune-source-trigger"))
         }
         Menu::Models => {
+            if let Some(gateway) = state.gateway() {
+                return Some(gateway_menu(state, gateway, typography, &p));
+            }
             // Configured routes by section with short names; routes still to set up fold into one
             // row that opens Settings. Full labels stay the accessible names.
             let mut choices = state.choices();
@@ -749,6 +752,33 @@ pub(super) fn menu(state: &State) -> Option<El> {
             Some(menu)
         }
     }
+}
+
+/// Without the companion: the ready gateway routes, then a row that opens setup.
+fn gateway_menu(state: &State, gateway: &super::gateway::Gateway, typography: super::preferences::Typography, p: &Palette) -> El {
+    let disabled = state.running();
+    let mut rows = col().key("rune-model-rows").w_full();
+    for (index, choice) in gateway.routes.iter().enumerate() {
+        let active = index == gateway.chosen();
+        let key = format!("gateway-route:{index}");
+        let row = menu_row(typography, p, key, choice.label.clone(), "", active).label(choice.label.clone()).press(p.line_strong);
+        let close: metldr_ui::menu::CloseOnSelect<State> = Some(std::rc::Rc::new(close_menu));
+        let choose = move |state: &mut State, _: &mut Tx| state.choose_gateway(index);
+        rows = rows.child(metldr_ui::menu::radio_item(row, disabled, active, close, choose));
+    }
+    let setup = menu_row(typography, p, "gateway-setup".into(), "Set up more".into(), "", false).label("Set up more").press(p.line_strong);
+    rows = rows.child(metldr_ui::menu::item(setup, false, |state: &mut State, _| state.open_setup(), close_menu));
+    let menu = col()
+        .key("rune-model-menu")
+        .min_w(176.0)
+        .max_w(416.0)
+        .padding(4.0)
+        .fill(p.surface)
+        .border(1.0, p.line)
+        .radius(10.0)
+        .shadow(0.0, 8.0, p.line.alpha(0.28))
+        .child(rows);
+    metldr_ui::menu::popup(menu, "Models", "rune-model-trigger", Side::Top, super::theme::pop_in(p), close_menu)
 }
 
 #[cfg(test)]
