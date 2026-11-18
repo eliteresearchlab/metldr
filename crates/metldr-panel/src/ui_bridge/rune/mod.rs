@@ -928,8 +928,14 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
         }
     }
     if let Some(gateway) = updates.gateway.borrow_mut().take() {
-        state.session = Session::Gateway(gateway);
+        state.session = Session::Gateway(Rc::clone(&gateway));
         updates.presentation.borrow_mut().error = None;
+        // The page's summary, where the summary settings call for one.
+        let summarized = Rc::clone(&updates);
+        spawn_local(async move {
+            let done = gateway.summarize(Rc::clone(&summarized), false).await;
+            summarized.finish(done);
+        });
     }
     if let Some(core) = state.core().cloned() {
         let running = state.running();
@@ -1685,6 +1691,24 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                         .gap(12.0)
                         .items_center()
                         .child(typography.text(line).role("status").wrap().grow(1.0).color(palette.ink_2))
+                        .child(
+                            typography
+                                .text("Summarize page")
+                                .key("gateway-summarize")
+                                .role("button")
+                                .focusable(true)
+                                .disabled(gateway.streaming())
+                                .native_activation()
+                                .on_press_tx(|state: &mut State, _| {
+                                    let updates = state.updates.clone();
+                                    if let (Some(gateway), Some(updates)) = (state.gateway().cloned(), updates) {
+                                        spawn_local(async move {
+                                            let done = gateway.summarize(Rc::clone(&updates), true).await;
+                                            updates.finish(done);
+                                        });
+                                    }
+                                }),
+                        )
                         .child(
                             typography
                                 .text("New chat")
