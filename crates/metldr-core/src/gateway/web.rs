@@ -125,6 +125,7 @@ fn saved<'a>(settings: &'a Value, route: &str, field: &str) -> Option<&'a str> {
 }
 
 mod dictionary;
+mod stats;
 mod summary_gate;
 mod word;
 
@@ -1008,9 +1009,12 @@ async fn stream(
             }
         }
     };
+    let started = js_sys::Date::now();
+    let mut used = String::new();
     let result = async {
         super::check_conversation(&system, &messages).map_err(str::to_owned)?;
         let target = target(route.as_deref(), model).await?;
+        used.clone_from(&target.model);
         reply(target, &system, &messages, None, &stop, &mut |delta| {
             let first = pending.borrow().is_empty();
             pending.borrow_mut().push_str(delta);
@@ -1024,6 +1028,11 @@ async fn stream(
     .await;
     flush();
     CONNECTIONS.with_borrow_mut(|all| all.get_mut(&connection).map(|c| c.streams.remove(&id)));
+    if let Ok((_, usage)) = &result {
+        // Counted off the answer's path: the done message never waits on the store.
+        let (usage, ms) = (usage.clone(), js_sys::Date::now() - started);
+        spawn_local(async move { stats::record_chat(&usage, ms, &used).await });
+    }
     let end = match result {
         Ok((text, usage)) => json!({"id": id, "type": "done", "text": text, "usage": usage}),
         Err(_) if stop.load(Ordering::Acquire) => {

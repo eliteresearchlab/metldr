@@ -1,5 +1,5 @@
 import { cacheService } from './CacheService'
-import { clearSummaryCache, dictionary, lookupWord, summaryGate } from './RustCore'
+import { clearSummaryCache, dictionary, lookupWord, statsSummary, summaryGate } from './RustCore'
 import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
@@ -84,6 +84,11 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'DICTIONARY') {
         dictionary(msg).then(respond, err => respond({ error: (err as Error).message }))
+        return true
+      }
+
+      if (msg.type === 'STATS_SUMMARY') {
+        statsSummary(msg.days).then(respond, () => respond(null))
         return true
       }
 
@@ -624,7 +629,7 @@ export class BackgroundBootstrap {
           reject(new Error('No active tab is available.'))
           return
         }
-        chrome.sidePanel.setOptions({ tabId: selected, path: 'index.html', enabled: true }, () => {
+        chrome.sidePanel.setOptions({ tabId: selected, path: 'chat.html', enabled: true }, () => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message))
             return

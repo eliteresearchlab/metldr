@@ -20,37 +20,24 @@
     "preview": "vite preview",
     "build:chat": "node scripts/build-chat.mjs",
     "check:chat": "npm --prefix extension/chat-ui run check",
-    "type-check": "vue-tsc --noEmit",
+    "type-check": "tsc --noEmit",
     "install:chat": "npm ci --prefix extension/chat-ui"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
     "@inboxsdk/core": "^2.2.11",
     "@mozilla/readability": "^0.6.0",
-    "@radix-icons/vue": "^1.0.0",
-    "@tailwindcss/vite": "^4.1.17",
-    "@vueuse/core": "^14.1.0",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
     "gsap": "^3.13.0",
     "lru-cache": "^11.2.4",
-    "lucide-vue-next": "^0.553.0",
     "marked": "^17.0.1",
-    "pinia": "^3.0.4",
-    "reka-ui": "^2.7.0",
-    "tailwind-merge": "^3.4.0",
-    "tailwindcss": "^4.1.17",
-    "voy-search": "^0.6.3",
-    "vue": "^3.5.22"
+    "voy-search": "^0.6.3"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.32",
-    "@vitejs/plugin-vue": "^6.0.1",
     "cross-env": "^10.1.0",
     "esbuild": "0.25.12",
     "typescript": "^5.9.3",
-    "vite": "npm:rolldown-vite@7.1.14",
-    "vue-tsc": "^3.1.8"
+    "vite": "npm:rolldown-vite@7.1.14"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"

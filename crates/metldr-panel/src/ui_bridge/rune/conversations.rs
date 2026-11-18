@@ -802,6 +802,12 @@ pub(super) const TUNE: Icon = Icon {
     view: 24.0,
     body: "<path d=\"M4 6h10M18 6h2M4 12h2M10 12h10M4 18h14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"16\" cy=\"6\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"8\" cy=\"12\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"18\" cy=\"18\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
 };
+/// Stats: bars rising (Lucide chart-column).
+pub(super) const STATS: Icon = Icon {
+    name: "metldr-stats",
+    view: 24.0,
+    body: "<path d=\"M3 3v16a2 2 0 0 0 2 2h16M18 17V9M13 17V5M8 17v-3\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+};
 /// Summarize page: lines of text (Lucide text).
 pub(super) const SUMMARY: Icon = Icon {
     name: "metldr-summary",

@@ -404,6 +404,7 @@ export type BackgroundMessage =
   | { type: 'GET_PAGE_CACHE'; url: string }
   | { type: 'DICTIONARY'; action: 'state' | 'select' | 'delete'; code?: string; on?: boolean }
   | { type: 'CLEAR_SUMMARY_CACHE' }
+  | { type: 'STATS_SUMMARY'; days: number }
 
 export type ResponseCallback = (response: unknown) => void
 
