@@ -599,12 +599,12 @@ pub async fn search_context(query: String, limit: u32, page: String) -> String {
     store.index.borrow().context(&focused, dense, limit, &page)
 }
 
-/// Global search: `{context, sources}`, one chunk per page, scored up by the question's words.
-#[wasm_bindgen]
-pub async fn search_sources(query: String, limit: u32) -> JsValue {
+/// Global search: `{context, sources}` for `query`, one chunk per page, scored up by the
+/// question's words.
+pub(super) async fn sources(query: &str, limit: u32) -> Value {
     let store = store().await;
-    let Found { focused, dense } = found(&store, &query, limit * 4).await;
-    let sources = store.index.borrow().sources(&query, &focused, dense, limit);
+    let Found { focused, dense } = found(&store, query, limit * 4).await;
+    let sources = store.index.borrow().sources(query, &focused, dense, limit);
     let sources = sources.and_then(|json| serde_json::from_str(&json).ok());
-    to_js(&sources.unwrap_or_else(|| json!({"context": "", "sources": []})))
+    sources.unwrap_or_else(|| json!({"context": "", "sources": []}))
 }

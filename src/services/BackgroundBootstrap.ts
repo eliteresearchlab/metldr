@@ -1,5 +1,7 @@
 import { cacheService } from './CacheService'
-import { clearSummaryCache, dictionary, lookupWord, recordStat, search, statsSummary, summaryGate } from './RustCore'
+import {
+  clearSummaryCache, dictionary, globalChat, lookupWord, recordStat, search, statsSummary, summaryGate
+} from './RustCore'
 import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
@@ -356,7 +358,7 @@ export class BackgroundBootstrap {
         }
         
         log.log(`onGlobalChat processing ${messages.length} messages`)
-        const result = await PageService.globalChat(messages)
+        const result = await globalChat(messages)
         
         log.log(`onGlobalChat result has ${result.sources?.length || 0} sources`)
         

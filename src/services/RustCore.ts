@@ -1,8 +1,9 @@
 import initCore, {
-  dictionary_request, gateway_complete, gateway_page_summary, gateway_preferred, gateway_summarize,
-  gateway_word_lookup, search_context, search_ensure, search_has, search_index, search_index_summary,
-  search_is_indexing, search_sources,
-  stats_record, stats_summary, summary_cache_clear, summary_gate, summary_prefs_load, summary_prefs_save
+  dictionary_request, gateway_complete, gateway_global_chat, gateway_page_summary,
+  gateway_preferred, gateway_summarize, gateway_word_lookup, search_context, search_ensure,
+  search_has, search_index, search_index_summary, search_is_indexing,
+  stats_record, stats_summary, summary_cache_clear, summary_gate, summary_prefs_load,
+  summary_prefs_save
 } from '../../crates/metldr-core/pkg/metldr_core'
 import type { ExtractedData, PageSummary, WordLookupResult } from '../types'
 import { databaseService, DB_CONFIGS } from './DatabaseService'
@@ -164,6 +165,22 @@ export interface FoundSource {
   snippet: string
 }
 
+// Global search chat: the last question answered from everything read, with its sources.
+export interface GlobalChatResult {
+  ok: boolean
+  content?: string
+  sources?: FoundSource[]
+  timing?: { total: number; model?: string }
+  error?: string
+}
+
+type Turn = { role: string; content: string }
+
+export async function globalChat(messages: Turn[]): Promise<GlobalChatResult> {
+  await cacheReady()
+  return gateway_global_chat(messages)
+}
+
 export const search = {
   async index(text: string, source: SearchSource, progress?: (percent: number) => void): Promise<void> {
     await cacheReady()
@@ -188,9 +205,5 @@ export const search = {
   async context(query: string, limit: number, sourceUrl?: string): Promise<string> {
     await cacheReady()
     return search_context(query, limit, sourceUrl ?? '')
-  },
-  async sources(query: string, limit: number): Promise<{ context: string; sources: FoundSource[] }> {
-    await cacheReady()
-    return search_sources(query, limit)
   }
 }
