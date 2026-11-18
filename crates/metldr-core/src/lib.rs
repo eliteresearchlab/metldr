@@ -1,7 +1,5 @@
 mod chunking;
 pub mod gateway;
-pub mod query;
-pub mod retrieval;
 pub mod summary_gate;
 pub mod word;
 
@@ -9,7 +7,7 @@ pub use chunking::{Chunk, ContentType, chunk_for_embedding};
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {
-    use super::retrieval::Chunk;
+    use metldr_retrieval::Chunk;
     use wasm_bindgen::prelude::*;
 
     #[wasm_bindgen]
@@ -19,15 +17,15 @@ mod wasm {
             .map_err(|_| JsError::new("could not encode chunks"))
     }
 
-    /// The keyword half of retrieval and the fusion with the dense half (see `retrieval`).
+    /// The keyword half of retrieval and the fusion with the dense half (see `metldr_retrieval`).
     #[wasm_bindgen]
-    pub struct KeywordIndex(super::retrieval::Index);
+    pub struct KeywordIndex(metldr_retrieval::Index);
 
     #[wasm_bindgen]
     impl KeywordIndex {
         #[wasm_bindgen(constructor)]
         pub fn new() -> Self {
-            Self(super::retrieval::Index::default())
+            Self(metldr_retrieval::Index::default())
         }
 
         #[allow(clippy::too_many_arguments)]
@@ -88,20 +86,20 @@ mod wasm {
         }
     }
 
-    /// The topic words of a search question (see `query::focus`).
+    /// The topic words of a search question (see `metldr_retrieval::query::focus`).
     #[wasm_bindgen]
     pub fn focus_query(query: &str) -> String {
-        super::query::focus(query)
+        metldr_retrieval::query::focus(query)
     }
 
     #[wasm_bindgen]
     pub fn expand_query_locally(query: &str) -> String {
-        super::query::expand_locally(query)
+        metldr_retrieval::query::expand_locally(query)
     }
 
-    /// A model's suggested search terms, space separated (see `query::suggested_terms`).
+    /// A model's suggested search terms, space separated (see `metldr_retrieval::query::suggested_terms`).
     #[wasm_bindgen]
     pub fn suggested_terms(answer: &str) -> String {
-        super::query::suggested_terms(answer).join(" ")
+        metldr_retrieval::query::suggested_terms(answer).join(" ")
     }
 }

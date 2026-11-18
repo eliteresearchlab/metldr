@@ -1,0 +1,16 @@
+[package]
+name = "metldr-retrieval"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "PolyForm-Noncommercial-1.0.0"
+publish = false
+
+[workspace]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+neo_frizbee = "=0.13.3"
+serde = { version = "1.0.228", features = ["derive"] }

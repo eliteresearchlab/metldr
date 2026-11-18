@@ -13,6 +13,10 @@ const SYSTEM: &str = "Answer the user's request about the page in the source. \
     answer. Cite the numbered sections you use, like [2]. Answer in the user's language, \
     briefly, in plain paragraphs or lists.";
 const DETECT: u64 = 1;
+/// The page text a conversation's first turn sends, in bytes.
+const PAGE_BUDGET: usize = crate::MAX_PAGE;
+/// The unsent page text a later turn may add for its request, in bytes.
+const MORE_BUDGET: usize = 4_096;
 /// The chat, kept in `chrome.storage.local` so it survives the panel closing.
 const SAVED: &str = "metldr.gateway.chat";
 /// Turns sent to the model: the first exchange (with the page) and the latest ones.
@@ -211,19 +215,34 @@ impl Gateway {
     pub(super) async fn ask(self: Rc<Self>, text: String, updates: Rc<Updates>) -> Result<(), FlowError> {
         let (url, title, markdown) = capture().await?;
         let same_page = self.page.borrow().as_deref() == Some(url.as_str());
-        let content = if same_page {
-            text.clone()
+        // The page goes into one buffer as numbered sections: the whole page when it fits, else
+        // its outline and the sections ranked for the request; later turns add unsent sections.
+        let mut sections = self.sections.borrow_mut();
+        let mut content = String::new();
+        if same_page {
+            sections.refresh(markdown);
         } else {
-            // The page goes once into one buffer: numbered sections, ranges into the kept text.
-            let sections = crate::reading::Sections::new(markdown);
-            let mut content = format!("Source: {title} ({url})\n\n");
-            sections.write_numbered(&mut content);
-            content.push_str("\n\nRequest: ");
-            content.push_str(&text);
-            *self.sections.borrow_mut() = sections;
+            *sections = crate::reading::Sections::new(markdown);
+            content = format!("Source: {title} ({url})\n\n");
             *self.page.borrow_mut() = Some(url);
-            content
-        };
+            if !sections.fits(PAGE_BUDGET) {
+                content.push_str("The page is longer than this message. ");
+                content.push_str("Its outline, by section and size:\n");
+                sections.write_outline(PAGE_BUDGET / 4, &mut content);
+                content.push_str("\nThe sections for this request:\n\n");
+            }
+        }
+        let budget = if same_page { MORE_BUDGET } else { PAGE_BUDGET.saturating_sub(content.len()) };
+        let picked = sections.pick(&text, budget);
+        if same_page && !picked.is_empty() {
+            content.push_str("More from the page:\n\n");
+        }
+        sections.write_numbered(&picked, &mut content);
+        drop(sections);
+        if !content.is_empty() {
+            content.push_str("\n\nRequest: ");
+        }
+        content.push_str(&text);
         let id = self.next.get();
         self.next.set(id + 1);
         self.turns.borrow_mut().push(("user", content));
@@ -475,7 +494,7 @@ async fn capture() -> Result<(String, String, String), FlowError> {
     let observed = crate::get(&js_sys::Array::from(&values).get(0), "result")
         .map_err(|_| failure("The page could not be read."))?;
     let title = crate::string_property(&observed, "title").unwrap_or_default();
-    let markdown = crate::flow::page_text(&observed, &url).await?;
+    let markdown = crate::flow::page_text(&observed, &url, crate::reading::FULL_PAGE).await?;
     Ok((url, title, markdown))
 }
 

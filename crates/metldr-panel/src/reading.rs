@@ -177,15 +177,23 @@ fn same_site(page: &str, href: &str) -> bool {
     }
 }
 
+/// The most page text read for the gateway, in bytes: the capture's own limit.
+pub(crate) const FULL_PAGE: usize = 65_536;
+
 /// The longest section a page is split into for citing, in bytes.
 const SECTION: usize = 700;
 
 /// A page's markdown in numbered sections for citing, kept as byte ranges into the one text:
-/// paragraphs joined up to `SECTION` bytes, a heading always starting a new one.
+/// paragraphs joined up to `SECTION` bytes, a heading always starting a new one. A saved chat
+/// keeps only which sections were sent; the text comes back from the next capture.
 #[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub(crate) struct Sections {
+    #[serde(skip)]
     text: String,
+    #[serde(skip)]
     ranges: Vec<std::ops::Range<usize>>,
+    /// Whether the model has seen each section.
+    sent: Vec<bool>,
 }
 
 impl Sections {
@@ -200,7 +208,21 @@ impl Sections {
                 _ => ranges.push(start..end),
             }
         }
-        Self { text, ranges }
+        let sent = vec![false; ranges.len()];
+        Self { text, ranges, sent }
+    }
+
+    /// Reads the page again from `text`. A page that splits into as many sections as before
+    /// keeps its sent marks.
+    pub(crate) fn refresh(&mut self, text: String) {
+        if self.text == text {
+            return;
+        }
+        let sent = std::mem::take(&mut self.sent);
+        *self = Self::new(text);
+        if sent.len() == self.len() {
+            self.sent = sent;
+        }
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -212,15 +234,80 @@ impl Sections {
         self.text.get(self.ranges.get(n.checked_sub(1)?)?.clone())
     }
 
-    /// Writes every section after its number, `[1] ...`, a blank line apart.
-    pub(crate) fn write_numbered(&self, out: &mut String) {
+    /// Section `n` as sent: its number, a space and the text.
+    fn cost(&self, n: usize) -> usize {
+        self.ranges[n - 1].len() + 8
+    }
+
+    /// Whether every section fits in `budget` bytes.
+    pub(crate) fn fits(&self, budget: usize) -> bool {
+        (1..=self.len()).map(|n| self.cost(n)).sum::<usize>() <= budget
+    }
+
+    /// Picks the unsent sections to send for `request` within `budget` bytes, in page order, and
+    /// marks them sent: all of them when they fit, else the best ranked for the request (BM25
+    /// with typo matching), then the earliest.
+    pub(crate) fn pick(&mut self, request: &str, budget: usize) -> Vec<usize> {
+        let unsent: Vec<usize> = (1..=self.len()).filter(|&n| !self.sent[n - 1]).collect();
+        let mut ranked = Vec::new();
+        if unsent.iter().map(|&n| self.cost(n)).sum::<usize>() > budget {
+            let mut index = metldr_retrieval::Index::default();
+            for &n in &unsent {
+                let content = self.get(n).unwrap_or_default();
+                let id = &n.to_string();
+                index.add(&metldr_retrieval::Chunk {
+                    id,
+                    kind: "page",
+                    title: "",
+                    content,
+                    source_url: "",
+                    source_id: "",
+                    summary: false,
+                });
+            }
+            let slots = index.keyword(request, unsent.len());
+            ranked.extend(slots.into_iter().filter_map(|slot| index.id(slot).parse::<usize>().ok()));
+        }
+        let mut room = budget;
+        let mut picked = Vec::new();
+        for n in ranked.into_iter().chain(unsent) {
+            if !self.sent[n - 1] && self.cost(n) <= room {
+                room -= self.cost(n);
+                self.sent[n - 1] = true;
+                picked.push(n);
+            }
+        }
+        picked.sort_unstable();
+        picked
+    }
+
+    /// Writes sections `which` after their numbers, `[1] ...`, a blank line apart.
+    pub(crate) fn write_numbered(&self, which: &[usize], out: &mut String) {
         use std::fmt::Write;
-        out.reserve(self.text.len() + self.ranges.len() * 8);
-        for n in 1..=self.len() {
-            if n > 1 {
+        out.reserve(which.iter().map(|&n| self.cost(n)).sum());
+        for (at, &n) in which.iter().enumerate() {
+            if at > 0 {
                 out.push_str("\n\n");
             }
             let _ = write!(out, "[{n}] {}", self.get(n).unwrap_or_default());
+        }
+    }
+
+    /// Writes the page's outline within `budget` bytes: each section that opens with a heading,
+    /// by number, with the size of the text up to the next heading.
+    pub(crate) fn write_outline(&self, budget: usize, out: &mut String) {
+        let opens_with_heading = |&n: &usize| self.get(n).is_some_and(|s| s.starts_with('#'));
+        let headed: Vec<usize> = (1..=self.len()).filter(opens_with_heading).collect();
+        let start = out.len();
+        for (at, &n) in headed.iter().enumerate() {
+            let end = headed.get(at + 1).map_or(self.text.len(), |&next| self.ranges[next - 1].start);
+            let heading = self.get(n).and_then(|s| s.lines().next()).unwrap_or_default();
+            let size = (end - self.ranges[n - 1].start) as f64 / 1024.0;
+            let line = format!("[{n}] {} ({size:.1} KB)\n", heading.trim_start_matches('#').trim());
+            if out.len() - start + line.len() > budget {
+                break;
+            }
+            out.push_str(&line);
         }
     }
 
@@ -316,7 +403,7 @@ mod tests {
         let page = "# North\n\nFirst part.\n\nSecond part.\n\n## Units\n\nSeventeen units.";
         let parts = Sections::new(page.into());
         let mut numbered = String::new();
-        parts.write_numbered(&mut numbered);
+        parts.write_numbered(&[1, 2], &mut numbered);
         assert_eq!(numbered, "[1] # North\n\nFirst part.\n\nSecond part.\n\n[2] ## Units\n\nSeventeen units.");
         let answer = "It has 17 units [2], see [1] and [2] again; [9] and [x] are not sections.";
         assert_eq!(cited(answer, 2), [2, 1]);
@@ -325,5 +412,20 @@ mod tests {
         let paragraphs = (0..40).map(|n| format!("Paragraph {n} with some words.\n\n"));
         let long = Sections::new(paragraphs.collect());
         assert!((1..=long.len()).all(|n| long.get(n).is_some_and(|section| section.len() <= SECTION)));
+        // A long page sends the sections the request is about first, each once.
+        let filler = "Plain words about the weather and the roads. ".repeat(14);
+        let mut page = String::new();
+        for n in 0..30 {
+            let topic = if n == 27 { "The zebra count reached 17." } else { "Nothing else." };
+            page.push_str(&format!("## Part {n}\n\n{filler}{topic}\n\n"));
+        }
+        let mut parts = Sections::new(page);
+        assert!(!parts.fits(8192));
+        let first = parts.pick("How many zebras?", 1500);
+        assert!(first.contains(&28) && first.len() < 5, "{first:?}");
+        assert!(!parts.pick("How many zebras?", 1500).contains(&28));
+        let mut outline = String::new();
+        parts.write_outline(60, &mut outline);
+        assert_eq!(outline, "[1] Part 0 (0.6 KB)\n[2] Part 1 (0.6 KB)\n[3] Part 2 (0.6 KB)\n");
     }
 }

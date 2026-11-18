@@ -37,6 +37,7 @@ wgpu = { version = "~30.0.1", optional = true, default-features = false, feature
 metldr-answer-codec = { path = "../metldr-answer-codec" }
 metldr-conversation = { path = "../metldr-conversation" }
 metldr-history-pages = { path = "../metldr-history-pages" }
+metldr-retrieval = { path = "../metldr-retrieval" }
 serde = { version = "=1.0.229", features = ["derive"] }
 js-sys = "=0.3.105"
 serde_json = "=1.0.154"

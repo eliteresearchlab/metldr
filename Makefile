@@ -1,10 +1,10 @@
-.PHONY: rust check check-rust check-ui check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-responses check-google check-messages check-chat check-credentials check-conversation check-panel check-companion companion dev-install
+.PHONY: rust check check-rust check-ui check-codex check-harness check-claude check-pi check-opencode check-browser-tools check-sse check-retrieval check-responses check-google check-messages check-chat check-credentials check-conversation check-panel check-companion companion dev-install
 
 # Every Cargo root in the repository, in the order the check-* targets use.
 RUST_CRATES := metldr-sse metldr-responses metldr-google-interactions metldr-messages \
   metldr-chat-completions metldr-native-credentials metldr-conversation \
   metldr-harness metldr-pi-session metldr-codex-session metldr-opencode-session metldr-claude-session \
-  metldr-browser-tools metldr-answer-codec metldr-ui metldr-panel metldr-companion \
+  metldr-browser-tools metldr-answer-codec metldr-retrieval metldr-ui metldr-panel metldr-companion \
   metldr-core metldr-history-pages metldr-welcome
 
 # Fast pre-gate: type-check every Cargo root without linking or running tests.
@@ -45,6 +45,9 @@ check-browser-tools:
 
 check-sse:
 	cargo test --locked --manifest-path crates/metldr-sse/Cargo.toml
+
+check-retrieval:
+	cargo test --locked --manifest-path crates/metldr-retrieval/Cargo.toml
 
 check-responses:
 	cargo test --locked --manifest-path crates/metldr-responses/Cargo.toml
