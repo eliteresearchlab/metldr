@@ -1515,6 +1515,7 @@ dependencies = [
 name = "metldr-core"
 version = "0.1.0"
 dependencies = [
+ "memchr",
  "metldr-embed",
  "metldr-retrieval",
  "py3langid",
