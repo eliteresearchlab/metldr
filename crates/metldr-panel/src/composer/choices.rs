@@ -228,7 +228,7 @@ mod checks {
             expected
         );
         assert!(unavailable.iter().all(|choice| !choice.enabled));
-        let mut view = PageView::decode(br#"{"sequence":1,"store":"0123456789abcdef0123456789abcdef","selection":{"store":"0123456789abcdef0123456789abcdef","conversation":"0123456789abcdef0123456789abcdef:100","epoch":"1"},"source":{"id":"0123456789abcdef0123456789abcdef:1","tab":4,"document":"doc-1","url":"http://127.0.0.1:43123/article","title":"North report","text":"North has 17 units."},"runs":[],"native_correction":null,"pi_profile":null,"agent_sessions":[],"browser_route":null}"#).unwrap();
+        let mut view = PageView::decode(br#"{"approval_mode":"ask","sequence":1,"store":"0123456789abcdef0123456789abcdef","selection":{"store":"0123456789abcdef0123456789abcdef","conversation":"0123456789abcdef0123456789abcdef:100","epoch":"1"},"source":{"id":"0123456789abcdef0123456789abcdef:1","tab":4,"document":"doc-1","url":"http://127.0.0.1:43123/article","title":"North report","text":"North has 17 units."},"runs":[],"native_correction":null,"pi_profile":null,"agent_sessions":[],"browser_route":null}"#).unwrap();
         view.fixture_available = true;
         let endpoint = "https://api.example.test/v1".to_owned();
         let model = "online-model".to_owned();

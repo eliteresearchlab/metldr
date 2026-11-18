@@ -131,7 +131,6 @@ fn make_owner_without_plan(directory: &Directory) -> crate::Result<(Owner, Strin
             pi_ui: Default::default(),
             codex_input: Default::default(),
             plan_hold: None,
-            session_grants: BTreeMap::new(),
             stopping: std::collections::BTreeSet::new(),
             browser_approval: None,
             browser_route: None,
@@ -895,32 +894,15 @@ fn propose_only(
 }
 
 #[test]
-fn session_grant_auto_approves_bound_tier_one_steps_only() -> crate::Result<()> {
-    use crate::model::ConversationAction::{GrantSession, RevokeSession};
+fn approval_mode_decides_what_asks() -> crate::Result<()> {
+    use crate::{browser_owner::ApprovalMode, model::ConversationAction::SetApprovalMode};
     let directory = Directory::new()?;
     let (mut owner, run) = make_owner_without_plan(&directory)?;
+    session_command(&mut owner, "panel-auto", SetApprovalMode { mode: ApprovalMode::Auto })?;
+    // Auto still asks for the plan.
     let plan = propose_plan(&mut owner, &run)?;
+    assert_eq!(plan.state, crate::history::PlanState::Proposed);
     panel_plan_reply(&mut owner, &run, plan.revision, "panel-approve")?;
-    // A grant for a stale revision is refused.
-    assert!(
-        session_command(
-            &mut owner,
-            "panel-grant-stale",
-            GrantSession {
-                run: run.clone(),
-                revision: plan.revision + 1,
-            },
-        )
-        .is_err()
-    );
-    session_command(
-        &mut owner,
-        "panel-grant",
-        GrantSession {
-            run: run.clone(),
-            revision: plan.revision,
-        },
-    )?;
     let binding = Binding {
         tab: 17,
         document: "document-1".into(),
@@ -931,65 +913,41 @@ fn session_grant_auto_approves_bound_tier_one_steps_only() -> crate::Result<()> 
         grant_revision: 1,
     };
     let url = "http://127.0.0.1:4567/article";
-    let verified = acted;
-    // The first Tier 1 step still asks; approving it binds the grant.
-    approve_dispatch_settle(
-        &mut owner,
-        proposal(&run, "grant-1", &binding, url, field()),
-        verified(),
-    )?;
-    // The next Tier 1 step on the same session and target is approved without asking.
-    let reply = propose_only(
-        &mut owner,
-        proposal(&run, "grant-2", &binding, url, field()),
-    )?;
+    // A step that cannot submit or delete runs without asking.
+    let reply = propose_only(&mut owner, proposal(&run, "auto-1", &binding, url, field()))?;
     assert!(owner.browser_approval.is_none());
     let auto = reply.blocking_recv()?.map_err(std::io::Error::other)?;
     assert_eq!(auto.state, Phase::Approved);
     let (ack, reply) = tokio::sync::oneshot::channel();
-    owner.browser_event(Event::Dispatch {
-        action: auto.id.clone(),
-        revision: auto.revision,
-        ack,
-    })?;
+    owner.browser_event(Event::Dispatch { action: auto.id.clone(), revision: auto.revision, ack })?;
     let dispatched = reply.blocking_recv()?.map_err(std::io::Error::other)?;
     let (ack, reply) = tokio::sync::oneshot::channel();
-    owner.browser_event(Event::Observed {
-        action: auto.id,
-        revision: dispatched.revision,
-        outcome: verified(),
+    owner.browser_event(Event::Observed { action: auto.id, revision: dispatched.revision, outcome: acted(), ack })?;
+    reply.blocking_recv()?.map_err(std::io::Error::other)?;
+    // A click that sends asks.
+    let send = Intent::act("click", serde_json::json!({"ref":"e3"}), &[("e3", "button", "Send")]);
+    let mut reply = propose_only(&mut owner, proposal(&run, "auto-2", &binding, url, send))?;
+    assert!(owner.browser_approval.is_some());
+    assert!(matches!(reply.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+    let send = owner.browser_approval.as_ref().unwrap().action.clone();
+    owner.browser_decide(&send, 1, false)?;
+    // Full access approves the next plan revision as it is proposed.
+    session_command(&mut owner, "panel-full", SetApprovalMode { mode: ApprovalMode::Full })?;
+    let (ack, reply) = tokio::sync::oneshot::channel();
+    owner.browser_event(Event::Plan {
+        run: run.clone(),
+        goal: "Fill the field again".into(),
+        intended_effects: vec!["The field changes".into()],
+        scope: "This page".into(),
         ack,
     })?;
-    reply.blocking_recv()?.map_err(std::io::Error::other)?;
-    // A button is Tier 2 and always asks.
-    let button = Intent::act(
-        "click",
-        serde_json::json!({"ref":"e3"}),
-        &[("e3", "button", "Send")],
-    );
-    let mut reply = propose_only(&mut owner, proposal(&run, "grant-3", &binding, url, button))?;
-    assert!(owner.browser_approval.is_some());
-    assert!(matches!(
-        reply.try_recv(),
-        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
-    ));
-    owner.cancel_browser_approval(&run);
-    // Stop ended the grant, so a later Tier 1 step asks again.
-    assert!(!owner.session_grants.contains_key(&run));
-    session_command(
-        &mut owner,
-        "panel-grant-again",
-        GrantSession {
-            run: run.clone(),
-            revision: plan.revision,
-        },
-    )?;
-    session_command(
-        &mut owner,
-        "panel-revoke",
-        RevokeSession { run: run.clone() },
-    )?;
-    assert!(!owner.session_grants.contains_key(&run));
+    let revision = reply.blocking_recv()?.map_err(std::io::Error::other)?;
+    let replanned = owner.record_history.edit(|edit| {
+        let execution = edit.execution(&run)?;
+        edit.task_plan(&execution)
+    })?;
+    assert!(replanned.is_some_and(|plan| plan.revision == revision
+        && plan.state == crate::history::PlanState::Approved));
     Ok(())
 }
 
@@ -1016,7 +974,7 @@ fn secret_entry(owner: &mut Owner, id: &str, action: &str, secret: &str) -> crat
 
 #[test]
 fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Result<()> {
-    use crate::model::ConversationAction::GrantSession;
+    use crate::{browser_owner::ApprovalMode, model::ConversationAction::SetApprovalMode};
     const SECRET: &str = "synthetic-Secret-7f3a";
     let directory = Directory::new()?;
     let (mut owner, run) = make_owner_without_plan(&directory)?;
@@ -1024,14 +982,8 @@ fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Resu
     owner.transport = transport;
     let plan = propose_plan(&mut owner, &run)?;
     panel_plan_reply(&mut owner, &run, plan.revision, "panel-approve")?;
-    session_command(
-        &mut owner,
-        "panel-grant",
-        GrantSession {
-            run: run.clone(),
-            revision: plan.revision,
-        },
-    )?;
+    // Even Full access asks for a secret.
+    session_command(&mut owner, "panel-full", SetApprovalMode { mode: ApprovalMode::Full })?;
     let binding = Binding {
         tab: 17,
         document: "document-1".into(),
@@ -1042,13 +994,6 @@ fn secret_entry_needs_its_own_consent_and_reaches_only_the_page() -> crate::Resu
         grant_revision: 1,
     };
     let url = "http://127.0.0.1:4567/article";
-    // Bind the session grant with one approved Tier 1 step.
-    approve_dispatch_settle(
-        &mut owner,
-        proposal(&run, "grant-1", &binding, url, field()),
-        acted(),
-    )?;
-    // An approved plan and a bound grant still leave the secret waiting for the user.
     let reference = "0123456789abcdef0123456789abcdef";
     let mut reply = propose_only(
         &mut owner,

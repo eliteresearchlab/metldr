@@ -38,8 +38,7 @@ impl Owner {
             | Action::BrowserDecision { .. }
             | Action::SecretEntry { .. }
             | Action::PlanReply { .. }
-            | Action::GrantSession { .. }
-            | Action::RevokeSession { .. }
+            | Action::SetApprovalMode { .. }
             | Action::NativePermission { .. }
             | Action::PiUiReply { .. }
             | Action::CodexInputReply { .. } => return Ok(false),
