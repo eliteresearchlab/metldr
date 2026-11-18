@@ -1,109 +1,49 @@
 #!/usr/bin/env node
-// download-models.mjs - Downloads core ML models for bundling
-// Run with: node scripts/download-models.mjs
+// The search model: potion-retrieval-32M (MIT) at a pinned revision, checked by SHA-256 and
+// packed by crates/metldr-embed into public/models/potion-retrieval-32M.metldr (int8, ~33 MB).
+// Run once with `npm run download:models`; the build copies public/models into the package.
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const MODELS_DIR = join(__dirname, '..', 'public', 'models')
-
-// all models to bundle (3 core models = ~318MB)
-const CORE_MODELS = [
-  // embed - required for all semantic search and RAG
-  {
-    id: 'nomic-ai/nomic-embed-text-v1.5',
-    files: [
-      'config.json',
-      'tokenizer.json',
-      'tokenizer_config.json',
-      'special_tokens_map.json',
-      'onnx/model_quantized.onnx'  // q8 quantized (~131MB)
-    ],
-    localDir: 'nomic-embed-text-v1.5'
-  },
-  // classify - used for email categorization
-  {
-    id: 'MoritzLaurer/deberta-v3-xsmall-zeroshot-v1.1-all-33',
-    files: [
-      'config.json',
-      'tokenizer.json',
-      'tokenizer_config.json',
-      'special_tokens_map.json',
-      'onnx/model_quantized.onnx'  // (~83MB)
-    ],
-    localDir: 'deberta-v3-xsmall-zeroshot'
-  },
-  // ner - extract names, dates, organizations
-  {
-    id: 'Xenova/bert-base-NER',
-    files: [
-      'config.json',
-      'tokenizer.json',
-      'tokenizer_config.json',
-      'onnx/model_quantized.onnx'  // (~104MB)
-    ],
-    localDir: 'bert-base-NER'
-  }
-]
-
-const HF_BASE = 'https://huggingface.co'
-
-async function downloadFile(url, dest) {
-  console.log(`  Downloading: ${url}`)
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Failed to download ${url}: ${res.status}`)
-  const buffer = await res.arrayBuffer()
-  writeFileSync(dest, Buffer.from(buffer))
-  console.log(`  Saved: ${dest} (${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB)`)
+const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const output = join(root, 'public', 'models', 'potion-retrieval-32M.metldr')
+const cache = join(homedir(), '.cache', 'metldr-models', 'potion-retrieval-32M')
+const revision = '6fc8051fab2a1e0ee76689cf08c853792ac285e7'
+const files = {
+  'model.safetensors': '07609e5bd33aad37900b3fd62f4ec96f6daec88ca4d46b9d8b928bfababf6ea0',
+  'tokenizer.json': '7d75cbc54318138807c401b0f0c9721117c628b39de8e8e0edb6cb17e0ee7d18',
 }
 
-async function downloadModel(model) {
-  console.log(`\nDownloading: ${model.id}`)
-  const modelDir = join(MODELS_DIR, model.localDir)
-  
-  if (!existsSync(modelDir)) {
-    mkdirSync(modelDir, { recursive: true })
-  }
-  
-  for (const file of model.files) {
-    const url = `${HF_BASE}/${model.id}/resolve/main/${file}`
-    const localPath = join(modelDir, file) // keep onnx/ subfolder structure
-    
-    // create subdirs if needed
-    const dir = dirname(localPath)
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    
-    // skip if already exists
-    if (existsSync(localPath)) {
-      console.log(`  Skip (exists): ${localPath}`)
-      continue
-    }
-    
-    await downloadFile(url, localPath)
-  }
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
+
+async function fetchPinned(name, expected) {
+  const path = join(cache, name)
+  if (existsSync(path) && sha256(readFileSync(path)) === expected) return path
+  const url = `https://huggingface.co/minishlab/potion-retrieval-32M/resolve/${revision}/${name}`
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`${url}: ${response.status}`)
+  const bytes = Buffer.from(await response.arrayBuffer())
+  const found = sha256(bytes)
+  if (found !== expected) throw new Error(`${name} hash ${found} is not the pinned ${expected}`)
+  mkdirSync(cache, { recursive: true })
+  writeFileSync(path, bytes)
+  return path
 }
 
-async function main() {
-  console.log('=== metldr Model Downloader ===\n')
-  console.log(`Target directory: ${MODELS_DIR}`)
-  
-  if (!existsSync(MODELS_DIR)) {
-    mkdirSync(MODELS_DIR, { recursive: true })
-  }
-  
-  for (const model of CORE_MODELS) {
-    try {
-      await downloadModel(model)
-    } catch (err) {
-      console.error(`Failed to download ${model.id}:`, err.message)
-    }
-  }
-  
-  console.log('\n=== Download complete ===')
-  console.log('Models are ready in public/models/')
-  console.log('Run `npm run build` to bundle them with the extension.')
+const weights = await fetchPinned('model.safetensors', files['model.safetensors'])
+const tokenizer = await fetchPinned('tokenizer.json', files['tokenizer.json'])
+mkdirSync(dirname(output), { recursive: true })
+const packed = spawnSync('cargo', [
+  'run', '--quiet', '--release', '--manifest-path', join(root, 'crates/metldr-embed/Cargo.toml'),
+  '--bin', 'pack-model', '--', weights, tokenizer, output,
+], { stdio: 'inherit' })
+if (packed.status !== 0) {
+  rmSync(output, { force: true })
+  process.exit(packed.status ?? 1)
 }
-
-main().catch(console.error)
+console.log(`packed ${output}`)

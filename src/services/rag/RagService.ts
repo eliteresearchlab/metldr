@@ -1,5 +1,4 @@
 import { vectorStore } from './VectorStore'
-import { embeddingProvider } from './EmbeddingProvider'
 import { chunkingService } from './ChunkingService'
 import { databaseService, DB_CONFIGS } from '../DatabaseService'
 import { LRUCache } from 'lru-cache'
@@ -143,7 +142,7 @@ export class RagService {
       // check if content unchanged (persisted deduplication)
       if (existingHash === contentHash) {
         // verify VOY index actually has this data
-        const voyHasData = await this.verifyVoyIndex(metadata.sourceId)
+        const voyHasData = await vectorStore.hasDocument(metadata.sourceId)
         if (voyHasData) {
           stats.skipped = true
           stats.skipReason = 'unchanged'
@@ -156,7 +155,7 @@ export class RagService {
         }
       } else if (!existingHash) {
         // no metadata entry - check if VOY/IDB has this doc (backfill case)
-        const voyHasData = await this.verifyVoyIndex(metadata.sourceId)
+        const voyHasData = await vectorStore.hasDocument(metadata.sourceId)
         if (voyHasData) {
           // backfill metadata and skip re-indexing
           this.contentHashes.set(metadata.sourceId, contentHash)
@@ -236,24 +235,6 @@ export class RagService {
     }
   }
 
-  // verify that VOY index actually has embeddings for this source
-  private async verifyVoyIndex(sourceId: string): Promise<boolean> {
-    try {
-      const docCount = vectorStore.getDocCount()
-      if (docCount === 0) {
-        console.log('[RagService] VOY verification: index is empty')
-        return false
-      }
-      
-      const hasDoc = await vectorStore.hasDocument(sourceId)
-      console.log(`[RagService] VOY verification: hasDoc=${hasDoc}, totalDocs=${docCount}`)
-      return hasDoc
-    } catch (err) {
-      console.warn('[RagService] VOY verification error:', err)
-      return false
-    }
-  }
-
   private hashContent(text: string): string {
     const first = text.slice(0, 200)
     const last = text.slice(-200)
@@ -270,13 +251,8 @@ export class RagService {
     
     for (let i = 0; i < entries.length; i += batchSize) {
       const batch = entries.slice(i, i + batchSize)
-      const texts = batch.map(e => e.content)
-      
-      // true batch embedding (GPU processes all at once)
-      const embeddings = await embeddingProvider.embedBatch(texts, false)
-      
-      // one vector-store batch per embedded batch: one IDB transaction and one sandbox message
-      await vectorStore.addBatch(batch.map((entry, idx) => ({ entry, embedding: embeddings[idx] })))
+      // one IDB transaction per batch; the Rust index embeds each chunk as it is added
+      await vectorStore.addBatch(batch)
       
       // report progress after each batch
       const batchNum = Math.floor(i / batchSize) + 1
@@ -293,8 +269,7 @@ export class RagService {
 
     await loadRustCore()
     const focused = focus_query(await this.expandQueryWithLLM(query))
-    const queryEmbedding = await embeddingProvider.embedQuery(focused)
-    const found = { focused, dense: await vectorStore.dense(Array.from(queryEmbedding), candidates * 5) }
+    const found = { focused, dense: (await vectorStore.keywords()).dense(focused, candidates * 5) }
     this.queryCache.set(cacheKey, found)
     return found
   }
@@ -347,7 +322,7 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
     // check metadata first (fast)
     if (this.contentHashes.has(sourceUrl)) {
       // verify VOY actually has the data
-      const voyHasData = await this.verifyVoyIndex(sourceUrl)
+      const voyHasData = await vectorStore.hasDocument(sourceUrl)
       if (voyHasData) {
         return true
       }
@@ -389,8 +364,7 @@ Example: "what was the pdf i read about islam and ummah" → "islam, ummah, musl
     }
     
     try {
-      const embedding = await embeddingProvider.embedDocument(summaryText)
-      await vectorStore.add(entry, embedding)
+      await vectorStore.add(entry)
       
       // persist metadata
       this.contentHashes.set(summarySourceId, this.hashContent(summaryText))

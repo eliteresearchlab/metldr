@@ -43,7 +43,11 @@ type HashMap<K, V> = StdMap<K, V, BuildHasherDefault<Fnv>>;
 
 const K1: f64 = 1.2;
 const B: f64 = 0.75;
-const RRF_K: f64 = 60.0;
+/// Reciprocal rank fusion: a hit at rank r in a list scores weight / (RRF_K + r + 1). K and
+/// the dense weight were chosen on SciFact's train queries for the static embeddings (notes:
+/// research/r13-static-embeddings.md): test nDCG@10 0.6939, against 0.6750 at k 60, equal weights.
+const RRF_K: f64 = 5.0;
+const DENSE_WEIGHT: f64 = 0.75;
 /// Fused scores use a 0 to 100 scale: a chunk ranked first by both lists scores 100.
 const TOP_SCORE: f64 = 100.0;
 const SUMMARY_BOOST: f64 = 8.0;
@@ -449,7 +453,8 @@ impl Index {
         );
         fused.add(self.keyword(query, keyword_limit), false);
 
-        let scale = TOP_SCORE * (RRF_K + 1.0) / 2.0;
+        // A hit first in both lists scores TOP_SCORE.
+        let scale = TOP_SCORE * (RRF_K + 1.0) / (1.0 + DENSE_WEIGHT);
         let doc = |slot: u32| self.doc(slot);
         let mut hits: Vec<Ranked> = fused
             .hits
@@ -653,7 +658,8 @@ impl Fusion {
     /// Adds one ranked list; a repeat within the same list counts once.
     fn add(&mut self, slots: impl IntoIterator<Item = u32>, from_dense: bool) {
         for (rank, slot) in slots.into_iter().enumerate() {
-            let contribution = 1.0 / (RRF_K + rank as f64 + 1.0);
+            let weight = if from_dense { DENSE_WEIGHT } else { 1.0 };
+            let contribution = weight / (RRF_K + rank as f64 + 1.0);
             let at = self.at[slot as usize];
             if at == NONE {
                 self.at[slot as usize] = self.hits.len() as u32;
@@ -811,7 +817,8 @@ mod tests {
         assert!((hits[0].score - 100.0).abs() < 1e-9);
         let second = hits.iter().find(|h| h.id == "p:2").unwrap();
         assert_eq!(second.kind, Match::Keyword);
-        let raw: f64 = (1.0 / 62.0) * 100.0 * 61.0 / 2.0;
+        // Second in the keyword list only.
+        let raw = TOP_SCORE * (RRF_K + 1.0) / (1.0 + DENSE_WEIGHT) / (RRF_K + 2.0);
         assert!((second.score - (raw - 15.0).max(0.0)).abs() < 1e-9);
         assert!(index.has_source("y:summary") && index.has_source("https://y"));
     }
