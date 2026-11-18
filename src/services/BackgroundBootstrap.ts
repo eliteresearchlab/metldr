@@ -1,10 +1,9 @@
 import { cacheService } from './CacheService'
-import { clearSummaryCache, dictionary, lookupWord, recordStat, statsSummary, summaryGate } from './RustCore'
+import { clearSummaryCache, dictionary, lookupWord, recordStat, search, statsSummary, summaryGate } from './RustCore'
 import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
 import { logger } from './LoggerService'
-import { ragService } from './rag/RagService'
 import { concurrencyManager } from './ConcurrencyManager'
 
 
@@ -129,7 +128,7 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'RAG_IS_INDEXING') {
         const { sourceId } = msg as { type: string; sourceId: string }
-        respond({ success: true, isIndexing: ragService.isIndexing(sourceId) })
+        search.isIndexing(sourceId).then(isIndexing => respond({ success: true, isIndexing }), () => respond({ success: false, isIndexing: false }))
         return true
       }
 
@@ -438,7 +437,7 @@ export class BackgroundBootstrap {
   static _onRagHasIndexedContent(msg: { type: string; sourceUrl: string }, respond: ResponseCallback): void {
     (async () => {
       try {
-        const hasContent = await ragService.hasIndexedContent(msg.sourceUrl)
+        const hasContent = await search.has(msg.sourceUrl)
         respond({ success: true, hasContent })
       } catch (err) {
         log.error('onRagHasIndexedContent', (err as Error).message)
@@ -450,7 +449,7 @@ export class BackgroundBootstrap {
   static _onRagSearchWithContext(msg: { type: string; query: string; limit?: number; sourceUrl?: string }, respond: ResponseCallback): void {
     (async () => {
       try {
-        const context = await ragService.searchWithContext(msg.query, msg.limit || 5, msg.sourceUrl)
+        const context = await search.context(msg.query, msg.limit || 5, msg.sourceUrl)
         respond({ success: true, context })
       } catch (err) {
         log.error('onRagSearchWithContext', (err as Error).message)
@@ -476,7 +475,7 @@ export class BackgroundBootstrap {
         
         const result = await concurrencyManager.execute('indexing', sourceUrl, async (signal) => {
           if (signal.aborted) throw new Error('Indexing aborted')
-          return await ragService.ensureIndexed(msg.text, msg.metadata, broadcastProgress)
+          return await search.ensure(msg.text, msg.metadata, broadcastProgress)
         })
         
         respond({ success: true, result })
@@ -702,7 +701,7 @@ export class BackgroundBootstrap {
               
               await concurrencyManager.execute('indexing', pdfUrl, async (signal) => {
                 if (signal.aborted) throw new Error('Indexing aborted')
-                await ragService.indexChunks(result.fullText, {
+                await search.index(result.fullText, {
                   sourceId: pdfUrl,
                   sourceUrl: pdfUrl,
                   sourceType: 'pdf',

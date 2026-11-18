@@ -575,15 +575,7 @@ export interface FetchResponse {
   contextInvalidated?: boolean
 }
 
-// rag & pdf
-export interface VectorEntry {
-  id: string
-  type: 'email' | 'page' | 'pdf' | 'article'
-  content: string
-  metadata: Record<string, unknown>
-  timestamp: number
-}
-
+// pdf
 export interface PdfChunk {
   text: string
   pageStart: number

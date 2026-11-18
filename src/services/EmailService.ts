@@ -1,6 +1,6 @@
 import { cacheService } from './CacheService'
 import { AIPrompts } from './ai/AIPrompts'
-import { complete, recordStat } from './RustCore'
+import { complete, recordStat, search } from './RustCore'
 import type {
   AmountFact,
   IdFact,
@@ -16,7 +16,6 @@ import type {
   ParsedReplies
 } from '../types'
 
-import { ragService } from './rag/RagService'
 
 const WHITESPACE_REGEX = /\s+/
 const JSON_FENCE_REGEX = /```json\s*/g
@@ -74,7 +73,7 @@ export class EmailService {
         }).catch(() => {})
       }
       
-      ragService.indexChunks(emailContent, {
+      search.index(emailContent, {
         sourceId: emailId,
         sourceUrl: `email://${emailId}`,
         sourceType: 'email',
@@ -121,7 +120,7 @@ export class EmailService {
         this.generateReplySuggestions(emailId, emailContent, summary, metadata).catch(() => {})
         // index summary for global search
         const summaryText = [summary.summary, ...(summary.action_items || [])].filter(Boolean).join('\n')
-        ragService.indexSummary(
+        search.indexSummary(
           summaryText,
           { sourceId: emailId, sourceUrl: `email://${emailId}`, sourceType: 'email', title: (metadata as any)?.subject || 'Email' }
         ).catch(() => {})

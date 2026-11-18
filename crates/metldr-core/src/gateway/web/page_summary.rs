@@ -28,7 +28,7 @@ struct Page {
 }
 
 /// The cache, when the extension has made it; opening never creates it.
-async fn cache() -> Option<IdbDatabase> {
+pub(super) async fn cache() -> Option<IdbDatabase> {
     let factory: web_sys::IdbFactory = get(&js_sys::global(), "indexedDB").dyn_into().ok()?;
     let open: IdbOpenDbRequest = factory.open(CACHE).ok()?;
     let refuse = Closure::once_into_js({
