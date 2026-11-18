@@ -444,7 +444,8 @@ impl Gateway {
                 follow();
             }
         });
-        for (event, listener) in [("onActivated", on_activated.as_ref()), ("onUpdated", on_updated.as_ref())] {
+        let listeners = [("onActivated", on_activated.as_ref()), ("onUpdated", on_updated.as_ref())];
+        for (event, listener) in listeners {
             if let Ok(event) = crate::get(&tabs, event) {
                 let _ = crate::call(&event, "addListener", &[listener.clone()]);
             }

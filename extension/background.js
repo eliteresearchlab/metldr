@@ -19,7 +19,8 @@ chrome.commands.onCommand.addListener((command, tab) => {
     initialized.then(stop_all_runs).catch(console.error);
     return;
   }
-  if (command !== "open-browser-agent" || !Number.isInteger(tab?.id) || tab.id < 0 || tab.id > 2147483647) return;
+  const validTab = Number.isInteger(tab?.id) && tab.id >= 0 && tab.id <= 2147483647;
+  if (command !== "open-browser-agent" || !validTab) return;
   chrome.sidePanel.setOptions({ tabId: tab.id, path: "chat.html", enabled: true }, () => {
     if (chrome.runtime.lastError) {
       console.error("metldr could not select its panel.", chrome.runtime.lastError.message);
