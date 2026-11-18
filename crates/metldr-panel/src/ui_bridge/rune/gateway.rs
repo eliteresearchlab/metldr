@@ -303,7 +303,7 @@ impl Gateway {
             turns,
             shown: shown[start..].to_vec(),
             sections: self.sections.borrow().clone(),
-            cited: ids[start..].iter().map(|id| citations.get(id).cloned().unwrap_or_default()).collect(),
+            cited: ids[start..].iter().map(|id| citations.get(id).cloned()).map(Option::unwrap_or_default).collect(),
         }
     }
 

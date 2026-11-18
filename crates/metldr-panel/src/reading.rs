@@ -226,7 +226,8 @@ impl Sections {
 
     /// The first `words` words of section `n` as plain text, to name it and find it on the page.
     pub(crate) fn opening(&self, n: usize, words: usize) -> Option<String> {
-        let plain: String = self.get(n)?.chars().filter(|c| !matches!(c, '#' | '*' | '`' | '>' | '|' | '_')).collect();
+        let markup = |c: &char| matches!(c, '#' | '*' | '`' | '>' | '|' | '_');
+        let plain: String = self.get(n)?.chars().filter(|c| !markup(c)).collect();
         Some(plain.split_whitespace().take(words).collect::<Vec<_>>().join(" "))
     }
 }
@@ -238,13 +239,13 @@ pub(crate) fn cited(answer: &str, count: usize) -> Vec<usize> {
     while let Some(open) = rest.find('[') {
         let after = &rest[open + 1..];
         let digits = after.bytes().take_while(u8::is_ascii_digit).count();
-        if digits > 0 && after.as_bytes().get(digits) == Some(&b']') {
-            if let Ok(n) = after[..digits].parse::<usize>()
-                && (1..=count).contains(&n)
-                && !found.contains(&n)
-            {
-                found.push(n);
-            }
+        if digits > 0
+            && after.as_bytes().get(digits) == Some(&b']')
+            && let Ok(n) = after[..digits].parse::<usize>()
+            && (1..=count).contains(&n)
+            && !found.contains(&n)
+        {
+            found.push(n);
         }
         rest = after;
     }
@@ -317,9 +318,12 @@ mod tests {
         let mut numbered = String::new();
         parts.write_numbered(&mut numbered);
         assert_eq!(numbered, "[1] # North\n\nFirst part.\n\nSecond part.\n\n[2] ## Units\n\nSeventeen units.");
-        assert_eq!(cited("It has 17 units [2], see [1] and [2] again; [9] and [x] are not sections.", 2), [2, 1]);
-        assert_eq!(Sections::new("## Units\n\nSeventeen **units** here.".into()).opening(1, 3).as_deref(), Some("Units Seventeen units"));
-        let long = Sections::new((0..40).map(|n| format!("Paragraph {n} with some words.\n\n")).collect());
+        let answer = "It has 17 units [2], see [1] and [2] again; [9] and [x] are not sections.";
+        assert_eq!(cited(answer, 2), [2, 1]);
+        let units = Sections::new("## Units\n\nSeventeen **units** here.".into());
+        assert_eq!(units.opening(1, 3).as_deref(), Some("Units Seventeen units"));
+        let paragraphs = (0..40).map(|n| format!("Paragraph {n} with some words.\n\n"));
+        let long = Sections::new(paragraphs.collect());
         assert!((1..=long.len()).all(|n| long.get(n).is_some_and(|section| section.len() <= SECTION)));
     }
 }
