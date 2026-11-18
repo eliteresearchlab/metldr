@@ -337,6 +337,13 @@ pub fn detect_single_page_chrome(
         .iter()
         .map(|l| l.bbox.y + l.bbox.height)
         .collect();
+    // Each line's pattern match, once: the isolation scan below asks it of every other line
+    // for each band line, which made the pass quadratic in lines with a string search per pair.
+    let chrome: Vec<bool> = page
+        .projected_lines
+        .iter()
+        .map(|l| matches_chrome_pattern(l.text.trim()))
+        .collect();
 
     for (idx, line) in page.projected_lines.iter().enumerate() {
         let text = line.text.trim();
@@ -349,6 +356,13 @@ pub fn detect_single_page_chrome(
         let in_top = bots[idx] <= top_cutoff;
         let in_bottom = tops[idx] >= bottom_cutoff;
         if !(in_top || in_bottom) {
+            continue;
+        }
+        // Require a chrome pattern signature — drops the false-positive risk
+        // of nuking real titles/headings that happen to sit in the band.
+        // Font-size delta alone is too coarse: section titles routinely
+        // differ from body by ≥15% but are not chrome.
+        if !chrome[idx] {
             continue;
         }
 
@@ -371,8 +385,8 @@ pub fn detect_single_page_chrome(
             page.projected_lines
                 .iter()
                 .enumerate()
-                .filter(|(j, l)| {
-                    *j != idx && tops[*j] > bots[idx] && !matches_chrome_pattern(l.text.trim())
+                .filter(|(j, _)| {
+                    *j != idx && tops[*j] > bots[idx] && !chrome[*j]
                 })
                 .map(|(j, _)| tops[j] - bots[idx])
                 .min_by(|a, b| a.total_cmp(b))
@@ -382,8 +396,8 @@ pub fn detect_single_page_chrome(
             page.projected_lines
                 .iter()
                 .enumerate()
-                .filter(|(j, l)| {
-                    *j != idx && bots[*j] < tops[idx] && !matches_chrome_pattern(l.text.trim())
+                .filter(|(j, _)| {
+                    *j != idx && bots[*j] < tops[idx] && !chrome[*j]
                 })
                 .map(|(j, _)| tops[idx] - bots[j])
                 .min_by(|a, b| a.total_cmp(b))
@@ -391,14 +405,6 @@ pub fn detect_single_page_chrome(
                 .unwrap_or(true)
         };
         if !isolated {
-            continue;
-        }
-
-        // Require a chrome pattern signature — drops the false-positive risk
-        // of nuking real titles/headings that happen to sit in the band.
-        // Font-size delta alone is too coarse: section titles routinely
-        // differ from body by ≥15% but are not chrome.
-        if !matches_chrome_pattern(text) {
             continue;
         }
 

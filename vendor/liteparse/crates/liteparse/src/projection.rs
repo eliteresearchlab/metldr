@@ -3215,8 +3215,15 @@ const MONO_NAME_HINTS: &[&str] = &[
     "Fira Code",
 ];
 
+/// Whether a font name holds any hint. Names are a few dozen bytes, so one pass over them
+/// comparing at each byte that starts a hint beats setting up a substring search per hint, which
+/// this runs for every text item several times.
 fn name_contains_any(name: &str, hints: &[&str]) -> bool {
-    hints.iter().any(|h| name.contains(h))
+    let name = name.as_bytes();
+    (0..name.len()).any(|at| {
+        let rest = &name[at..];
+        hints.iter().any(|h| rest.starts_with(h.as_bytes()))
+    })
 }
 
 /// Flag the line's short items set clearly smaller than its body text and raised above its

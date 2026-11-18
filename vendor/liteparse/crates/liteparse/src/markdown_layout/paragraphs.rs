@@ -34,21 +34,13 @@ const INDENT_TOLERANCE: f32 = 6.0;
 /// `projection.rs` pads with column-alignment spaces (e.g. `for    instance`)
 /// which look fine as a layout grid but are wrong for prose.
 pub(super) fn collapse_whitespace(s: &str) -> String {
+    // Whole words copied at once, one space between: no per-character pushes or re-encoding.
     let mut out = String::with_capacity(s.len());
-    let mut prev_space = false;
-    for c in s.chars() {
-        if c.is_whitespace() {
-            if !prev_space && !out.is_empty() {
-                out.push(' ');
-            }
-            prev_space = true;
-        } else {
-            out.push(c);
-            prev_space = false;
+    for word in s.split_whitespace() {
+        if !out.is_empty() {
+            out.push(' ');
         }
-    }
-    if out.ends_with(' ') {
-        out.pop();
+        out.push_str(word);
     }
     out
 }
