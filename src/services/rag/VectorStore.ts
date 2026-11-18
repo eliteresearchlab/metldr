@@ -1,10 +1,11 @@
 import { databaseService, DB_CONFIGS } from '../DatabaseService'
 import type { VectorEntry } from '../../types'
-import { SearchIndex } from '../../../crates/metldr-core/pkg/metldr_core'
+import { SearchIndex, search_model_fetch } from '../../../crates/metldr-core/pkg/metldr_core'
 import { loadRustCore } from '../RustCore'
 
-// The static embedding model (potion-retrieval-32M, int8), packed by crates/metldr-embed.
-const MODEL_PATH = 'models/potion-retrieval-32M.metldr'
+// The search model downloads once on first use (see the core's model.rs); until it is ready,
+// search runs on keywords, and the download is retried at most this often.
+const MODEL_RETRY_MS = 30_000
 // Every chunk's vector, saved as one blob so a restart embeds only new or changed chunks.
 const VECTORS_KEY = 'system:vectors'
 const SAVE_DELAY_MS = 300
@@ -17,20 +18,31 @@ export class VectorStore {
   private operationQueue: Promise<void> = Promise.resolve()
   private pendingSave: ReturnType<typeof setTimeout> | null = null
   private loading: Promise<SearchIndex> | null = null
+  private modelTried = 0
 
   // the index, loaded once: the model, the saved vectors, then every stored chunk
-  private index(): Promise<SearchIndex> {
-    return this.loading ??= this.load().catch(error => {
+  private async index(): Promise<SearchIndex> {
+    const index = await (this.loading ??= this.load().catch(error => {
       this.loading = null
       throw error
-    })
+    }))
+    if (!index.has_model() && Date.now() - this.modelTried > MODEL_RETRY_MS) this.fetchModel(index)
+    return index
+  }
+
+  // a model that arrives after the chunks embeds them all, then saves their vectors
+  private async fetchModel(index: SearchIndex): Promise<void> {
+    this.modelTried = Date.now()
+    if (!(await search_model_fetch()) || !index.use_search_model()) return
+    await this.eachStored(entry => index.embed(entry.id, entry.content))
+    this.scheduleSave()
   }
 
   private async load(): Promise<SearchIndex> {
     await loadRustCore()
     const index = new SearchIndex()
-    const model = await fetch(chrome.runtime.getURL(MODEL_PATH))
-    if (model.ok) index.load_model(new Uint8Array(await model.arrayBuffer()))
+    this.modelTried = Date.now()
+    if (await search_model_fetch()) index.use_search_model()
     const saved = await databaseService.get<SavedVectors>(DB_CONFIGS.cache, 'page_cache', VECTORS_KEY)
     if (saved?.value) index.restore_vectors(saved.value)
     await this.eachStored(entry => this.remember(index, entry))

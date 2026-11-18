@@ -125,6 +125,8 @@ fn saved<'a>(settings: &'a Value, route: &str, field: &str) -> Option<&'a str> {
 }
 
 mod dictionary;
+mod model;
+pub(crate) use model::take_search_model;
 mod stats;
 mod summary_gate;
 mod word;

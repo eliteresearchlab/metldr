@@ -36,9 +36,18 @@ mod wasm {
             Self::default()
         }
 
-        /// Loads the packed embedding model; false when the bytes are not one.
-        pub fn load_model(&mut self, bytes: Vec<u8>) -> bool {
-            self.dense.load_model(bytes)
+        /// Takes the search model fetched by `search_model_fetch`; false when none is ready.
+        pub fn use_search_model(&mut self) -> bool {
+            crate::gateway::web::take_search_model().is_some_and(|bytes| self.dense.load_model(bytes))
+        }
+
+        pub fn has_model(&self) -> bool {
+            self.dense.has_model()
+        }
+
+        /// Embeds an already added chunk, for chunks added before the model was ready.
+        pub fn embed(&mut self, id: &str, content: &str) {
+            self.dense.add(id, content);
         }
 
         /// Keeps a saved vector blob for the chunks added next (see `Dense::restore`).
