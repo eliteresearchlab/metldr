@@ -1,18 +1,29 @@
-interface StoreConfig {
-  readonly name: string
-  readonly keyPath: string
-  readonly indexes?: ReadonlyArray<{ name: string; keyPath: string; unique?: boolean }>
-}
-
 interface DatabaseConfig {
   name: string
   version: number
-  stores: readonly StoreConfig[] | StoreConfig[]
+  stores: readonly { readonly name: string; readonly keyPath: string }[]
 }
 
 type TransactionMode = 'readonly' | 'readwrite'
 
-class DatabaseServiceClass {
+// the schema is exactly the config: stores it no longer names are deleted, and no store keeps an index
+function upgrade(request: IDBOpenDBRequest, config: DatabaseConfig): void {
+  const db = request.result
+  const wanted = new Map(config.stores.map(store => [store.name, store.keyPath]))
+  for (const name of Array.from(db.objectStoreNames)) {
+    if (!wanted.has(name)) {
+      db.deleteObjectStore(name)
+      continue
+    }
+    const store = request.transaction!.objectStore(name)
+    for (const index of Array.from(store.indexNames)) store.deleteIndex(index)
+  }
+  for (const [name, keyPath] of wanted) {
+    if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath })
+  }
+}
+
+class Databases {
   private databases: Map<string, IDBDatabase> = new Map()
   private initPromises: Map<string, Promise<IDBDatabase>> = new Map()
 
@@ -42,12 +53,10 @@ class DatabaseServiceClass {
   private openDatabase(config: DatabaseConfig): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(config.name, config.version)
-
       request.onerror = () => {
         console.error('[DatabaseService] open failed:', config.name, request.error)
         reject(request.error)
       }
-
       request.onsuccess = () => {
         const db = request.result
         db.onversionchange = () => {
@@ -56,42 +65,15 @@ class DatabaseServiceClass {
         }
         resolve(db)
       }
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result
-
-        // the schema is exactly the config: stores it no longer names are deleted
-        for (const name of Array.from(db.objectStoreNames)) {
-          if (!config.stores.some(store => store.name === name)) db.deleteObjectStore(name)
-        }
-        for (const store of config.stores) {
-          const objectStore = db.objectStoreNames.contains(store.name)
-            ? request.transaction!.objectStore(store.name)
-            : db.createObjectStore(store.name, { keyPath: store.keyPath })
-          for (const name of Array.from(objectStore.indexNames)) {
-            if (!store.indexes?.some(index => index.name === name)) objectStore.deleteIndex(name)
-          }
-          if (store.indexes) {
-            for (const index of store.indexes) {
-              if (!objectStore.indexNames.contains(index.name)) {
-                objectStore.createIndex(index.name, index.keyPath, { unique: index.unique ?? false })
-              }
-            }
-          }
-        }
-      }
+      request.onupgradeneeded = () => upgrade(request, config)
     })
   }
 
   async get<T>(config: DatabaseConfig, storeName: string, key: string): Promise<T | null> {
     const db = await this.getDatabase(config)
-    
     return new Promise((resolve) => {
       try {
-        const tx = db.transaction([storeName], 'readonly')
-        const store = tx.objectStore(storeName)
-        const request = store.get(key)
-
+        const request = db.transaction([storeName], 'readonly').objectStore(storeName).get(key)
         request.onsuccess = () => resolve(request.result ?? null)
         request.onerror = () => resolve(null)
       } catch {
@@ -102,124 +84,13 @@ class DatabaseServiceClass {
 
   async put<T>(config: DatabaseConfig, storeName: string, value: T): Promise<void> {
     const db = await this.getDatabase(config)
-
     return new Promise((resolve, reject) => {
       try {
-        const tx = db.transaction([storeName], 'readwrite')
-        const store = tx.objectStore(storeName)
-        const request = store.put(value)
-
+        const request = db.transaction([storeName], 'readwrite').objectStore(storeName).put(value)
         request.onsuccess = () => resolve()
         request.onerror = () => reject(request.error)
       } catch (err) {
         reject(err)
-      }
-    })
-  }
-
-  // batch put
-  async putBatch<T>(config: DatabaseConfig, storeName: string, items: T[], chunkSize = 500): Promise<void> {
-    const db = await this.getDatabase(config)
-    
-    for (let i = 0; i < items.length; i += chunkSize) {
-      const chunk = items.slice(i, i + chunkSize)
-      
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction([storeName], 'readwrite')
-        const store = tx.objectStore(storeName)
-        
-        for (const item of chunk) {
-          store.put(item)
-        }
-        
-        tx.oncomplete = () => resolve()
-        tx.onerror = () => reject(tx.error)
-      })
-    }
-    
-    console.log(`[DatabaseService] putBatch: ${items.length} items to ${storeName}`)
-  }
-
-  async delete(config: DatabaseConfig, storeName: string, key: string): Promise<void> {
-    const db = await this.getDatabase(config)
-
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction([storeName], 'readwrite')
-        const store = tx.objectStore(storeName)
-        const request = store.delete(key)
-
-        request.onsuccess = () => resolve()
-        request.onerror = () => resolve()
-      } catch {
-        resolve()
-      }
-    })
-  }
-
-  async getAll<T>(config: DatabaseConfig, storeName: string, query?: IDBValidKey | IDBKeyRange): Promise<T[]> {
-    const db = await this.getDatabase(config)
-
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction([storeName], 'readonly')
-        const store = tx.objectStore(storeName)
-        const request = store.getAll(query)
-
-        request.onsuccess = () => resolve(request.result ?? [])
-        request.onerror = () => resolve([])
-      } catch {
-        resolve([])
-      }
-    })
-  }
-
-  async clear(config: DatabaseConfig, storeName: string): Promise<void> {
-    const db = await this.getDatabase(config)
-
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction([storeName], 'readwrite')
-        const store = tx.objectStore(storeName)
-        const request = store.clear()
-
-        request.onsuccess = () => resolve()
-        request.onerror = () => resolve()
-      } catch {
-        resolve()
-      }
-    })
-  }
-
-  async getAllKeys<K extends IDBValidKey>(config: DatabaseConfig, storeName: string, query?: IDBValidKey | IDBKeyRange, indexName?: string): Promise<K[]> {
-    const db = await this.getDatabase(config)
-
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction([storeName], 'readonly')
-        const store = tx.objectStore(storeName)
-        const request = (indexName ? store.index(indexName) : store).getAllKeys(query)
-        request.onsuccess = () => resolve(request.result as K[])
-        request.onerror = () => resolve([])
-      } catch {
-        resolve([])
-      }
-    })
-  }
-
-  async count(config: DatabaseConfig, storeName: string, query?: IDBValidKey | IDBKeyRange): Promise<number> {
-    const db = await this.getDatabase(config)
-
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction([storeName], 'readonly')
-        const store = tx.objectStore(storeName)
-        const request = store.count(query)
-
-        request.onsuccess = () => resolve(request.result)
-        request.onerror = () => resolve(0)
-      } catch {
-        resolve(0)
       }
     })
   }
@@ -245,24 +116,9 @@ class DatabaseServiceClass {
       throw error
     }
   }
-
-  closeDatabase(name: string): void {
-    const db = this.databases.get(name)
-    if (db) {
-      db.close()
-      this.databases.delete(name)
-    }
-  }
-
-  closeAll(): void {
-    for (const [name, db] of this.databases) {
-      db.close()
-      this.databases.delete(name)
-    }
-  }
 }
 
-export const databaseService = new DatabaseServiceClass()
+export const databaseService = new Databases()
 
 export const EMAIL_STORES = {
   header: 'email_sessions',
@@ -281,4 +137,3 @@ export const DB_CONFIGS = {
     ]
   }
 } as const
-
