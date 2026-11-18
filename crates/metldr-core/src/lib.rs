@@ -1,5 +1,6 @@
 mod chunking;
 pub mod decide;
+pub mod email;
 pub mod dense;
 pub mod gateway;
 pub mod page;

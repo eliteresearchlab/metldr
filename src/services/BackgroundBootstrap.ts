@@ -1,8 +1,8 @@
 import { cacheService } from './CacheService'
 import {
-  clearSummaryCache, dictionary, globalChat, lookupWord, recordStat, search, statsSummary, summaryGate
+  clearSummaryCache, dictionary, email, globalChat, lookupWord, recordStat, search, statsSummary,
+  summaryGate
 } from './RustCore'
-import { EmailService } from './EmailService'
 import { PageService } from './PageService'
 import { pdfService } from './pdf/PdfService'
 import { logger } from './LoggerService'
@@ -185,10 +185,10 @@ export class BackgroundBootstrap {
     (async () => {
       try {
         const { emailContent, emailId, metadata, forceRegenerate } = msg
-        const summary = await EmailService.summarize(
-          emailContent, 
-          emailId || null, 
-          metadata as Record<string, unknown> | null, 
+        const summary = await email.summary(
+          emailContent,
+          emailId || null,
+          metadata as Record<string, unknown> | null,
           forceRegenerate || false
         )
         respond({ summary })
@@ -217,7 +217,7 @@ export class BackgroundBootstrap {
           return
         }
 
-        const suggestions = await EmailService.getCachedReplies(emailId)
+        const suggestions = await email.keptReplies(emailId)
         if (suggestions && suggestions.length > 0) {
           respond({ success: true, suggestions })
         } else {
@@ -239,22 +239,10 @@ export class BackgroundBootstrap {
           return
         }
 
-        log.log('generating reply suggestions', { emailId, force: forceRegenerate })
-
-        if (forceRegenerate) {
-          try {
-            await cacheService.deleteReplySuggestions(emailId)
-          } catch (err) {
-            log.warn('failed to delete cached suggestions', (err as Error).message)
-          }
-        }
-
         if (!forceRegenerate) {
-          const cached = await EmailService.getCachedReplies(emailId)
-          // filter out empty suggestions before returning
-          const validCached = (cached || []).filter(s => s.body && s.body.trim().length > 10)
-          if (validCached.length > 0) {
-            respond({ success: true, suggestions: validCached })
+          const kept = await email.keptReplies(emailId)
+          if (kept) {
+            respond({ success: true, suggestions: kept })
             return
           }
         }
@@ -280,25 +268,10 @@ export class BackgroundBootstrap {
           log.log('could not extract email', (err as Error).message)
         }
 
-        // get cached summary if available (optional)
-        const cachedSummary = await cacheService.getEmailSummary(emailId) as import('../types').EmailSummary | null
-
-        // fallback: use summary as context if no direct content
-        if (!emailContent && cachedSummary?.summary) {
-          emailContent = cachedSummary.summary
-        }
-
-        // generate suggestions
-        const suggestions = await EmailService.generateReplySuggestions(
-          emailId, 
-          emailContent || '',
-          cachedSummary,
-          metadata
-        )
-
-        const valid = (suggestions || []).filter(s => s.body?.trim().length > 10)
-        respond(valid.length > 0 
-          ? { success: true, suggestions: valid }
+        // the core writes from the kept summary when the email could not be read
+        const suggestions = await email.replies(emailId, emailContent, metadata, forceRegenerate || false)
+        respond(suggestions
+          ? { success: true, suggestions }
           : { success: false, error: 'no valid suggestions generated' }
         )
       } catch (err) {
@@ -415,8 +388,7 @@ export class BackgroundBootstrap {
   static _onGetEmailCache(msg: GetEmailCacheMessage, respond: ResponseCallback): void {
     (async () => {
       try {
-        const cached = await cacheService.getEmailCache(msg.emailId)
-        respond({ cached: cached.summary, emailCount: cached.emailCount })
+        respond(await email.cache(msg.emailId))
       } catch (err) {
         log.error('onGetEmailCache]', (err as Error).message)
         respond({ cached: null, emailCount: 0 })
@@ -427,10 +399,7 @@ export class BackgroundBootstrap {
   static _onSetEmailCache(msg: SetEmailCacheMessage & { emailCount?: number }, respond: ResponseCallback): void {
     (async () => {
       try {
-        await cacheService.updateEmailSession(msg.emailId, {
-          summary: msg.summary,
-          ...(msg.emailCount !== undefined && { emailCount: msg.emailCount })
-        })
+        await email.setCache(msg.emailId, msg.summary, msg.emailCount)
         respond({ success: true })
       } catch (err) {
         log.error('onSetEmailCache]', (err as Error).message)
