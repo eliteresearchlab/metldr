@@ -149,7 +149,9 @@ impl Server {
                         }
                     };
                     drop(call_future);
-                    if (expired || result.as_ref().is_err_and(|error| !error.is::<crate::browser_worker::PlanRefusal>())) && !stop.load(Ordering::Acquire) && !done.load(Ordering::Acquire) {
+                    let refused = result.as_ref().is_err_and(|error| error.is::<crate::browser_worker::Refusal>());
+                    let halts = expired || (result.is_err() && !refused);
+                    if halts && !stop.load(Ordering::Acquire) && !done.load(Ordering::Acquire) {
                         failed.store(true, Ordering::Release);
                         dispatch_error.get_or_insert_with(|| "Browser execution failed; task halted".into());
                         accepting = false;

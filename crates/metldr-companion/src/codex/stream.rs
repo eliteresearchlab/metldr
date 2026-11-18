@@ -264,7 +264,7 @@ pub(super) async fn run(
                 }
                 let (text, success) = match outcome {
                     Ok(value) => (serde_json::to_string(&*value)?, true),
-                    Err(error) if error.is::<crate::browser_worker::PlanRefusal>() => {
+                    Err(error) if error.is::<crate::browser_worker::Refusal>() => {
                         (error.to_string(), false)
                     }
                     Err(error) => return Err(error),
