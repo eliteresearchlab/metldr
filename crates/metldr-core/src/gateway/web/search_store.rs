@@ -73,7 +73,15 @@ impl SearchIndex {
         source_id: &str,
         summary: bool,
     ) {
-        let chunk = metldr_retrieval::Chunk { id, kind, title, content, source_url, source_id, summary };
+        let chunk = metldr_retrieval::Chunk {
+            id,
+            kind,
+            title,
+            content,
+            source_url,
+            source_id,
+            summary,
+        };
         self.keywords.add(&chunk);
         self.dense.add(id, content);
     }
@@ -100,7 +108,9 @@ impl SearchIndex {
         dense: Vec<String>,
         limit: u32,
     ) -> Option<String> {
-        let sources = self.keywords.sources(question, focused, &dense, limit as usize);
+        let sources = self
+            .keywords
+            .sources(question, focused, &dense, limit as usize);
         serde_json::to_string(&sources).ok()
     }
 }
@@ -142,7 +152,8 @@ fn now() -> f64 {
 
 async fn sleep(ms: i32) {
     let timer = js_sys::Promise::new(&mut |resolve, _| {
-        if let Ok(set_timeout) = get(&js_sys::global(), "setTimeout").dyn_into::<js_sys::Function>() {
+        if let Ok(set_timeout) = get(&js_sys::global(), "setTimeout").dyn_into::<js_sys::Function>()
+        {
             let _ = set_timeout.call2(&JsValue::UNDEFINED, &resolve, &ms.into());
         }
     });
@@ -174,11 +185,24 @@ fn remember(index: &mut SearchIndex, entry: &Value) {
 
 /// Every stored chunk entry.
 async fn stored() -> Vec<Value> {
-    let Some(db) = page_summary::cache().await else { return Vec::new() };
+    let Some(db) = page_summary::cache().await else {
+        return Vec::new();
+    };
     let read = async {
-        let range = IdbKeyRange::bound_with_lower_open_and_upper_open(&"rag:".into(), &"rag;".into(), false, true).ok()?;
-        let store = db.transaction_with_str(PAGES).and_then(|tx| tx.object_store(PAGES)).ok()?;
-        let all = keys::done(&store.get_all_with_key(&range).ok()?).await.ok()?;
+        let range = IdbKeyRange::bound_with_lower_open_and_upper_open(
+            &"rag:".into(),
+            &"rag;".into(),
+            false,
+            true,
+        )
+        .ok()?;
+        let store = db
+            .transaction_with_str(PAGES)
+            .and_then(|tx| tx.object_store(PAGES))
+            .ok()?;
+        let all = keys::done(&store.get_all_with_key(&range).ok()?)
+            .await
+            .ok()?;
         from_js(&all).as_array().cloned()
     };
     let found = read.await.unwrap_or_default();
@@ -194,9 +218,15 @@ async fn load() -> Rc<Store> {
     }
     if let Some(db) = page_summary::cache().await {
         let read = async {
-            let tx = db.transaction_with_str_sequence(&js_sys::Array::of2(&PAGES.into(), &HASHES.into())).ok()?;
-            let vectors = keys::done(&tx.object_store(PAGES).ok()?.get(&VECTORS.into()).ok()?).await.ok()?;
-            let hashes = keys::done(&tx.object_store(HASHES).ok()?.get_all().ok()?).await.ok()?;
+            let tx = db
+                .transaction_with_str_sequence(&js_sys::Array::of2(&PAGES.into(), &HASHES.into()))
+                .ok()?;
+            let vectors = keys::done(&tx.object_store(PAGES).ok()?.get(&VECTORS.into()).ok()?)
+                .await
+                .ok()?;
+            let hashes = keys::done(&tx.object_store(HASHES).ok()?.get_all().ok()?)
+                .await
+                .ok()?;
             Some((vectors, hashes))
         };
         if let Some((vectors, hashes)) = read.await {
@@ -206,8 +236,13 @@ async fn load() -> Rc<Store> {
                 store.index.borrow_mut().restore_vectors(&blob.to_vec());
             }
             for entry in from_js(&hashes).as_array().into_iter().flatten() {
-                if let (Some(id), Some(hash)) = (entry["sourceId"].as_str(), entry["contentHash"].as_str()) {
-                    store.hashes.borrow_mut().insert(id.to_owned(), hash.to_owned());
+                if let (Some(id), Some(hash)) =
+                    (entry["sourceId"].as_str(), entry["contentHash"].as_str())
+                {
+                    store
+                        .hashes
+                        .borrow_mut()
+                        .insert(id.to_owned(), hash.to_owned());
                 }
             }
         }
@@ -236,7 +271,10 @@ async fn store() -> Rc<Store> {
             if model::search_model_fetch().await && later.index.borrow_mut().use_search_model() {
                 for entry in stored().await {
                     let text = |key: &str| entry[key].as_str().unwrap_or_default().to_owned();
-                    later.index.borrow_mut().embed(&text("id"), &text("content"));
+                    later
+                        .index
+                        .borrow_mut()
+                        .embed(&text("id"), &text("content"));
                 }
                 save_soon(&later);
             }
@@ -246,15 +284,25 @@ async fn store() -> Rc<Store> {
 }
 
 async fn save(store: &Store) {
-    let Some(db) = page_summary::cache().await else { return };
+    let Some(db) = page_summary::cache().await else {
+        return;
+    };
     let blob = js_sys::Uint8Array::from(store.index.borrow().vectors().as_slice());
     let record = js_sys::Object::new();
-    for (key, value) in [("url", JsValue::from(VECTORS)), ("value", blob.into()), ("timestamp", now().into())] {
+    for (key, value) in [
+        ("url", JsValue::from(VECTORS)),
+        ("value", blob.into()),
+        ("timestamp", now().into()),
+    ] {
         let _ = js_sys::Reflect::set(&record, &key.into(), &value);
     }
     let written = async {
-        let tx = db.transaction_with_str_and_mode(PAGES, IdbTransactionMode::Readwrite).map_err(err)?;
-        tx.object_store(PAGES).and_then(|s| s.put(&record)).map_err(err)?;
+        let tx = db
+            .transaction_with_str_and_mode(PAGES, IdbTransactionMode::Readwrite)
+            .map_err(err)?;
+        tx.object_store(PAGES)
+            .and_then(|s| s.put(&record))
+            .map_err(err)?;
         dictionary::finished(&tx).await
     };
     let _ = written.await;
@@ -276,7 +324,9 @@ fn save_soon(store: &Rc<Store>) {
 
 /// Writes `entries` and their source's hash in one cache transaction.
 async fn keep(entries: &[Value], hash: Option<(&str, &str, usize)>) {
-    let Some(db) = page_summary::cache().await else { return };
+    let Some(db) = page_summary::cache().await else {
+        return;
+    };
     keep_in(&db, entries, hash).await;
     db.close();
 }
@@ -285,14 +335,18 @@ async fn keep(entries: &[Value], hash: Option<(&str, &str, usize)>) {
 async fn keep_in(db: &web_sys::IdbDatabase, entries: &[Value], hash: Option<(&str, &str, usize)>) {
     let written = async {
         let names = js_sys::Array::of2(&PAGES.into(), &HASHES.into());
-        let tx = db.transaction_with_str_sequence_and_mode(&names, IdbTransactionMode::Readwrite).map_err(err)?;
+        let tx = db
+            .transaction_with_str_sequence_and_mode(&names, IdbTransactionMode::Readwrite)
+            .map_err(err)?;
         let pages = tx.object_store(PAGES).map_err(err)?;
         for entry in entries {
             pages.put(&to_js(entry)).map_err(err)?;
         }
         if let Some((source, hash, chunks)) = hash {
             let record = json!({"sourceId": source, "contentHash": hash, "chunkCount": chunks, "timestamp": now()});
-            tx.object_store(HASHES).and_then(|s| s.put(&to_js(&record))).map_err(err)?;
+            tx.object_store(HASHES)
+                .and_then(|s| s.put(&to_js(&record)))
+                .map_err(err)?;
         }
         dictionary::finished(&tx).await
     };
@@ -312,7 +366,12 @@ fn report(progress: &Option<js_sys::Function>, percent: u32) {
 
 /// Indexes `text` from `source` unless the same text is indexed already; `progress` hears 0 to
 /// 100. A second call for a source being indexed waits for the first.
-async fn index(store: &Rc<Store>, text: &str, source: &Source, progress: &Option<js_sys::Function>) {
+async fn index(
+    store: &Rc<Store>,
+    text: &str,
+    source: &Source,
+    progress: &Option<js_sys::Function>,
+) {
     let id = &source.source_id;
     if store.indexing.borrow().contains(id) {
         while store.indexing.borrow().contains(id) {
@@ -352,7 +411,12 @@ async fn index(store: &Rc<Store>, text: &str, source: &Source, progress: &Option
                     let meta = json!({"sourceId": id, "sourceUrl": source.source_url,
                         "title": source.title.as_deref().unwrap_or_default(),
                         "chunkIndex": chunk.index, "totalChunks": total});
-                    entry(format!("{}:{id}:chunk:{}", source.source_type, chunk.index), source, &chunk.text, meta)
+                    entry(
+                        format!("{}:{id}:chunk:{}", source.source_type, chunk.index),
+                        source,
+                        &chunk.text,
+                        meta,
+                    )
                 })
                 .collect();
             if let Some(db) = &db {
@@ -388,7 +452,11 @@ fn source(value: JsValue) -> Result<Source, JsValue> {
 
 /// Indexes `text` from `source` `{sourceId, sourceUrl, sourceType, title?}` for search.
 #[wasm_bindgen]
-pub async fn search_index(text: String, source_of: JsValue, progress: Option<js_sys::Function>) -> Result<(), JsValue> {
+pub async fn search_index(
+    text: String,
+    source_of: JsValue,
+    progress: Option<js_sys::Function>,
+) -> Result<(), JsValue> {
     let source = source(source_of)?;
     index(&store().await, &text, &source, &progress).await;
     Ok(())
@@ -406,7 +474,14 @@ pub async fn search_index_summary(text: String, source_of: JsValue) -> Result<()
     if store.hashes.borrow().contains_key(&id) {
         return Ok(());
     }
-    let title = format!("Summary: {}", source.title.as_deref().filter(|t| !t.is_empty()).unwrap_or(&source.source_url));
+    let title = format!(
+        "Summary: {}",
+        source
+            .title
+            .as_deref()
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&source.source_url)
+    );
     let meta = json!({"sourceId": id, "sourceUrl": source.source_url, "sourceType": source.source_type,
         "title": title, "isSummary": true});
     source.source_id = id.clone();
@@ -428,12 +503,20 @@ pub async fn search_has(source: String) -> bool {
 /// Whether `source` is being indexed now.
 #[wasm_bindgen]
 pub fn search_is_indexing(source: &str) -> bool {
-    STORE.with_borrow(|store| store.as_ref().is_some_and(|store| store.indexing.borrow().contains(source)))
+    STORE.with_borrow(|store| {
+        store
+            .as_ref()
+            .is_some_and(|store| store.indexing.borrow().contains(source))
+    })
 }
 
 /// Indexes `text` unless `source` is indexed: `already-indexed`, `was-indexing` or `indexed-now`.
 #[wasm_bindgen]
-pub async fn search_ensure(text: String, source_of: JsValue, progress: Option<js_sys::Function>) -> Result<String, JsValue> {
+pub async fn search_ensure(
+    text: String,
+    source_of: JsValue,
+    progress: Option<js_sys::Function>,
+) -> Result<String, JsValue> {
     let source = source(source_of)?;
     let store = store().await;
     if store.index.borrow().has_source(&source.source_id) {
@@ -441,7 +524,12 @@ pub async fn search_ensure(text: String, source_of: JsValue, progress: Option<js
     }
     let waited = store.indexing.borrow().contains(&source.source_id);
     index(&store, &text, &source, &progress).await;
-    Ok(if waited { "was-indexing" } else { "indexed-now" }.into())
+    Ok(if waited {
+        "was-indexing"
+    } else {
+        "indexed-now"
+    }
+    .into())
 }
 
 /// The slow half of a search for `query`: the model's expansion, then the dense neighbours of
@@ -449,11 +537,18 @@ pub async fn search_ensure(text: String, source_of: JsValue, progress: Option<js
 async fn found(store: &Store, query: &str, candidates: u32) -> Found {
     let key = format!("{query}:{candidates}");
     let fresh = |at: f64| now() - at < QUERY_KEEP_MS;
-    if let Some((_, _, found)) = store.queries.borrow().iter().find(|(k, at, _)| *k == key && fresh(*at)) {
+    if let Some((_, _, found)) = store
+        .queries
+        .borrow()
+        .iter()
+        .find(|(k, at, _)| *k == key && fresh(*at))
+    {
         return found.clone();
     }
     let expanded = match target(None, None).await {
-        Ok(target) => ask(target, EXPAND, format!("Query: \"{query}\"")).await.ok(),
+        Ok(target) => ask(target, EXPAND, format!("Query: \"{query}\""))
+            .await
+            .ok(),
         Err(_) => None,
     };
     let terms = expanded.map(|text| metldr_retrieval::query::suggested_terms(&text).join(" "));

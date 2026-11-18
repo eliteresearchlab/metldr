@@ -128,7 +128,10 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'RAG_IS_INDEXING') {
         const { sourceId } = msg as { type: string; sourceId: string }
-        search.isIndexing(sourceId).then(isIndexing => respond({ success: true, isIndexing }), () => respond({ success: false, isIndexing: false }))
+        search.isIndexing(sourceId).then(
+          isIndexing => respond({ success: true, isIndexing }),
+          () => respond({ success: false, isIndexing: false })
+        )
         return true
       }
 

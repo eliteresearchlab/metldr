@@ -155,7 +155,14 @@ export interface SearchSource {
   title?: string
 }
 
-export interface FoundSource { index: number; title: string; url: string; type: 'email' | 'page' | 'pdf'; score: number; snippet: string }
+export interface FoundSource {
+  index: number
+  title: string
+  url: string
+  type: 'email' | 'page' | 'pdf'
+  score: number
+  snippet: string
+}
 
 export const search = {
   async index(text: string, source: SearchSource, progress?: (percent: number) => void): Promise<void> {
