@@ -1390,7 +1390,7 @@ impl Connection {
         let url = string_property(&observed, "url").map_err(js_error)?;
         validate_url(&url)?;
         let title = string_property(&observed, "title").map_err(js_error)?;
-        let text = page_text(&observed)?;
+        let text = page_text(&observed, &url).await?;
         // The markdown is never empty and never over the page budget.
         if document.is_empty()
             || document.len() > 128
@@ -1411,7 +1411,7 @@ impl Connection {
             || string_property(&confirmed, "documentId").map_err(js_error)? != document
             || string_property(&result, "url").map_err(js_error)? != url
             || string_property(&result, "title").map_err(js_error)? != title
-            || page_text(&result)? != text
+            || page_text(&result, &url).await? != text
         {
             return Err(FlowError::Host(
                 "The selected page changed during capture. Nothing was sent.".into(),
@@ -1440,7 +1440,7 @@ impl Connection {
         Ok(if !same_document {
             SourceStatus::Saved
         } else if string_property(&observed, "title").map_err(js_error)? == source.title
-            && page_text(&observed)? == source.text
+            && page_text(&observed, &source.url).await? == source.text
         {
             SourceStatus::Current
         } else {
@@ -1473,17 +1473,60 @@ impl Connection {
     }
 }
 
-/// The captured page's main content as markdown within the page budget.
-pub(crate) fn page_text(observed: &JsValue) -> Result<String> {
+/// The captured page as markdown within the page budget: the site's own markdown when it offers
+/// some on the same site, else the main content the capture read.
+pub(crate) async fn page_text(observed: &JsValue, page: &str) -> Result<String> {
     let raw = js_sys::JSON::stringify(observed)
         .map_err(js_error)?
         .as_string()
         .ok_or_else(|| FlowError::InvalidInput("The page capture is malformed.".into()))?;
     let capture: crate::reading::Capture = serde_json::from_str(&raw)
         .map_err(|_| FlowError::InvalidInput("The page capture is malformed.".into()))?;
+    if let Some(text) = match capture.site_markdown(page) {
+        Some(href) => site_text(href).await,
+        None => None,
+    } {
+        return Ok(text);
+    }
     capture.markdown(MAX_PAGE).ok_or_else(|| {
         FlowError::InvalidInput("The page has no readable content. Nothing was sent.".into())
     })
+}
+
+thread_local! {
+    /// The last site markdown fetched, by address, so later checks of the page read the same text.
+    static SITE_TEXT: RefCell<Option<(String, Option<String>)>> = const { RefCell::new(None) };
+}
+
+/// The site's markdown at `href`, within the page budget: text only, at most 2 MB, three
+/// seconds, no redirects. None when the site does not answer that way.
+async fn site_text(href: &str) -> Option<String> {
+    let cached = SITE_TEXT.with(|cache| cache.borrow().as_ref().filter(|(at, _)| at == href).map(|(_, text)| text.clone()));
+    if let Some(text) = cached {
+        return text;
+    }
+    let text = fetch_text(href).await;
+    SITE_TEXT.with(|cache| *cache.borrow_mut() = Some((href.to_owned(), text.clone())));
+    text
+}
+
+async fn fetch_text(href: &str) -> Option<String> {
+    let global = js_sys::global();
+    let signal = call(&get(&global, "AbortSignal").ok()?, "timeout", &[3000.into()]).ok()?;
+    let init = json_js(&json!({"headers":{"Accept":"text/markdown, text/plain;q=0.9"},"redirect":"error","credentials":"omit"})).ok()?;
+    Reflect::set(&init, &"signal".into(), &signal).ok()?;
+    let response = await_call(&global, "fetch", &[href.into(), init]).await.ok()?;
+    let headers = get(&response, "headers").ok()?;
+    let kind = call(&headers, "get", &["content-type".into()]).ok()?.as_string().unwrap_or_default();
+    let textual = ["text/markdown", "text/x-markdown", "text/plain"].iter().any(|t| kind.starts_with(t));
+    if get(&response, "ok").ok()?.as_bool() != Some(true) || !textual {
+        return None;
+    }
+    let text = await_call(&response, "text", &[]).await.ok()?.as_string()?;
+    if text.len() > 2 << 20 {
+        return None;
+    }
+    crate::reading::bounded(&text, MAX_PAGE)
 }
 
 pub(super) fn validate_url(url: &str) -> Result<()> {
