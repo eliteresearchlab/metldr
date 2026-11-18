@@ -1358,7 +1358,7 @@ impl Connection {
         let url = string_property(&observed, "url").map_err(js_error)?;
         validate_url(&url)?;
         let title = string_property(&observed, "title").map_err(js_error)?;
-        let text = page_text(&observed, &url).await?;
+        let text = page_text(&observed, &url, MAX_PAGE).await?;
         // The markdown is never empty and never over the page budget.
         if document.is_empty()
             || document.len() > 128
@@ -1379,7 +1379,7 @@ impl Connection {
             || string_property(&confirmed, "documentId").map_err(js_error)? != document
             || string_property(&result, "url").map_err(js_error)? != url
             || string_property(&result, "title").map_err(js_error)? != title
-            || page_text(&result, &url).await? != text
+            || page_text(&result, &url, MAX_PAGE).await? != text
         {
             return Err(FlowError::Host(
                 "The selected page changed during capture. Nothing was sent.".into(),
@@ -1408,7 +1408,7 @@ impl Connection {
         Ok(if !same_document {
             SourceStatus::Saved
         } else if string_property(&observed, "title").map_err(js_error)? == source.title
-            && page_text(&observed, &source.url).await? == source.text
+            && page_text(&observed, &source.url, MAX_PAGE).await? == source.text
         {
             SourceStatus::Current
         } else {
@@ -1441,9 +1441,9 @@ impl Connection {
     }
 }
 
-/// The captured page as markdown within the page budget: the site's own markdown when it offers
+/// The captured page as markdown within `budget` bytes: the site's own markdown when it offers
 /// some on the same site, else the main content the capture read.
-pub(crate) async fn page_text(observed: &JsValue, page: &str) -> Result<String> {
+pub(crate) async fn page_text(observed: &JsValue, page: &str, budget: usize) -> Result<String> {
     let raw = js_sys::JSON::stringify(observed)
         .map_err(js_error)?
         .as_string()
@@ -1451,11 +1451,11 @@ pub(crate) async fn page_text(observed: &JsValue, page: &str) -> Result<String> 
     let capture: crate::reading::Capture = serde_json::from_str(&raw)
         .map_err(|_| FlowError::InvalidInput("The page capture is malformed.".into()))?;
     if let Some(href) = capture.site_markdown(page)
-        && let Some(text) = site_text(href).await
+        && let Some(text) = site_text(href).await.and_then(|text| crate::reading::bounded(&text, budget))
     {
         return Ok(text);
     }
-    capture.markdown(MAX_PAGE).ok_or_else(|| {
+    capture.markdown(budget).ok_or_else(|| {
         FlowError::InvalidInput("The page has no readable content. Nothing was sent.".into())
     })
 }
@@ -1465,7 +1465,7 @@ thread_local! {
     static SITE_TEXT: RefCell<Option<(String, Option<String>)>> = const { RefCell::new(None) };
 }
 
-/// The site's markdown at `href`, within the page budget: text only, at most 2 MB, three
+/// The site's markdown at `href`, within `FULL_PAGE`: text only, at most 2 MB, three
 /// seconds, no redirects. None when the site does not answer that way.
 async fn site_text(href: &str) -> Option<String> {
     let cached = SITE_TEXT.with(|cache| {
@@ -1497,7 +1497,7 @@ async fn fetch_text(href: &str) -> Option<String> {
     if text.len() > 2 << 20 {
         return None;
     }
-    crate::reading::bounded(&text, MAX_PAGE)
+    crate::reading::bounded(&text, crate::reading::FULL_PAGE)
 }
 
 pub(super) fn validate_url(url: &str) -> Result<()> {
