@@ -140,6 +140,6 @@ pub fn decode_call(name: &str, arguments: Value) -> Result<Call> {
     let object = arguments
         .as_object()
         .ok_or("tool arguments must be an object")?;
-    let tool = tools::find(name).ok_or("unknown browser tool")?;
-    (tool.decode)(object)
+    let decode = tools::decoder(name).ok_or("unknown browser tool")?;
+    decode(object)
 }

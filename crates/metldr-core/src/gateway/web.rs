@@ -125,6 +125,7 @@ fn saved<'a>(settings: &'a Value, route: &str, field: &str) -> Option<&'a str> {
 }
 
 mod dictionary;
+mod email;
 mod language;
 mod model;
 mod stats;

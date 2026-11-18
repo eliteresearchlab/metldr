@@ -55,147 +55,54 @@ const LOCAL_WRITE: Annotations = Annotations {
     open_world: true,
 };
 
-const LOCAL_READ: Annotations = Annotations {
+const READ: Annotations = Annotations {
     read_only: true,
     destructive: false,
     idempotent: true,
     open_world: true,
 };
 
-/// Every browser tool, in advertised order.
-pub static TOOLS: [Tool; 16] = [
-    Tool {
-        name: snapshot::NAME,
-        order: 1,
-        annotations: Annotations {
-            read_only: true,
-            destructive: false,
-            idempotent: true,
-            open_world: true,
-        },
-        definition: snapshot::definition,
-        decode: snapshot::decode,
-    },
-    Tool {
-        name: navigate::NAME,
-        order: 2,
-        annotations: WRITE,
-        definition: navigate::definition,
-        decode: navigate::decode,
-    },
-    Tool {
-        name: "click",
-        order: 3,
-        annotations: WRITE,
-        definition: act::click_definition,
-        decode: act::click_decode,
-    },
-    Tool {
-        name: "fill",
-        order: 4,
-        annotations: WRITE,
-        definition: act::fill_definition,
-        decode: act::fill_decode,
-    },
-    Tool {
-        name: "type",
-        order: 5,
-        annotations: WRITE,
-        definition: act::type_definition,
-        decode: act::type_decode,
-    },
-    Tool {
-        name: "press",
-        order: 6,
-        annotations: WRITE,
-        definition: act::press_definition,
-        decode: act::press_decode,
-    },
-    Tool {
-        name: "select",
-        order: 7,
-        annotations: WRITE,
-        definition: act::select_definition,
-        decode: act::select_decode,
-    },
-    Tool {
-        name: "hover",
-        order: 8,
-        annotations: LOCAL_WRITE,
-        definition: act::hover_definition,
-        decode: act::hover_decode,
-    },
-    Tool {
-        name: "drag",
-        order: 9,
-        annotations: WRITE,
-        definition: act::drag_definition,
-        decode: act::drag_decode,
-    },
-    Tool {
-        name: "scroll",
-        order: 10,
-        annotations: LOCAL_WRITE,
-        definition: act::scroll_definition,
-        decode: act::scroll_decode,
-    },
-    Tool {
-        name: logs::NAME,
-        order: 11,
-        annotations: Annotations {
-            read_only: true,
-            destructive: false,
-            idempotent: true,
-            open_world: true,
-        },
-        definition: logs::definition,
-        decode: logs::decode,
-    },
-    Tool {
-        name: status::NAME,
-        order: 12,
-        annotations: LOCAL_READ,
-        definition: status::definition,
-        decode: status::decode,
-    },
-    Tool {
-        name: settings::NAME,
-        order: 13,
-        annotations: LOCAL_READ,
-        definition: settings::definition,
-        decode: settings::decode,
-    },
-    Tool {
-        name: plan::NAME,
-        order: 14,
-        annotations: LOCAL_WRITE,
-        definition: plan::definition,
-        decode: plan::decode,
-    },
-    Tool {
-        name: network::NAME,
-        order: 15,
-        annotations: Annotations {
-            read_only: true,
-            destructive: false,
-            idempotent: true,
-            open_world: true,
-        },
-        definition: network::definition,
-        decode: network::decode,
-    },
-    Tool {
-        name: secret::NAME,
-        order: 16,
-        annotations: WRITE,
-        definition: secret::definition,
-        decode: secret::decode,
-    },
-];
+/// The one tool list: each row is a tool's position, name, hints, definition and decoder. It
+/// makes `TOOLS` and a decoder lookup of its own, so a caller that only decodes tool calls
+/// (an answer that must not call tools) links no tool's definition.
+macro_rules! tools {
+    ($($order:literal $name:expr, $hints:ident, $definition:path, $decode:path;)*) => {
+        /// Every browser tool, in advertised order.
+        pub static TOOLS: [Tool; 16] = [$(Tool {
+            name: $name,
+            order: $order,
+            annotations: $hints,
+            definition: $definition,
+            decode: $decode,
+        },)*];
 
-/// The registered tool with this name.
-pub fn find(name: &str) -> Option<&'static Tool> {
-    TOOLS.iter().find(|tool| tool.name == name)
+        /// The decoder of the tool named `name`.
+        pub(crate) fn decoder(name: &str) -> Option<fn(&Map<String, Value>) -> Result<Call>> {
+            $(if name == $name {
+                return Some($decode);
+            })*
+            None
+        }
+    };
+}
+
+tools! {
+    1 snapshot::NAME, READ, snapshot::definition, snapshot::decode;
+    2 navigate::NAME, WRITE, navigate::definition, navigate::decode;
+    3 "click", WRITE, act::click_definition, act::click_decode;
+    4 "fill", WRITE, act::fill_definition, act::fill_decode;
+    5 "type", WRITE, act::type_definition, act::type_decode;
+    6 "press", WRITE, act::press_definition, act::press_decode;
+    7 "select", WRITE, act::select_definition, act::select_decode;
+    8 "hover", LOCAL_WRITE, act::hover_definition, act::hover_decode;
+    9 "drag", WRITE, act::drag_definition, act::drag_decode;
+    10 "scroll", LOCAL_WRITE, act::scroll_definition, act::scroll_decode;
+    11 logs::NAME, READ, logs::definition, logs::decode;
+    12 status::NAME, READ, status::definition, status::decode;
+    13 settings::NAME, READ, settings::definition, settings::decode;
+    14 plan::NAME, LOCAL_WRITE, plan::definition, plan::decode;
+    15 network::NAME, READ, network::definition, network::decode;
+    16 secret::NAME, WRITE, secret::definition, secret::decode;
 }
 
 /// Every definition in advertised order.

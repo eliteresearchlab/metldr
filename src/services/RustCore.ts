@@ -1,11 +1,12 @@
 import initCore, {
-  dictionary_request, gateway_complete, gateway_global_chat, gateway_page_summary,
+  dictionary_request, email_cache, email_cache_set, email_kept_replies, email_replies, email_summary,
+  gateway_complete, gateway_global_chat, gateway_page_summary,
   gateway_preferred, gateway_summarize, gateway_word_lookup, search_context, search_ensure,
   search_has, search_index, search_index_summary, search_is_indexing,
   stats_record, stats_summary, summary_cache_clear, summary_gate, summary_prefs_load,
   summary_prefs_save
 } from '../../crates/metldr-core/pkg/metldr_core'
-import type { ExtractedData, PageSummary, WordLookupResult } from '../types'
+import type { EmailSummary, ExtractedData, PageSummary, ReplySuggestion, WordLookupResult } from '../types'
 import { databaseService, DB_CONFIGS } from './DatabaseService'
 import coreWasmUrl from '../../crates/metldr-core/pkg/metldr_core_bg.wasm?url'
 
@@ -205,5 +206,44 @@ export const search = {
   async context(query: string, limit: number, sourceUrl?: string): Promise<string> {
     await cacheReady()
     return search_context(query, limit, sourceUrl ?? '')
+  }
+}
+
+// Email summaries and reply suggestions in the Rust core: kept by email id, written by the
+// preferred route, indexed for search and counted in stats.
+type Metadata = Record<string, unknown> | null
+
+function indexingProgress(sourceId: string): (percent: number) => void {
+  return percent => {
+    const message = { type: 'INDEXING_PROGRESS', sourceId, percent }
+    chrome.runtime.sendMessage(message).catch(() => {})
+  }
+}
+
+export const email = {
+  async summary(
+    content: string, id: string | null, metadata: Metadata, force: boolean
+  ): Promise<EmailSummary> {
+    await cacheReady()
+    const progress = id ? indexingProgress(id) : undefined
+    return email_summary(content, id ?? undefined, metadata, force, progress)
+  },
+  async replies(
+    id: string, content: string, metadata: Metadata, force: boolean
+  ): Promise<ReplySuggestion[] | null> {
+    await cacheReady()
+    return email_replies(id, content, metadata, force)
+  },
+  async keptReplies(id: string): Promise<ReplySuggestion[] | null> {
+    await cacheReady()
+    return email_kept_replies(id)
+  },
+  async cache(id: string): Promise<{ cached: EmailSummary | null; emailCount: number }> {
+    await cacheReady()
+    return email_cache(id)
+  },
+  async setCache(id: string, summary: unknown, emailCount?: number): Promise<void> {
+    await cacheReady()
+    await email_cache_set(id, summary, emailCount)
   }
 }
