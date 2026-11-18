@@ -65,10 +65,18 @@ export async function dictionary(request: object): Promise<unknown> {
 }
 
 // Counts a page tool's work in the local stats: a summary, a word lookup or reply suggestions.
-export type StatEvent =
-  | { kind: 'summary'; email: boolean; wordsIn: number; wordsOut: number; tokensOut: number; ms: number; model?: string; url?: string }
-  | { kind: 'lookup' }
-  | { kind: 'replies'; count: number }
+interface SummaryStat {
+  kind: 'summary'
+  email: boolean
+  wordsIn: number
+  wordsOut: number
+  tokensOut: number
+  ms: number
+  model?: string
+  url?: string
+}
+
+export type StatEvent = SummaryStat | { kind: 'lookup' } | { kind: 'replies'; count: number }
 
 export async function recordStat(event: StatEvent): Promise<void> {
   await loadRustCore()
