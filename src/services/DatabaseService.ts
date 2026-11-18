@@ -1,5 +1,3 @@
-import { CACHE_STORE_CONFIGS, migrateCache } from './cacheRecords'
-
 interface StoreConfig {
   readonly name: string
   readonly keyPath: string
@@ -62,10 +60,17 @@ class DatabaseServiceClass {
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result
 
+        // the schema is exactly the config: stores it no longer names are deleted
+        for (const name of Array.from(db.objectStoreNames)) {
+          if (!config.stores.some(store => store.name === name)) db.deleteObjectStore(name)
+        }
         for (const store of config.stores) {
           const objectStore = db.objectStoreNames.contains(store.name)
             ? request.transaction!.objectStore(store.name)
             : db.createObjectStore(store.name, { keyPath: store.keyPath })
+          for (const name of Array.from(objectStore.indexNames)) {
+            if (!store.indexes?.some(index => index.name === name)) objectStore.deleteIndex(name)
+          }
           if (store.indexes) {
             for (const index of store.indexes) {
               if (!objectStore.indexNames.contains(index.name)) {
@@ -73,9 +78,6 @@ class DatabaseServiceClass {
               }
             }
           }
-        }
-        if (config.name === DB_CONFIGS.cache.name && event.oldVersion < 8) {
-          migrateCache(request.transaction!)
         }
       }
     })
@@ -262,11 +264,21 @@ class DatabaseServiceClass {
 
 export const databaseService = new DatabaseServiceClass()
 
+export const EMAIL_STORES = {
+  header: 'email_sessions',
+  summary: 'email_summaries',
+  replies: 'email_replies'
+} as const
+
 export const DB_CONFIGS = {
   cache: {
     name: 'metldr_cache',
-    version: 8,
-    stores: CACHE_STORE_CONFIGS
+    version: 9,
+    stores: [
+      ...Object.values(EMAIL_STORES).map(name => ({ name, keyPath: 'emailId' })),
+      { name: 'page_cache', keyPath: 'url' },
+      { name: 'rag_metadata', keyPath: 'sourceId' }
+    ]
   }
 } as const
 
