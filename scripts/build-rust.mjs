@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordReceipt, sourceDigest } from './answer-contract.mjs';
@@ -13,6 +14,7 @@ const crates = [
   { name: 'metldr-panel', variant: 'rune', module: 'metldr_panel', pkg: 'target/wasm/metldr-panel-rune/pkg', features: 'rune-ui' },
   { name: 'metldr-welcome', module: 'welcome_runtime', pkg: 'public/welcome/pkg' },
   { name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg' },
+  { name: 'metldr-pdf', module: 'metldr_pdf', pkg: 'crates/metldr-pdf/pkg', pdfium: true },
   { name: 'metldr-answer-codec', artifact: 'metldr_answer_codec', module: 'answer_codec', pkg: 'crates/metldr-answer-codec/pkg', features: 'guest' },
 ];
 const isCheck = process.argv.includes('--check');
@@ -117,6 +119,38 @@ async function runPool(tasks, limit) {
   if (failure) throw failure;
 }
 
+// PDFium for the browser, linked into metldr-pdf. The archive is fetched once and used only
+// when its SHA-256 matches, so the package never ships a binary nobody pinned.
+const PDFIUM = {
+  url: 'https://github.com/run-llama/pdfium-binaries/releases/download/chromium%2F8058/pdfium-wasi-wasm.tgz',
+  sha256: 'e8a5b7851f3bbbd325dca9e9f5029fc56be1df0be40dd710051521cff1028f35',
+  dir: join(homedir(), '.cache', 'metldr-pdfium', 'chromium_8058'),
+};
+
+const buildError = message => Object.assign(new Error(message), { exitCode: 1 });
+
+async function pdfiumEnv() {
+  const lib = join(PDFIUM.dir, 'lib');
+  if (!existsSync(join(lib, 'libpdfium.a'))) {
+    const response = await fetch(PDFIUM.url);
+    if (!response.ok) throw buildError(`PDFium download failed: ${response.status}`);
+    const archive = Buffer.from(await response.arrayBuffer());
+    const found = createHash('sha256').update(archive).digest('hex');
+    if (found !== PDFIUM.sha256) {
+      throw buildError(`PDFium archive hash ${found} is not the pinned ${PDFIUM.sha256}`);
+    }
+    const staging = `${PDFIUM.dir}.tmp`;
+    rmSync(staging, { recursive: true, force: true });
+    mkdirSync(staging, { recursive: true });
+    writeFileSync(join(staging, 'pdfium.tgz'), archive);
+    await runAsync('tar', ['-xzf', join(staging, 'pdfium.tgz'), '-C', staging], 'PDFium extract');
+    rmSync(join(staging, 'pdfium.tgz'));
+    rmSync(PDFIUM.dir, { recursive: true, force: true });
+    renameSync(staging, PDFIUM.dir);
+  }
+  return { ...cargoEnv, PDFIUM_LIB_PATH: lib, PDFIUM_INCLUDE_PATH: join(PDFIUM.dir, 'include') };
+}
+
 function cargoBuildArgs(crate) {
   const args = ['--locked', '--manifest-path', join('crates', crate.name, 'Cargo.toml'), '--lib', '--target', 'wasm32-unknown-unknown'];
   if (crate.features) args.push('--features', crate.features);
@@ -144,14 +178,16 @@ try {
   if (isCheck) {
     for (const crate of crates) {
       const args = ['check', ...cargoBuildArgs(crate)];
-      await runAsync('cargo', args, `Cargo (${crate.name})`);
+      const env = crate.pdfium ? await pdfiumEnv() : cargoEnv;
+      await runAsync('cargo', args, `Cargo (${crate.name})`, false, env);
       if (failure) throw failure;
     }
   } else {
     await runPool(crates.map(crate => async () => {
       const targetDir = wasmTargetDir(crate);
       const args = ['build', '--profile', profile, ...cargoBuildArgs(crate), '--target-dir', targetDir];
-      await runAsync('cargo', args, `Cargo (${crate.name})`);
+      const env = crate.pdfium ? await pdfiumEnv() : cargoEnv;
+      await runAsync('cargo', args, `Cargo (${crate.name})`, false, env);
       if (failure) return;
       const wasm = join(targetDir, 'wasm32-unknown-unknown', profile, `${crate.artifact ?? crate.module}.wasm`);
       // An unchanged wasm already has its bindings: skip wasm-bindgen when the wasm's hash

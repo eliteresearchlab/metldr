@@ -1,0 +1,42 @@
+[package]
+name = "metldr-pdf"
+version = "0.1.0"
+edition = "2024"
+license = "PolyForm-Noncommercial-1.0.0"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.154"
+wasm-bindgen = "=0.2.128"
+
+# PDFium is built for the browser only, so the reader is too.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+liteparse = { path = "../../vendor/liteparse/crates/liteparse" }
+# PDFium, linked statically into the module; build.rs reads where it lives.
+liteparse-pdfium-sys = "=1.14.0"
+js-sys = "=0.3.105"
+wasm-bindgen-futures = "=0.4.78"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# Keep target_features: wasm-bindgen reads reference types there to wrap PDFium's exceptions.
+strip = "debuginfo"
+panic = "abort"
+
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+
+[lints.rust]
+# Denied everywhere; only the WASI answers in src/wasi.rs write PDFium's result addresses.
+unsafe_code = "deny"

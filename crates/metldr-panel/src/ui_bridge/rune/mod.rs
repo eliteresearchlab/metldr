@@ -382,6 +382,38 @@ impl State {
         }
     }
 
+    /// Opens the file picker for a PDF to make the chat's source.
+    fn pick_document(&mut self, _: &mut Tx) {
+        self.menu = None;
+        self.sound(crate::interaction_audio::Cue::Press);
+        if !crate::flow::pick_document() {
+            self.fail(FlowError::Host("The file picker could not open.".into()));
+        }
+    }
+
+    /// Makes the read document the chat's source and asks for its summary.
+    fn attach_document(&mut self, name: String, document: &str, error: Option<String>) {
+        let (Some(gateway), Some(updates)) = (self.gateway().cloned(), self.updates.clone()) else {
+            let gateway_only = "PDFs open in the chat once it answers through the extension.";
+            return self.fail(FlowError::Host(gateway_only.into()));
+        };
+        if let Some(error) = error {
+            return self.fail(FlowError::Host(error));
+        }
+        if gateway.streaming() {
+            return self.fail(FlowError::Host("Wait for the answer, then attach the PDF.".into()));
+        }
+        let markdown = gateway::document_markdown(document);
+        if markdown.trim().is_empty() {
+            let scanned = "This PDF has no text to read. Scanned pages need text recognition, which is not available yet.";
+            return self.fail(FlowError::Host(scanned.into()));
+        }
+        spawn_local(async move {
+            let done = gateway.attach(name, markdown, Rc::clone(&updates)).await;
+            updates.finish(done);
+        });
+    }
+
     /// Selects the cited `words` on `page` and scrolls them into view.
     fn show_on_page(&mut self, page: &str, words: &str) {
         let (page, words) = (page.split('#').next().unwrap_or(page).to_owned(), words.to_owned());
@@ -2203,7 +2235,12 @@ fn ask_for_cjk() {
 }
 
 #[wasm_bindgen]
-pub fn start_rune_chat(capture: Function, fonts: js_sys::Array, want_fonts: Function) -> Result<(), JsValue> {
+pub fn start_rune_chat(
+    capture: Function,
+    pick: Function,
+    fonts: js_sys::Array,
+    want_fonts: Function,
+) -> Result<(), JsValue> {
     HOST.with(|host| {
         let mut host = host.borrow_mut();
         if host.is_some() {
@@ -2213,6 +2250,7 @@ pub fn start_rune_chat(capture: Function, fonts: js_sys::Array, want_fonts: Func
         }
         let fonts = fonts::read(&fonts, &fonts::NAMES)?;
         crate::flow::install_capture(capture);
+        crate::flow::install_pick(pick);
         WANT_FONTS.with(|want| *want.borrow_mut() = Some(want_fonts));
         let spec = AppSpec {
             fonts: fonts::retain(fonts),
@@ -2265,6 +2303,17 @@ pub fn add_rune_chat_fonts(group: String, fonts: js_sys::Array) -> Result<(), Js
         });
     }
     Ok(())
+}
+
+/// A document the page read for the chat: its file name and the PDF reader's JSON, or the
+/// reader's error.
+#[wasm_bindgen]
+pub fn rune_chat_attach(name: String, document: String, error: Option<String>) {
+    HOST.with(|host| {
+        if let Some(host) = host.borrow().as_ref() {
+            host.update(move |state: &mut State, _| state.attach_document(name, &document, error));
+        }
+    });
 }
 
 #[wasm_bindgen]
