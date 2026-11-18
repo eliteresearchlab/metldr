@@ -1415,6 +1415,17 @@ fn key(state: &mut State, key: &::rune::KeyEvent, tx: &mut Tx) -> bool {
     } else if key.key == ::rune::Key::Escape && state.settings_open {
         state.close_settings(tx);
         true
+    } else if key.key == ::rune::Key::Escape && state.stats_open {
+        state.close_stats(tx);
+        true
+    } else if key.is_command('l') && key.mods.shift {
+        // Ctrl+Shift+L (Cmd+Shift+L on macOS) summarizes the page, as the old panel did.
+        if state.gateway().is_some() {
+            state.summarize_page(true);
+        } else {
+            state.summarize(tx);
+        }
+        true
     } else if key.key == ::rune::Key::Escape && state.menu.is_some() {
         state.menu = None;
         state.source_engaged = false;

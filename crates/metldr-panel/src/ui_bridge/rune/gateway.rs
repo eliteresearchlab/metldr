@@ -21,8 +21,12 @@ const PAGE_BUDGET: usize = crate::MAX_PAGE;
 const MORE_BUDGET: usize = 4_096;
 /// How an attached document's source is named, in place of a page URL.
 pub(super) const DOCUMENT: &str = "file:";
-/// The chat, kept in `chrome.storage.local` so it survives the panel closing.
-const SAVED: &str = "metldr.gateway.chat";
+/// Each page's chat, kept in `chrome.storage.local` under this prefix and the page's key, so it
+/// survives the panel closing and comes back with the page.
+const SAVED: &str = "metldr.gateway.chat:";
+/// The saved pages' keys, least recent first; past [`KEPT_CHATS`] the oldest chat goes.
+const INDEX: &str = "metldr.gateway.chats";
+const KEPT_CHATS: usize = 50;
 /// Turns sent to the model: the first exchange (with the page) and the latest ones.
 const KEPT_TURNS: usize = 24;
 const KEPT_SHOWN: usize = 50;
@@ -81,6 +85,8 @@ pub(super) struct Gateway {
     /// New chat.
     /// The markdown is empty once the sections hold it.
     document: RefCell<Option<(String, String)>>,
+    /// The page the shown chat belongs to, by [`page_key`].
+    key: RefCell<String>,
 }
 
 /// Posts `message` on `port`.
@@ -142,11 +148,17 @@ impl Gateway {
             searches: RefCell::default(),
             summarized: RefCell::default(),
             document: RefCell::default(),
+            key: RefCell::default(),
             sections: RefCell::default(),
             citations: RefCell::default(),
         });
-        gateway.restore(updates).await;
+        load_index().await;
+        if let Ok((_, url)) = active_tab().await {
+            *gateway.key.borrow_mut() = page_key(&url);
+            gateway.restore(updates).await;
+        }
         *opened.borrow_mut() = Some(Rc::clone(&gateway));
+        gateway.watch_tabs(updates);
         Some(gateway)
     }
 
@@ -223,7 +235,7 @@ impl Gateway {
         drop(presentation);
         self.shown.borrow_mut().push((text, answer.to_owned()));
         self.shown_ids.borrow_mut().push(id);
-        spawn_local(save(self.saved()));
+        self.persist();
         updates.changed();
         Ok(())
     }
@@ -273,7 +285,7 @@ impl Gateway {
         show(&updates, &format!("gateway-{id}"), "Summarize page".into(), text.clone());
         self.shown.borrow_mut().push(("Summarize page".into(), text));
         self.shown_ids.borrow_mut().push(format!("gateway-{id}"));
-        spawn_local(save(self.saved()));
+        self.persist();
         updates.changed();
         Ok(())
     }
@@ -291,7 +303,11 @@ impl Gateway {
         });
         let (url, title, markdown) = match attached {
             Some(attached) => attached,
-            None => capture().await?,
+            None => {
+                let captured = capture().await?;
+                self.switch(&page_key(&captured.0), &updates).await;
+                captured
+            }
         };
         let same_page = self.page.borrow().as_deref() == Some(url.as_str());
         // The page goes into one buffer as numbered sections: the whole page when it fits, else
@@ -385,7 +401,7 @@ impl Gateway {
                     last.1.clone_from(content);
                 }
                 self.streaming.set(None);
-                spawn_local(save(self.saved()));
+                self.persist();
             }
             _ => {
                 // The question goes unanswered, so the model will not see it next turn.
@@ -404,6 +420,71 @@ impl Gateway {
 
 impl Gateway {
     /// The chat to save, bounded: the first exchange and the latest turns, the latest answers.
+    /// Follows the reader across tabs and pages: a tab switch or a navigation in the active tab
+    /// brings that page's chat.
+    fn watch_tabs(self: &Rc<Self>, updates: &Rc<Updates>) {
+        let Ok(tabs) = crate::chrome_api("tabs") else { return };
+        let (gateway, updates) = (Rc::downgrade(self), Rc::downgrade(updates));
+        let follow = Rc::new(move || {
+            let (Some(gateway), Some(updates)) = (gateway.upgrade(), updates.upgrade()) else { return };
+            spawn_local(async move {
+                if let Ok((_, url)) = active_tab().await {
+                    gateway.follow(&url, &updates).await;
+                }
+            });
+        });
+        let activated = Rc::clone(&follow);
+        let on_activated = Closure::<dyn FnMut(JsValue)>::new(move |_: JsValue| activated());
+        // Only a changed address counts; titles, icons and loading states do not.
+        let on_updated = Closure::<dyn FnMut(JsValue, JsValue)>::new(move |_: JsValue, change: JsValue| {
+            if crate::get(&change, "url").is_ok_and(|url| !url.is_undefined()) {
+                follow();
+            }
+        });
+        for (event, listener) in [("onActivated", on_activated.as_ref()), ("onUpdated", on_updated.as_ref())] {
+            if let Ok(event) = crate::get(&tabs, event) {
+                let _ = crate::call(&event, "addListener", &[listener.clone()]);
+            }
+        }
+        // They live as long as the panel.
+        on_activated.forget();
+        on_updated.forget();
+    }
+
+    /// Saves the shown chat under its page.
+    fn persist(&self) {
+        let key = self.key.borrow().clone();
+        if !key.is_empty() {
+            spawn_local(save(key, self.saved()));
+        }
+    }
+
+    /// Shows the chat for the page at `url`, when the reader moved to another page and no
+    /// answer is on its way.
+    pub(super) async fn follow(&self, url: &str, updates: &Updates) {
+        if !self.streaming() && !self.waiting.get() {
+            self.switch(&page_key(url), updates).await;
+        }
+    }
+
+    /// Puts the chat saved for page `key` in place of the shown one, which is already saved.
+    async fn switch(&self, key: &str, updates: &Updates) {
+        if *self.key.borrow() == key {
+            return;
+        }
+        key.clone_into(&mut self.key.borrow_mut());
+        self.turns.borrow_mut().clear();
+        self.shown.borrow_mut().clear();
+        self.shown_ids.borrow_mut().clear();
+        self.citations.borrow_mut().clear();
+        self.sections.take();
+        self.page.take();
+        self.document.take();
+        updates.presentation.borrow_mut().messages.messages.clear();
+        self.restore(updates).await;
+        updates.changed();
+    }
+
     fn saved(&self) -> Saved {
         let turns = self.turns.borrow();
         let turns = kept(&turns).map(|(role, text)| ((*role).to_owned(), text.clone())).collect();
@@ -421,7 +502,8 @@ impl Gateway {
 
     /// Brings back the saved chat: the model's turns and the reader's messages.
     async fn restore(&self, updates: &Updates) {
-        let Some(saved) = load().await else { return };
+        let key = self.key.borrow().clone();
+        let Some(saved) = load(&key).await else { return };
         let turns = saved.turns.into_iter().map(|(name, text)| Some((role(&name)?, text)));
         let Some(turns) = turns.collect::<Option<Vec<_>>>() else { return };
         *self.turns.borrow_mut() = turns;
@@ -452,7 +534,7 @@ impl Gateway {
         *self.summarized.borrow_mut() = None;
         self.document.take();
         updates.presentation.borrow_mut().messages.messages.clear();
-        spawn_local(save(Saved::default()));
+        spawn_local(forget(self.key.borrow().clone()));
         updates.changed();
     }
 }
@@ -484,18 +566,74 @@ fn storage() -> Option<JsValue> {
     crate::get(&crate::chrome_api("storage").ok()?, "local").ok()
 }
 
-async fn load() -> Option<Saved> {
-    let items = crate::await_call(&storage()?, "get", &[JsValue::from_str(SAVED)]).await.ok()?;
-    let raw = crate::get(&items, SAVED).ok()?.as_string()?;
-    serde_json::from_str(&raw).ok()
+/// A page as its chat is keyed: its URL without the fragment, except on Gmail, where the
+/// fragment names the open thread.
+fn page_key(url: &str) -> String {
+    match url.split_once('#') {
+        Some((page, _)) if !page.contains("://mail.google.com/") => page.to_owned(),
+        _ => url.to_owned(),
+    }
 }
 
-async fn save(saved: Saved) {
-    let (Some(storage), Ok(raw)) = (storage(), serde_json::to_string(&saved)) else { return };
+async fn read(key: &str) -> Option<String> {
+    let items = crate::await_call(&storage()?, "get", &[JsValue::from_str(key)]).await.ok()?;
+    crate::get(&items, key).ok()?.as_string()
+}
+
+async fn write(pairs: &[(&str, &str)], gone: &[String]) {
+    let Some(storage) = storage() else { return };
     let items = js_sys::Object::new();
-    if js_sys::Reflect::set(&items, &SAVED.into(), &raw.into()).is_ok() {
-        let _ = crate::await_call(&storage, "set", &[items.into()]).await;
+    for (key, value) in pairs {
+        let _ = js_sys::Reflect::set(&items, &(*key).into(), &(*value).into());
     }
+    let _ = crate::await_call(&storage, "set", &[items.into()]).await;
+    if !gone.is_empty() {
+        let gone: js_sys::Array = gone.iter().map(|key| JsValue::from_str(key)).collect();
+        let _ = crate::await_call(&storage, "remove", &[gone.into()]).await;
+    }
+}
+
+thread_local! {
+    /// The saved pages' keys, read once when the gateway opens; every save updates it before it
+    /// writes, so two saves never race on the stored copy.
+    static KEYS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+async fn load_index() {
+    let keys = read(INDEX).await.and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default();
+    KEYS.with_borrow_mut(|k| *k = keys);
+}
+
+/// `key` made the most recent (or removed), the index as stored and the chats that fell off.
+fn reindex(key: &str, keep: bool) -> (String, Vec<String>) {
+    KEYS.with_borrow_mut(|keys| {
+        keys.retain(|k| k != key);
+        if keep {
+            keys.push(key.to_owned());
+        }
+        let excess = keys.len().saturating_sub(KEPT_CHATS);
+        let gone = keys.drain(..excess).map(|k| format!("{SAVED}{k}")).collect();
+        (serde_json::to_string(&*keys).unwrap_or_default(), gone)
+    })
+}
+
+async fn load(key: &str) -> Option<Saved> {
+    serde_json::from_str(&read(&format!("{SAVED}{key}")).await?).ok()
+}
+
+/// Saves page `key`'s chat in one write with the index, the page now most recent; past
+/// [`KEPT_CHATS`] the oldest chats are removed.
+async fn save(key: String, saved: Saved) {
+    let Ok(raw) = serde_json::to_string(&saved) else { return };
+    let (keys, gone) = reindex(&key, true);
+    write(&[(&format!("{SAVED}{key}"), &raw), (INDEX, &keys)], &gone).await;
+}
+
+/// Deletes page `key`'s chat.
+async fn forget(key: String) {
+    let (keys, mut gone) = reindex(&key, false);
+    gone.push(format!("{SAVED}{key}"));
+    write(&[(INDEX, &keys)], &gone).await;
 }
 
 /// The ready routes, named for people, and the preferred one (else the first).
