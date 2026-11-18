@@ -87,6 +87,8 @@ pub(super) struct Gateway {
     document: RefCell<Option<(String, String)>>,
     /// The page the shown chat belongs to, by [`page_key`].
     key: RefCell<String>,
+    /// A page the reader moved to while an answer was on its way; its chat follows once idle.
+    pending: RefCell<Option<String>>,
 }
 
 /// Posts `message` on `port`.
@@ -149,6 +151,7 @@ impl Gateway {
             summarized: RefCell::default(),
             document: RefCell::default(),
             key: RefCell::default(),
+            pending: RefCell::default(),
             sections: RefCell::default(),
             citations: RefCell::default(),
         });
@@ -462,9 +465,20 @@ impl Gateway {
     /// Shows the chat for the page at `url`, when the reader moved to another page and no
     /// answer is on its way.
     pub(super) async fn follow(&self, url: &str, updates: &Updates) {
-        if !self.streaming() && !self.waiting.get() {
-            self.switch(&page_key(url), updates).await;
+        if self.busy() {
+            *self.pending.borrow_mut() = Some(url.to_owned());
+            return;
         }
+        self.switch(&page_key(url), updates).await;
+    }
+
+    fn busy(&self) -> bool {
+        self.streaming() || self.waiting.get()
+    }
+
+    /// The page the reader moved to while busy, once the answer is in.
+    pub(super) fn idle_pending(&self) -> Option<String> {
+        if self.busy() { None } else { self.pending.take() }
     }
 
     /// Puts the chat saved for page `key` in place of the shown one, which is already saved.

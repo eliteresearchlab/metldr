@@ -629,7 +629,7 @@ export class BackgroundBootstrap {
           reject(new Error('No active tab is available.'))
           return
         }
-        chrome.sidePanel.setOptions({ tabId: selected, path: 'index.html', enabled: true }, () => {
+        chrome.sidePanel.setOptions({ tabId: selected, path: 'chat.html', enabled: true }, () => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message))
             return

@@ -996,6 +996,13 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
             }
         }
     }
+    // A tab switch that came while an answer was on its way brings its page's chat now.
+    if let Some(gateway) = state.gateway().cloned()
+        && let Some(url) = gateway.idle_pending()
+    {
+        let updates = Rc::clone(&updates);
+        spawn_local(async move { gateway.follow(&url, &updates).await });
+    }
     if let Some(gateway) = updates.gateway.borrow_mut().take() {
         state.session = Session::Gateway(Rc::clone(&gateway));
         updates.presentation.borrow_mut().error = None;
