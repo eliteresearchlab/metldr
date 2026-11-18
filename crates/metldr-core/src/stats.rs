@@ -220,11 +220,12 @@ pub fn record(day: serde_json::Value, date: &str, event: &Event) -> serde_json::
     use serde_json::{Map, Value, json};
     let mut map = match day {
         Value::Object(map) => map,
-        _ => {
-            let fresh = json!({"date": date, "hourlyActivity": vec![0u8; 24], "topDomains": {}, "modelUsage": {}});
-            let Value::Object(map) = fresh else { unreachable!() };
-            map
-        }
+        _ => Map::from_iter([
+            ("date".to_owned(), json!(date)),
+            ("hourlyActivity".to_owned(), json!(vec![0u8; 24])),
+            ("topDomains".to_owned(), json!({})),
+            ("modelUsage".to_owned(), json!({})),
+        ]),
     };
     // Fields are found in place; a key is allocated only when the record lacks it.
     fn put(map: &mut Map<String, Value>, key: &str, value: Value) {

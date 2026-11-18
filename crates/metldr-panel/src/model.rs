@@ -830,7 +830,9 @@ impl RunRoute {
             | Self::HttpsGoogleInteractions { model, .. }
             | Self::Text { model, .. }
             | Self::Pi { model, .. } => model,
-            Self::Codex { model, .. } | Self::OpenCode { model, .. } => model.as_deref().unwrap_or_default(),
+            Self::Codex { model, .. } | Self::OpenCode { model, .. } => {
+                model.as_deref().unwrap_or_default()
+            }
             Self::Harness { harness, .. } => harness,
             Self::LegacyUnspecified | Self::Fixture => "",
         }

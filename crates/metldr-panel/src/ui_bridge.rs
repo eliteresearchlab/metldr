@@ -751,7 +751,8 @@ impl Core {
 /// Counts a finished companion run in the extension's Stats, as the gateway counts its chats.
 fn record_run(ledger: &metldr_conversation::Ledger, model: &str) {
     let total = ledger.total();
-    let event = serde_json::json!({"kind":"run","input":total.input,"output":total.output,"ms":ledger.ms,"model":model});
+    let (input, output, ms) = (total.input, total.output, ledger.ms);
+    let event = serde_json::json!({"kind":"run","input":input,"output":output,"ms":ms,"model":model});
     let message = serde_json::json!({"type":"STATS_RECORD","event":event});
     let sent = crate::chrome_api("runtime").and_then(|runtime| {
         let message = js_sys::JSON::parse(&message.to_string())?;
