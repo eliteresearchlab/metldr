@@ -7,14 +7,12 @@
     "dev": "portless",
     "dev:server": "vite",
     "predev": "npm run build:rust",
-    "build": "npm run build:main && npm run build:content && npm run build:sandbox && npm run build:offscreen && npm run build:models",
+    "build": "npm run build:main && npm run build:content && npm run build:models",
     "build:rust": "node scripts/build-rust.mjs",
     "build:fast": "cross-env METLDR_PROFILE=fast npm run build",
     "prebuild:main": "npm run build:rust && npm run build:chat",
     "build:main": "vite build",
     "build:content": "cross-env BUILD_TARGET=content vite build",
-    "build:sandbox": "esbuild src/sandbox/gpu-bridge.ts --bundle --outfile=dist/gpu-bridge.js --format=esm --target=esnext --minify && cp public/sandbox.html dist/sandbox.html && node scripts/copy-sandbox-assets.mjs",
-    "build:offscreen": "esbuild src/offscreen/offscreen.ts --bundle --outfile=dist/offscreen.js --format=esm --target=esnext --minify && cp public/offscreen.html dist/offscreen.html",
     "build:models": "[ -d public/models ] && cp -r public/models dist/ || echo 'No models to copy (run npm run download:models first)'",
     "download:models": "node scripts/download-models.mjs",
     "preview": "vite preview",
@@ -24,13 +22,11 @@
     "install:chat": "npm ci --prefix extension/chat-ui"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1",
     "@inboxsdk/core": "^2.2.11",
     "@mozilla/readability": "^0.6.0",
     "gsap": "^3.13.0",
     "lru-cache": "^11.2.4",
-    "marked": "^17.0.1",
-    "voy-search": "^0.6.3"
+    "marked": "^17.0.1"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.32",

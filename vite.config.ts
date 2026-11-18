@@ -1,5 +1,4 @@
 import { watchChat } from './scripts/build-chat.mjs'
-import { copySandboxAssets } from './scripts/copy-sandbox-assets.mjs'
 import { defineConfig, normalizePath, type Plugin } from 'vite'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
@@ -63,16 +62,6 @@ const chatDevelopment = (): Plugin => ({
   },
 })
 
-const copyWasmAssets = (): Plugin => ({
-  name: 'copy-wasm-assets',
-  configureServer() {
-    copySandboxAssets('public/assets')
-  },
-  writeBundle() {
-    copySandboxAssets('dist/assets')
-  }
-})
-
 const copyInboxSDKPlugin = () => ({
   name: 'copy-inboxsdk-pageworld',
   writeBundle() {
@@ -113,7 +102,7 @@ export default defineConfig({
     watch: { ignored: privateFiles },
     fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', ...privateFiles] },
   },
-  plugins: isContentBuild ? [] : [rustWelcome(), chatDevelopment(), copyInboxSDKPlugin(), copyWasmAssets(), copyBrowseScripts()],
+  plugins: isContentBuild ? [] : [rustWelcome(), chatDevelopment(), copyInboxSDKPlugin(), copyBrowseScripts()],
   resolve: {
     alias: {
       '@': resolve(__dirname, './src')
