@@ -122,8 +122,7 @@ impl Gateway {
         updates.presentation.borrow_mut().error = None;
         self.streaming.set(Some(id));
         let turns = self.turns.borrow();
-        let messages: Vec<Value> = turns
-            .iter()
+        let messages: Vec<Value> = kept(&turns)
             .map(|(role, content)| json!({"role":role,"content":content}))
             .collect();
         drop(turns);
@@ -179,17 +178,7 @@ impl Gateway {
     /// The chat to save, bounded: the first exchange and the latest turns, the latest answers.
     fn saved(&self) -> Saved {
         let turns = self.turns.borrow();
-        let keep = |turns: &[(&str, String)]| {
-            let owned = turns.iter().map(|(role, text)| ((*role).to_owned(), text.clone()));
-            owned.collect::<Vec<_>>()
-        };
-        let turns = if turns.len() > KEPT_TURNS {
-            let mut kept = keep(&turns[..2]);
-            kept.extend(keep(&turns[turns.len() - (KEPT_TURNS - 2)..]));
-            kept
-        } else {
-            keep(&turns)
-        };
+        let turns = kept(&turns).map(|(role, text)| ((*role).to_owned(), text.clone())).collect();
         let shown = self.shown.borrow();
         Saved {
             page: self.page.borrow().clone(),
@@ -223,6 +212,17 @@ impl Gateway {
         spawn_local(save(Saved::default()));
         updates.changed();
     }
+}
+
+/// The turns the model sees: all of a short chat, else the first exchange (it holds the page)
+/// and the latest turns.
+fn kept<T>(turns: &[T]) -> impl Iterator<Item = &T> {
+    let (head, tail) = if turns.len() > KEPT_TURNS {
+        (&turns[..2], &turns[turns.len() - (KEPT_TURNS - 2)..])
+    } else {
+        (turns, &turns[..0])
+    };
+    head.iter().chain(tail)
 }
 
 /// A saved turn's role, from the two the model takes.
@@ -301,4 +301,17 @@ async fn capture() -> Result<(String, String, String), FlowError> {
         .map_err(|_| failure("The page could not be read."))?;
     let title = crate::string_property(&observed, "title").unwrap_or_default();
     Ok((url, title, crate::flow::page_text(&observed)?))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_long_chat_keeps_its_first_exchange_and_latest_turns() {
+        let turns: Vec<u32> = (0..30).collect();
+        let kept: Vec<u32> = super::kept(&turns).copied().collect();
+        assert_eq!(kept.len(), super::KEPT_TURNS);
+        assert_eq!(&kept[..3], &[0, 1, 8]);
+        assert_eq!(kept.last(), Some(&29));
+        assert_eq!(super::kept(&turns[..5]).count(), 5);
+    }
 }
