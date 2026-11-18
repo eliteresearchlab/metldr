@@ -185,7 +185,6 @@ export interface PageSummary {
   bullets: string[]
   readTime?: string
   content?: string
-  fullContent?: string
   wordCount?: number
   timestamp?: number
   timing?: SummaryTiming

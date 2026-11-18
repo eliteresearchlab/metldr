@@ -113,7 +113,7 @@ pub async fn gateway_page_summary(page: JsValue, force: bool) -> Result<JsValue,
         "total": (js_sys::Date::now() - started).round(), "cached": false, "model": model});
     let summary = json!({"title": page.title, "author": page.author, "publishDate": page.publish_date,
         "publication": page.publication, "bullets": bullets, "readTime": page.read_time,
-        "fullContent": request.content, "wordCount": page.word_count, "timestamp": js_sys::Date::now(),
+        "wordCount": page.word_count, "timestamp": js_sys::Date::now(),
         "timing": timing});
     if let Some(url) = url {
         keep(url, &summary).await;
