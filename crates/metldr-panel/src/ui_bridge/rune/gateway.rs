@@ -140,7 +140,11 @@ impl Gateway {
 
     /// The active tab's summary from the extension's page tools: cached per page and, when not
     /// `manual`, only where the summary settings call for one. It joins the chat as an exchange.
-    pub(super) async fn summarize(self: Rc<Self>, updates: Rc<Updates>, manual: bool) -> Result<(), FlowError> {
+    pub(super) async fn summarize(
+        self: Rc<Self>,
+        updates: Rc<Updates>,
+        manual: bool,
+    ) -> Result<(), FlowError> {
         let (tab, url) = active_tab().await?;
         if !manual && self.summarized.borrow().as_deref() == Some(url.as_str()) {
             return Ok(());
@@ -148,19 +152,17 @@ impl Gateway {
         self.summarizing.set(true);
         updates.changed();
         let trigger = if manual { "manual" } else { "auto" };
-        let message = crate::flow::json_value(&json!({"type":"EXTRACT_AND_SUMMARIZE","tabId":tab,"force":manual,"trigger":trigger}))?;
-        let runtime = crate::chrome_api("runtime").map_err(|_| FlowError::Host("The extension is unavailable.".into()));
-        let reply = match runtime {
-            Ok(runtime) => crate::await_call(&runtime, "sendMessage", &[message]).await.ok().and_then(|reply| json_of(&reply)),
-            Err(error) => return Err(error),
-        };
+        let request = json!({"type":"EXTRACT_AND_SUMMARIZE","tabId":tab,"force":manual,"trigger":trigger});
+        let reply = ask_extension(&request).await;
         self.summarizing.set(false);
         updates.changed();
         let reply = reply.unwrap_or_default();
         let Some(text) = summary_text(&reply["summary"]).filter(|_| reply["success"] == true) else {
             return match reply["error"].as_str() {
                 Some(error) if manual => Err(FlowError::Host(error.to_owned())),
-                _ if manual && reply["skip"] == true => Err(FlowError::Host("This page has too little text to summarize.".into())),
+                _ if manual && reply["skip"] == true => {
+                    Err(FlowError::Host("This page has too little text to summarize.".into()))
+                }
                 _ => Ok(()),
             };
         };
@@ -353,6 +355,13 @@ fn ready_routes(reply: &Value) -> Option<(Vec<RouteChoice>, usize)> {
     (!routes.is_empty()).then_some((routes, chosen))
 }
 
+/// The extension's reply to `request` sent to its service worker, or None.
+async fn ask_extension(request: &Value) -> Option<Value> {
+    let runtime = crate::chrome_api("runtime").ok()?;
+    let message = crate::flow::json_value(request).ok()?;
+    json_of(&crate::await_call(&runtime, "sendMessage", &[message]).await.ok()?)
+}
+
 /// A page summary as markdown: its title in bold, then its points.
 fn summary_text(summary: &Value) -> Option<String> {
     let bullets: Vec<&str> = summary["bullets"].as_array()?.iter().filter_map(Value::as_str).collect();
@@ -369,8 +378,8 @@ async fn active_tab() -> Result<(f64, String), FlowError> {
     let failure = || FlowError::Host("Select a browser tab.".into());
     let tabs = crate::chrome_api("tabs").map_err(|_| failure())?;
     let query = crate::flow::json_value(&json!({"active":true,"lastFocusedWindow":true}))?;
-    let found = crate::await_call(&tabs, "query", &[query]).await.map_err(|_| failure())?;
-    let tab = js_sys::Array::from(&found).get(0);
+    let found = crate::await_call(&tabs, "query", &[query]).await;
+    let tab = js_sys::Array::from(&found.map_err(|_| failure())?).get(0);
     let id = crate::get(&tab, "id").ok().and_then(|id| id.as_f64()).ok_or_else(failure)?;
     let url = crate::string_property(&tab, "url").map_err(|_| failure())?;
     Ok((id, url))

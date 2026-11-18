@@ -369,6 +369,16 @@ impl State {
         crate::composer::choices::selected(Some(&core.page.view.borrow()), &self.selection)
     }
 
+    /// Without the companion: the page's summary, always when `manual`, else as the settings say.
+    fn summarize_page(&mut self, manual: bool) {
+        if let (Some(gateway), Some(updates)) = (self.gateway().cloned(), self.updates.clone()) {
+            spawn_local(async move {
+                let done = gateway.summarize(Rc::clone(&updates), manual).await;
+                updates.finish(done);
+            });
+        }
+    }
+
     /// Without the companion: answers with gateway route `index` from now on.
     pub(super) fn choose_gateway(&mut self, index: usize) {
         if self.running() {
@@ -931,11 +941,7 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
         state.session = Session::Gateway(Rc::clone(&gateway));
         updates.presentation.borrow_mut().error = None;
         // The page's summary, where the summary settings call for one.
-        let summarized = Rc::clone(&updates);
-        spawn_local(async move {
-            let done = gateway.summarize(Rc::clone(&summarized), false).await;
-            summarized.finish(done);
-        });
+        state.summarize_page(false);
     }
     if let Some(core) = state.core().cloned() {
         let running = state.running();
@@ -1699,15 +1705,7 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                                 .focusable(true)
                                 .disabled(gateway.streaming())
                                 .native_activation()
-                                .on_press_tx(|state: &mut State, _| {
-                                    let updates = state.updates.clone();
-                                    if let (Some(gateway), Some(updates)) = (state.gateway().cloned(), updates) {
-                                        spawn_local(async move {
-                                            let done = gateway.summarize(Rc::clone(&updates), true).await;
-                                            updates.finish(done);
-                                        });
-                                    }
-                                }),
+                                .on_press_tx(|state: &mut State, _| state.summarize_page(true)),
                         )
                         .child(
                             typography
