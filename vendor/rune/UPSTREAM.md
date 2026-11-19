@@ -45,6 +45,8 @@ Local changes:
 * `text::add_fonts` registers fallback fonts on a running app: every text system on the thread (windows, overlays, the measurer) registers them as script and CJK fallbacks on its next frame and lays out again, and `font_epoch` moves.
 * Web input stops untrusted (`isTrusted` false) input types in the window capture phase, before the page's listeners and winit's. Mirror presses and focus name the browser's trust and the mirror revision they were rendered from, and the runtime refuses any other (`runtime/input/provenance.rs`).
 * The `examples` directory and its `[[example]]` entries are not vendored; metldr builds none of them.
+* On the web an app with `WindowOptions::transparent` configures its canvas with premultiplied alpha and clears to transparent, so an in-page frame shows only what it draws.
+* On the web a WebGPU adapter is requested before the canvas surface is made, so a browser that has WebGPU but no adapter falls back to WebGL2 on the same canvas instead of finding it already claimed.
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.
 

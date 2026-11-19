@@ -174,11 +174,21 @@ async fn try_backend(canvas: &web_sys::HtmlCanvasElement, backends: wgpu::Backen
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = backends;
     let instance = wgpu::Instance::new(descriptor);
-    let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone())).map_err(|e| e.to_string())?;
-    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::LowPower, compatible_surface: Some(&surface),
+    let surface = |instance: &wgpu::Instance| instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone())).map_err(|e| e.to_string());
+    let options = |compatible_surface| wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::LowPower, compatible_surface,
         force_fallback_adapter: false, apply_limit_buckets: false,
-    }).await.map_err(|e| e.to_string())?;
+    };
+    // A canvas gives out one kind of context, so WebGPU claims it only once it has an adapter:
+    // a browser without one leaves the canvas free for WebGL2. WebGL2 needs its surface first.
+    let (surface, adapter) = if webgl {
+        let surface = surface(&instance)?;
+        let adapter = instance.request_adapter(&options(Some(&surface))).await.map_err(|e| e.to_string())?;
+        (surface, adapter)
+    } else {
+        let adapter = instance.request_adapter(&options(None)).await.map_err(|e| e.to_string())?;
+        (surface(&instance)?, adapter)
+    };
     let required_limits = if webgl {
         wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())
     } else {
@@ -299,6 +309,7 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
             let compositor = app.compositor.take();
             let on_frame_drawn = app.on_frame_drawn.take();
             let (on_focus, modifier_keys, srgb_blend) = (app.on_focus, app.modifier_keys, app.srgb_blend);
+            let transparent = app.window_options.transparent;
             let (font_smoothing, fit_height) = (app.font_smoothing, app.fit_content_height);
             let tab_visits_controls = app.tab_visits_controls;
             let playground = app.playground.take();
@@ -357,6 +368,14 @@ impl<S: 'static> ApplicationHandler<Wake> for Browser<S> {
             };
             config.present_mode = wgpu::PresentMode::Fifo;
             let caps = surface.get_capabilities(&gpu.adapter);
+            // A transparent app composites over the page behind its canvas: premultiplied alpha,
+            // cleared to transparent black.
+            // WebGPU canvases always take "premultiplied" (wgpu lists only Opaque for them).
+            let webgpu = gpu.adapter.get_info().backend == wgpu::Backend::BrowserWebGpu;
+            if transparent && (webgpu || caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied)) {
+                config.alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
+                rt.transparent = true;
+            }
             config.usage |= caps.usages & wgpu::TextureUsages::COPY_SRC;
             let wanted = if srgb_blend { config.format.remove_srgb_suffix() } else { config.format.add_srgb_suffix() };
             let is_gl = gpu.adapter.get_info().backend == wgpu::Backend::Gl;
