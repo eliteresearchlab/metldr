@@ -1,5 +1,5 @@
 import { UIService } from './UIService'
-import { WordPopup } from './WordPopup'
+import { WordFrame } from './WordFrame'
 import { PdfToolbar } from './PdfToolbar'
 import { emailExtractor } from './EmailExtractor'
 import { ArticleExtractor } from './ArticleExtractor'
@@ -24,7 +24,7 @@ export class ContentScriptBootstrap {
     this.setupThemeListeners()
     this.setupMessageListeners()
 
-    const popupManager = new WordPopup()
+    const popupManager = new WordFrame()
     document.addEventListener('dblclick', (e) => popupManager.handleTextSelection(e))
 
     if (isGmail && sdk) {

@@ -331,6 +331,7 @@ export type BackgroundMessage =
   | { type: 'CLEAR_SUMMARY_CACHE' }
   | { type: 'STATS_SUMMARY'; days: number }
   | { type: 'STATS_RECORD'; event: import('../services/RustCore').StatEvent }
+  | { type: 'INPAGE_PULL' }
 
 export type ResponseCallback = (response: unknown) => void
 

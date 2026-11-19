@@ -25,6 +25,7 @@ mod settings;
 mod sources;
 mod stats;
 mod theme;
+mod word;
 
 use activities::Activities;
 use messages::Messages;
@@ -159,6 +160,8 @@ struct State {
     answers: answers::Answers,
     thread_rect: ::rune::Live<[f32; 4]>,
     proposed_followup: Option<answers::Followup>,
+    /// Set only in a word popup's frame, where this state draws the popup and nothing else.
+    word_popup: Option<Box<word::Popup>>,
 }
 
 impl Default for State {
@@ -196,6 +199,7 @@ impl Default for State {
             answers: answers::Answers::default(),
             thread_rect: ::rune::Live::new([0.0; 4]),
             proposed_followup: None,
+            word_popup: None,
         }
     }
 }
