@@ -94,11 +94,7 @@ export class ContentScriptBootstrap {
   }
 
   static setupThemeListeners(): void {
-    UIService.onChange((_themeName, _themeObj) => {
-      console.log('metldr: theme changed to:', _themeName)
-      UIService.updatePopupTheme(document.querySelector('.metldr-inline-word-popup'))
-      UIService.updateSummaryTheme()
-    })
+    UIService.onChange(() => UIService.updateSummaryTheme())
 
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes.theme) {

@@ -1310,8 +1310,6 @@ async fn chrome_summary(request: &Summarize, kind: &str, length: &str) -> Option
     text
 }
 
-/// The language of `text` as a two letter code. Chrome's own detector answers first since it
-/// costs no model call.
 /// The language of `text`: the compact py3langid model when it is loaded, else Chrome's built-in
 /// detector. No model call: detection costs no tokens and waits on no network.
 async fn detect_language(text: String) -> Result<String, JsValue> {

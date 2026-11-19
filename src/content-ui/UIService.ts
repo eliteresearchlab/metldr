@@ -159,7 +159,6 @@ export class UIService {
   static listeners: ThemeListener[] = []
 
   static ANIMATION_STYLE_ID = 'metldr-animations'
-  static POPUP_ANIMATION_STYLE_ID = 'metldr-word-popup-animations'
 
   static async loadFromStorage(): Promise<string> {
     try {
@@ -203,12 +202,8 @@ export class UIService {
   static init(): void {
     if (document.head) {
       this.injectSummaryAnimations()
-      this.injectPopupAnimations()
     } else {
-      document.addEventListener('DOMContentLoaded', () => {
-        this.injectSummaryAnimations()
-        this.injectPopupAnimations()
-      })
+      document.addEventListener('DOMContentLoaded', () => this.injectSummaryAnimations())
     }
   }
 
@@ -293,31 +288,6 @@ export class UIService {
         border-left: 3px solid currentColor;
         opacity: 0.8;
       }
-    `
-    document.head.appendChild(style)
-  }
-
-  static injectPopupAnimations(): void {
-    if (!document.head) return
-    if (document.getElementById(this.POPUP_ANIMATION_STYLE_ID)) return
-
-    const style = document.createElement('style')
-    style.id = this.POPUP_ANIMATION_STYLE_ID
-    style.textContent = `
-      @keyframes metldr-popup-enter {
-        from { opacity: 0; transform: scale(0.85) translateY(-6px); }
-        to { opacity: 1; transform: scale(1) translateY(0); }
-      }
-      @keyframes metldr-fade-in {
-        from { opacity: 0; transform: translateY(-8px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes metldr-spin { to { transform: rotate(360deg); } }
-      .metldr-definitions-scroll::-webkit-scrollbar { width: 4px; }
-      .metldr-definitions-scroll::-webkit-scrollbar-track { background: transparent; }
-      .metldr-definitions-scroll::-webkit-scrollbar-thumb { background: var(--metldr-primary, #00f0ff); border-radius: 2px; opacity: 0.5; }
-      .metldr-definitions-scroll::-webkit-scrollbar-thumb:hover { opacity: 0.8; }
-      .metldr-definitions-scroll { scrollbar-width: thin; scrollbar-color: var(--metldr-primary) transparent; }
     `
     document.head.appendChild(style)
   }
@@ -580,96 +550,6 @@ export class UIService {
     setTimeout(() => {
       summaryDiv.style.setProperty('will-change', 'auto', 'important')
     }, 500)
-  }
-
-  static updatePopupTheme(container: HTMLElement | null): void {
-    if (!container) return
-
-    const popup = container.querySelector('.metldr-popup-body') as HTMLElement | null
-    if (!popup) return
-
-    const theme = this.currentTheme
-    const popupBg = theme.bgSecondary
-
-    popup.style.setProperty('--metldr-primary', theme.primary, 'important')
-    popup.style.setProperty('--metldr-secondary', theme.secondary, 'important')
-    popup.style.setProperty('--metldr-text', theme.text, 'important')
-    popup.style.setProperty('--metldr-bg-secondary', popupBg, 'important')
-    popup.style.setProperty('--metldr-border', theme.border, 'important')
-
-    popup.style.setProperty('background', popupBg, 'important')
-    popup.style.setProperty('background-color', popupBg, 'important')
-    popup.style.setProperty('border-color', theme.border, 'important')
-    popup.style.setProperty('box-shadow', `0 8px 24px ${theme.shadow}, 0 4px 12px ${theme.shadow}, inset 0 1px 0 ${theme.borderSubtle}`, 'important')
-
-    this._updatePopupHeader(popup, theme, popupBg)
-    this._updatePopupContent(popup, theme, popupBg)
-    this._updateDefinitions(popup, theme, popupBg)
-    this._updateAiBadges(popup, theme)
-
-    console.log('[popup] theme updated in real-time:', this.currentThemeName, 'using bg:', popupBg)
-  }
-
-  static _updatePopupHeader(popup: HTMLElement, theme: Theme, popupBg: string): void {
-    const header = popup.querySelector('.metldr-popup-header') as HTMLElement | null
-    if (header) {
-      header.style.setProperty('background', popupBg, 'important')
-      header.style.setProperty('background-color', popupBg, 'important')
-    }
-
-    const wordSpan = header?.querySelector('span') as HTMLElement | null
-    if (wordSpan && wordSpan.textContent && wordSpan.textContent.length < 50 && !wordSpan.textContent.includes('ai')) {
-      wordSpan.style.setProperty('color', theme.primary, 'important')
-    }
-  }
-
-  static _updatePopupContent(popup: HTMLElement, theme: Theme, popupBg: string): void {
-    const content = popup.querySelector('.metldr-popup-content') as HTMLElement | null
-    if (content) {
-      content.style.setProperty('background', popupBg, 'important')
-      content.style.setProperty('background-color', popupBg, 'important')
-      content.style.setProperty('color', theme.text, 'important')
-    }
-  }
-
-  static _updateDefinitions(popup: HTMLElement, theme: Theme, popupBg: string): void {
-    const defsContainer = popup.querySelector('.metldr-definitions-scroll') as HTMLElement | null
-    if (defsContainer) {
-      defsContainer.style.setProperty('background', popupBg, 'important')
-      defsContainer.style.setProperty('background-color', popupBg, 'important')
-    }
-
-    const content = popup.querySelector('.metldr-popup-content')
-    if (content) {
-      const posElements = content.querySelectorAll('[data-element-type="pos"]')
-      posElements.forEach(el => {
-        const htmlEl = el as HTMLElement
-        htmlEl.style.setProperty('color', theme.secondary, 'important')
-        htmlEl.style.setProperty('border-bottom-color', theme.border, 'important')
-      })
-
-      const defElements = content.querySelectorAll('[data-element-type="definition"]')
-      defElements.forEach(el => {
-        const htmlEl = el as HTMLElement
-        htmlEl.style.setProperty('color', theme.text, 'important')
-      })
-
-      const defBlocks = content.querySelectorAll('[data-element-type="def-block"]')
-      defBlocks.forEach(block => {
-        const htmlEl = block as HTMLElement
-        htmlEl.style.setProperty('background', popupBg, 'important')
-        htmlEl.style.setProperty('background-color', popupBg, 'important')
-        htmlEl.style.setProperty('border-bottom-color', theme.border, 'important')
-      })
-    }
-  }
-
-  static _updateAiBadges(popup: HTMLElement, theme: Theme): void {
-    const header = popup.querySelector('.metldr-popup-header')
-    const aiBadge = header?.querySelector('span[title="ai generated definition"]') as HTMLElement | null
-    if (aiBadge) {
-      aiBadge.style.setProperty('color', theme.accent, 'important')
-    }
   }
 
   static updateSummaryTheme(): void {
