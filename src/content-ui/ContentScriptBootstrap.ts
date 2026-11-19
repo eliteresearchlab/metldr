@@ -1,5 +1,5 @@
 import { UIService } from './UIService'
-import { WordPopup } from './WordPopup'
+import { WordFrame } from './WordFrame'
 import { PdfToolbar } from './PdfToolbar'
 import { emailExtractor } from './EmailExtractor'
 import { ArticleExtractor } from './ArticleExtractor'
@@ -24,7 +24,7 @@ export class ContentScriptBootstrap {
     this.setupThemeListeners()
     this.setupMessageListeners()
 
-    const popupManager = new WordPopup()
+    const popupManager = new WordFrame()
     document.addEventListener('dblclick', (e) => popupManager.handleTextSelection(e))
 
     if (isGmail && sdk) {
@@ -94,11 +94,7 @@ export class ContentScriptBootstrap {
   }
 
   static setupThemeListeners(): void {
-    UIService.onChange((_themeName, _themeObj) => {
-      console.log('metldr: theme changed to:', _themeName)
-      UIService.updatePopupTheme(document.querySelector('.metldr-inline-word-popup'))
-      UIService.updateSummaryTheme()
-    })
+    UIService.onChange(() => UIService.updateSummaryTheme())
 
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes.theme) {

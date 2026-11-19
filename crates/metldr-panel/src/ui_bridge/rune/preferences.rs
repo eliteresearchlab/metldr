@@ -1,9 +1,9 @@
-pub(super) use super::theme::Palette;
+pub(super) use super::theme::{Palette, Typography};
 use super::*;
 use crate::preferences::{
     UiPreferenceSnapshot, UiPreferenceStatus, UiPreferenceSubscription, UiPreferences,
 };
-use ::rune::{Color, El, TextStyle, col, text};
+use ::rune::{El, col};
 use wasm_bindgen_futures::JsFuture;
 
 #[derive(Clone, Copy)]
@@ -573,72 +573,6 @@ pub(super) fn switch(
     if enabled { el } else { el.opacity(0.5) }
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct Typography {
-    pub(super) scale: f32,
-    pub(super) ink: Color,
-    /// The overlay a pressed control shows.
-    pub(super) press: Color,
-    /// Hairline and fill of an outlined control.
-    pub(super) line: Color,
-    pub(super) field: Color,
-    /// The lip a key stands on, on a molded theme.
-    pub(super) lip: Option<Color>,
-    /// Set in a monospaced face, as a molded or neon theme's legends are.
-    pub(super) mono: bool,
-    /// A neon theme's accent: its keys are outlined in it, and its legends print in capitals
-    /// with a little tracking, as a HUD's do.
-    pub(super) neon: Option<Color>,
-    /// Legends print in lowercase, as a molded theme's keys are printed.
-    pub(super) lower: bool,
-}
-
-impl Typography {
-    pub(super) fn new(scale: f32, palette: &Palette) -> Self {
-        Self {
-            line: palette.line,
-            field: if palette.molded() || palette.retro() { palette.surface } else { palette.field },
-            lip: (palette.molded() || palette.retro()).then_some(palette.lip),
-            mono: palette.crafted(),
-            neon: palette.neon().then_some(palette.accent),
-            lower: palette.molded(),
-            scale,
-            ink: palette.ink,
-            press: palette.press,
-        }
-    }
-
-    pub(super) fn font(self, size: f32, weight: f32) -> TextStyle {
-        let style = TextStyle::new(size * self.scale, weight);
-        let style = if self.mono { style.mono() } else { style };
-        if self.neon.is_some() { style.tracking(0.3) } else { style }
-    }
-
-    /// A text field's style: 16 points or more, so mobile browsers never zoom into it.
-    pub(super) fn input(self) -> TextStyle {
-        TextStyle::new((16.0 * self.scale).max(16.0), 400.0)
-    }
-
-    pub(super) fn text(self, value: impl Into<String>) -> El {
-        text(value).font(self.font(13.0, 400.0)).color(self.ink)
-    }
-
-    /// A control's printed legend: lowercase on a molded theme, as its keys are printed, and
-    /// capitals on a neon one, as a HUD's are. The control keeps the original wording as its
-    /// accessible name.
-    pub(super) fn legend(self, label: impl Into<String>) -> El {
-        let mut label = label.into();
-        // Legends are almost always ASCII: change those in place, without a second string.
-        match (self.neon.is_some(), self.lower, label.is_ascii()) {
-            (true, _, true) => label.make_ascii_uppercase(),
-            (true, _, false) => label = label.to_uppercase(),
-            (false, true, true) => label.make_ascii_lowercase(),
-            (false, true, false) => label = label.to_lowercase(),
-            (false, false, _) => {}
-        }
-        self.text(label)
-    }
-}
 fn scale(font_size: &str) -> f32 {
     match font_size {
         "small" => 0.9375,

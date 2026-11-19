@@ -1,5 +1,5 @@
-//! The chat fonts, read by the page from `chat/fonts/`: the interface fonts at start, the
-//! fallbacks after the first frame.
+//! The interface fonts of every Rune surface, read by its page from `chat/fonts/`: the
+//! interface fonts at start, the fallbacks after the first frame.
 //!
 //! Nothing is embedded in the wasm. The service worker loads the same module, so embedded fonts
 //! would cost it about 33 MB it never uses.
@@ -8,7 +8,7 @@ use std::cell::OnceCell;
 
 /// Approved interface files in renderer order: the Allo variable face (optical size, weight
 /// and roundness axes) and 6 JetBrains Mono subsets. The chat starts with these alone.
-pub(super) const NAMES: [&str; 7] = [
+pub const NAMES: [&str; 7] = [
     "AlloVariable.ttf",
     "0aa834ed78bf6d07-s.ttf",
     "67957d42bae0796d-s.ttf",
@@ -21,7 +21,7 @@ pub(super) const NAMES: [&str; 7] = [
 /// them first: Allo's oblique in each weight (named into the variable face's family, so italic
 /// text finds them), Inter for the Greek, Cyrillic, Vietnamese and extended Latin Allo lacks,
 /// and Noto for other scripts, symbols and emoji (about 13 MB, mostly emoji).
-pub(super) const FALLBACKS: [&str; 25] = [
+pub const FALLBACKS: [&str; 25] = [
     "AlloVariable-ThinItalic.otf",
     "AlloVariable-ExtraLightItalic.otf",
     "AlloVariable-LightItalic.otf",
@@ -49,11 +49,11 @@ pub(super) const FALLBACKS: [&str; 25] = [
     "NotoColorEmoji.ttf",
 ];
 /// The CJK collection (about 19.5 MB), added only once the chat lays out CJK text.
-pub(super) const CJK: [&str; 1] = ["NotoSansCJK-Regular.ttc"];
+pub const CJK: [&str; 1] = ["NotoSansCJK-Regular.ttc"];
 /// Upper bound for one file. The largest approved file, the CJK collection, is about 19.5 MB.
 const MAX_FONT_BYTES: usize = 24 * 1024 * 1024;
 
-pub(super) const FAMILIES: (&str, &str) = ("Allo Variable", "JetBrains Mono");
+pub const FAMILIES: (&str, &str) = ("Allo Variable", "JetBrains Mono");
 
 thread_local! {
     static RETAINED: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
@@ -62,7 +62,7 @@ thread_local! {
 }
 
 /// A group of fonts the page adds after start, by its manifest name.
-pub(super) fn group(name: &str) -> Option<&'static [&'static str]> {
+pub fn group(name: &str) -> Option<&'static [&'static str]> {
     match name {
         "fallbacks" => Some(&FALLBACKS),
         "cjk" => Some(&CJK),
@@ -71,20 +71,18 @@ pub(super) fn group(name: &str) -> Option<&'static [&'static str]> {
 }
 
 /// Copies the page's font buffers into the module and checks them against `names`.
-pub(super) fn read(
-    fonts: &js_sys::Array,
-    names: &[&str],
-) -> Result<Vec<Vec<u8>>, wasm_bindgen::JsValue> {
+#[cfg(target_arch = "wasm32")]
+pub fn read(fonts: &js_sys::Array, names: &[&str]) -> Result<Vec<Vec<u8>>, String> {
     let fonts: Vec<Vec<u8>> = fonts
         .iter()
         .map(|font| js_sys::Uint8Array::new(&font).to_vec())
         .collect();
-    validate(&fonts, names).map_err(|error| crate::err(&error))?;
+    validate(&fonts, names)?;
     Ok(fonts)
 }
 
 /// Refuses a font set before the renderer sees it: the count, each size and the signature.
-pub(super) fn validate(fonts: &[Vec<u8>], names: &[&str]) -> Result<(), String> {
+pub fn validate(fonts: &[Vec<u8>], names: &[&str]) -> Result<(), String> {
     if fonts.len() != names.len() {
         return Err(format!(
             "Expected {} font files, received {}.",
@@ -108,13 +106,13 @@ pub(super) fn validate(fonts: &[Vec<u8>], names: &[&str]) -> Result<(), String> 
 
 /// Keeps the interface fonts for the document's lifetime, since the renderer reads them while
 /// it runs. They are leaked once; a later start in the same document reuses the first set.
-pub(super) fn retain(fonts: Vec<Vec<u8>>) -> &'static [&'static [u8]] {
+pub fn retain(fonts: Vec<Vec<u8>>) -> &'static [&'static [u8]] {
     RETAINED.with(|retained| *retained.get_or_init(|| leak(fonts)))
 }
 
 /// Keeps a group added after start like [`retain`]. `None` when it was already kept, so a
 /// document adds each group to the renderer once.
-pub(super) fn retain_group(name: &str, fonts: Vec<Vec<u8>>) -> Option<&'static [&'static [u8]]> {
+pub fn retain_group(name: &str, fonts: Vec<Vec<u8>>) -> Option<&'static [&'static [u8]]> {
     let cell = if name == "cjk" { &RETAINED_CJK } else { &RETAINED_FALLBACKS };
     cell.with(|retained| {
         let mut fresh = false;

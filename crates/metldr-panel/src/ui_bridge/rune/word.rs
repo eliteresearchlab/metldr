@@ -1,0 +1,244 @@
+//! The in-page UI: small Rune surfaces drawn in extension frames over a page, so they run under
+//! the extension's policy on every site. A popup is a view of the chat's own state, so the chat
+//! and every popup share one Rune build and one instantiation of its runtime. The word popup is the first: a looked-up word, its
+//! senses and synonyms, in the theme the reader chose.
+//!
+//! The frame's page (`inpage-word.html`) gets its job from the extension, never from the page
+//! around it, and tells the content script only its size and when to close.
+
+use super::State;
+use metldr_ui::theme::{Palette, Typography, card_shadow, pop_in};
+use ::rune::{App, AppSpec, Cx, El, Key, KeyEvent, Tx, WindowOptions, col, row};
+use serde::Deserialize;
+use std::cell::{Cell, RefCell};
+use wasm_bindgen::prelude::*;
+
+/// The popup's width in points; its height follows its content.
+const WIDTH: f32 = 320.0;
+/// How many synonyms show before the rest fold into a count.
+const SYNONYMS: usize = 4;
+/// Room around the card for its shadow, in points on each side.
+pub const MARGIN: f32 = 16.0;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Sense {
+    #[serde(default)]
+    definition: String,
+    #[serde(default)]
+    part_of_speech: String,
+    #[serde(default)]
+    example: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Found {
+    #[serde(default)]
+    definitions: Vec<Sense>,
+    #[serde(default)]
+    synonyms: Vec<String>,
+    #[serde(default)]
+    source: String,
+}
+
+enum Phase {
+    Looking,
+    Found(Found),
+    Failed(String),
+}
+
+/// The word popup's own part of the state.
+pub(super) struct Popup {
+    palette: Palette,
+    typography: Typography,
+    word: String,
+    phase: Phase,
+}
+
+thread_local! {
+    static THEME: RefCell<String> = RefCell::new("dark".into());
+    static HOST: RefCell<Option<::rune::AppHandle<State>>> = const { RefCell::new(None) };
+    static CLOSE: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
+}
+
+fn init() -> State {
+    let palette = THEME.with_borrow(|theme| Palette::for_theme(theme));
+    let popup = Popup { typography: Typography::new(1.0, &palette), palette, word: String::new(), phase: Phase::Looking };
+    let mut state = State::default();
+    state.word_popup = Some(Box::new(popup));
+    state
+}
+
+/// `text` without the bold and italic marks a model's definition can carry.
+fn plain(text: &str) -> String {
+    text.replace("**", "").replace("__", "")
+}
+
+fn chip(t: Typography, p: &Palette, label: &str) -> El {
+    t.legend(label)
+        .font(t.font(11.0, 600.0))
+        .color(p.ink_2)
+        .px(7.0)
+        .py(3.0)
+        .radius(6.0)
+        .fill(p.field)
+        .border(1.0, p.line)
+}
+
+fn header(s: &Popup, found: Option<&Found>) -> El {
+    let (p, t) = (&s.palette, s.typography);
+    let word = t.text(s.word.as_str()).font(t.font(15.0, 650.0)).color(p.accent).role("heading");
+    let mut out = row().gap(6.0).flex_wrap().child(word);
+    let Some(found) = found else { return out };
+    for synonym in found.synonyms.iter().take(SYNONYMS) {
+        out = out.child(chip(t, p, synonym));
+    }
+    if found.synonyms.len() > SYNONYMS {
+        let rest = &found.synonyms[SYNONYMS..];
+        let more = chip(t, p, &format!("+{}", rest.len())).label(format!("More synonyms: {}", rest.join(", ")));
+        out = out.child(more);
+    }
+    // A definition a model wrote, rather than one from a dictionary.
+    if !["api", "local", "cache"].contains(&found.source.as_str()) {
+        out = out.child(chip(t, p, "ai").label("Written by a model"));
+    }
+    out
+}
+
+fn sense(t: Typography, p: &Palette, sense: &Sense) -> El {
+    let pos = if sense.part_of_speech.is_empty() { "unknown" } else { &sense.part_of_speech };
+    let mut out = col().w_full().gap(3.0).child(
+        t.legend(pos.to_uppercase()).font(t.font(10.0, 600.0).tracking(0.5)).color(p.orange),
+    );
+    out = out.child(t.text(plain(&sense.definition)).font(t.font(13.0, 400.0).lh(19.5)).w_full().wrap());
+    if let Some(example) = sense.example.as_deref().filter(|e| !e.is_empty()) {
+        let quoted = format!("\u{201c}{example}\u{201d}");
+        out = out.child(t.text(quoted).font(t.font(12.0, 400.0).italic().lh(17.5)).color(p.ink_2).w_full().wrap());
+    }
+    out
+}
+
+fn body(s: &Popup) -> El {
+    let (p, t) = (&s.palette, s.typography);
+    let note = |text: &str, color| t.text(text.to_owned()).font(t.font(12.0, 500.0)).color(color).w_full().wrap();
+    match &s.phase {
+        Phase::Looking => note("Looking up\u{2026}", p.ink_3).role("status"),
+        Phase::Failed(message) => note(message, p.red).role("alert"),
+        Phase::Found(found) if found.definitions.is_empty() => note("No definition found.", p.ink_3),
+        Phase::Found(found) => {
+            let senses = found.definitions.iter().map(|d| sense(t, p, d));
+            let list = col().key("word-senses").w_full().max_h(280.0).gap(12.0).children(senses);
+            metldr_ui::scroll_area::viewport(list, "Definitions", false)
+        }
+    }
+}
+
+fn view(state: &State, _: &mut Cx<State>) -> El {
+    let Some(s) = state.word_popup.as_deref() else { return col() };
+    let p = &s.palette;
+    let found = match &s.phase {
+        Phase::Found(found) => Some(found),
+        _ => None,
+    };
+    let card = col()
+        .key("word-card")
+        .w(WIDTH)
+        .gap(8.0)
+        .px(16.0)
+        .py(12.0)
+        .radius(12.0)
+        .fill(p.surface)
+        .border(1.0, p.line)
+        .label(format!("Definition of {}", s.word))
+        .child(header(s, found))
+        .child(body(s))
+        .transition(pop_in(p));
+    col().padding(MARGIN).child(card_shadow(card, p))
+}
+
+fn key(_: &mut State, event: &KeyEvent, _: &mut Tx) -> bool {
+    if event.key != Key::Escape {
+        return false;
+    }
+    CLOSE.with_borrow(|close| close.as_ref().map(|close| close.call0(&JsValue::NULL)));
+    true
+}
+
+fn update(change: impl FnOnce(&mut Popup) + Send + 'static) {
+    HOST.with_borrow(|host| {
+        if let Some(host) = host {
+            host.update(move |state: &mut State, _| {
+                if let Some(popup) = state.word_popup.as_deref_mut() {
+                    change(popup);
+                }
+            });
+        }
+    });
+}
+
+/// Starts the popup in `theme` with the interface `fonts`; `sized(width, height)` hears the
+/// frame size the card needs, `close()` that the reader dismissed it.
+#[wasm_bindgen]
+pub fn start_word(fonts: js_sys::Array, theme: String, sized: js_sys::Function, close: js_sys::Function) -> Result<(), JsValue> {
+    let fonts = metldr_ui::fonts::read(&fonts, &metldr_ui::fonts::NAMES).map_err(|e| JsValue::from_str(&e))?;
+    THEME.with_borrow_mut(|stored| *stored = theme);
+    CLOSE.with_borrow_mut(|stored| *stored = Some(close));
+    let spec = AppSpec {
+        fonts: metldr_ui::fonts::retain(fonts),
+        families: metldr_ui::fonts::FAMILIES,
+        on_key: Some(key),
+        ..AppSpec::new("metldr word", (WIDTH + 2.0 * MARGIN, 160.0), init, view)
+    };
+    let last = Cell::new((0.0f32, 0.0f32));
+    let app = App::new(spec)
+        .canvas_id("metldr-inpage")
+        .full_viewport()
+        .window_options(WindowOptions { transparent: true, ..Default::default() })
+        .on_frame_drawn(move |runtime| {
+            let Some(([_, _, w, h], _)) = runtime.presented("word-card") else { return };
+            let size = ((w + 2.0 * MARGIN).ceil(), (h + 2.0 * MARGIN).ceil());
+            if size != last.replace(size) {
+                let _ = sized.call2(&JsValue::NULL, &size.0.into(), &size.1.into());
+            }
+        });
+    let handle = app.handle();
+    app.try_run().map_err(|error| JsValue::from_str(&error))?;
+    HOST.with_borrow_mut(|host| *host = Some(handle));
+    Ok(())
+}
+
+/// Redraws the popup in `theme`, the one the reader just picked.
+#[wasm_bindgen]
+pub fn word_theme(theme: String) {
+    let palette = Palette::for_theme(&theme);
+    THEME.with_borrow_mut(|stored| *stored = theme);
+    update(move |state| {
+        state.typography = Typography::new(1.0, &palette);
+        state.palette = palette;
+    });
+}
+
+/// Shows `word` while its lookup runs.
+#[wasm_bindgen]
+pub fn word_show(word: String) {
+    update(move |state| {
+        state.word = word;
+        state.phase = Phase::Looking;
+    });
+}
+
+/// The extension's answer to the lookup, `{result}` or `{error}`, as JSON.
+#[wasm_bindgen]
+pub fn word_result(answer: String) {
+    #[derive(Deserialize)]
+    struct Answer {
+        result: Option<Found>,
+        error: Option<String>,
+    }
+    let phase = match serde_json::from_str::<Answer>(&answer) {
+        Ok(Answer { result: Some(found), .. }) => Phase::Found(found),
+        Ok(Answer { error: Some(error), .. }) => Phase::Failed(error),
+        _ => Phase::Failed("The lookup failed.".into()),
+    };
+    update(move |state| state.phase = phase);
+}

@@ -51,7 +51,7 @@ export class BackgroundBootstrap {
 
     this.isInitialized = true
 
-    chrome.runtime.onMessage.addListener((msg: BackgroundMessage, _sender, respond: ResponseCallback) => {
+    chrome.runtime.onMessage.addListener((msg: BackgroundMessage, sender, respond: ResponseCallback) => {
       if (msg.type === 'SUMMARIZE_EMAIL') {
         this._onEmailSummary(msg, respond)
         return true
@@ -74,6 +74,19 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'EXTRACT_AND_SUMMARIZE') {
         this._onExtractAndSummarize(msg, respond)
+        return true
+      }
+
+      // An in-page frame's job, from the content script of the tab it sits in; the page never
+      // takes part, so it cannot choose what the frame shows.
+      if (msg.type === 'INPAGE_PULL') {
+        const tab = sender.tab?.id
+        const fromFrame = sender.url?.endsWith('/inpage/word.html') === true
+        if (tab === undefined || !fromFrame) {
+          respond(null)
+          return false
+        }
+        chrome.tabs.sendMessage(tab, { type: 'INPAGE_PULL' }, { frameId: 0 }).then(respond, () => respond(null))
         return true
       }
 
@@ -153,12 +166,12 @@ export class BackgroundBootstrap {
       }
 
       if (msg.type === 'OPEN_SIDE_PANEL') {
-        this._onOpenSidePanel(msg as { type: string; focus?: string }, _sender, respond)
+        this._onOpenSidePanel(msg as { type: string; focus?: string }, sender, respond)
         return true
       }
 
       if (msg.type === 'TOGGLE_SIDE_PANEL') {
-        this._onToggleSidePanel(msg as { type: string; focus?: string }, _sender, respond)
+        this._onToggleSidePanel(msg as { type: string; focus?: string }, sender, respond)
         return true
       }
 

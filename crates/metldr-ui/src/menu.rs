@@ -189,7 +189,7 @@ mod tests {
             }));
         if app.open {
             let entry = |name: &'static str, disabled: bool| {
-                item(row().key(name).label(name).size(140.0, 24.0).focus_highlight(rune::oklch(0.9, 0.0, 0.0)).child(text(name)), disabled, move |a: &mut App, _| a.log.push(name), close)
+                item(row().key(name).label(name).size(140.0, 24.0).focus_highlight(crate::theme::Palette::for_theme("light").hover).child(text(name)), disabled, move |a: &mut App, _| a.log.push(name), close)
             };
             out = out.child(
                 popup(col().key("menu").w(160.0), "File", "file", Side::Bottom, Transition::opacity(), close)

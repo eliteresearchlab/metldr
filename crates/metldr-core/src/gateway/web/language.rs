@@ -1,6 +1,6 @@
 //! Language detection: py3langid in compact form (99.1% on sentences, 93.6% on four words in
 //! the papluca test set), loaded through the model store the first time it is needed. Until it is
-//! ready, Chrome's built-in detector answers.
+//! ready, Chrome's built-in detector answers when its model is already on the device.
 
 use super::*;
 use std::cell::Cell;
