@@ -1321,8 +1321,15 @@ async fn detect_language(text: String) -> Result<String, JsValue> {
     chrome_language(&text).await.ok_or_else(|| js_error("The language could not be told."))
 }
 
+/// Chrome's own detector, only when its model is already on the device: creating it while the
+/// model downloads waits for the download, which a lookup must not.
 async fn chrome_language(text: &str) -> Option<String> {
     let detector = Some(get(&js_sys::global(), "LanguageDetector")).filter(JsValue::is_function)?;
+    let availability: js_sys::Function = get(&detector, "availability").dyn_into().ok()?;
+    let ready = availability.call0(&detector).ok()?.dyn_into::<js_sys::Promise>().ok()?;
+    if JsFuture::from(ready).await.ok()?.as_string().as_deref() != Some("available") {
+        return None;
+    }
     let create: js_sys::Function = get(&detector, "create").dyn_into().ok()?;
     let session = JsFuture::from(
         create
