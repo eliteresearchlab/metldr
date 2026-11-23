@@ -320,13 +320,7 @@ export type BackgroundMessage =
   | WordLookupMessage
   | GetEmailCacheMessage
   | SetEmailCacheMessage
-  | { type: 'EXTRACT_ONLY'; tabId: number }
-  | { type: 'RAG_HAS_INDEXED_CONTENT'; sourceUrl: string }
-  | { type: 'RAG_SEARCH_WITH_CONTEXT'; query: string; limit?: number; sourceUrl?: string }
-  | { type: 'RAG_IS_INDEXING'; sourceId: string }
-  | { type: 'RAG_ENSURE_INDEXED'; text: string; metadata: Record<string, unknown> }
   | { type: 'GLOBAL_CHAT'; messages: ChatMessage[] }
-  | { type: 'OPEN_SIDE_PANEL'; focus?: string }
   | { type: 'TOGGLE_SIDE_PANEL'; focus?: string }
   | { type: 'DICTIONARY'; action: 'state' | 'select' | 'delete'; code?: string; on?: boolean }
   | { type: 'CLEAR_SUMMARY_CACHE' }

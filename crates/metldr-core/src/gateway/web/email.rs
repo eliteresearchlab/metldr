@@ -79,15 +79,14 @@ async fn written_replies(id: &str, content: &str, summary: &Value, metadata: &Va
 
 /// The summary of email `content`: `{summary, action_items, dates, key_facts, tags, domain,
 /// intent, reasoning, urgency, model, time_ms, cached}`, the kept one unless `force`. With an
-/// `id` the email and its summary are indexed for search (`progress` hears the indexing), and
-/// replies are written in the background when none are kept.
+/// `id` the email and its summary are indexed for search, and replies are written in the
+/// background when none are kept.
 #[wasm_bindgen]
 pub async fn email_summary(
     content: String,
     id: Option<String>,
     metadata: JsValue,
     force: bool,
-    progress: Option<js_sys::Function>,
 ) -> Result<JsValue, JsValue> {
     let started = js_sys::Date::now();
     let metadata = from_js(&metadata);
@@ -96,7 +95,7 @@ pub async fn email_summary(
     if let Some(id) = id.as_deref().filter(|_| !content.is_empty()) {
         let (text, source) = (content.clone(), source(id, subject.as_deref().unwrap_or("Email Thread")));
         spawn_local(async move {
-            let _ = search_store::search_index(text, source, progress).await;
+            let _ = search_store::search_index(text, source).await;
         });
     }
     if let Some(id) = id.as_deref() {

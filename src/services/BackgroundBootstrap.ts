@@ -4,7 +4,6 @@ import {
 } from './RustCore'
 import { PageService } from './PageService'
 import { logger } from './LoggerService'
-import { concurrencyManager } from './ConcurrencyManager'
 
 
 import type {
@@ -60,11 +59,6 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'GENERATE_REPLY_SUGGESTIONS') {
         this._onGenerateReplySuggestions(msg as GenerateReplySuggestionsMessage, respond)
-        return true
-      }
-
-      if (msg.type === 'EXTRACT_ONLY') {
-        this._onExtractOnly(msg, respond)
         return true
       }
 
@@ -133,35 +127,6 @@ export class BackgroundBootstrap {
 
       if (msg.type === 'SET_EMAIL_CACHE') {
         this._onSetEmailCache(msg as SetEmailCacheMessage, respond)
-        return true
-      }
-
-      if (msg.type === 'RAG_HAS_INDEXED_CONTENT') {
-        this._onRagHasIndexedContent(msg as { type: string; sourceUrl: string }, respond)
-        return true
-      }
-
-      if (msg.type === 'RAG_SEARCH_WITH_CONTEXT') {
-        this._onRagSearchWithContext(msg as { type: string; query: string; limit?: number; sourceUrl?: string }, respond)
-        return true
-      }
-
-      if (msg.type === 'RAG_IS_INDEXING') {
-        const { sourceId } = msg as { type: string; sourceId: string }
-        search.isIndexing(sourceId).then(
-          isIndexing => respond({ success: true, isIndexing }),
-          () => respond({ success: false, isIndexing: false })
-        )
-        return true
-      }
-
-      if (msg.type === 'RAG_ENSURE_INDEXED') {
-        this._onRagEnsureIndexed(msg as { type: string; text: string; metadata: any }, respond)
-        return true
-      }
-
-      if (msg.type === 'OPEN_SIDE_PANEL') {
-        this._onOpenSidePanel(msg as { type: string; focus?: string }, sender, respond)
         return true
       }
 
@@ -277,25 +242,6 @@ export class BackgroundBootstrap {
     })()
   }
 
-  static _onExtractOnly(msg: { tabId: number }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const { tabId } = msg
-        if (!tabId) {
-          respond({ success: false, error: 'no tabId' })
-          return
-        }
-        const response = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_ARTICLE' }) as { success: boolean; data?: ExtractedData; error?: string }
-        if (!response?.success || !response.data) {
-          respond({ success: false, error: response?.error || 'extraction failed' })
-          return
-        }
-        respond({ success: true, data: response.data })
-      } catch (err) {
-        respond({ success: false, error: (err as Error).message })
-      }
-    })()
-  }
 
   // A PDF tools frame asks for its own tab; the panel names the active one.
   static _onExtractAndSummarize(msg: ExtractAndSummarizeMessage, sender: chrome.runtime.MessageSender, respond: ResponseCallback): void {
@@ -422,100 +368,11 @@ export class BackgroundBootstrap {
     })()
   }
 
-  static _onRagHasIndexedContent(msg: { type: string; sourceUrl: string }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const hasContent = await search.has(msg.sourceUrl)
-        respond({ success: true, hasContent })
-      } catch (err) {
-        log.error('onRagHasIndexedContent', (err as Error).message)
-        respond({ success: false, error: (err as Error).message, hasContent: false })
-      }
-    })()
-  }
-
-  static _onRagSearchWithContext(msg: { type: string; query: string; limit?: number; sourceUrl?: string }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const context = await search.context(msg.query, msg.limit || 5, msg.sourceUrl)
-        respond({ success: true, context })
-      } catch (err) {
-        log.error('onRagSearchWithContext', (err as Error).message)
-        respond({ success: false, error: (err as Error).message, context: '' })
-      }
-    })()
-  }
-
-  static _onRagEnsureIndexed(msg: { type: string; text: string; metadata: any }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const sourceUrl = msg.metadata?.sourceUrl || msg.metadata?.sourceId || 'unknown'
-        const sourceId = msg.metadata?.sourceId || sourceUrl
-        
-        const broadcastProgress = (percent: number) => {
-          console.log('[BackgroundBootstrap] Broadcasting progress:', percent, 'for', sourceId.slice(0, 40))
-          chrome.runtime.sendMessage({
-            type: 'INDEXING_PROGRESS',
-            sourceId,
-            percent
-          }).catch(() => {})
-        }
-        
-        const result = await concurrencyManager.execute('indexing', sourceUrl, async (signal) => {
-          if (signal.aborted) throw new Error('Indexing aborted')
-          return await search.ensure(msg.text, msg.metadata, broadcastProgress)
-        })
-        
-        respond({ success: true, result })
-      } catch (err) {
-        const errMsg = (err as Error).message
-        if (errMsg !== 'Indexing aborted' && errMsg !== 'Operation cancelled') {
-          log.error('onRagEnsureIndexed', errMsg)
-        }
-        respond({ success: false, error: errMsg })
-      }
-    })()
-  }
 
 
 
-  static _onOpenSidePanel(
-    msg: { type: string; focus?: string },
-    sender: chrome.runtime.MessageSender,
-    respond: ResponseCallback
-  ): void {
 
-    const windowId = sender?.tab?.windowId
-    
-    if (!windowId) {
-      chrome.windows.getCurrent((win) => {
-        if (win?.id) {
-          this._openPageTools(win.id)
-            .then(() => {
-              log.log('side panel opened (fallback)', msg.focus ? `focus: ${msg.focus}` : '')
-              respond({ success: true })
-            })
-            .catch((err) => {
-              log.error('onOpenSidePanel', err.message)
-              respond({ success: false, error: err.message })
-            })
-        } else {
-          respond({ success: false, error: 'no window available' })
-        }
-      })
-      return
-    }
-    
-    this._openPageTools(windowId, sender.tab?.id)
-      .then(() => {
-        log.log('side panel opened', msg.focus ? `focus: ${msg.focus}` : '')
-        respond({ success: true })
-      })
-      .catch((err) => {
-        log.error('onOpenSidePanel', err.message)
-        respond({ success: false, error: err.message })
-      })
-  }
+
 
   static _onToggleSidePanel(
     msg: { type: string; focus?: string },
