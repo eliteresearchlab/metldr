@@ -25,6 +25,9 @@ struct Page {
     word_count: Option<f64>,
     read_time: Option<String>,
     extraction_time: Option<f64>,
+    /// The page's type: `application/pdf` for the text an extension page read from a PDF.
+    #[serde(default)]
+    content_type: Option<String>,
 }
 
 /// The cache, when the extension has made it; opening never creates it.
@@ -138,7 +141,7 @@ pub async fn gateway_page_summary(page: JsValue, force: bool) -> Result<JsValue,
         keep(url, &summary).await;
     }
     let event = counts::Event::Summary {
-        email: false,
+        of: if page.content_type.as_deref() == Some("application/pdf") { counts::Read::Pdf } else { counts::Read::Page },
         words_in: page.word_count.unwrap_or(0.0),
         words_out,
         tokens_out: (text.len() as f64 / 4.0).round(),

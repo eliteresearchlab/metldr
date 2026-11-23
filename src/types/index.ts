@@ -169,6 +169,8 @@ export interface SummaryResult {
   skip?: boolean
   prompt?: boolean
   reason?: string
+  // The tab shows a PDF: the asking extension page reads it and sends its text.
+  pdf?: boolean
 }
 
 // word/dictionary
@@ -279,9 +281,12 @@ export interface GenerateReplySuggestionsMessage {
 
 export interface ExtractAndSummarizeMessage {
   type: 'EXTRACT_AND_SUMMARIZE'
-  tabId: number
+  // The asking frame's own tab when absent.
+  tabId?: number
   force?: boolean
   trigger?: string
+  // A PDF tab's text, read by the extension page asking.
+  text?: string
 }
 
 export interface WordLookupMessage {
@@ -321,12 +326,8 @@ export type BackgroundMessage =
   | { type: 'RAG_IS_INDEXING'; sourceId: string }
   | { type: 'RAG_ENSURE_INDEXED'; text: string; metadata: Record<string, unknown> }
   | { type: 'GLOBAL_CHAT'; messages: ChatMessage[] }
-  | { type: 'PDF_SUMMARIZE'; url: string }
-  | { type: 'PDF_EXTRACT_TEXT'; url: string }
   | { type: 'OPEN_SIDE_PANEL'; focus?: string }
   | { type: 'TOGGLE_SIDE_PANEL'; focus?: string }
-  | { type: 'PDF_PROCESS_ARRAYBUFFER'; data: number[]; filename: string; action: 'summarize' | 'copy'; sourceUrl?: string }
-  | { type: 'GET_PAGE_CACHE'; url: string }
   | { type: 'DICTIONARY'; action: 'state' | 'select' | 'delete'; code?: string; on?: boolean }
   | { type: 'CLEAR_SUMMARY_CACHE' }
   | { type: 'STATS_SUMMARY'; days: number }

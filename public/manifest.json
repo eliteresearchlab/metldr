@@ -65,7 +65,8 @@
     },
     {
       "resources": [
-        "inpage/word.html"
+        "inpage/word.html",
+        "inpage/pdf.html"
       ],
       "matches": [
         "<all_urls>"

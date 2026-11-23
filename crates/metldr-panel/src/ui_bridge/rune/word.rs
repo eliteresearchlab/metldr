@@ -1,24 +1,17 @@
-//! The in-page UI: small Rune surfaces drawn in extension frames over a page, so they run under
-//! the extension's policy on every site. A popup is a view of the chat's own state, so the chat
-//! and every popup share one Rune build and one instantiation of its runtime. The word popup is the first: a looked-up word, its
-//! senses and synonyms, in the theme the reader chose.
-//!
-//! The frame's page (`inpage-word.html`) gets its job from the extension, never from the page
-//! around it, and tells the content script only its size and when to close.
+//! The word popup: a looked-up word, its senses and synonyms, in an in-page frame
+//! (`inpage/word.html`, see [`super::inpage`]) in the theme the reader chose.
 
 use super::State;
+use super::inpage::{self, MARGIN};
 use metldr_ui::theme::{Palette, Typography, card_shadow, pop_in};
-use ::rune::{App, AppSpec, Cx, El, Key, KeyEvent, Tx, WindowOptions, col, row};
+use ::rune::{Cx, El, Key, KeyEvent, Tx, col, row};
 use serde::Deserialize;
-use std::cell::{Cell, RefCell};
 use wasm_bindgen::prelude::*;
 
 /// The popup's width in points; its height follows its content.
 const WIDTH: f32 = 320.0;
 /// How many synonyms show before the rest fold into a count.
 const SYNONYMS: usize = 4;
-/// Room around the card for its shadow, in points on each side.
-pub const MARGIN: f32 = 16.0;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,15 +48,15 @@ pub(super) struct Popup {
     phase: Phase,
 }
 
-thread_local! {
-    static THEME: RefCell<String> = RefCell::new("dark".into());
-    static HOST: RefCell<Option<::rune::AppHandle<State>>> = const { RefCell::new(None) };
-    static CLOSE: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
+impl Popup {
+    pub(super) fn retheme(&mut self, palette: Palette, typography: Typography) {
+        (self.palette, self.typography) = (palette, typography);
+    }
 }
 
 fn init() -> State {
-    let palette = THEME.with_borrow(|theme| Palette::for_theme(theme));
-    let popup = Popup { typography: Typography::new(1.0, &palette), palette, word: String::new(), phase: Phase::Looking };
+    let (palette, typography) = inpage::palette();
+    let popup = Popup { typography, palette, word: String::new(), phase: Phase::Looking };
     let mut state = State::default();
     state.word_popup = Some(Box::new(popup));
     state
@@ -157,21 +150,17 @@ fn view(state: &State, _: &mut Cx<State>) -> El {
 }
 
 fn key(_: &mut State, event: &KeyEvent, _: &mut Tx) -> bool {
-    if event.key != Key::Escape {
-        return false;
+    let escape = event.key == Key::Escape;
+    if escape {
+        inpage::close();
     }
-    CLOSE.with_borrow(|close| close.as_ref().map(|close| close.call0(&JsValue::NULL)));
-    true
+    escape
 }
 
 fn update(change: impl FnOnce(&mut Popup) + Send + 'static) {
-    HOST.with_borrow(|host| {
-        if let Some(host) = host {
-            host.update(move |state: &mut State, _| {
-                if let Some(popup) = state.word_popup.as_deref_mut() {
-                    change(popup);
-                }
-            });
+    inpage::update(move |state| {
+        if let Some(popup) = state.word_popup.as_deref_mut() {
+            change(popup);
         }
     });
 }
@@ -180,42 +169,15 @@ fn update(change: impl FnOnce(&mut Popup) + Send + 'static) {
 /// frame size the card needs, `close()` that the reader dismissed it.
 #[wasm_bindgen]
 pub fn start_word(fonts: js_sys::Array, theme: String, sized: js_sys::Function, close: js_sys::Function) -> Result<(), JsValue> {
-    let fonts = metldr_ui::fonts::read(&fonts, &metldr_ui::fonts::NAMES).map_err(|e| JsValue::from_str(&e))?;
-    THEME.with_borrow_mut(|stored| *stored = theme);
-    CLOSE.with_borrow_mut(|stored| *stored = Some(close));
-    let spec = AppSpec {
-        fonts: metldr_ui::fonts::retain(fonts),
-        families: metldr_ui::fonts::FAMILIES,
-        on_key: Some(key),
-        ..AppSpec::new("metldr word", (WIDTH + 2.0 * MARGIN, 160.0), init, view)
+    let frame = inpage::Frame {
+        title: "metldr word",
+        size: (WIDTH + 2.0 * MARGIN, 160.0),
+        fits: "word-card",
+        init,
+        view,
+        on_key: key,
     };
-    let last = Cell::new((0.0f32, 0.0f32));
-    let app = App::new(spec)
-        .canvas_id("metldr-inpage")
-        .full_viewport()
-        .window_options(WindowOptions { transparent: true, ..Default::default() })
-        .on_frame_drawn(move |runtime| {
-            let Some(([_, _, w, h], _)) = runtime.presented("word-card") else { return };
-            let size = ((w + 2.0 * MARGIN).ceil(), (h + 2.0 * MARGIN).ceil());
-            if size != last.replace(size) {
-                let _ = sized.call2(&JsValue::NULL, &size.0.into(), &size.1.into());
-            }
-        });
-    let handle = app.handle();
-    app.try_run().map_err(|error| JsValue::from_str(&error))?;
-    HOST.with_borrow_mut(|host| *host = Some(handle));
-    Ok(())
-}
-
-/// Redraws the popup in `theme`, the one the reader just picked.
-#[wasm_bindgen]
-pub fn word_theme(theme: String) {
-    let palette = Palette::for_theme(&theme);
-    THEME.with_borrow_mut(|stored| *stored = theme);
-    update(move |state| {
-        state.typography = Typography::new(1.0, &palette);
-        state.palette = palette;
-    });
+    inpage::start(frame, fonts, theme, sized, Some(close))
 }
 
 /// Shows `word` while its lookup runs.

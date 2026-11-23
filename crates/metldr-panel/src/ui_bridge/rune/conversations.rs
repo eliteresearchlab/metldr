@@ -518,7 +518,7 @@ impl Conversations {
     }
 }
 
-const CLOSE: Icon = Icon {
+pub(super) const CLOSE: Icon = Icon {
     name: "metldr-close",
     view: 24.0,
     body: "<path d=\"M18 6 6 18M6 6l12 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\"/>",

@@ -18,6 +18,10 @@ export function capturePage(find) {
     }
     return { found: false };
   }
+  // A PDF tab shows the browser's viewer, not the document; the chat reads the file instead.
+  if (document.contentType === "application/pdf") {
+    return { title: document.title || decodeURIComponent(location.pathname.split("/").pop() ?? ""), pdf: true };
+  }
   const BLOCK_LIMIT = 4000;
   const TEXT_LIMIT = 65536;
   const SKIP = "script,style,noscript,template,svg,canvas,iframe,object,embed,video,audio,form,fieldset,label:has(input,textarea,select),input,textarea,select,button,nav,aside,dialog,[hidden],[inert],[aria-hidden='true'],[role='navigation'],[role='banner'],[role='contentinfo'],[role='complementary'],[role='search'],[role='dialog'],[role='textbox']";

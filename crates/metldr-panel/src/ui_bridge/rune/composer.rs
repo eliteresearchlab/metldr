@@ -56,7 +56,7 @@ const MIC: Icon = Icon {
     view: 24.0,
     body: "<path d=\"M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
 };
-const CHECK: Icon = Icon {
+pub(super) const CHECK: Icon = Icon {
     name: "metldr-check",
     view: 24.0,
     body: "<path d=\"M20 6 9 17l-5-5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",

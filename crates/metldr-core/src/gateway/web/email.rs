@@ -139,7 +139,7 @@ pub async fn email_summary(
         });
     }
     let event = counts::Event::Summary {
-        email: true,
+        of: counts::Read::Email,
         words_in: content.split_whitespace().count() as f64,
         words_out: text.split_whitespace().count() as f64,
         tokens_out: (text.len() as f64 / 4.0).round(),

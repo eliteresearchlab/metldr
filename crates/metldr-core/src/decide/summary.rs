@@ -204,7 +204,8 @@ pub fn classify(page: &Value, prefs: &Prefs, manual: bool) -> Decision {
     if listed(&prefs.denylist) {
         return decide("skip", "denylist");
     }
-    if !content_type.starts_with("text/") {
+    // A PDF arrives as the text an extension page read from it.
+    if !content_type.starts_with("text/") && content_type != "application/pdf" {
         return decide("skip", "non_text");
     }
     if manual {
@@ -297,9 +298,11 @@ mod checks {
             decide("skip", "denylist")
         );
         assert_eq!(
-            classify(&json!({"contentType": "application/pdf"}), &auto, false),
+            classify(&json!({"contentType": "image/png"}), &auto, false),
             decide("skip", "non_text")
         );
+        let pdf = json!({"contentType": "application/pdf", "wordCount": 900});
+        assert_eq!(classify(&pdf, &manual, true), decide("auto", "manual_trigger"));
         assert_eq!(
             classify(&article("https://a.io", 50), &manual, true),
             decide("skip", "too_short")

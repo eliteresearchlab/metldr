@@ -9,7 +9,7 @@ export class PageService {
     const source = {
       sourceId: url || '',
       sourceUrl: url || '',
-      sourceType: 'article' as const,
+      sourceType: extractedData.contentType === 'application/pdf' ? 'pdf' as const : 'article' as const,
       title: title || url || 'Untitled Article'
     }
     if (url && content) {
