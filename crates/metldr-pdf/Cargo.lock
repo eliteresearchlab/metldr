@@ -1468,8 +1468,6 @@ dependencies = [
  "js-sys",
  "liteparse",
  "liteparse-pdfium-sys",
- "serde",
- "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
