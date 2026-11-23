@@ -45,7 +45,8 @@ pub(super) fn start(
     sized: js_sys::Function,
     close: Option<js_sys::Function>,
 ) -> Result<(), JsValue> {
-    let fonts = metldr_ui::fonts::read(&fonts, &metldr_ui::fonts::NAMES).map_err(|e| JsValue::from_str(&e))?;
+    let fonts = metldr_ui::fonts::read(&fonts, &metldr_ui::fonts::NAMES);
+    let fonts = fonts.map_err(|error| JsValue::from_str(&error))?;
     THEME.with_borrow_mut(|stored| *stored = theme);
     CLOSE.with_borrow_mut(|stored| *stored = close);
     let spec = AppSpec {

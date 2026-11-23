@@ -97,7 +97,7 @@ fn tools(state: &mut State) -> Option<&mut Tools> {
 }
 
 /// A labelled key of the bar, or an icon-only one when `text` is empty.
-fn key_el(t: Typography, p: &Palette, key: &'static str, icon: &'static Icon, text: &'static str, label: &'static str) -> El {
+fn key_el(t: Typography, p: &Palette, key: &'static str, icon: &'static Icon, text: &'static str) -> El {
     let mut out = row()
         .key(key)
         .h(32.0)
@@ -108,8 +108,7 @@ fn key_el(t: Typography, p: &Palette, key: &'static str, icon: &'static Icon, te
         .child(::rune::el::icon(icon, 15.0).color(p.ink_2))
         .hover(p.hover)
         .press(p.line_strong)
-        .press_scale(metldr_ui::theme::PRESS_SCALE)
-        .label(label);
+        .press_scale(metldr_ui::theme::PRESS_SCALE);
     if !text.is_empty() {
         out = out.child(t.text(text).font(t.font(13.0, 500.0)).color(p.ink));
     }
@@ -120,17 +119,17 @@ fn bar(s: &Tools) -> El {
     let (p, t) = (&s.palette, s.typography);
     let props = metldr_ui::button::Props { disabled: s.busy(), focusable_when_disabled: true };
     let summarize = metldr_ui::button::button(
-        key_el(t, p, "pdf-summarize", &SUMMARY, "Summarize", "Summarize this PDF").busy(s.busy()),
+        key_el(t, p, "pdf-summarize", &SUMMARY, "Summarize").label("Summarize this PDF").busy(s.busy()),
         props,
         |_: &mut State, _| act("summarize"),
     );
     let chat = metldr_ui::button::button(
-        key_el(t, p, "pdf-chat", &MESSAGE, "Chat", "Chat about this PDF"),
+        key_el(t, p, "pdf-chat", &MESSAGE, "Chat").label("Chat about this PDF"),
         Default::default(),
         |_: &mut State, _| act("chat"),
     );
-    let bar = row().gap(2.0).padding(4.0).radius(12.0).fill(p.surface).border(1.0, p.line).child(summarize).child(chat);
-    let bar = metldr_ui::toolbar::toolbar(bar, "PDF tools", Default::default());
+    let bar = row().gap(2.0).padding(4.0).radius(12.0).fill(p.surface).border(1.0, p.line);
+    let bar = metldr_ui::toolbar::toolbar(bar.child(summarize).child(chat), "PDF tools", Default::default());
     card_shadow(bar, p)
 }
 
@@ -157,7 +156,9 @@ fn card(s: &Tools) -> Option<El> {
                 .press(p.press_solid)
                 .press_scale(metldr_ui::theme::PRESS_SCALE)
                 .child(t.text("Choose the file").font(t.font(13.0, 600.0)).color(p.surface));
-            let choose = metldr_ui::button::button(choose, Default::default(), |_: &mut State, _| act("choose"));
+            let choose = metldr_ui::button::button(choose, Default::default(), |_: &mut State, _| {
+                act("choose");
+            });
             col()
                 .gap(10.0)
                 .w_full()
@@ -172,7 +173,8 @@ fn card(s: &Tools) -> Option<El> {
                     .child(t.text("\u{2022}").font(t.font(13.0, 600.0)).color(p.accent))
                     .child(t.text(text.clone()).font(t.font(13.0, 400.0).lh(19.5)).grow(1.0).shrink().wrap())
             };
-            let list = col().key("pdf-points").w_full().max_h(320.0).gap(8.0).children(bullets.iter().map(point));
+            let list = col().key("pdf-points").w_full().max_h(320.0).gap(8.0);
+            let list = list.children(bullets.iter().map(point));
             metldr_ui::scroll_area::viewport(list, "Summary", false)
         }
     };
@@ -188,16 +190,12 @@ fn card(s: &Tools) -> Option<El> {
         .child(t.text(title).font(t.font(14.0, 650.0)).color(p.ink).role("heading").grow(1.0));
     if matches!(s.phase, Phase::Summary { .. }) {
         let (icon, label) = if s.copied { (&CHECK, "Copied") } else { (&COPY, "Copy summary") };
-        let copy = metldr_ui::button::button(key_el(t, p, "pdf-copy", icon, "", label), Default::default(), |state: &mut State, _| {
-            act("copy");
-            if let Some(tools) = tools(state) {
-                tools.copied = true;
-            }
-        });
+        let copy = key_el(t, p, "pdf-copy", icon, "").label(label);
+        let copy = metldr_ui::button::button(copy, Default::default(), |_: &mut State, _| act("copy"));
         head = head.child(copy);
     }
     let close = metldr_ui::button::button(
-        key_el(t, p, "pdf-close", &CLOSE, "", "Close"),
+        key_el(t, p, "pdf-close", &CLOSE, "").label("Close"),
         Default::default(),
         |state: &mut State, _| dismiss(state),
     );
@@ -247,7 +245,12 @@ fn key(state: &mut State, event: &KeyEvent, _: &mut Tx) -> bool {
 /// Starts the PDF tools in `theme` with the interface `fonts`; `sized(width, height)` hears the
 /// frame size they need and `act(name)` each action pressed.
 #[wasm_bindgen]
-pub fn start_pdf(fonts: js_sys::Array, theme: String, sized: js_sys::Function, act: js_sys::Function) -> Result<(), JsValue> {
+pub fn start_pdf(
+    fonts: js_sys::Array,
+    theme: String,
+    sized: js_sys::Function,
+    act: js_sys::Function,
+) -> Result<(), JsValue> {
     ACT.with_borrow_mut(|stored| *stored = Some(act));
     let frame = inpage::Frame {
         title: "metldr PDF tools",
@@ -264,11 +267,22 @@ pub fn start_pdf(fonts: js_sys::Array, theme: String, sized: js_sys::Function, a
 /// `{phase: "summary", bullets}` or `{phase: "failed", error}`, as JSON.
 #[wasm_bindgen]
 pub fn pdf_phase(report: String) {
-    let phase = serde_json::from_str(&report).unwrap_or_else(|_| Phase::Failed { error: "The PDF tools failed.".into() });
+    let failed = || Phase::Failed { error: "The PDF tools failed.".into() };
+    let phase = serde_json::from_str(&report).unwrap_or_else(|_| failed());
     inpage::update(move |state| {
         if let Some(tools) = tools(state) {
             tools.phase = phase;
             tools.copied = false;
+        }
+    });
+}
+
+/// The summary reached the clipboard.
+#[wasm_bindgen]
+pub fn pdf_copied() {
+    inpage::update(|state| {
+        if let Some(tools) = tools(state) {
+            tools.copied = true;
         }
     });
 }

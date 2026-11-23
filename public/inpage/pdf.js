@@ -1,11 +1,13 @@
 // The PDF tools' frame over a PDF tab. The extension names the tab's PDF, never the page around
 // the frame; this page reads it, has the extension summarize its text, and tells the page only
 // the size the tools need.
-import init, { inpage_theme, pdf_phase, start_pdf } from '/chat/rune/metldr_panel.js'
+import init, { inpage_theme, pdf_copied, pdf_phase, start_pdf } from '/chat/rune/metldr_panel.js'
 import { readPdf, readPdfAt } from './read-pdf.js'
 
 const post = message => parent.postMessage({ metldr: 'pdf', ...message }, '*')
 const phase = report => pdf_phase(JSON.stringify(report))
+const failed = error => phase({ phase: 'failed', error })
+const SCANNED = 'This PDF has no text to read. Scanned pages need text recognition, which is not available yet.'
 let tab = null
 let bullets = []
 
@@ -17,12 +19,13 @@ async function fonts() {
 
 // The text's summary from the extension's page summary pipeline: cached per PDF, counted in stats.
 async function summarize(text) {
-  if (!text) return phase({ phase: 'failed', error: 'This PDF has no text to read. Scanned pages need text recognition, which is not available yet.' })
+  if (!text) return failed(SCANNED)
   phase({ phase: 'summarizing' })
-  const reply = await chrome.runtime.sendMessage({ type: 'EXTRACT_AND_SUMMARIZE', trigger: 'manual', text }).catch(() => null)
+  const request = { type: 'EXTRACT_AND_SUMMARIZE', trigger: 'manual', text }
+  const reply = await chrome.runtime.sendMessage(request).catch(error => ({ error: error.message }))
   bullets = reply?.success ? reply.summary?.bullets ?? [] : []
-  if (bullets.length) phase({ phase: 'summary', bullets })
-  else phase({ phase: 'failed', error: reply?.error || (reply?.skip ? 'This PDF has too little text to summarize.' : 'The summary failed.') })
+  if (bullets.length) return phase({ phase: 'summary', bullets })
+  failed(reply?.error || (reply?.skip ? 'This PDF has too little text to summarize.' : 'The summary failed.'))
 }
 
 async function run(read) {
@@ -30,12 +33,13 @@ async function run(read) {
   try {
     await summarize(await read())
   } catch (error) {
-    phase({ phase: 'failed', error: error?.message || 'This PDF could not be read.' })
+    failed(error?.message || 'This PDF could not be read.')
   }
 }
 
 // A PDF on this computer is the reader's to hand over: only a file they choose can be read.
-const picker = Object.assign(document.createElement('input'), { type: 'file', accept: 'application/pdf,.pdf', hidden: true })
+const picker = document.createElement('input')
+Object.assign(picker, { type: 'file', accept: 'application/pdf,.pdf', hidden: true })
 picker.addEventListener('change', () => {
   const file = picker.files[0]
   picker.value = ''
@@ -50,8 +54,19 @@ const actions = {
     else run(() => readPdfAt(tab.url))
   },
   choose: () => picker.click(),
-  copy: () => navigator.clipboard.writeText(bullets.map(point => `• ${point}`).join('\n')).catch(() => {}),
-  chat: () => chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL', focus: 'chat' }).catch(() => {})
+  async copy() {
+    const text = bullets.map(point => `• ${point}`).join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+      pdf_copied()
+    } catch {
+      failed('The summary could not be copied.')
+    }
+  },
+  async chat() {
+    const reply = await chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL', focus: 'chat' }).catch(() => null)
+    if (reply?.success === false) failed(reply.error || 'The chat could not open.')
+  }
 }
 
 const [files, stored, pulled] = await Promise.all([
@@ -61,7 +76,9 @@ const [files, stored, pulled] = await Promise.all([
   init()
 ])
 tab = pulled
-start_pdf(files, stored.theme ?? 'catppuccin', (width, height) => post({ size: [width, height] }), name => actions[name]?.())
+const sized = (width, height) => post({ size: [width, height] })
+start_pdf(files, stored.theme ?? 'catppuccin', sized, name => actions[name]?.())
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && typeof changes.theme?.newValue === 'string') inpage_theme(changes.theme.newValue)
+  const theme = area === 'local' ? changes.theme?.newValue : undefined
+  if (typeof theme === 'string') inpage_theme(theme)
 })
