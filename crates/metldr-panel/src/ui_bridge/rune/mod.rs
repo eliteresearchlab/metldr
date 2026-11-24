@@ -902,6 +902,10 @@ fn setup(state: &mut State, wake: ::rune::Waker) {
 
 fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
     let appearance_changed = state.preferences.poll() | state.page_tools.poll() | state.stats.poll();
+    // A model set up while the panel waits for one: start again with it.
+    if state.page_tools.take_routes_changed() && matches!(state.session, Session::Failed) {
+        state.review(tx);
+    }
     let Some(updates) = state.updates.clone() else {
         return appearance_changed;
     };
@@ -1823,23 +1827,39 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .child(col().w_full().items_center().padding(12.0).child(composer));
         }
         if matches!(state.session, Session::Failed) {
-            if let Some(error) = state
+            // Neither the companion nor a model on this device or with a key answered: the
+            // reader needs one before metldr can chat, so the panel offers to set one up.
+            let error = state
                 .updates
                 .as_ref()
                 .and_then(|updates| updates.presentation.borrow().error.clone())
-            {
-                thread = thread.child(typography.text(error).role("status").wrap());
+                .filter(|error| error != "host disconnected");
+            let mut setup = col()
+                .key("panel-setup")
+                .w_full()
+                .gap(10.0)
+                .child(typography.text("metldr needs a model to answer").role("heading"))
+                .child(
+                    typography
+                        .text("Use a model on this device, an AI provider key, or the metldr companion.")
+                        .wrap()
+                        .color(palette.ink_2),
+                );
+            if let Some(error) = error {
+                setup = setup.child(typography.text(error).role("status").wrap());
             }
-            thread = thread.child(
-                typography
-                    .text("Reload")
-                    .role("button")
-                    .focusable(true)
-                    .on_press_tx(|state: &mut State, tx| state.review(tx))
-                    .on_key(|state: &mut State, key, tx| {
-                        composer::enter(state, key, tx, State::review)
-                    }),
-            );
+            let action = |label: &'static str, key: &'static str| {
+                preferences::outlined(typography, label, key).border(1.0, typography.line).press(typography.press)
+            };
+            let set_up = metldr_ui::button::button(action("Set up", "panel-setup-open"), Default::default(), |state: &mut State, _| {
+                state.sound(crate::interaction_audio::Cue::Press);
+                state.open_setup();
+            });
+            let retry = metldr_ui::button::button(action("Try again", "panel-setup-retry"), Default::default(), |state: &mut State, tx| {
+                state.sound(crate::interaction_audio::Cue::Press);
+                state.review(tx);
+            });
+            thread = thread.child(setup.child(row().gap(8.0).child(set_up).child(retry)));
         }
         return col()
             .w_full()

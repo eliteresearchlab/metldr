@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use wasm_bindgen::closure::Closure;
 
 const POPUP: &str = "wordPopupEnabled";
+/// The model gateway's settings in the core (`metldr.gateway`): routes the setup page saves.
+const ROUTES: &str = "metldr.gateway";
 /// The page summary settings' key (summary_settings.rs).
 const SUMMARY_PREFS: &str = "summaryPrefs";
 /// The service worker's dictionary keys; a change to any of them is a new state to show.
@@ -36,6 +38,8 @@ struct Language {
 
 #[derive(Default)]
 struct Inbox {
+    /// The model routes' settings changed (the setup page saved one).
+    routes: bool,
     popup: Option<bool>,
     dictionaries: Option<Dictionaries>,
     cleared: Option<bool>,
@@ -87,6 +91,12 @@ impl PageTools {
                         wake();
                     }
                 }
+                if has(ROUTES) {
+                    inbox.borrow_mut().routes = true;
+                    if let Some(wake) = &wake {
+                        wake();
+                    }
+                }
                 if has(SUMMARY_PREFS) {
                     summaries.load(wake.clone());
                 }
@@ -123,6 +133,11 @@ impl PageTools {
     }
 
     /// Takes what arrived since the last frame; true when the section changes.
+    /// Whether the model routes' settings changed since the last call.
+    pub(super) fn take_routes_changed(&mut self) -> bool {
+        std::mem::take(&mut self.inbox.borrow_mut().routes)
+    }
+
     /// What redraws the panel once a request answers.
     pub(super) fn wake(&self) -> Option<::rune::Waker> {
         self.wake.clone()
