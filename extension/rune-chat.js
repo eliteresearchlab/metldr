@@ -1,7 +1,8 @@
 import { capturePage } from "./page-capture.js";
 
 // The fonts ship beside the wasm, not inside it. The interface fonts load while the graphics check
-// runs; the fallbacks for other scripts and emoji (about 33 MB) wait until the chat has drawn.
+// runs; the fallbacks for other scripts (about 3 MB) wait until the chat has drawn, and the CJK
+// and emoji fonts until it lays out text that needs them.
 async function load(url) {
   const response = await fetch(new URL(url, location.href));
   if (!response.ok) throw new Error(`${url} could not load (${response.status})`);
@@ -109,7 +110,8 @@ if (!(await canDraw())) {
   const chat = await glue;
   const { default: init, start_rune_chat, stop_rune_chat, add_rune_chat_fonts } = chat;
   const [files] = await Promise.all([fonts, init()]);
-  // The chat asks for the CJK collection (about 19.5 MB) only once it lays out CJK text.
+  // The chat asks for the CJK collection (about 19.5 MB) and the colour emoji (about 10.5 MB)
+  // only once it lays out text that needs them.
   start_rune_chat(capturePage, documents(chat), readTabPdf, files, group => addGroup(add_rune_chat_fonts, group));
   window.addEventListener("pagehide", stop_rune_chat, { once: true });
   // Two frames in, the chat has drawn; the other fallbacks follow.

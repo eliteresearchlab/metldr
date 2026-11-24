@@ -26,7 +26,7 @@ use crate::color::Color;
 use crate::tok::{Family, OpticalSize, TextStyle};
 
 mod added;
-pub use added::{add_fonts, cjk_seen};
+pub use added::{add_fonts, cjk_seen, emoji_seen};
 mod atlas;
 mod case;
 mod cursor;
