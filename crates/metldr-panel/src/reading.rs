@@ -20,6 +20,11 @@ pub(crate) struct Capture {
     truncated: bool,
     /// The page's own markdown, when it offers one (`link rel=alternate type=text/markdown`).
     alternate: String,
+    // Present for a page summary; the summary reads them from the capture itself.
+    #[serde(default, rename = "signals")]
+    _signals: Option<serde::de::IgnoredAny>,
+    #[serde(default, rename = "meta")]
+    _meta: Option<serde::de::IgnoredAny>,
 }
 
 impl Capture {

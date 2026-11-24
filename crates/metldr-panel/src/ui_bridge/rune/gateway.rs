@@ -257,29 +257,29 @@ impl Gateway {
         updates: Rc<Updates>,
         manual: bool,
     ) -> Result<(), FlowError> {
-        let (tab, url) = active_tab().await?;
+        let (_, url) = active_tab().await?;
         if !manual && self.summarized.borrow().as_deref() == Some(url.as_str()) {
             return Ok(());
         }
         self.waiting.set(true);
         updates.changed();
-        let trigger = if manual { "manual" } else { "auto" };
-        let mut request = json!({"type":"EXTRACT_AND_SUMMARIZE","tabId":tab,"force":manual,"trigger":trigger});
-        let mut reply = ask_extension(&request).await;
-        // A PDF tab's text comes from the file, read here and summarized by the same pipeline.
-        if reply.as_ref().is_some_and(|reply| reply["pdf"] == true) {
-            reply = match crate::flow::read_pdf(&url).await {
-                Ok(text) if !text.is_empty() => {
-                    request["text"] = Value::String(text);
-                    ask_extension(&request).await
+        // The page is read as the chat reads it (a PDF tab's file included), then summarized.
+        let reply = match capture(true).await {
+            Ok(page) => {
+                let trigger = if manual { "manual" } else { "auto" };
+                let mut about = page.about;
+                about["title"] = Value::String(page.title);
+                about["content"] = Value::String(page.markdown);
+                if page.pdf {
+                    about["contentType"] = "application/pdf".into();
                 }
-                Ok(_) => Some(json!({"error": SCANNED})),
-                Err(error) => Some(json!({"error": error.to_string()})),
-            };
-        }
+                let request = json!({"type":"SUMMARIZE_PAGE","tabId":page.tab,"force":manual,"trigger":trigger,"page":about});
+                ask_extension(&request).await.unwrap_or_default()
+            }
+            Err(error) => json!({"error": error.to_string()}),
+        };
         self.waiting.set(false);
         updates.changed();
-        let reply = reply.unwrap_or_default();
         let Some(text) = summary_text(&reply["summary"]).filter(|_| reply["success"] == true) else {
             return match reply["error"].as_str() {
                 Some(error) if manual => Err(FlowError::Host(error.to_owned())),
@@ -314,9 +314,9 @@ impl Gateway {
         let (url, title, markdown) = match attached {
             Some(attached) => attached,
             None => {
-                let captured = capture().await?;
-                self.switch(&page_key(&captured.0), &updates).await;
-                captured
+                let page = capture(false).await?;
+                self.switch(&page_key(&page.url), &updates).await;
+                (page.url, page.title, page.markdown)
             }
         };
         let same_page = self.page.borrow().as_deref() == Some(url.as_str());
@@ -764,8 +764,20 @@ pub(super) async fn show_words(page: &str, words: &str) -> Result<(), FlowError>
     crate::await_call(&scripting, "executeScript", &[details]).await.map(|_| ()).map_err(|_| failure())
 }
 
-/// The active tab's main content as markdown, captured without the companion.
-async fn capture() -> Result<(String, String, String), FlowError> {
+/// The active tab's page, captured without the companion.
+struct Captured {
+    tab: f64,
+    url: String,
+    title: String,
+    /// The main content as markdown, or a PDF's text.
+    markdown: String,
+    pdf: bool,
+    /// When asked for: what the summary settings judge the page by (`pageSignals`) and its byline.
+    about: Value,
+}
+
+/// The active tab's main content as markdown; with `about`, also its signals and byline.
+async fn capture(about: bool) -> Result<Captured, FlowError> {
     let failure = |message: &str| FlowError::Host(message.into());
     let api = |name: &str| crate::chrome_api(name).map_err(|_| failure("The browser API is unavailable."));
     let (id, url) = active_tab().await?;
@@ -775,7 +787,7 @@ async fn capture() -> Result<(String, String, String), FlowError> {
         return Err(failure("Allow metldr on this site in the extension's site access first."));
     }
     let script = crate::flow::capture_function().ok_or_else(|| failure("Page capture is unavailable."))?;
-    let details = crate::flow::json_value(&json!({"target":{"tabId":id}}))?;
+    let details = crate::flow::json_value(&json!({"target":{"tabId":id},"args":[null, about]}))?;
     js_sys::Reflect::set(&details, &"func".into(), script.as_ref())
         .map_err(|_| failure("Page capture is unavailable."))?;
     let values = crate::await_call(&api("scripting")?, "executeScript", &[details])
@@ -785,7 +797,16 @@ async fn capture() -> Result<(String, String, String), FlowError> {
         .map_err(|_| failure("The page could not be read."))?;
     let title = crate::string_property(&observed, "title").unwrap_or_default();
     // A PDF tab shows the browser's viewer, so the file is read instead of the page.
-    let markdown = if crate::get(&observed, "pdf").is_ok_and(|pdf| pdf.is_truthy()) {
+    let pdf = crate::get(&observed, "pdf").is_ok_and(|pdf| pdf.is_truthy());
+    let mut described = json!({});
+    if about && !pdf {
+        let meta = crate::get(&observed, "meta").ok().and_then(|meta| json_of(&meta)).unwrap_or_default();
+        described = json!({
+            "pageSignals": crate::get(&observed, "signals").ok().and_then(|signals| json_of(&signals)),
+            "author": meta["author"], "publication": meta["publication"], "publishDate": meta["publishDate"],
+        });
+    }
+    let markdown = if pdf {
         let text = crate::flow::read_pdf(&url).await?;
         if text.is_empty() {
             return Err(failure(SCANNED));
@@ -794,7 +815,7 @@ async fn capture() -> Result<(String, String, String), FlowError> {
     } else {
         crate::flow::page_text(&observed, &url, crate::reading::FULL_PAGE).await?
     };
-    Ok((url, title, markdown))
+    Ok(Captured { tab: id, url, title, markdown, pdf, about: described })
 }
 
 #[cfg(test)]
