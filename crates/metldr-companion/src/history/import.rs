@@ -327,8 +327,7 @@ impl Prepared {
                     if let crate::browser_action::Phase::Settled {
                         outcome: crate::browser_action::Outcome::Navigated { binding, .. },
                     } = &action.state
-                    {
-                        if grants
+                        && grants
                             .insert(
                                 (action.proposal.run.as_str(), binding.grant_revision),
                                 action.id.as_str(),
@@ -337,7 +336,6 @@ impl Prepared {
                         {
                             return Err("legacy navigation grant index collision".into());
                         }
-                    }
                     if matches!(
                         action.state,
                         crate::browser_action::Phase::Settled {

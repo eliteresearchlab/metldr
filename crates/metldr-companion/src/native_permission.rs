@@ -220,14 +220,13 @@ impl Owner {
         if pending.run != run {
             return Err("native permission run mismatch".into());
         }
-        if let Some(option) = option {
-            if !pending.details["options"]
+        if let Some(option) = option
+            && !pending.details["options"]
                 .as_array()
                 .is_some_and(|choices| choices.iter().any(|o| o["id"] == option))
             {
                 return Err("native permission choice was not offered".into());
             }
-        }
         let next = self.native_input_state(run)?;
         let pending = self
             .native_permissions

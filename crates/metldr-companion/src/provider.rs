@@ -128,7 +128,7 @@ pub(super) fn provider(
                         | io::ErrorKind::Interrupted
                 ) =>
             {
-                ()
+                
             }
             Err(e) => return Err(e.into()),
         }

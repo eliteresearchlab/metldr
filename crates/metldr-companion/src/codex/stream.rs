@@ -54,8 +54,8 @@ pub(super) async fn run(
             return outcome(terminal.take().unwrap(), &interrupted, review.cancelled);
         }
         let stopping = stop.load(Ordering::Acquire) || review.cancelled;
-        if stopping {
-            if let Some(command) = held_correction.take() {
+        if stopping
+            && let Some(command) = held_correction.take() {
                 corrections.finish(
                     &command.request,
                     Phase::NotSent {
@@ -63,7 +63,6 @@ pub(super) async fn run(
                     },
                 )?;
             }
-        }
         if terminal.is_none() {
             stop_wait.check(stopping, Instant::now())?;
         }

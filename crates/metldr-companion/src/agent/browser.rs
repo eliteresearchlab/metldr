@@ -92,7 +92,7 @@ async fn execute_inner(
         let result = match (result, corrections.close()) {
             (Ok(result), Ok(())) => Ok(result),
             (Err(error), _) => Err(error),
-            (Ok(_), Err(error)) => Err(error.into()),
+            (Ok(_), Err(error)) => Err(error),
         };
         worker_done.store(true, Ordering::Release);
         result

@@ -83,14 +83,12 @@ impl Profile {
         if let Self::Pi {
             provider, model, ..
         } = self
-        {
-            if [provider, model]
+            && [provider, model]
                 .into_iter()
                 .any(|s| s.trim().is_empty() || s.len() > 128 || s.chars().any(char::is_control))
             {
                 return Err("invalid Pi model selection".into());
             }
-        }
         Ok(())
     }
     fn resolve(&self) -> Result<Self> {
@@ -266,18 +264,17 @@ impl Settings {
                 }
                 profile.validate()?;
             }
-            if let Some(r) = &s.last_change {
-                if !valid_request_id(&r.request)
+            if let Some(r) = &s.last_change
+                && (!valid_request_id(&r.request)
                     || r.digest.len() != 64
                     || !r
                         .digest
                         .bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-                    || r.expected_revision.checked_add(1) != Some(s.revision)
+                    || r.expected_revision.checked_add(1) != Some(s.revision))
                 {
                     return Err("invalid agent change receipt".into());
                 }
-            }
         }
         Ok(())
     }
@@ -354,14 +351,13 @@ impl Runtime {
 impl Owner {
     fn admit_agent(&self, id: &str, k: Kind, expected: u64, digest: &str) -> Result<bool> {
         let slot = self.state.agent_settings.slot(k);
-        if let Some(r) = &slot.last_change {
-            if r.request == id {
+        if let Some(r) = &slot.last_change
+            && r.request == id {
                 if r.expected_revision == expected && r.digest == digest {
                     return Ok(false);
                 }
                 return Err("agent request identity already used".into());
             }
-        }
         if !self.operations.is_empty() || self.settings.job.is_some() {
             return Err("agent settings are busy; refresh the view before retrying".into());
         }

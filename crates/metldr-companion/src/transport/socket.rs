@@ -187,11 +187,10 @@ impl SocketTransport {
         if self.active == Some(epoch) {
             self.active = None;
         }
-        if self.pending.is_none() && self.active.is_none() {
-            if let Some(stream) = self.stream.take() {
+        if self.pending.is_none() && self.active.is_none()
+            && let Some(stream) = self.stream.take() {
                 let _ = stream.shutdown(std::net::Shutdown::Both);
             }
-        }
     }
 
     pub(super) fn finish(&mut self) {

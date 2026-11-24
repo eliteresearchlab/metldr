@@ -98,8 +98,8 @@ impl Server {
             if failed.load(Ordering::Acquire) && !stop.load(Ordering::Acquire) && !done.load(Ordering::Acquire) {
                 dispatch_error.get_or_insert_with(|| "Browser service failed; task halted".into());
             }
-            if !stop.load(Ordering::Acquire) && !failed.load(Ordering::Acquire) && !done.load(Ordering::Acquire) && !fatal_cancel && dispatch_error.is_none() {
-                if let Some(request) = pending.pop_front() {
+            if !stop.load(Ordering::Acquire) && !failed.load(Ordering::Acquire) && !done.load(Ordering::Acquire) && !fatal_cancel && dispatch_error.is_none()
+                && let Some(request) = pending.pop_front() {
                     if request.budget.expired() {
                         answer_tool(request, Err("browser tool deadline expired".into()));
                         continue;
@@ -165,7 +165,6 @@ impl Server {
                     }
                     continue;
                 }
-            }
 
             if stop.load(Ordering::Acquire)
                 || failed.load(Ordering::Acquire)
@@ -408,7 +407,8 @@ async fn handle_connection(
         events.send(&mut stream, &body).await;
         return Ok(());
     }
-    let response = match result {
+    
+    match result {
         Ok(Some(body)) => {
             let sent = write_http(&mut stream, 200, &body).await;
             if discovery && sent.is_ok() {
@@ -418,8 +418,7 @@ async fn handle_connection(
         }
         Ok(None) => write_http(&mut stream, 202, "").await,
         Err(error) => write_http(&mut stream, 400, &json_error(error)).await,
-    };
-    response
+    }
 }
 
 async fn process_message(
