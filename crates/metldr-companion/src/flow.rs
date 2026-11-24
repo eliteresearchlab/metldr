@@ -734,7 +734,7 @@ impl Owner {
         disconnected: bool,
     ) -> Result<()> {
         self.stopping.remove(run);
-        let mut operation = self.operations.remove(run).ok_or_else(|| {
+        let mut operation = self.operations.remove(run).ok_or({
             if self.operations.is_empty() {
                 "settlement without operation"
             } else {

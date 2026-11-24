@@ -54,7 +54,7 @@ impl Artifact {
                 }
                 Ok(ArtifactPresentation::Generated {
                     revision,
-                    completion: completion.clone(),
+                    completion: *completion,
                 })
             }
             ArtifactContent::Generated { .. } => Err("generated artifact revision is zero".into()),

@@ -149,11 +149,10 @@ pub(super) fn validate(state: &Store) -> Result<()> {
             }
             if let Some(selection) = selection {
                 selection.validate()?;
-                if let Binding::Bound { identity } = &w.binding {
-                    if identity.selection != *selection {
+                if let Binding::Bound { identity } = &w.binding
+                    && identity.selection != *selection {
                         return Err("OpenCode launch selection differs from bound identity".into());
                     }
-                }
             }
         }
     }

@@ -125,7 +125,7 @@ impl Owner {
                         })
                     })
                 });
-                return acknowledge(ack, result);
+                acknowledge(ack, result)
             }
             Event::Proposed {
                 proposal,

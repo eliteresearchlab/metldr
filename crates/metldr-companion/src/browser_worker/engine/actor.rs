@@ -270,7 +270,7 @@ impl Actor {
             return Err("browser attachment ended".into());
         }
         self.transport.event(runtime::RawEvent {
-            method: notice.method.into(),
+            method: notice.method,
             session: notice.session,
             params: notice.params,
         })?;

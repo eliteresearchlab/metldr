@@ -26,23 +26,77 @@
     const r = element.getBoundingClientRect()
     return { x: r.left, y: r.top, width: r.width, height: r.height }
   }
+  // What tells a control apart when its role and name do not: its icon, its image file, a stable
+  // attribute, and the text of the row or item it sits in. Parts the page lacks are left out.
+  const hintFor = (element, rows) => {
+    const tail = (value, sep) => (value || "").split(sep).pop()
+    const use = element.querySelector("svg use")
+    const svg = element.querySelector("svg[id], svg[data-icon]")
+    const mark = element.querySelector("svg[class], i[class]")
+    const img = element.querySelector("img[src]:not([src^='data:'])")
+    const icon = use ? tail(use.getAttribute("href") || use.getAttribute("xlink:href"), "#")
+      : svg ? svg.id || svg.dataset.icon
+      : mark ? (mark.getAttribute("class") || "").split(/\s+/).filter((c) => /^(lucide|fa|bi|mdi|ri|ti|icon)-/.test(c)).join(" ")
+      : ""
+    const file = img ? tail(img.getAttribute("src").split(/[?#]/)[0], "/").replace(/\.\w+$/, "") : ""
+    // Generated values (three digits in a row) name nothing stable.
+    const key = ["data-testid", "name", "id"].find((k) => /^(?!.*\d{3})[a-z][\w-]*$/i.test(element.getAttribute(k) || ""))
+    // textContent, not innerText: it needs no layout, and one row's text serves all its controls.
+    const row = element.closest("tr, li, article, [role=row], [role=listitem]")
+    let text = row && rows.get(row)
+    if (row && text === undefined) rows.set(row, text = row.textContent.replace(/\s+/g, " ").trim())
+    const own = element.textContent.replace(/\s+/g, " ").trim()
+    const near = text ? (own ? text.replace(own, "") : text).replace(/\s+/g, " ").trim() : ""
+    return [icon && `icon:${icon}`, file && `img:${file}`, key && `${key}:${element.getAttribute(key)}`, near && `in:${near}`]
+      .filter(Boolean).map((part) => part.slice(0, 48)).join("; ")
+  }
+  // An action checks a control's identity name; most equal its name, so those cross to the Rust side
+  // once, and a control with no identity name says so with null.
+  const shareNames = (result) => {
+    for (const entry of result?.entries || []) {
+      if (!entry.selector) continue
+      if (entry.identityName === entry.name) delete entry.identityName
+      else if (entry.identityName === undefined) entry.identityName = null
+    }
+    return result
+  }
+  // Adds a hint to each control of `result` that has no name or shares its role and name with
+  // another control of the same capture; the name itself, and so the ref's identity, is unchanged.
+  const withHints = (helpers, result) => {
+    const controls = (result?.entries || []).filter((entry) => entry.selector && !entry.iframe)
+    const counts = new Map()
+    const label = (entry) => `${entry.selectorRole || entry.role}\u0000${entry.name}`
+    for (const entry of controls) counts.set(label(entry), (counts.get(label(entry)) || 0) + 1)
+    const rows = new Map()
+    for (const entry of controls) {
+      if (entry.name && counts.get(label(entry)) === 1) continue
+      // A plain CSS path is a direct lookup; a path through a shadow root (`>>`) needs the selector engine.
+      let element
+      try {
+        element = entry.selector.includes(">>") ? helpers.queryAll(entry.selector)[0] : document.querySelector(entry.selector)
+      } catch { continue }
+      const hint = element ? hintFor(element, rows) : ""
+      if (hint) entry.details = [entry.details, `hint=${JSON.stringify(hint)}`].filter(Boolean).join(" ")
+    }
+    return result
+  }
 
   return {
     inj: undefined,
 
     // Compact snapshot capture (today's snapshot()).
     capture(settings) {
-      return capture(settings)
+      return shareNames(withHints(this, capture(settings)))
     },
     captureWithin(element, settings) {
-      return capture(element, settings)
+      return shareNames(withHints(this, capture(element, settings)))
     },
     // A within root given as a snapshot ref, resolved as actions resolve it (selector chains through shadow roots
     // included). { refStatus } when it doesn't resolve to one element.
     captureRef(id, role, name, selector, settings) {
       const found = this.refResolve(id, role, name, selector)
       if (typeof found === "string") return { refStatus: found }
-      return capture(found, settings)
+      return shareNames(withHints(this, capture(found, settings)))
     },
     // A within root given as a Playwright selector: the only match, else the first visible one with a note, as the
     // CSS path in capture does. null when nothing matches.
@@ -51,7 +105,7 @@
       if (matches.length === 0) return null
       const visible = (element) => element.checkVisibility?.({ visibilityProperty: true }) ?? true
       const root = matches.length === 1 ? matches[0] : (matches.find(visible) ?? matches[0])
-      const result = capture(root, settings)
+      const result = shareNames(withHints(this, capture(root, settings)))
       if (matches.length > 1) {
         const which = visible(root) ? "the first visible one" : "the first (none is visible)"
         result.notes = [`within "${selector}" matched ${matches.length} elements; showing ${which}`, ...(result.notes || [])]

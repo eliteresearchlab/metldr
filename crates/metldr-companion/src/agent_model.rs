@@ -328,16 +328,15 @@ pub(super) fn validate(state: &Store) -> Result<()> {
             } => Some((&session.id, &session.path)),
             _ => None,
         };
-        if let Some((id, path)) = identity {
-            if id.is_empty()
+        if let Some((id, path)) = identity
+            && (id.is_empty()
                 || id.len() > 128
                 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
                 || path.parent() != Some(w.profile.session_dir.as_path())
-                || path.extension().is_none_or(|s| s != "jsonl")
+                || path.extension().is_none_or(|s| s != "jsonl"))
             {
                 return Err("invalid native session binding".into());
             }
-        }
     }
     Ok(())
 }

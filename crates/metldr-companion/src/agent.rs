@@ -137,11 +137,9 @@ fn session(
         id: old_id,
         path: old_path,
     } = &job.binding
-    {
-        if &id != old_id || &path != old_path {
+        && (&id != old_id || &path != old_path) {
             return Err("Pi restored a different native session".into());
         }
-    }
     let (ack, committed) = mpsc::sync_channel(1);
     tx.send(Event::PiBound {
         run: job.run.clone(),
@@ -163,14 +161,10 @@ fn session(
         if failed.load(Ordering::Acquire) {
             return Err("Pi browser tools were not discovered before its prompt".into());
         }
-        match setup_event(pi, ui, &mut deadline, true)? {
-            Some(event) => {
-                if event["type"] == "extension_error" {
-                    return Err("Pi extension failed while browser tools were loading".into());
-                }
+        if let Some(event) = setup_event(pi, ui, &mut deadline, true)?
+            && event["type"] == "extension_error" {
+                return Err("Pi extension failed while browser tools were loading".into());
             }
-            None => (),
-        }
     }
     if failed.load(Ordering::Acquire) {
         return Err("Pi browser service ended before its prompt".into());
@@ -235,8 +229,8 @@ fn stream(
         {
             return Err("Pi correction response deadline expired".into());
         }
-        if stop.load(Ordering::Acquire) {
-            if let Some(command) = held_correction.take() {
+        if stop.load(Ordering::Acquire)
+            && let Some(command) = held_correction.take() {
                 corrections.finish(
                     &command.request,
                     Phase::NotSent {
@@ -244,7 +238,6 @@ fn stream(
                     },
                 )?;
             }
-        }
         if failed.load(Ordering::Acquire) {
             return Err("Pi browser service failed; task halted".into());
         }
@@ -286,8 +279,8 @@ fn stream(
                             deadline: Instant::now() + Duration::from_secs(15),
                         });
                     }
-                } else if !stop.load(Ordering::Acquire) && pending_correction.is_none() {
-                    if let Some(command) = corrections.take()? {
+                } else if !stop.load(Ordering::Acquire) && pending_correction.is_none()
+                    && let Some(command) = corrections.take()? {
                         if corrections.authorize(&command, &Target::Pi, stop)? {
                             held_correction = Some(command);
                         } else {
@@ -299,7 +292,6 @@ fn stream(
                             )?;
                         }
                     }
-                }
                 continue;
             }
             Err(e) => return Err(e),

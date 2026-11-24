@@ -233,19 +233,17 @@ pub(super) fn fit_wire(reply: &mut Value) -> Result<()> {
                     for name in ["title", "input", "output"] {
                         if let Some(preview) =
                             report.get_mut("call").and_then(|call| call.get_mut(name))
-                        {
-                            if !preview["text"].as_str().unwrap_or("").is_empty() {
+                            && !preview["text"].as_str().unwrap_or("").is_empty() {
                                 preview["text"] = Value::String(String::new());
                                 preview["truncated"] = Value::Bool(true);
                             }
-                        }
                     }
                 }
             }
         }
     }
-    if serde_json::to_vec(reply)?.len() > crate::FRAME_MAX {
-        if let Some(runs) = reply["view"]["runs"].as_array_mut() {
+    if serde_json::to_vec(reply)?.len() > crate::FRAME_MAX
+        && let Some(runs) = reply["view"]["runs"].as_array_mut() {
             for run in runs {
                 if let Some(reports) = run["activity"].as_array_mut() {
                     for report in reports {
@@ -257,7 +255,6 @@ pub(super) fn fit_wire(reply: &mut Value) -> Result<()> {
                 }
             }
         }
-    }
     if serde_json::to_vec(reply)?.len() > crate::FRAME_MAX {
         return Err("required native view exceeds frame bound".into());
     }

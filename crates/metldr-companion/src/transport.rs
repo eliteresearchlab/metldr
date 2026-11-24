@@ -117,11 +117,10 @@ impl Transport {
         }
         reap(&mut self.readers);
         #[cfg(unix)]
-        if let Mode::Socket(socket) = &mut self.mode {
-            if let Some(reader) = socket.poll(tx, self.readers.is_empty())? {
+        if let Mode::Socket(socket) = &mut self.mode
+            && let Some(reader) = socket.poll(tx, self.readers.is_empty())? {
                 self.readers.push(reader);
             }
-        }
         Ok(())
     }
 
