@@ -63,8 +63,23 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
   .catch(error => console.error('metldr could not set the side panel behaviour.', error));
 
+// Tabs open before an install or update have no content script of this version: each gets the
+// one its page would load (Gmail's or every other page's).
+async function injectOpenTabs(): Promise<void> {
+  const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*', 'file:///*'] });
+  await Promise.all(tabs.map(tab => {
+    if (tab.id === undefined || tab.discarded) return undefined;
+    const gmail = tab.url?.startsWith('https://mail.google.com/') === true;
+    return chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [gmail ? 'gmail.js' : 'content.js'] })
+      .catch(() => undefined);
+  }));
+}
+
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
     chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+  }
+  if (details.reason === 'install' || details.reason === 'update') {
+    injectOpenTabs().catch(error => console.error('metldr could not reach the open tabs.', error));
   }
 });

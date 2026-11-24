@@ -7,6 +7,12 @@ import { ArticleExtractor } from '../content-ui/ArticleExtractor'
 
 const isPdf = document.contentType === 'application/pdf'
 
+// After an update the extension injects this script into tabs already open. The previous
+// version's script there is cut off from the extension: it is told to stop, and the frames it
+// left go.
+document.dispatchEvent(new Event('metldr:retire'))
+for (const stale of document.querySelectorAll('iframe[aria-label^="metldr "]')) stale.remove()
+
 chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
   if (msg?.type !== 'EXTRACT_ARTICLE') return false
   // The extension page asking reads a PDF's file itself.
@@ -28,5 +34,5 @@ if (isPdf) {
   showPdfTools()
 } else {
   const words = new WordFrame()
-  document.addEventListener('dblclick', event => words.handleTextSelection(event))
+  document.addEventListener('metldr:retire', () => words.retire(), { once: true })
 }
