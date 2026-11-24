@@ -10,7 +10,7 @@ import { emailFromDom } from '../content-ui/gmailDom'
 chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
   if (msg?.type !== 'GET_EMAIL_CONTENT') return false
   try {
-    const email = emailExtractor.getLastExtracted() ?? emailFromDom()
+    const email = emailExtractor.lastRead() ?? emailFromDom()
     respond(email ? { success: true, content: email.content, metadata: email.metadata } : { success: false, error: 'no email content found' })
   } catch (err) {
     console.error('metldr: email content extraction failed:', err)
@@ -20,5 +20,5 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
 })
 
 InboxSDK.load(2, INBOXSDK_APP_ID)
-  .then(sdk => emailExtractor.init(sdk, () => {}))
+  .then(sdk => emailExtractor.init(sdk))
   .catch(err => console.error('metldr: gmail setup failed:', err))

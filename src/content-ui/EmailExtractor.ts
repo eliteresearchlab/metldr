@@ -1,632 +1,169 @@
+import type { InboxSDK, MessageView, ThreadView } from '@inboxsdk/core'
 import { summaryFrame } from './SummaryFrame'
 import { replyFrame } from './ReplyFrame'
-import type { 
-  ThreadView, 
-  MessageView, 
-  Contact, 
-  EmailMetadata as BaseEmailMetadata,
-  EmailProcessCallback 
-} from '../types'
+import { threadFromUrl } from './gmailDom'
 
-const gmailThreadPattern = /#[^/]+\/(?:[^/]+\/)?([A-Za-z0-9_-]{16,})$/
+// The open Gmail thread, read through InboxSDK: its messages as text and the headers the
+// extension's email prompts use. The thread's summary frame is placed after its last message.
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type InboxSDK = any
-
-interface EmailMetadata extends Omit<BaseEmailMetadata, 'participants' | 'emailCount'> {
+interface EmailMetadata {
   subject: string
+  from: string | null
+  fromEmail: string | null
+  to: string[]
+  date: string | null
   participants: string[]
   emailCount: number
-  timestamp: string
-  toList: string[]
-  ccList: string[]
-  bccList: string[]
+}
+
+interface Email {
+  thread: string
+  content: string
+  metadata: EmailMetadata
+}
+
+// The last message's header, else the thread's header: where the summary goes.
+function lastHeader(): Element | null {
+  const main = document.querySelector('div[role="main"]')
+  if (!main) return null
+  const messages = main.querySelectorAll('[data-message-id], .gs, .adn')
+  const last = messages[messages.length - 1]
+  if (last) return last.querySelector('.gH, .gE, .iw') ?? last
+  return main.querySelector('.gH, .gE, [data-thread-perm-id]') ?? main
+}
+
+const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const visible = (element: HTMLElement): boolean => {
+  const style = getComputedStyle(element)
+  return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
+    && element.offsetWidth > 0 && element.offsetHeight > 0
+}
+
+const all = (selector: string): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>(selector))
+
+// Clicks each element `gap` ms apart; how many it clicked.
+const clickEach = async (elements: HTMLElement[], gap: number): Promise<number> => {
+  for (const element of elements) {
+    element.click()
+    await pause(gap)
+  }
+  return elements.length
+}
+
+// The ways Gmail shows collapsed messages, each clicked open in turn.
+const openers: ((unloaded: MessageView[]) => Promise<number>)[] = [
+  unloaded => clickEach(unloaded.map(m => m.getElement()).filter(Boolean)
+    .map(el => el.querySelector<HTMLElement>('.gE, .gs, [data-legacy-message-id]') ?? el), 50),
+  () => clickEach(all('[data-tooltip="Expand all"], [aria-label*="Expand"]').filter(visible).slice(0, 1), 150),
+  () => clickEach(all('.kx, .kQ').filter(visible), 80),
+  () => clickEach(all('.h7[role="listitem"][aria-expanded="false"]').filter(visible), 50),
+  () => clickEach(all('[data-legacy-message-id]').filter(el => el.clientHeight < 100 && visible(el)), 50),
+  () => clickEach(all('.adn.ads').filter(el => !el.querySelector('.a3s') && visible(el)), 50),
+]
+
+// Opens the thread's collapsed messages and waits up to `timeoutMs` for them to load.
+async function openAll(messages: MessageView[], timeoutMs = 10000): Promise<void> {
+  const unloaded = () => messages.filter(m => !m.isLoaded())
+  const waiting = unloaded()
+  if (waiting.length === 0) return
+  const loaded = Promise.all(waiting.map(m => new Promise<void>(resolve => m.once('load', () => resolve()))))
+  let before = -1
+  for (let pass = 0; pass < 5; pass++) {
+    const left = unloaded()
+    if (left.length === 0 || left.length === before) break
+    before = left.length
+    for (const open of openers) {
+      // A message opened by an earlier way is clicked no more, so it is not closed again.
+      const clicked = await open(unloaded()).catch(() => 0)
+      if (clicked > 0) await pause(100)
+    }
+    await pause(150)
+  }
+  if (unloaded().length > 0) await Promise.race([loaded, pause(timeoutMs)])
+  // Opening messages moves the thread, so the newest message is brought back into view.
+  const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches
+  lastHeader()?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
+}
+
+const contact = (c: { name?: string; emailAddress: string }): string =>
+  c.name ? `${c.name} <${c.emailAddress}>` : c.emailAddress
+
+const recipients = (m: MessageView): Promise<string[]> =>
+  Promise.resolve()
+    .then(() => m.getRecipientsFull())
+    .then(list => list.map(contact))
+    .catch(() => m.getRecipientEmailAddresses())
+    .catch(() => [])
+
+// The thread's loaded messages as text and its headers; null when it has under 50 characters.
+async function read(view: ThreadView, thread: string): Promise<Email | null> {
+  const messages = view.getMessageViewsAll()
+  if (messages.length === 0) return null
+  await openAll(messages)
+  const loaded = messages.filter(m => m.isLoaded())
+  // Recipient lists may need a request each, so they are asked for together.
+  const to = new Set((await Promise.all(loaded.map(recipients))).flat())
+  const participants = new Set<string>()
+  let sender: { name?: string; emailAddress: string } | null = null
+  let date: string | null = null
+  const parts: string[] = []
+  for (const message of loaded) {
+    try {
+      const from = message.getSender()
+      sender ??= from
+      if (from?.emailAddress) participants.add(contact(from))
+      const when = message.getDateString() || null
+      date = when ?? date
+      const body = message.getBodyElement()?.innerText ?? ''
+      if (body.length > 20) {
+        parts.push(`--- Message from ${from?.name || from?.emailAddress || 'Unknown'}${when ? ` (${when})` : ''} ---\n${body}`)
+      }
+    } catch { /* a message Gmail has not drawn */ }
+  }
+  const content = parts.join('\n').split('\n').filter(line => line.trim()).join('\n')
+  if (content.length < 50) return null
+  return {
+    thread,
+    content,
+    metadata: {
+      subject: view.getSubject(),
+      from: sender?.name || null,
+      fromEmail: sender?.emailAddress || null,
+      to: [...to],
+      date,
+      participants: [...participants],
+      emailCount: messages.length,
+    },
+  }
 }
 
 export class EmailExtractor {
-  private sdk: InboxSDK | null = null
-  private onEmailProcess: EmailProcessCallback | null = null
-  private isProcessing = false
-  private processingTimeout = 30000
-  private processedThreads: Set<string> = new Set()
-  private activeRequestToken: string | null = null
-  private lastExtractedContent: { threadId: string; content: string; metadata: EmailMetadata } | null = null
+  private last: Email | null = null
+  private latest: ThreadView | null = null
 
-  // get last extracted content (used by background for regeneration)
-  getLastExtracted(): { threadId: string; content: string; metadata: EmailMetadata } | null {
-    return this.lastExtractedContent
+  // The thread read last, for the extension's chat and reply suggestions.
+  lastRead(): Email | null {
+    return this.last
   }
 
-  // expand collapsed messages with success-based retry
-  // keeps trying different methods until all messages are loaded
-  private async expandAndWaitForMessages(
-    threadView: ThreadView, 
-    messages: MessageView[], 
-    timeoutMs = 10000
-  ): Promise<void> {
-    const totalMessages = messages.length
-    const getLoadedCount = () => messages.filter(m => m.isLoaded?.() !== false).length
-    
-    let loadedCount = getLoadedCount()
-    if (loadedCount >= totalMessages) {
-      console.log('metldr: all', totalMessages, 'messages already loaded')
-      return
-    }
-
-    console.log('metldr: need to expand', totalMessages - loadedCount, 'of', totalMessages, 'messages')
-    const methodsUsed: string[] = []
-
-    // DOM DISCOVERY: log what selectors actually exist in Gmail's current DOM
-    const domScan = {
-      expandAllBtn: !!document.querySelector('[data-tooltip="Expand all"]'),
-      kx: document.querySelectorAll('.kx').length,
-      h7: document.querySelectorAll('.h7[role="listitem"]').length,
-      h7Collapsed: document.querySelectorAll('.h7[role="listitem"][aria-expanded="false"]').length,
-      gs: document.querySelectorAll('.gs').length,
-      adnCls: document.querySelectorAll('.adn').length,
-      collapsedAttr: document.querySelectorAll('[data-collapsed]').length,
-      msgHeaders: document.querySelectorAll('[data-legacy-message-id]').length
-    }
-    console.log('metldr: DOM scan BEFORE expansion:', domScan)
-
-    // set up InboxSDK load event listeners
-    const loadPromises: Promise<void>[] = []
-    const unloaded = messages.filter(m => m.isLoaded?.() === false)
-    for (const msgView of unloaded) {
-      if (msgView.on) {
-        loadPromises.push(new Promise<void>((resolve) => {
-          const timeout = setTimeout(() => resolve(), timeoutMs)
-          msgView.on!('load', () => {
-            clearTimeout(timeout)
-            resolve()
-          })
-        }))
-      }
-    }
-
-    // EXPANSION METHODS - try each and check success after
-    const methods = [
-      // method 1: InboxSDK getElement + click header
-      async () => {
-        let clicked = 0
-        for (const msgView of unloaded) {
-          const el = (msgView as { getElement?: () => HTMLElement }).getElement?.()
-          if (el) {
-            const header = el.querySelector('.gE, .gs, [data-legacy-message-id]') as HTMLElement || el
-            console.log('metldr: [M1] clicking:', header.tagName, header.className?.slice(0, 30))
-            header.click()
-            clicked++
-            await new Promise(r => setTimeout(r, 50))
-          }
-        }
-        return clicked > 0 ? `InboxSDK(${clicked})` : null
-      },
-
-      // method 2: native "Expand all" button
-      async () => {
-        const btn = document.querySelector('[data-tooltip="Expand all"], [aria-label*="Expand"]') as HTMLElement
-        if (btn && this.isElementVisible(btn)) {
-          console.log('metldr: [M2] clicking Expand All button')
-          btn.click()
-          await new Promise(r => setTimeout(r, 150))
-          return 'ExpandAllBtn'
-        }
-        return null
-      },
-
-      // method 3: .kx collapsed groups ("X more messages")
-      async () => {
-        const groups = Array.from(document.querySelectorAll('.kx, .kQ')) as HTMLElement[]
-        let clicked = 0
-        for (const g of groups) {
-          if (this.isElementVisible(g)) {
-            console.log('metldr: [M3] clicking collapsed group')
-            g.click()
-            clicked++
-            await new Promise(r => setTimeout(r, 80))
-          }
-        }
-        return clicked > 0 ? `CollapsedGroup(${clicked})` : null
-      },
-
-      // method 4: .h7 collapsed message rows
-      async () => {
-        const rows = Array.from(document.querySelectorAll('.h7[role="listitem"][aria-expanded="false"]')) as HTMLElement[]
-        let clicked = 0
-        for (const row of rows) {
-          if (this.isElementVisible(row)) {
-            console.log('metldr: [M4] clicking collapsed row')
-            row.click()
-            clicked++
-            await new Promise(r => setTimeout(r, 50))
-          }
-        }
-        return clicked > 0 ? `H7Rows(${clicked})` : null
-      },
-
-      // method 5: click any element with data-legacy-message-id
-      async () => {
-        const msgElements = Array.from(document.querySelectorAll('[data-legacy-message-id]')) as HTMLElement[]
-        let clicked = 0
-        // only click ones that look collapsed (small height)
-        for (const el of msgElements) {
-          if (el.clientHeight < 100 && this.isElementVisible(el)) {
-            console.log('metldr: [M5] clicking message-id element')
-            el.click()
-            clicked++
-            await new Promise(r => setTimeout(r, 50))
-          }
-        }
-        return clicked > 0 ? `MsgIdEl(${clicked})` : null
-      },
-
-      // method 6: .adn message containers
-      async () => {
-        const adns = Array.from(document.querySelectorAll('.adn.ads')) as HTMLElement[]
-        let clicked = 0
-        for (const adn of adns) {
-          // check if collapsed by looking for body content
-          const hasBody = adn.querySelector('.a3s')
-          if (!hasBody && this.isElementVisible(adn)) {
-            console.log('metldr: [M6] clicking .adn container')
-            adn.click()
-            clicked++
-            await new Promise(r => setTimeout(r, 50))
-          }
-        }
-        return clicked > 0 ? `AdnContainers(${clicked})` : null
-      }
-    ]
-
-    const MAX_PASSES = 5
-    let previousLoaded = 0
-    let pass = 0
-
-    while (pass < MAX_PASSES) {
-      pass++
-      loadedCount = getLoadedCount()
-      
-      console.log('metldr: === EXPANSION PASS', pass, '===', loadedCount, '/', totalMessages, 'loaded')
-      
-      if (loadedCount >= totalMessages) {
-        console.log('metldr: all messages loaded!')
-        break
-      }
-      
-      if (loadedCount === previousLoaded && pass > 1) {
-        console.log('metldr: no new messages loaded since last pass, stopping')
-        break
-      }
-      previousLoaded = loadedCount
-
-      // run all methods each pass - they re-scan DOM fresh each time
-      for (let i = 0; i < methods.length; i++) {
-        try {
-          const result = await methods[i]()
-          if (result) {
-            methodsUsed.push(`P${pass}:${result}`)
-            await new Promise(r => setTimeout(r, 100)) // wait for DOM update
-          }
-        } catch (e) {
-          console.warn('metldr: method', i + 1, 'failed:', e)
-        }
-      }
-      
-      await new Promise(r => setTimeout(r, 150))
-    }
-
-    // wait for remaining load promises
-    if (loadPromises.length > 0) {
-      console.log('metldr: waiting for', loadPromises.length, 'InboxSDK load events...')
-      await Promise.race([
-        Promise.all(loadPromises),
-        new Promise(r => setTimeout(r, timeoutMs))
-      ])
-    }
-
-    // final status
-    const finalLoaded = getLoadedCount()
-    console.log('metldr: ===== EXPANSION COMPLETE =====')
-    console.log('metldr: result:', finalLoaded, '/', totalMessages, 'messages loaded')
-    console.log('metldr: methods used:', methodsUsed.join(' → ') || 'none')
-    if (finalLoaded < totalMessages) {
-      console.warn('metldr: warning:', totalMessages - finalLoaded, 'messages still not loaded')
-    }
-
-    // immediately scroll to the last message after expansion (before extraction)
-    this.scrollToLatestMessage(threadView)
-  }
-
-  // check if element is visible in viewport
-  private isElementVisible(element: HTMLElement): boolean {
-    if (!element) return false
-    const style = window.getComputedStyle(element)
-    return (
-      style.display !== 'none' &&
-      style.visibility !== 'hidden' &&
-      style.opacity !== '0' &&
-      element.offsetWidth > 0 &&
-      element.offsetHeight > 0
-    )
-  }
-
-  private scrollToLatestMessage(threadView: ThreadView): void {
-    const threadElement = (threadView as { getElement?: () => HTMLElement }).getElement?.()
-    const container = threadElement || document.querySelector('div[role="main"]')
-    if (!container) return
-
-    const allMessages = container.querySelectorAll('[data-message-id], .gs, .adn')
-    if (allMessages.length === 0) return
-    
-    const lastMessage = allMessages[allMessages.length - 1] as HTMLElement
-    const header = lastMessage.querySelector('.gE, .gH, .iw') as HTMLElement || lastMessage
-    header.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    console.log('metldr: scrolled to last message header')
-  }
-
-  private async extractThreadContent(threadView: ThreadView, threadId: string): Promise<void> {
-    const subject = threadView.getSubject()
-    const messages = threadView.getMessageViewsAll()
-    if (!messages || messages.length === 0) return
-
-    await this.expandAndWaitForMessages(threadView, messages)
-
-    let fullText = ''
-    const participants = new Set<string>()
-    let latestDate: string | null = null
-    let fromName: string | null = null
-    let fromEmail: string | null = null
-    const toRecipients = new Set<string>()
-    let loadedCount = 0
-
-    for (const msgView of messages) {
-      try {
-        const isLoaded = msgView.isLoaded?.() !== false
-        if (!isLoaded) continue // skip unloaded messages - their data throws SelectorError
-
-        loadedCount++
-
-        // extract sender metadata
-        const sender = msgView.getSender()
-        if (sender) {
-          if (!fromName && sender.name) fromName = sender.name
-          if (!fromEmail && sender.emailAddress) fromEmail = sender.emailAddress
-          const senderStr = sender.name ? `${sender.name} <${sender.emailAddress}>` : sender.emailAddress || ''
-          if (senderStr) participants.add(senderStr)
-        }
-
-        // extract date
-        const dateStr = msgView.getDateString?.()
-        if (dateStr) latestDate = dateStr
-
-        // extract recipients
-        try {
-          const recipientContacts = await msgView.getRecipientsFull()
-          if (Array.isArray(recipientContacts)) {
-            recipientContacts.forEach((c) => {
-              const email = c.emailAddress || c.address || c.email
-              if (email) toRecipients.add(email)
-            })
-          }
-        } catch {
-          try {
-            const emailAddrs = msgView.getRecipientEmailAddresses()
-            emailAddrs.forEach(email => toRecipients.add(email))
-          } catch { /* ignore */ }
-        }
-
-        // extract body
-        const bodyElement = msgView.getBodyElement()
-        const body = bodyElement ? bodyElement.innerText : ''
-        if (body && body.length > 20) {
-          const senderName = sender?.name || sender?.emailAddress || 'Unknown'
-          const msgDate = dateStr || ''
-          fullText += `--- Message from ${senderName}${msgDate ? ` (${msgDate})` : ''} ---\n${body}\n\n`
-        }
-      } catch { /* ignore individual message errors */ }
-    }
-
-    fullText = fullText.split('\n').filter(line => line.trim().length > 0).join('\n')
-    if (!fullText || fullText.length < 50) return
-
-    const metadata: EmailMetadata = {
-      subject,
-      participants: Array.from(participants),
-      emailCount: messages.length,
-      date: latestDate,
-      timestamp: new Date().toISOString(),
-      sender: fromName || null,
-      senderEmail: fromEmail || null,
-      from: (fromName || fromEmail) ? [fromName, fromEmail ? `<${fromEmail}>` : null].filter(Boolean).join(' ') : null,
-      replyTo: null,
-      to: toRecipients.size ? Array.from(toRecipients).join(', ') : null,
-      cc: null,
-      bcc: null,
-      toList: Array.from(toRecipients),
-      ccList: [],
-      bccList: [],
-      mailedBy: null,
-      signedBy: null
-    }
-
-    this.lastExtractedContent = { threadId, content: fullText, metadata }
-    console.log('metldr: extracted email content for chat', { 
-      threadId: threadId.slice(0, 20), 
-      len: fullText.length,
-      totalMessages: messages.length,
-      loadedMessages: loadedCount,
-      participants: participants.size
-    })
-  }
-
-  setProcessCallback(callback: EmailProcessCallback): void {
-    this.onEmailProcess = callback
-  }
-
-  init(sdk: InboxSDK | null, onEmailProcess: EmailProcessCallback): void {
-    this.sdk = sdk
-    this.onEmailProcess = onEmailProcess
-
-    if (!sdk) {
-      console.warn('metldr: no sdk provided, email extraction disabled')
-      return
-    }
-
-    sdk.Conversations.registerThreadViewHandler((threadView: ThreadView) => {
-      this.handleThreadView(threadView)
-    })
-
+  init(sdk: InboxSDK): void {
+    sdk.Conversations.registerThreadViewHandler(view => void this.open(view))
     replyFrame.init(sdk)
-
-    console.log('metldr: email extractor initialized with inboxsdk')
   }
 
-  async handleThreadView(threadView: ThreadView): Promise<void> {
-    let threadId = this.getThreadIdFromUrl()
-    
-    if (!threadId && threadView.getThreadIDAsync) {
-      try {
-        threadId = await threadView.getThreadIDAsync()
-      } catch { // ignore
-      }
+  // A thread opened later takes over, so only the newest thread places its summary.
+  private async open(view: ThreadView): Promise<void> {
+    this.latest = view
+    const thread = threadFromUrl() ?? await view.getThreadIDAsync().catch(() => null)
+    if (!thread) return
+    const email = await read(view, thread)
+    if (!email || this.latest !== view) return
+    this.last = email
+    const header = lastHeader() ?? (await pause(200), lastHeader())
+    if (header && this.latest === view) {
+      summaryFrame.show(header, { thread, count: email.metadata.emailCount, content: email.content, metadata: email.metadata })
     }
-
-    if (!threadId) {
-      console.log('metldr: no thread id available')
-      return
-    }
-
-    if (this.isProcessing) {
-      console.log('metldr: already processing, skipping')
-      return
-    }
-
-  
-    const existingSummary = document.querySelector('.metldr-summary')
-    if (existingSummary) {
-      const existingThreadId = existingSummary.getAttribute('data-metldr-thread')
-      if (existingThreadId === threadId) {
-        console.log('metldr: summary already exists for this thread')
-        // still extract content for chat context
-        await this.extractThreadContent(threadView, threadId)
-        return
-      }
-      existingSummary.remove()
-    }
-
-    this.isProcessing = true
-
-    const timeoutId = setTimeout(() => {
-      this.isProcessing = false
-    }, this.processingTimeout)
-
-    try {
-      await this.processThread(threadView, threadId)
-    } finally {
-      clearTimeout(timeoutId)
-      this.isProcessing = false
-    }
-  }
-
-  async processThread(threadView: ThreadView, threadId: string): Promise<void> {
-    console.log('metldr: processing thread:', threadId)
-
-    const requestToken = `${threadId}-${Date.now()}`
-    this.activeRequestToken = requestToken
-
-    const subject = threadView.getSubject()
-    const messages = threadView.getMessageViewsAll()
-
-    if (!messages || messages.length === 0) {
-      console.log('metldr: no messages in thread')
-      return
-    }
-
-    // auto-expand collapsed messages and wait for them to load
-    await this.expandAndWaitForMessages(threadView, messages)
-
-    let fullText = ''
-    const participants = new Set<string>()
-    let latestDate: string | null = null
-    let fromName: string | null = null
-    let fromEmail: string | null = null
-    let replyTo: string | null = null
-    let mailedBy: string | null = null
-    let signedBy: string | null = null
-    const toRecipients = new Set<string>()
-    const ccRecipients = new Set<string>()
-    const bccRecipients = new Set<string>()
-
-    const formatContact = (contact: Contact | null): string | null => {
-      if (!contact) return null
-      const name = contact.name || contact.fullName || contact.displayName
-      const email = contact.emailAddress || contact.address || contact.email
-      if (name && email) return `${name} <${email}>`
-      return email || name || null
-    }
-
-    const addContacts = (list: Contact[] | undefined, target: Set<string>): void => {
-      if (!Array.isArray(list)) return
-      list.forEach((c) => {
-        const formatted = formatContact(c)
-        if (formatted) target.add(formatted)
-      })
-    }
-
-    let loadedCount = 0
-
-    for (const msgView of messages) {
-      try {
-        const isLoaded = msgView.isLoaded?.() !== false
-        if (!isLoaded) continue // skip unloaded messages - their data throws SelectorError
-
-        loadedCount++
-
-        const sender = msgView.getSender()
-        if (sender) {
-          if (!fromName && sender.name) fromName = sender.name
-          if (!fromEmail && sender.emailAddress) fromEmail = sender.emailAddress
-
-          const senderStr = sender.name ? 
-            `${sender.name} <${sender.emailAddress}>` : 
-            sender.emailAddress || ''
-          if (senderStr) participants.add(senderStr)
-        }
-
-        const dateStr = msgView.getDateString?.()
-        if (dateStr) latestDate = dateStr
-
-        if (!replyTo && typeof msgView.getReplyTo === 'function') {
-          try {
-            const rt = msgView.getReplyTo()
-            if (rt) {
-              if (Array.isArray(rt)) {
-                const formatted = formatContact(rt[0])
-                if (formatted) replyTo = formatted
-              } else {
-                const formatted = formatContact(rt)
-                if (formatted) replyTo = formatted
-              }
-            }
-          } catch { /* ignore */ }
-        }
-
-        if ((!mailedBy || !signedBy) && typeof msgView.getSMTPHeaders === 'function') {
-          try {
-            const headers = msgView.getSMTPHeaders()
-            if (headers?.['mailed-by'] && !mailedBy) mailedBy = headers['mailed-by']
-            if (headers?.['signed-by'] && !signedBy) signedBy = headers['signed-by']
-          } catch { /* ignore */ }
-        }
-
-        try {
-          const recipientContacts = await msgView.getRecipientsFull()
-          addContacts(recipientContacts, toRecipients)
-        } catch {
-          try {
-            const emailAddrs = msgView.getRecipientEmailAddresses()
-            emailAddrs.forEach(email => toRecipients.add(email))
-          } catch { /* ignore */ }
-        }
-
-        const bodyElement = msgView.getBodyElement()
-        const body = bodyElement ? bodyElement.innerText : ''
-        if (body && body.length > 20) {
-          const senderName = sender?.name || sender?.emailAddress || 'Unknown'
-          const msgDate = dateStr || ''
-          fullText += `--- Message from ${senderName}${msgDate ? ` (${msgDate})` : ''} ---\n${body}\n\n`
-        }
-      } catch { /* ignore individual message errors */ }
-    }
-
-    console.log('metldr: thread extraction complete', { 
-      total: messages.length, 
-      loaded: loadedCount, 
-      participants: participants.size 
-    })
-
-    fullText = fullText.split('\n').filter(line => line.trim().length > 0).join('\n')
-
-    if (!fullText || fullText.length < 50) {
-      console.log('metldr: email text too short, skipping')
-      return
-    }
-
-    const metadata: EmailMetadata = {
-      subject,
-      participants: Array.from(participants),
-      emailCount: messages.length,
-      date: latestDate,
-      timestamp: new Date().toISOString(),
-      sender: fromName || null,
-      senderEmail: fromEmail || null,
-      from: (fromName || fromEmail) ? [fromName, fromEmail ? `<${fromEmail}>` : null].filter(Boolean).join(' ') : null,
-      replyTo: replyTo || null,
-      to: toRecipients.size ? Array.from(toRecipients).join(', ') : null,
-      cc: ccRecipients.size ? Array.from(ccRecipients).join(', ') : null,
-      bcc: bccRecipients.size ? Array.from(bccRecipients).join(', ') : null,
-      toList: Array.from(toRecipients),
-      ccList: Array.from(ccRecipients),
-      bccList: Array.from(bccRecipients),
-      mailedBy: mailedBy || null,
-      signedBy: signedBy || null
-    }
-
-    console.log('metldr: extracted metadata:', metadata)
-    
-    this.lastExtractedContent = { threadId, content: fullText, metadata }
-
-    const threadElement = threadView.getElement?.() ?? null
-    let header = this.findInjectionPoint(threadElement)
-    // Gmail may not have drawn the thread yet.
-    if (!header) {
-      await new Promise(resolve => setTimeout(resolve, 200))
-      header = this.findInjectionPoint(threadElement)
-    }
-    if (header && this.activeRequestToken === requestToken) {
-      summaryFrame.show(header, { thread: threadId, count: metadata.emailCount, content: fullText, metadata })
-    }
-  }
-
-  findInjectionPoint(threadElement: HTMLElement | null): Element | null {
-    const container = threadElement || document.querySelector('div[role="main"]')
-    if (!container) return null
-
-    // find all message elements in the thread and get the LAST one (most recent)
-    const allMessages = container.querySelectorAll('[data-message-id], .gs, .adn')
-    if (allMessages.length > 0) {
-      const lastMessage = allMessages[allMessages.length - 1]
-      // inject after the last message's header area
-      const header = lastMessage.querySelector('.gE, .gH, .iw') || lastMessage
-      return header
-    }
-
-    // fallback to thread header if no messages found
-    if (threadElement) {
-      const header = threadElement.querySelector('.gH') || 
-                     threadElement.querySelector('.gE') ||
-                     threadElement.querySelector('[data-thread-perm-id]')
-      if (header) return header
-    }
-
-    return document.querySelector('.gH') || 
-           document.querySelector('.gE') ||
-           document.querySelector('[data-thread-perm-id]') ||
-           container
-  }
-
-  getThreadIdFromUrl(): string | null {
-    const hash = window.location.hash
-    const hashMatch = hash.match(gmailThreadPattern)
-    if (hashMatch) return hashMatch[1]
-
-    const url = new URL(window.location.href)
-    return url.searchParams.get('msgid') || url.searchParams.get('tid') || null
-  }
-
-  destroy(): void {
-    this.processedThreads.clear()
-    replyFrame.hide()
   }
 }
 

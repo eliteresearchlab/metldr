@@ -1,5 +1,3 @@
-import type { ContextData } from '../types'
-
 // The word popup: a double-clicked word looked up in an extension frame over the page. The frame
 // draws it (Rust and Rune, under the extension's policy on every site) and pulls its job through
 // the extension; this script reads the selection, places the frame and closes it.
@@ -15,6 +13,13 @@ const MARGIN = 16
 const SETTLE_MS = 250
 // A hidden frame keeps its wasm instance and GPU device; one unused this long is removed.
 const IDLE_MS = 60_000
+
+interface ContextData {
+  contextBefore?: string
+  contextAfter?: string
+  fullSentence?: string
+  pageLang?: string
+}
 
 interface Job {
   word: string

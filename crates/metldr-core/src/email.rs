@@ -363,41 +363,39 @@ pub fn facts_text(facts: &Facts) -> String {
     }
 }
 
-fn text_of<'a>(value: &'a Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| match &value[*key] {
-        Value::String(s) if !s.is_empty() => Some(s.clone()),
-        Value::Array(list) => {
-            let joined: Vec<&str> = list.iter().filter_map(Value::as_str).collect();
-            (!joined.is_empty()).then(|| joined.join(", "))
-        }
-        _ => None,
-    })
+/// Field `key` of the thread's headers as text; a list is joined with commas.
+fn text_of(metadata: &Value, key: &str) -> Option<String> {
+    let text = match &metadata[key] {
+        Value::String(s) => s.trim().to_owned(),
+        Value::Array(list) => list.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "),
+        _ => return None,
+    };
+    (!text.is_empty()).then_some(text)
 }
 
-/// The message headers the extractor read, as lines for the prompt.
+/// The sender as `Name <address>`, from the name and address the reader keeps apart.
+fn sender(metadata: &Value) -> Option<String> {
+    let address = text_of(metadata, "fromEmail").map(|a| format!("<{a}>"));
+    let from = [text_of(metadata, "from"), address].into_iter().flatten().collect::<Vec<_>>().join(" ");
+    (!from.is_empty()).then_some(from)
+}
+
+/// The thread's headers, as lines for the prompt.
 pub fn metadata_context(metadata: &Value) -> String {
     if !metadata.is_object() {
         return String::new();
     }
     let mut out = String::from("EMAIL METADATA:");
-    let name = text_of(metadata, &["from", "sender"]);
-    let address = text_of(metadata, &["fromEmail", "senderEmail"]).map(|a| format!("<{a}>"));
-    let from = [name, address].into_iter().flatten().collect::<Vec<_>>().join(" ");
     let mut line = |label: &str, value: Option<String>| {
-        if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
-            let _ = write!(out, "\n{label}: {}", value.trim());
+        if let Some(value) = value {
+            let _ = write!(out, "\n{label}: {value}");
         }
     };
-    line("From", Some(from));
-    line("Reply-To", text_of(metadata, &["replyTo", "reply-to"]));
-    line("To", text_of(metadata, &["to", "toList", "toRecipients"]));
-    line("Cc", text_of(metadata, &["cc", "ccList", "ccRecipients"]));
-    line("Bcc", text_of(metadata, &["bcc", "bccList", "bccRecipients"]));
-    line("Date", text_of(metadata, &["date"]));
-    line("Subject", text_of(metadata, &["subject"]));
-    line("Mailed-By", text_of(metadata, &["mailedBy"]));
-    line("Signed-By", text_of(metadata, &["signedBy"]));
-    line("Participants", text_of(metadata, &["participants"]));
+    line("From", sender(metadata));
+    line("To", text_of(metadata, "to"));
+    line("Date", text_of(metadata, "date"));
+    line("Subject", text_of(metadata, "subject"));
+    line("Participants", text_of(metadata, "participants"));
     line("Message Count", metadata["emailCount"].as_u64().filter(|n| *n > 0).map(|n| n.to_string()));
     out.push_str("\n\n");
     out
@@ -543,8 +541,14 @@ pub fn reply_schema() -> Value {
 
 pub fn reply_prompt(metadata: &Value, summary: &Value, email: &str) -> String {
     let mut out = String::from("Generate reply suggestions for this email.\n\nPERSPECTIVE: The user RECEIVED this email. You write replies FROM the user TO the sender.\n- \"From\" = sender (address this person in replies)\n- \"To\" = user/recipient (this is who is replying)\n\n");
-    for (label, key) in [("From", "from"), ("To", "to"), ("Subject", "subject"), ("Date", "date")] {
-        if let Some(value) = metadata[key].as_str().filter(|v| !v.is_empty()) {
+    let headers = [
+        ("From", sender(metadata)),
+        ("To", text_of(metadata, "to")),
+        ("Subject", text_of(metadata, "subject")),
+        ("Date", text_of(metadata, "date")),
+    ];
+    for (label, value) in headers {
+        if let Some(value) = value {
             let _ = writeln!(out, "{label}: {value}");
         }
     }
@@ -698,5 +702,10 @@ mod checks {
         assert_eq!(replies.len(), 1);
         assert_eq!(replies[0]["label"], "Option 1");
         assert_eq!(snippet(&"x".repeat(7000)).chars().count(), 4000 + 2000 + 19);
+        let headers = json!({"from": "Ada", "fromEmail": "ada@example.com", "to": ["Bo <bo@example.com>", "cy@example.com"],
+            "subject": "Order", "emailCount": 2});
+        let context = "EMAIL METADATA:\nFrom: Ada <ada@example.com>\nTo: Bo <bo@example.com>, cy@example.com\nSubject: Order\n";
+        assert_eq!(metadata_context(&headers), format!("{context}Message Count: 2\n\n"));
+        assert!(reply_prompt(&headers, &Value::Null, "hi").contains(&context["EMAIL METADATA:\n".len()..]));
     }
 }
