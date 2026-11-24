@@ -8,7 +8,6 @@ use web_sys::{IdbDatabase, IdbOpenDbRequest, IdbTransactionMode};
 
 pub(super) const CACHE: &str = "metldr_cache";
 const PAGES: &str = "page_cache";
-/// How long a cached summary is meant to last, in milliseconds, as the cache records it.
 /// How long a page summary is kept: a week, then the page is summarized again.
 const KEEP_MS: f64 = 7.0 * 24.0 * 3_600_000.0;
 /// About how many words a summary picked from the page's own sentences holds.
