@@ -2301,19 +2301,21 @@ const SUMMARY_REQUEST: &str = "Summarize this page.";
 
 thread_local! {
     static HOST: RefCell<Option<AppHandle<State>>> = const { RefCell::new(None) };
-    /// The page's font loader, called once with `"cjk"` when the chat first lays out CJK text.
+    /// The page's font loader, called once with `"cjk"` and once with `"emoji"` when the chat
+    /// first lays out text that needs each.
     static WANT_FONTS: RefCell<Option<Function>> = const { RefCell::new(None) };
+    /// The groups already asked for: CJK, emoji.
+    static ASKED: Cell<(bool, bool)> = const { Cell::new((false, false)) };
 }
 
-/// Asks the page for the CJK font the first frame CJK text was laid out.
-fn ask_for_cjk() {
-    if ::rune::text::cjk_seen() {
-        WANT_FONTS.with(|want| {
-            if let Some(want) = want.borrow_mut().take() {
-                let _ = want.call1(&JsValue::NULL, &JsValue::from_str("cjk"));
-            }
-        });
+/// Asks the page for the CJK and emoji fonts the first frame text needing each was laid out.
+fn ask_for_fonts() {
+    let (cjk, emoji) = ASKED.get();
+    let wanted = [(!cjk && ::rune::text::cjk_seen(), "cjk"), (!emoji && ::rune::text::emoji_seen(), "emoji")];
+    for (_, group) in wanted.iter().filter(|(now, _)| *now) {
+        WANT_FONTS.with_borrow(|want| want.as_ref().map(|want| want.call1(&JsValue::NULL, &JsValue::from_str(group))));
     }
+    ASKED.set((cjk || wanted[0].0, emoji || wanted[1].0));
 }
 
 #[wasm_bindgen]
@@ -2349,7 +2351,7 @@ pub fn start_rune_chat(
             .full_viewport()
             .tab_visits_controls(true)
             .on_frame_drawn(|runtime| {
-                ask_for_cjk();
+                ask_for_fonts();
                 if let Some(updates) = &runtime.state.updates {
                     runtime.state.answers.drawn(
                         if runtime.state.settings_open || runtime.state.conversations.is_open() {

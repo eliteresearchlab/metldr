@@ -1,5 +1,6 @@
 //! The interface fonts of every Rune surface, read by its page from `chat/fonts/`: the
-//! interface fonts at start, the fallbacks after the first frame.
+//! interface fonts at start, the fallbacks after the first frame, CJK and emoji only once text
+//! needs them.
 //!
 //! Nothing is embedded in the wasm. The service worker loads the same module, so embedded fonts
 //! would cost it about 33 MB it never uses.
@@ -20,8 +21,8 @@ pub const NAMES: [&str; 7] = [
 /// Approved fallbacks, added after the first frame so a cold open neither fetches nor parses
 /// them first: Allo's oblique in each weight (named into the variable face's family, so italic
 /// text finds them), Inter for the Greek, Cyrillic, Vietnamese and extended Latin Allo lacks,
-/// and Noto for other scripts, symbols and emoji (about 13 MB, mostly emoji).
-pub const FALLBACKS: [&str; 25] = [
+/// and Noto for other scripts and symbols (about 3 MB).
+pub const FALLBACKS: [&str; 24] = [
     "AlloVariable-ThinItalic.otf",
     "AlloVariable-ExtraLightItalic.otf",
     "AlloVariable-LightItalic.otf",
@@ -46,10 +47,11 @@ pub const FALLBACKS: [&str; 25] = [
     "NotoSansSymbols-Regular.ttf",
     "NotoSansSymbols2-Regular.ttf",
     "NotoSansMath-Regular.ttf",
-    "NotoColorEmoji.ttf",
 ];
 /// The CJK collection (about 19.5 MB), added only once the chat lays out CJK text.
 pub const CJK: [&str; 1] = ["NotoSansCJK-Regular.ttc"];
+/// The colour emoji (about 10.5 MB), added only once the chat lays out an emoji.
+pub const EMOJI: [&str; 1] = ["NotoColorEmoji.ttf"];
 /// Upper bound for one file. The largest approved file, the CJK collection, is about 19.5 MB.
 const MAX_FONT_BYTES: usize = 24 * 1024 * 1024;
 
@@ -59,6 +61,7 @@ thread_local! {
     static RETAINED: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
     static RETAINED_FALLBACKS: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
     static RETAINED_CJK: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
+    static RETAINED_EMOJI: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
 }
 
 /// A group of fonts the page adds after start, by its manifest name.
@@ -66,6 +69,7 @@ pub fn group(name: &str) -> Option<&'static [&'static str]> {
     match name {
         "fallbacks" => Some(&FALLBACKS),
         "cjk" => Some(&CJK),
+        "emoji" => Some(&EMOJI),
         _ => None,
     }
 }
@@ -113,7 +117,11 @@ pub fn retain(fonts: Vec<Vec<u8>>) -> &'static [&'static [u8]] {
 /// Keeps a group added after start like [`retain`]. `None` when it was already kept, so a
 /// document adds each group to the renderer once.
 pub fn retain_group(name: &str, fonts: Vec<Vec<u8>>) -> Option<&'static [&'static [u8]]> {
-    let cell = if name == "cjk" { &RETAINED_CJK } else { &RETAINED_FALLBACKS };
+    let cell = match name {
+        "cjk" => &RETAINED_CJK,
+        "emoji" => &RETAINED_EMOJI,
+        _ => &RETAINED_FALLBACKS,
+    };
     cell.with(|retained| {
         let mut fresh = false;
         let kept = *retained.get_or_init(|| {

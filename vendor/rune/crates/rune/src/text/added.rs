@@ -26,9 +26,10 @@ pub fn add_fonts(fonts: &[&'static [u8]]) {
 }
 
 thread_local! {
-    /// Whether text laid out on this thread held CJK, so an app that adds its CJK font on
-    /// demand knows when to.
+    /// Whether text laid out on this thread held CJK or emoji, so an app that adds those fonts
+    /// on demand knows when to.
     static CJK_SEEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static EMOJI_SEEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Whether any text laid out on this thread held Han, kana, Hangul or Bopomofo. An app that
@@ -37,17 +38,31 @@ pub fn cjk_seen() -> bool {
     CJK_SEEN.get()
 }
 
-/// Notes `text` for [`cjk_seen`]. ASCII text, and every call once CJK was seen, costs one check.
+/// Whether any text laid out on this thread held an emoji: a pictograph (U+1F000 to U+1FAFF),
+/// the emoji presentation selector, a star or a circle. Symbols such as a check mark or a plain
+/// star stay text and do not count. An app that ships a colour emoji font adds it once this
+/// turns true.
+pub fn emoji_seen() -> bool {
+    EMOJI_SEEN.get()
+}
+
+/// Notes `text` for [`cjk_seen`] and [`emoji_seen`]. ASCII text, and every call once both were
+/// seen, costs one check.
 pub(super) fn note_text(text: &str) {
-    if text.is_ascii() || CJK_SEEN.get() {
+    if text.is_ascii() || (CJK_SEEN.get() && EMOJI_SEEN.get()) {
         return;
     }
-    let cjk = |c: char| matches!(c as u32,
+    let cjk = |c: u32| matches!(c,
         0x1100..=0x11FF | 0x2E80..=0x2FDF | 0x3000..=0x303F | 0x3040..=0x30FF | 0x3100..=0x312F
         | 0x3130..=0x318F | 0x31A0..=0x31FF | 0x3200..=0x4DBF | 0x4E00..=0x9FFF | 0xA960..=0xA97F
         | 0xAC00..=0xD7FF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x3FFFF);
-    if text.chars().any(cjk) {
-        CJK_SEEN.set(true);
+    let emoji = |c: u32| matches!(c, 0x1F000..=0x1FAFF | 0xFE0F | 0x2B50 | 0x2B55);
+    for c in text.chars().map(u32::from) {
+        if cjk(c) {
+            CJK_SEEN.set(true);
+        } else if emoji(c) {
+            EMOJI_SEEN.set(true);
+        }
     }
 }
 
@@ -102,6 +117,17 @@ mod tests {
         assert!(!cjk_seen());
         ts.layout_rich("日本語", &[], style, 1.0, None);
         assert!(cjk_seen());
+    }
+
+    /// Emoji text marks the thread; check marks, plain stars and other symbols never do.
+    #[test]
+    fn emoji_text_is_noted_once_laid_out() {
+        let mut ts = TextSystem::new(&[INTER], ("Inter", "Inter"));
+        let style = TextStyle::new(13.0, 400.0);
+        ts.layout_rich("done ✓ ★ → €", &[], style, 1.0, None);
+        assert!(!emoji_seen());
+        ts.layout_rich("ship it 🚀", &[], style, 1.0, None);
+        assert!(emoji_seen());
     }
 
     /// A running text system and one built later both draw with an added font, and the

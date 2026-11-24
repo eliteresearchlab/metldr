@@ -47,6 +47,7 @@ Local changes:
 * The `examples` directory and its `[[example]]` entries are not vendored; metldr builds none of them.
 * On the web an app with `WindowOptions::transparent` configures its canvas with premultiplied alpha and clears to transparent, so an in-page frame shows only what it draws.
 * On the web a WebGPU adapter is requested before the canvas surface is made, so a browser that has WebGPU but no adapter falls back to WebGL2 on the same canvas instead of finding it already claimed.
+* `text::emoji_seen` turns true once text laid out on the thread holds an emoji (U+1F000 to U+1FAFF, the emoji presentation selector, ⭐ or ⭕), beside `cjk_seen`, so an app adds its colour emoji font only when text needs it.
 
 The MIT license and bundled Inter and IBM Plex Mono font licenses remain beside their source assets.
 
