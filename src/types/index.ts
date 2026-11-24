@@ -1,24 +1,3 @@
-export interface Theme {
-  primary: string
-  secondary: string
-  accent: string
-  bg: string
-  bgSecondary: string
-  text: string
-  textMuted: string
-  border: string
-  borderSubtle: string
-  shadow: string
-}
-
-export type ThemeName = 'light' | 'cyberpunk' | 'catppuccin' | 'gruvbox'
-export type ThemeListener = (themeName: string, theme: Theme) => void
-
-export interface IntentStyle {
-  bg: string
-  text: string
-}
-
 export interface EmailMetadata {
   from?: string | null
   sender?: string | null
@@ -55,18 +34,6 @@ export interface SupportedLanguage {
   code: string
   name: string
   url: string
-}
-
-// ui summary display
-export interface Summary {
-  summary?: string
-  action_items?: string[]
-  dates?: string[]
-  confidence?: 'high' | 'medium' | 'low'
-  model?: string
-  intent?: string
-  time_ms?: number
-  cached?: boolean
 }
 
 // inboxsdk types
@@ -128,22 +95,4 @@ export interface Contact {
 
 // email extractor
 export type EmailProcessCallback = () => void
-
-export interface SummaryResponse {
-  summary?: unknown
-  action_items?: string[]
-  dates?: string[]
-  key_facts?: {
-    booking_reference?: string
-    amount?: string
-    sender_org?: string
-  }
-  intent?: string
-  reasoning?: string
-  urgency?: string
-  time_ms?: number
-  cached?: boolean
-  model?: string
-  error?: string
-}
 

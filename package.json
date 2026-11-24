@@ -22,7 +22,6 @@
   "dependencies": {
     "@inboxsdk/core": "^2.2.11",
     "@mozilla/readability": "^0.6.0",
-    "gsap": "^3.13.0",
     "marked": "^17.0.1"
   },
   "devDependencies": {
