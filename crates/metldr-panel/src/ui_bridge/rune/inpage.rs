@@ -104,5 +104,8 @@ pub fn inpage_theme(theme: String) {
         if let Some(replies) = state.gmail_replies.as_deref_mut() {
             replies.retheme(palette, typography);
         }
+        if let Some(card) = state.gmail_summary.as_deref_mut() {
+            card.retheme(palette, typography);
+        }
     });
 }

@@ -148,6 +148,9 @@ pub(super) async fn email_summary(
     let text = summary["summary"].as_str().unwrap_or_default().to_owned();
     if let Some(id) = id {
         write(SUMMARIES, &id, Some(&summary)).await;
+        if let Some(count) = metadata["emailCount"].as_u64() {
+            keep_count(&id, count).await;
+        }
         let actions = summary["action_items"].as_array().into_iter().flatten().filter_map(Value::as_str);
         let indexed: Vec<&str> = std::iter::once(text.as_str()).filter(|t| !t.is_empty()).chain(actions).collect();
         let indexed = indexed.join("\n");
@@ -202,18 +205,16 @@ pub(super) async fn email_cache(id: String) -> JsValue {
     to_js(&json!({"cached": summary, "emailCount": count}))
 }
 
-/// Keeps `summary` for email `id`, and its thread's message count when given.
-pub(super) async fn email_cache_set(id: String, summary: JsValue, email_count: Option<u32>) {
-    write(SUMMARIES, &id, Some(&from_js(&summary))).await;
-    if let Some(count) = email_count {
-        let Some(db) = page_summary::cache().await else { return };
-        let written = async {
-            let tx = db.transaction_with_str_and_mode(SESSIONS, IdbTransactionMode::Readwrite).map_err(err)?;
-            let record = to_js(&json!({"emailId": id, "emailCount": count, "timestamp": js_sys::Date::now()}));
-            tx.object_store(SESSIONS).and_then(|s| s.put(&record)).map_err(err)?;
-            dictionary::finished(&tx).await
-        };
-        let _ = written.await;
-        db.close();
-    }
+/// Keeps how many messages thread `id` had when it was summarized, so a thread that grew is
+/// summarized again.
+async fn keep_count(id: &str, count: u64) {
+    let Some(db) = page_summary::cache().await else { return };
+    let written = async {
+        let tx = db.transaction_with_str_and_mode(SESSIONS, IdbTransactionMode::Readwrite).map_err(err)?;
+        let record = to_js(&json!({"emailId": id, "emailCount": count, "timestamp": js_sys::Date::now()}));
+        tx.object_store(SESSIONS).and_then(|s| s.put(&record)).map_err(err)?;
+        dictionary::finished(&tx).await
+    };
+    let _ = written.await;
+    db.close();
 }

@@ -1,17 +1,14 @@
-import { UIService } from './UIService'
+import { summaryFrame } from './SummaryFrame'
 import { replyFrame } from './ReplyFrame'
-import { languageService } from '../services/LanguageService'
 import type { 
   ThreadView, 
   MessageView, 
   Contact, 
   EmailMetadata as BaseEmailMetadata,
-  SummaryResponse,
   EmailProcessCallback 
 } from '../types'
 
 const gmailThreadPattern = /#[^/]+\/(?:[^/]+\/)?([A-Za-z0-9_-]{16,})$/
-
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type InboxSDK = any
@@ -30,7 +27,6 @@ export class EmailExtractor {
   private sdk: InboxSDK | null = null
   private onEmailProcess: EmailProcessCallback | null = null
   private isProcessing = false
-  private isRegenerating = false
   private processingTimeout = 30000
   private processedThreads: Set<string> = new Set()
   private activeRequestToken: string | null = null
@@ -363,55 +359,6 @@ export class EmailExtractor {
     })
   }
 
-  // cache format: { summary, emailCount }
-  async getCachedSummary(emailId: string, currentEmailCount?: number): Promise<{ summary: unknown; needsRegeneration: boolean } | null> {
-    if (!chrome?.runtime?.sendMessage) return null
-    try {
-      const result = await new Promise<{ cached: unknown; emailCount?: number } | null>((resolve) => {
-        chrome.runtime.sendMessage({ type: 'GET_EMAIL_CACHE', emailId }, (resp) => {
-          if (chrome.runtime.lastError) {
-            console.warn('metldr: cache lookup error:', chrome.runtime.lastError.message)
-            resolve(null)
-          } else {
-            resolve(resp || null)
-          }
-        })
-      })
-      
-      if (!result?.cached) {
-        console.log('metldr: no cached summary found for', emailId.slice(0, 20))
-        return null
-      }
-      
-      const cachedEmailCount = (result as any).emailCount || 0
-      const needsRegeneration = currentEmailCount !== undefined && 
-                                cachedEmailCount > 0 && 
-                                currentEmailCount !== cachedEmailCount
-      
-      if (needsRegeneration) {
-        console.log(`metldr: cache stale - email count changed ${cachedEmailCount} -> ${currentEmailCount}`)
-      }
-      
-      console.log('metldr: found cached summary for', emailId.slice(0, 20))
-      return { summary: result.cached, needsRegeneration }
-    } catch (err) {
-      console.error('metldr: getCachedSummary error:', (err as Error).message)
-      return null
-    }
-  }
-
-  async cacheSummary(emailId: string, summary: unknown, emailCount?: number): Promise<void> {
-    if (!chrome?.runtime?.sendMessage) return
-    try {
-      await new Promise<void>((resolve) => {
-        chrome.runtime.sendMessage({ type: 'SET_EMAIL_CACHE', emailId, summary, emailCount }, () => {
-          resolve()
-        })
-      })
-    } catch {
-    }
-  }
-
   setProcessCallback(callback: EmailProcessCallback): void {
     this.onEmailProcess = callback
   }
@@ -629,87 +576,16 @@ export class EmailExtractor {
     
     this.lastExtractedContent = { threadId, content: fullText, metadata }
 
-    const threadElement = threadView.getElement?.()
-    const currentEmailCount = metadata.emailCount
-
-    const cacheResult = await this.getCachedSummary(threadId, currentEmailCount)
-    const cached = cacheResult?.summary
-    const needsRegeneration = cacheResult?.needsRegeneration || false
-    
-    console.log('metldr: cache check result:', { 
-      hasCached: !!cached, 
-      needsRegeneration,
-      threadId: threadId.slice(0, 20)
-    })
-    
-    if (cached) {
-      if (needsRegeneration) {
-        console.log('metldr: new emails detected, auto-regenerating summary')
-        await this.autoRegenerateSummary(threadView, threadId, fullText, metadata, threadElement || null)
-        return
-      }
-      
-      console.log('metldr: using cached summary')
-      const summaryCard = UIService.createSummaryCard(cached, threadId)
-      let header = this.findInjectionPoint(threadElement || null)
-      
-      // retry injection point lookup with delay if not found (gmail dom may not be ready)
-      if (!header) {
-        console.log('metldr: injection point not found, retrying...')
-        await new Promise(r => setTimeout(r, 200))
-        header = this.findInjectionPoint(threadElement || null)
-      }
-      
-      if (header) {
-        UIService.injectSummary(header, summaryCard)
-        this.attachRegenerateListener(summaryCard, threadId, fullText, metadata)
-      } else {
-        console.warn('metldr: could not find injection point for cached summary')
-      }
-      return
-    }
-
-    // show button for manual summarization instead of auto-triggering
-    const header = this.findInjectionPoint(threadElement || null)
+    const threadElement = threadView.getElement?.() ?? null
+    let header = this.findInjectionPoint(threadElement)
+    // Gmail may not have drawn the thread yet.
     if (!header) {
-      console.log('metldr: no injection point found')
-      return
+      await new Promise(resolve => setTimeout(resolve, 200))
+      header = this.findInjectionPoint(threadElement)
     }
-
-    const summarizeButton = UIService.createSummarizeButton(threadId, async () => {
-      // remove button
-      summarizeButton.remove()
-      
-      // show loading indicator
-      const loadingDiv = UIService.createLoadingIndicator(threadElement || document.body)
-      UIService.injectLoading(header, loadingDiv)
-      
-      console.log('metldr: requesting summary...')
-      
-      // always use background service for consistent quality with fact extraction
-      const summary = await this.getSummaryFromBackground(fullText, threadId, metadata)
-      
-      console.log('metldr: summary response:', summary)
-      
-      // check if thread changed during summarization
-      const currentThreadId = this.getThreadIdFromUrl()
-      if (currentThreadId && currentThreadId !== threadId) {
-        console.log('metldr: thread changed before injection, skipping summary insert')
-        loadingDiv.remove()
-        return
-      }
-      
-      loadingDiv.remove()
-      
-      if (summary) {
-        console.log('metldr: creating summary card')
-        const summaryCard = UIService.createSummaryCard(summary, threadId)
-        UIService.injectSummary(header, summaryCard)
-        this.attachRegenerateListener(summaryCard, threadId, fullText, metadata)
-      }
-    })
-    
-    UIService.injectLoading(header, summarizeButton)
+    if (header && this.activeRequestToken === requestToken) {
+      summaryFrame.show(header, { thread: threadId, count: metadata.emailCount, content: fullText, metadata })
+    }
   }
 
   findInjectionPoint(threadElement: HTMLElement | null): Element | null {
@@ -746,131 +622,6 @@ export class EmailExtractor {
 
     const url = new URL(window.location.href)
     return url.searchParams.get('msgid') || url.searchParams.get('tid') || null
-  }
-
-  attachRegenerateListener(summaryCard: HTMLElement, threadId: string, emailText: string, metadata: EmailMetadata): void {
-    const regenerateBtn = summaryCard.querySelector('.metldr-regenerate-btn')
-    if (regenerateBtn) {
-      regenerateBtn.addEventListener('click', async () => {
-        await this.regenerateSummary(threadId, emailText, metadata)
-      })
-    }
-  }
-
-  async getSummaryFromBackground(emailText: string, emailId: string, metadata: EmailMetadata | null = null, forceRegenerate = false): Promise<unknown> {
-    if (!chrome?.runtime?.sendMessage) return null
-
-    const maxRetries = 3
-    const delays = [0, 100, 200]
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      if (delays[attempt] > 0) {
-        await new Promise(r => setTimeout(r, delays[attempt]))
-      }
-
-      try {
-        const response = await new Promise<SummaryResponse>((resolve, reject) => {
-          chrome.runtime.sendMessage({
-            type: 'SUMMARIZE_EMAIL',
-            emailContent: emailText,
-            emailId: emailId,
-            metadata: metadata,
-            forceRegenerate: forceRegenerate
-          }, (resp) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message))
-            } else {
-              resolve(resp as SummaryResponse)
-            }
-          })
-        })
-
-        return response?.summary || null
-      } catch (err) {
-        console.warn(`metldr: email summary attempt ${attempt + 1}/${maxRetries} failed:`, (err as Error).message)
-        if (attempt === maxRetries - 1) {
-          console.error('metldr: all email summary attempts failed')
-          return null
-        }
-      }
-    }
-
-    return null
-  }
-
-  async autoRegenerateSummary(
-    _threadView: ThreadView, 
-    threadId: string, 
-    emailText: string, 
-    metadata: EmailMetadata, 
-    threadElement: HTMLElement | null
-  ): Promise<void> {
-    const header = this.findInjectionPoint(threadElement)
-    if (!header) return
-
-    // show loading
-    const loadingDiv = UIService.createLoadingIndicator(threadElement || document.body)
-    UIService.injectLoading(header, loadingDiv)
-    
-    console.log('metldr: auto-regenerating summary due to new emails...')
-    
-    const summary = await this.getSummaryFromBackground(emailText, threadId, metadata, true)
-    
-    loadingDiv.remove()
-    
-    if (summary) {
-      const summaryCard = UIService.createSummaryCard(summary, threadId)
-      UIService.injectSummary(header, summaryCard)
-      this.attachRegenerateListener(summaryCard, threadId, emailText, metadata)
-    }
-  }
-
-  async regenerateSummary(threadId: string, emailText: string, metadata: EmailMetadata): Promise<void> {
-    if (this.isRegenerating) return
-    this.isRegenerating = true
-
-    const requestToken = `${threadId}-regen-${Date.now()}`
-    this.activeRequestToken = requestToken
-
-    try {
-      const existing = document.querySelector('.metldr-summary') as HTMLElement | null
-      if (existing) {
-        existing.style.transition = 'opacity 0.2s, transform 0.2s'
-        existing.style.opacity = '0'
-        existing.style.transform = 'scale(0.95)'
-        await new Promise(resolve => setTimeout(resolve, 200))
-        existing.remove()
-      }
-
-      const header = this.findInjectionPoint(null)
-      if (!header) return
-
-      const loadingDiv = UIService.createLoadingIndicator(document.body)
-      UIService.injectLoading(header, loadingDiv)
-
-      const summary = await this.getSummaryFromBackground(emailText, threadId, metadata, true)
-      if (loadingDiv) loadingDiv.remove()
-
-      if (this.activeRequestToken !== requestToken) {
-        console.log('metldr: stale regen response skipped for thread', threadId)
-        return
-      }
-
-      const currentThreadId = this.getThreadIdFromUrl()
-      if (currentThreadId && currentThreadId !== threadId) {
-        console.log('metldr: thread changed during regen, skipping insert')
-        return
-      }
-
-      if (summary) {
-        const summaryCard = UIService.createSummaryCard(summary, threadId)
-        UIService.injectSummary(header, summaryCard)
-        this.attachRegenerateListener(summaryCard, threadId, emailText, metadata)
-
-      }
-    } finally {
-      this.isRegenerating = false
-    }
   }
 
   destroy(): void {
