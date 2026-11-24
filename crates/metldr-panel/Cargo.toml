@@ -28,6 +28,9 @@ crate-type = ["cdylib"]
 
 [features]
 rune-ui = ["dep:rune", "dep:wgpu", "dep:metldr-ui"]
+# The service worker's one module: the companion relay here and the core's gateway, store and
+# message handlers.
+worker = ["metldr-core/web"]
 
 [dependencies]
 metldr-harness = { path = "../metldr-harness" }

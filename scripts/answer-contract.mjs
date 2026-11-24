@@ -14,7 +14,7 @@ const outputs = [
   'crates/metldr-panel/pkg/metldr_panel_bg.wasm',
 ];
 
-const crates = ['metldr-answer-codec', 'metldr-conversation', 'metldr-history-pages', 'metldr-panel'];
+const crates = ['metldr-answer-codec', 'metldr-conversation', 'metldr-history-pages', 'metldr-panel', 'metldr-core'];
 
 function sourceFiles(path, directories = false) {
   const absolute = join(root, path);
