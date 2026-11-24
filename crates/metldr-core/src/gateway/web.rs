@@ -625,13 +625,16 @@ async fn first_ready(settings: &Value) -> Option<&'static Route> {
     None
 }
 
+/// The error when no route is chosen and none is ready: nothing can write an answer.
+pub(super) const NO_ROUTE: &str = "Set up where metldr's AI runs first.";
+
 async fn target(id: Option<&str>, model: Option<String>) -> Result<Target, Error> {
     let settings = settings().await;
     let route = match id.or_else(|| settings["preferred"]["route"].as_str()) {
         Some(id) => super::route(id).ok_or("Unknown route.")?,
         None => first_ready(&settings)
             .await
-            .ok_or("Set up where metldr's AI runs first.")?,
+            .ok_or(NO_ROUTE)?,
     };
     let model = model
         .or_else(|| saved(&settings, route.id, "model").map(str::to_owned))
