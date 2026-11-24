@@ -9,12 +9,11 @@ import { recordReceipt, sourceDigest } from './answer-contract.mjs';
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 // Ordered longest first so the parallel pool below finishes as early as it can.
 const crates = [
-  // The service worker loads the plain module; the chat page loads the Rune variant.
-  { name: 'metldr-panel', module: 'metldr_panel', pkg: 'crates/metldr-panel/pkg' },
+  // The service worker loads one module, the companion relay with the core (whose search compares
+  // int8 vectors with wasm SIMD, 16 lanes at once); the chat page loads the Rune variant.
+  { name: 'metldr-panel', module: 'metldr_panel', pkg: 'crates/metldr-panel/pkg', simd: true, features: 'worker' },
   { name: 'metldr-panel', variant: 'rune', module: 'metldr_panel', pkg: 'target/wasm/metldr-panel-rune/pkg', features: 'rune-ui' },
   { name: 'metldr-welcome', module: 'welcome_runtime', pkg: 'public/welcome/pkg' },
-  // The core's search compares int8 vectors with wasm SIMD, 16 lanes at once.
-  { name: 'metldr-core', module: 'metldr_core', pkg: 'crates/metldr-core/pkg', simd: true, features: 'web' },
   // Binaryen's size passes make the PDF module 1.4 MB smaller and no slower on the paper set.
   { name: 'metldr-pdf', module: 'metldr_pdf', pkg: 'crates/metldr-pdf/pkg', pdfium: true, opt: '-Oz' },
   { name: 'metldr-answer-codec', artifact: 'metldr_answer_codec', module: 'answer_codec', pkg: 'crates/metldr-answer-codec/pkg', features: 'guest' },
