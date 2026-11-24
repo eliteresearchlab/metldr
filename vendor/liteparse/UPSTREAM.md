@@ -13,6 +13,7 @@ Changes from upstream:
 - `projection.rs`: font-name hints are found in one pass over the name instead of a substring
   search per hint for every text item.
 - `markdown_layout/paragraphs.rs`: whitespace collapses by copying whole words.
+- `bidi.rs`, `document_metadata.rs`, `markdown_layout/inline.rs`: helpers only native or test code uses are built only there, and the unused `SpanStyle::is_plain` is gone.
 - `conversion.rs`: the browser build reads PDFs only and refuses other inputs, so the image and
   office converters stay out of the module.
 - `Cargo.toml`: a standalone crate; PDFium from crates.io pinned to 1.14.0.
