@@ -211,7 +211,53 @@ async fn stored() -> Vec<Value> {
     found
 }
 
+/// Deletes every cache record past its own lifetime (`timestamp` plus `ttl`): page summaries
+/// after a week, search chunks after 60 days. A source that lost chunks loses its hash too, so
+/// reading it again indexes it again. Answers the search chunks that remain.
+async fn prune() -> Vec<Value> {
+    let Some(db) = page_summary::cache().await else {
+        return Vec::new();
+    };
+    let run = async {
+        let names = js_sys::Array::of2(&PAGES.into(), &HASHES.into());
+        let tx = db.transaction_with_str_sequence_and_mode(&names, IdbTransactionMode::Readwrite).ok()?;
+        let pages = tx.object_store(PAGES).ok()?;
+        // Every record but the saved vectors (`system:` keys), which hold no lifetime.
+        let below = IdbKeyRange::upper_bound_with_open(&"system:".into(), true).ok()?;
+        let above = IdbKeyRange::lower_bound_with_open(&"system;".into(), true).ok()?;
+        let mut records = Vec::new();
+        for range in [below, above] {
+            let found = keys::done(&pages.get_all_with_key(&range).ok()?).await.ok()?;
+            records.extend(from_js(&found).as_array().cloned().unwrap_or_default());
+        }
+        let (mut kept, mut emptied) = (Vec::new(), HashSet::new());
+        for record in records {
+            let (at, ttl) = (record["timestamp"].as_f64(), record["ttl"].as_f64());
+            let expired = matches!((at, ttl), (Some(at), Some(ttl)) if now() - at > ttl);
+            let key = record["url"].as_str().unwrap_or_default();
+            if expired {
+                let _ = pages.delete(&key.into());
+                if let Some(source) = record["metadata"]["sourceId"].as_str().filter(|_| key.starts_with("rag:")) {
+                    emptied.insert(source.to_owned());
+                }
+            } else if key.starts_with("rag:") {
+                kept.push(record);
+            }
+        }
+        let hashes = tx.object_store(HASHES).ok()?;
+        for source in &emptied {
+            let _ = hashes.delete(&source.as_str().into());
+        }
+        dictionary::finished(&tx).await.ok()?;
+        Some(kept)
+    };
+    let kept = run.await.unwrap_or_default();
+    db.close();
+    kept
+}
+
 async fn load() -> Rc<Store> {
+    let chunks = prune().await;
     let store = Store::default();
     store.model_tried.set(now());
     if model::search_model_fetch().await {
@@ -250,8 +296,8 @@ async fn load() -> Rc<Store> {
         }
         db.close();
     }
-    for entry in stored().await {
-        remember(&mut store.index.borrow_mut(), &entry);
+    for entry in &chunks {
+        remember(&mut store.index.borrow_mut(), entry);
     }
     Rc::new(store)
 }
