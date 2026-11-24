@@ -6,7 +6,7 @@ use super::*;
 use crate::{page, stats as counts};
 use web_sys::{IdbDatabase, IdbOpenDbRequest, IdbTransactionMode};
 
-const CACHE: &str = "metldr_cache";
+pub(super) const CACHE: &str = "metldr_cache";
 const PAGES: &str = "page_cache";
 /// How long a cached summary is meant to last, in milliseconds, as the cache records it.
 const KEEP_MS: f64 = 3_600_000.0;
@@ -85,8 +85,7 @@ async fn keep(url: &str, summary: &Value) {
 }
 
 /// The summary of `page`: `{title, bullets, timing, ...}`, the cached one unless `force`.
-#[wasm_bindgen]
-pub async fn gateway_page_summary(page: JsValue, force: bool) -> Result<JsValue, JsValue> {
+pub(super) async fn gateway_page_summary(page: JsValue, force: bool) -> Result<JsValue, JsValue> {
     let started = js_sys::Date::now();
     let page: Page =
         serde_json::from_value(from_js(&page)).map_err(|_| js_error("That page is not valid."))?;
@@ -154,8 +153,7 @@ pub async fn gateway_page_summary(page: JsValue, force: bool) -> Result<JsValue,
 }
 
 /// Clears the cached page summaries. It never creates the cache.
-#[wasm_bindgen]
-pub async fn summary_cache_clear() -> Result<(), JsValue> {
+pub(super) async fn summary_cache_clear() -> Result<(), JsValue> {
     let Some(db) = cache().await else {
         return Ok(());
     };

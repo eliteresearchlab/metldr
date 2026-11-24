@@ -36,8 +36,7 @@ thread_local! {
 /// `{action: "state" | "select" | "delete", code, on}` to the dictionaries as settings show
 /// them: `{languages: [{code, name}], selected, downloaded, progress: {code: percent}}`.
 /// Reading the state also resumes unfinished downloads and starts the chosen languages.
-#[wasm_bindgen]
-pub async fn dictionary_request(request: JsValue) -> Result<JsValue, JsValue> {
+pub(super) async fn dictionary_request(request: JsValue) -> Result<JsValue, JsValue> {
     let request = from_js(&request);
     let code = request["code"].as_str().and_then(dictionary::language);
     load().await;

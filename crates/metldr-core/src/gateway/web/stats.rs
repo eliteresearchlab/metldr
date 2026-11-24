@@ -16,8 +16,7 @@ const STORES: [(&str, &str, &str); 3] = [
 ];
 
 /// `{days, summaries, chatMessages, ...}` for the `days` up to today; zeros before any use.
-#[wasm_bindgen]
-pub async fn stats_summary(days: u32) -> JsValue {
+pub(super) async fn stats_summary(days: u32) -> JsValue {
     let all: Vec<Day> = match database().await {
         Ok(db) => {
             let read = async {
@@ -67,8 +66,7 @@ pub(super) async fn record(event: &stats::Event<'_>) {
 /// Counts what the extension's page tools did: `{kind: "summary", email, wordsIn, wordsOut,
 /// tokensOut, ms, model, url}`, `{kind: "lookup"}` or `{kind: "replies", count}`; and a finished
 /// companion run, `{kind: "run", input, output, ms, model}`, as one chat.
-#[wasm_bindgen]
-pub async fn stats_record(event: JsValue) {
+pub(super) async fn stats_record(event: JsValue) {
     let event = from_js(&event);
     let number = |key: &str| event[key].as_f64().unwrap_or(0.0);
     let text = |key: &str| event[key].as_str().unwrap_or_default();
