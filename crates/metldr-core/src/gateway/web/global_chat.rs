@@ -77,8 +77,7 @@ async fn summaries(sources: &[Value]) -> Vec<String> {
 
 /// Answers the last user message of `messages` `[{role, content}]` from the search store:
 /// `{ok, content, sources, timing: {total, model}}`, or `{ok: false, error}`.
-#[wasm_bindgen]
-pub async fn gateway_global_chat(messages: JsValue) -> JsValue {
+pub(super) async fn gateway_global_chat(messages: JsValue) -> JsValue {
     let started = js_sys::Date::now();
     let elapsed = || (js_sys::Date::now() - started).round();
     let messages = from_js(&messages);

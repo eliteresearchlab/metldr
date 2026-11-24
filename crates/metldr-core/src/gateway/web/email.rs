@@ -81,8 +81,7 @@ async fn written_replies(id: &str, content: &str, summary: &Value, metadata: &Va
 /// intent, reasoning, urgency, model, time_ms, cached}`, the kept one unless `force`. With an
 /// `id` the email and its summary are indexed for search, and replies are written in the
 /// background when none are kept.
-#[wasm_bindgen]
-pub async fn email_summary(
+pub(super) async fn email_summary(
     content: String,
     id: Option<String>,
     metadata: JsValue,
@@ -152,8 +151,7 @@ pub async fn email_summary(
 
 /// Reply suggestions for email `id`: the kept ones unless `force`, else written from `content`
 /// (or the kept summary when the email could not be read). `null` when there are none.
-#[wasm_bindgen]
-pub async fn email_replies(id: String, content: String, metadata: JsValue, force: bool) -> JsValue {
+pub(super) async fn email_replies(id: String, content: String, metadata: JsValue, force: bool) -> JsValue {
     if force {
         write(REPLIES, &id, None).await;
     } else if let Some(kept) = kept_replies(&id).await {
@@ -169,22 +167,19 @@ pub async fn email_replies(id: String, content: String, metadata: JsValue, force
 }
 
 /// The reply suggestions kept for email `id`, or `null`.
-#[wasm_bindgen]
-pub async fn email_kept_replies(id: String) -> JsValue {
+pub(super) async fn email_kept_replies(id: String) -> JsValue {
     kept_replies(&id).await.map_or(JsValue::NULL, |replies| to_js(&replies))
 }
 
 /// The kept summary of email `id` and how many messages its thread had: `{cached, emailCount}`.
-#[wasm_bindgen]
-pub async fn email_cache(id: String) -> JsValue {
+pub(super) async fn email_cache(id: String) -> JsValue {
     let summary = read(SUMMARIES, &id).await.map_or(Value::Null, |mut record| record["value"].take());
     let count = read(SESSIONS, &id).await.and_then(|record| record["emailCount"].as_u64()).unwrap_or(0);
     to_js(&json!({"cached": summary, "emailCount": count}))
 }
 
 /// Keeps `summary` for email `id`, and its thread's message count when given.
-#[wasm_bindgen]
-pub async fn email_cache_set(id: String, summary: JsValue, email_count: Option<u32>) {
+pub(super) async fn email_cache_set(id: String, summary: JsValue, email_count: Option<u32>) {
     write(SUMMARIES, &id, Some(&from_js(&summary))).await;
     if let Some(count) = email_count {
         let Some(db) = page_summary::cache().await else { return };

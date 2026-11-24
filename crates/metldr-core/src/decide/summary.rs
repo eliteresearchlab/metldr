@@ -1,7 +1,7 @@
 //! Auto summary: a page summarizes on its own only when the reader's settings and the
 //! page's shape both say it is an article.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
 const ALLOWLIST: [&str; 34] = [
@@ -140,45 +140,6 @@ impl Prefs {
     }
 }
 
-/// A list typed one entry per line or comma separated; the fallback when it holds none.
-pub fn parse_list(text: &str, fallback: &[String]) -> Vec<String> {
-    let parts: Vec<String> = text
-        .split(['\n', ','])
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .map(str::to_owned)
-        .collect();
-    if parts.is_empty() {
-        fallback.to_vec()
-    } else {
-        parts
-    }
-}
-
-/// The settings form's fields to the stored settings.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Form {
-    pub mode: String,
-    pub allowlist: String,
-    pub denylist: String,
-    pub min_auto_words: Value,
-}
-
-impl Form {
-    pub fn into_prefs(self) -> Prefs {
-        let base = Prefs::default();
-        let min_auto_words = number(&self.min_auto_words, base.min_auto_words);
-        Prefs {
-            allowlist: parse_list(&self.allowlist, &base.allowlist),
-            denylist: parse_list(&self.denylist, &base.denylist),
-            mode: self.mode,
-            min_auto_words,
-            min_prompt_words: base.min_prompt_words,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Serialize)]
 pub struct Decision {
     /// skip, auto, prompt or wait.
@@ -278,8 +239,6 @@ mod checks {
         assert_eq!(prefs.allowlist, ["a.com"]);
         assert_eq!(prefs.denylist, Prefs::default().denylist);
         assert_eq!(prefs.min_auto_words, 500.0);
-        assert_eq!(parse_list(" a.com,\nb.org ,", &[]), ["a.com", "b.org"]);
-        assert_eq!(parse_list("  ", &["z".into()]), ["z"]);
     }
 
     #[test]

@@ -452,16 +452,14 @@ fn source(value: JsValue) -> Result<Source, JsValue> {
 }
 
 /// Indexes `text` from `source` `{sourceId, sourceUrl, sourceType, title?}` for search.
-#[wasm_bindgen]
-pub async fn search_index(text: String, source_of: JsValue) -> Result<(), JsValue> {
+pub(super) async fn search_index(text: String, source_of: JsValue) -> Result<(), JsValue> {
     let source = source(source_of)?;
     index(&store().await, &text, &source).await;
     Ok(())
 }
 
 /// Indexes a source's summary once, as its own searchable entry.
-#[wasm_bindgen]
-pub async fn search_index_summary(text: String, source_of: JsValue) -> Result<(), JsValue> {
+pub(super) async fn search_index_summary(text: String, source_of: JsValue) -> Result<(), JsValue> {
     let mut source = source(source_of)?;
     if text.trim().is_empty() {
         return Ok(());

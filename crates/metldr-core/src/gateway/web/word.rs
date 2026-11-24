@@ -8,8 +8,7 @@ use web_sys::{IdbDatabase, IdbOpenDbRequest};
 const API_MS: u32 = 8_000;
 
 /// `word` and its page context to `{definitions, synonyms, language, source}`.
-#[wasm_bindgen]
-pub async fn gateway_word_lookup(word: String, context: JsValue) -> Result<JsValue, JsValue> {
+pub(super) async fn gateway_word_lookup(word: String, context: JsValue) -> Result<JsValue, JsValue> {
     let word = word::normalize(&word);
     if word.is_empty() || word.len() > 100 {
         return Err(js_error("That word cannot be looked up."));

@@ -1053,54 +1053,8 @@ async fn stream(
 
 // ---------- calls from the service worker's own page tools ----------
 
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Complete {
-    system: String,
-    messages: Vec<Message>,
-    route: Option<String>,
-    model: Option<String>,
-    schema: Option<Value>,
-}
-
-fn answer(text: String, route: &str, model: &str, started: f64) -> JsValue {
-    let ms = (js_sys::Date::now() - started).round();
-    let model = if model.is_empty() {
-        "gemini-nano"
-    } else {
-        model
-    };
-    to_js(&json!({"text": text, "route": route, "model": model, "ms": ms}))
-}
-
 fn js_error(message: impl AsRef<str>) -> JsValue {
     js_sys::Error::new(message.as_ref()).into()
-}
-
-/// One whole reply on the preferred route (or the one named): `{system, messages, route?,
-/// model?, schema?}` to `{text, route, model, ms}`.
-#[wasm_bindgen]
-pub async fn gateway_complete(request: JsValue) -> Result<JsValue, JsValue> {
-    let request: Complete = serde_json::from_value(from_js(&request))
-        .map_err(|_| js_error("That model request is not valid."))?;
-    super::check_conversation(&request.system, &request.messages).map_err(js_error)?;
-    let target = target(request.route.as_deref(), request.model)
-        .await
-        .map_err(js_error)?;
-    let (route, model) = (target.route.id, target.model.clone());
-    let started = js_sys::Date::now();
-    let stop = AtomicBool::new(false);
-    let (text, _) = reply(
-        target,
-        &request.system,
-        &request.messages,
-        request.schema.as_ref(),
-        &stop,
-        &mut |_| {},
-    )
-    .await
-    .map_err(js_error)?;
-    Ok(answer(text, route, &model, started))
 }
 
 #[derive(serde::Deserialize)]
@@ -1112,18 +1066,6 @@ struct Summarize {
     /// short, medium or long.
     length: Option<String>,
     context: Option<String>,
-}
-
-/// A summary of content of any length on the preferred route: Chrome's Summarizer there when
-/// the content fits, a summarizing prompt elsewhere, and sections first for long content.
-/// `{content, kind?, length?, context?}` to `{text, route, model, ms}`.
-#[wasm_bindgen]
-pub async fn gateway_summarize(request: JsValue) -> Result<JsValue, JsValue> {
-    let request: Summarize = serde_json::from_value(from_js(&request))
-        .map_err(|_| js_error("That summary request is not valid."))?;
-    let started = js_sys::Date::now();
-    let (text, route, model) = summarized(&request).await.map_err(js_error)?;
-    Ok(answer(text, route, &model, started))
 }
 
 /// A summary of `request` on the preferred route: its text, route and model.
@@ -1353,8 +1295,3 @@ async fn chrome_language(text: &str) -> Option<String> {
     get(&top, "detectedLanguage").as_string()
 }
 
-/// The route and model page tools use, or `null` before any is chosen.
-#[wasm_bindgen]
-pub async fn gateway_preferred() -> JsValue {
-    to_js(&settings().await["preferred"])
-}
