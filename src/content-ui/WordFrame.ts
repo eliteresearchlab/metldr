@@ -30,15 +30,24 @@ export class WordFrame {
   private pending: ReturnType<typeof setTimeout> | null = null
   private idle: ReturnType<typeof setTimeout> | null = null
   private lastDoubleClick = 0
+  // Every listener this script adds, removed together when it retires.
+  private readonly listening = new AbortController()
+  private readonly answerPull = (message: { type?: string }, _sender: unknown, respond: (job: Job | null) => void): boolean => {
+    if (message?.type !== 'INPAGE_PULL') return false
+    respond(this.job)
+    return false
+  }
 
   constructor() {
+    const signal = this.listening.signal
+    document.addEventListener('dblclick', event => this.handleTextSelection(event), { signal })
     document.addEventListener('click', event => {
       if (Date.now() - this.lastDoubleClick < 300 && this.pending) this.cancelPending()
       else if (this.shown && event.target !== this.frame) this.hide()
-    })
-    document.addEventListener('keydown', event => { if (event.key === 'Escape' && this.shown) this.hide() })
-    window.addEventListener('scroll', () => this.place(), { passive: true, capture: true })
-    window.addEventListener('resize', () => this.place())
+    }, { signal })
+    document.addEventListener('keydown', event => { if (event.key === 'Escape' && this.shown) this.hide() }, { signal })
+    window.addEventListener('scroll', () => this.place(), { passive: true, capture: true, signal })
+    window.addEventListener('resize', () => this.place(), { signal })
     // Only this frame is heard: it says the size it needs and when to close.
     window.addEventListener('message', event => {
       // The browser sets the origin, so a page script cannot pass for the frame.
@@ -48,13 +57,20 @@ export class WordFrame {
         this.place()
       }
       if (event.data.close) this.hide()
-    })
+    }, { signal })
     // The frame asks the extension for its job, and the extension asks this script.
-    chrome.runtime.onMessage.addListener((message, _sender, respond) => {
-      if (message?.type !== 'INPAGE_PULL') return false
-      respond(this.job)
-      return false
-    })
+    chrome.runtime.onMessage.addListener(this.answerPull)
+  }
+
+  // The extension was updated and its new script took over this tab: this one stops listening
+  // and takes its frame away.
+  retire(): void {
+    this.listening.abort()
+    chrome.runtime.onMessage.removeListener(this.answerPull)
+    this.cancelPending()
+    if (this.idle) clearTimeout(this.idle)
+    this.frame?.remove()
+    this.frame = null
   }
 
   private pageLanguage(): string | undefined {
@@ -68,7 +84,7 @@ export class WordFrame {
     this.pending = null
   }
 
-  handleTextSelection(event: MouseEvent): void {
+  private handleTextSelection(event: MouseEvent): void {
     this.lastDoubleClick = Date.now()
     this.cancelPending()
     const target = event.target as HTMLElement
