@@ -1,48 +1,25 @@
-// The open thread read from Gmail's DOM, for when InboxSDK has not loaded yet.
-export function emailFromDom(): { content: string; metadata: { subject?: string; from?: string } } | null {
-  try {
-    // gmail subject selector
-    const subjectEl = document.querySelector('h2[data-thread-perm-id]') || 
-                      document.querySelector('.hP') ||
-                      document.querySelector('[role="heading"][data-thread-perm-id]')
-    const subject = subjectEl?.textContent?.trim() || ''
-    
-    // gmail sender - look for sender element  
-    const senderEl = document.querySelector('.gD') ||
-                     document.querySelector('[email]') ||
-                     document.querySelector('.go')
-    const from = senderEl?.getAttribute('email') || senderEl?.textContent?.trim() || ''
-    
-    // gmail message bodies - multiple selectors for different views
-    const messageContainers = document.querySelectorAll('.a3s.aiL, .ii.gt, [data-message-id] .a3s')
-    
-    if (messageContainers.length === 0) {
-      console.log('metldr: no email bodies found in DOM')
-      return null
-    }
-    
-    let content = ''
-    messageContainers.forEach((container, i) => {
-      const text = container.textContent?.trim() || ''
-      if (text.length > 20) {
-        content += `Message ${i + 1}:\n${text}\n\n`
-      }
-    })
-    
-    content = content.trim()
-    if (content.length < 50) {
-      console.log('metldr: extracted content too short')
-      return null
-    }
-    
-    console.log('metldr: DOM extraction successful', { subject: subject.slice(0, 30), len: content.length })
-    
-    return {
-      content,
-      metadata: { subject, from }
-    }
-  } catch (err) {
-    console.error('metldr: DOM extraction error:', err)
-    return null
+// Gmail read from its page: the open thread's id from the address, and the thread's text for
+// when InboxSDK has not loaded yet.
+
+const threadInHash = /#[^/]+\/(?:[^/]+\/)?([A-Za-z0-9_-]{16,})$/
+
+export function threadFromUrl(): string | null {
+  const params = new URL(location.href).searchParams
+  return location.hash.match(threadInHash)?.[1] ?? params.get('msgid') ?? params.get('tid')
+}
+
+export function emailFromDom(): { content: string; metadata: { subject: string; from: string } } | null {
+  const subject = document.querySelector('h2[data-thread-perm-id], .hP, [role="heading"][data-thread-perm-id]')
+  const sender = document.querySelector('.gD, [email], .go')
+  const bodies = Array.from(document.querySelectorAll('.a3s.aiL, .ii.gt, [data-message-id] .a3s'))
+  const content = bodies.map(el => el.textContent?.trim() ?? '').filter(text => text.length > 20)
+    .map((text, i) => `Message ${i + 1}:\n${text}`).join('\n\n')
+  if (content.length < 50) return null
+  return {
+    content,
+    metadata: {
+      subject: subject?.textContent?.trim() ?? '',
+      from: sender?.getAttribute('email') || sender?.textContent?.trim() || '',
+    },
   }
 }

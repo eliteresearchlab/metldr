@@ -1,4 +1,5 @@
-import type { ComposeView, InboxSDK } from '../types'
+import type { ComposeView, InboxSDK } from '@inboxsdk/core'
+import { threadFromUrl } from './gmailDom'
 
 // Gmail reply suggestions: a button in each reply opens an extension frame (Rust and Rune) beside
 // it. The frame asks the extension for the thread's replies; this script places the frame, tells
@@ -6,9 +7,6 @@ import type { ComposeView, InboxSDK } from '../types'
 
 // The frame's room around the card for its shadow, as the frame draws it (inpage.rs MARGIN).
 const MARGIN = 16
-const THREAD_ID_HASH_REGEX = /#[^/]+\/(?:[^/]+\/)?([A-Za-z0-9_-]{16,})$/
-
-const threadFromUrl = (): string | null => window.location.hash.match(THREAD_ID_HASH_REGEX)?.[1] ?? null
 
 export class ReplyFrame {
   private frame: HTMLIFrameElement | null = null
@@ -47,7 +45,7 @@ export class ReplyFrame {
 
   // A reply in a thread gets the button; a new email has no thread to answer.
   private attach(view: ComposeView): void {
-    const thread = threadFromUrl() ?? view.getThreadID?.() ?? null
+    const thread = threadFromUrl() ?? (view.getThreadID() || null)
     if (!thread) return
     view.addButton({
       title: 'Reply suggestions',
@@ -99,7 +97,7 @@ export class ReplyFrame {
   // Above the reply, at its right edge, inside the viewport.
   private place(): void {
     if (!this.shown || !this.frame) return
-    const anchor = this.compose?.getElement?.()?.getBoundingClientRect()
+    const anchor = this.compose?.getElement().getBoundingClientRect()
     const [width, height] = this.size
     const right = anchor ? anchor.right : window.innerWidth - 24
     const top = anchor ? anchor.top : window.innerHeight - 24
