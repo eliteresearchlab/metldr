@@ -43,14 +43,6 @@ export interface EmailMetadata {
   emailCount?: number
 }
 
-export interface ReplySuggestion {
-  id: string
-  tone: string
-  length: string
-  body: string
-  label: string
-}
-
 export interface ContextData {
   contextBefore?: string
   contextAfter?: string
@@ -155,11 +147,3 @@ export interface SummaryResponse {
   error?: string
 }
 
-// reply panel
-export interface FetchResponse {
-  success: boolean
-  error?: string
-  replies?: ReplySuggestion[]
-  suggestions?: ReplySuggestion[]
-  contextInvalidated?: boolean
-}

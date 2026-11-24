@@ -101,5 +101,8 @@ pub fn inpage_theme(theme: String) {
         if let Some(tools) = state.pdf_tools.as_deref_mut() {
             tools.retheme(palette, typography);
         }
+        if let Some(replies) = state.gmail_replies.as_deref_mut() {
+            replies.retheme(palette, typography);
+        }
     });
 }

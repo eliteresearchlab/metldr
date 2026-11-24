@@ -225,8 +225,8 @@ async fn replies_answer(msg: &Value, sender_tab: Option<i32>) -> Value {
 }
 
 /// An in-page frame's job, from the tab it sits in; the page never takes part, so it cannot
-/// choose what the frame shows. The PDF tools read the tab's own address; the word popup's job
-/// comes from the tab's content script.
+/// choose what the frame shows. The PDF tools read the tab's own address; the word popup's and
+/// the Gmail reply card's jobs come from the tab's content script.
 async fn inpage_pull(sender: &Value, tab: Option<i32>) -> JsValue {
     let url = sender["url"].as_str().unwrap_or_default();
     let frame = url.rfind("/inpage/").map_or("", |at| &url[at..]);
@@ -235,8 +235,10 @@ async fn inpage_pull(sender: &Value, tab: Option<i32>) -> JsValue {
             "url": sender["tab"]["url"].as_str().unwrap_or_default(),
             "title": sender["tab"]["title"].as_str().unwrap_or_default(),
         })),
-        (Some(tab), "/inpage/word.html") => {
-            let ask = to_js(&json!({"type": "INPAGE_PULL"}));
+        (Some(tab), "/inpage/word.html" | "/inpage/replies.html") => {
+            // Each frame's script answers only for its own frame.
+            let kind = if frame == "/inpage/word.html" { "word" } else { "replies" };
+            let ask = to_js(&json!({"type": "INPAGE_PULL", "frame": kind}));
             promise(tabs_send(tab, &ask, &to_js(&json!({"frameId": 0})))).await.unwrap_or(JsValue::NULL)
         }
         _ => JsValue::NULL,
