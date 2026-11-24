@@ -1,7 +1,9 @@
-export function capturePage(find) {
+export function capturePage(find, about) {
   // Chrome serializes this function without its module scope: everything it uses lives inside.
   // It returns the page's main content as blocks, [kind, depth, text]; Rust renders the markdown.
-  // Given words to find instead, it selects their first match and scrolls it into view.
+  // Given words to find instead, it selects their first match and scrolls it into view. With
+  // `about`, it also returns what the page tools' summary settings judge a page by (`signals`)
+  // and the article's byline (`meta`).
   if (typeof find === "string") {
     const words = find.replace(/\s+/gu, " ").trim();
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -47,9 +49,15 @@ export function capturePage(find) {
     return !element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
   };
   const clean = (text) => text.replace(/\s+/gu, " ").trim();
+  // A block past the limit keeps the part that fits, so one long block never empties the page.
   const push = (kind, depth, text) => {
     if (!text || truncated) return;
-    if (blocks.length >= BLOCK_LIMIT || size + text.length > TEXT_LIMIT) { truncated = true; return; }
+    if (blocks.length >= BLOCK_LIMIT) { truncated = true; return; }
+    if (size + text.length > TEXT_LIMIT) {
+      truncated = true;
+      text = text.slice(0, TEXT_LIMIT - size);
+      if (text.length < 200) return;
+    }
     size += text.length;
     blocks.push([kind, depth, text]);
   };
@@ -65,12 +73,23 @@ export function capturePage(find) {
     }
     return text;
   };
+  // Two line breaks in a row end a paragraph (pages laid out with <br> instead of <p>).
+  let breaks = 0;
   const walk = (element, depth) => {
     for (const node of element.childNodes) {
       if (truncated) return;
-      if (node.nodeType === Node.TEXT_NODE) { pending += node.data; continue; }
+      if (node.nodeType === Node.TEXT_NODE) {
+        pending += node.data;
+        if (node.data.trim()) breaks = 0;
+        continue;
+      }
       if (node.nodeType !== Node.ELEMENT_NODE || skipped(node)) continue;
       const tag = node.tagName;
+      if (tag === "BR") {
+        pending += " ";
+        if (++breaks === 2) flush();
+        continue;
+      }
       if (HEADING[tag]) { flush(); push(HEADING[tag], 0, clean(inline(node))); }
       else if (PARAGRAPH.has(tag)) { flush(); push("p", 0, clean(inline(node))); }
       else if (tag === "LI") {
@@ -80,16 +99,18 @@ export function capturePage(find) {
       }
       else if (tag === "PRE") { flush(); push("pre", 0, node.innerText.trimEnd()); }
       else if (tag === "BLOCKQUOTE") { flush(); push("quote", 0, clean(inline(node))); }
-      // A row holding a table is page layout, not data: read inside it.
-      else if (tag === "TR" && node.querySelector("table")) { flush(); walk(node, depth); flush(); }
+      // A row holding a table, or with one cell, is page layout, not data: read inside it.
+      else if (tag === "TR" && (node.cells.length < 2 || node.querySelector("table"))) { flush(); walk(node, depth); flush(); }
       else if (tag === "TR") {
         flush();
         const cells = [...node.cells].map((cell) => clean(inline(cell))).filter(Boolean);
         push("row", 0, cells.join(" | "));
       }
       else if (tag === "IMG" || tag === "PICTURE") continue;
+      // Inline text that holds line breaks or blocks is read for its paragraphs.
       else if (INLINE.has(tag) || getComputedStyle(node).display.startsWith("inline")) {
-        pending += ` ${inline(node)} `;
+        if (node.querySelector("br,p,div,ul,ol,table,pre,blockquote,h1,h2,h3,h4,h5,h6")) walk(node, depth);
+        else pending += ` ${inline(node)} `;
       }
       else { flush(); walk(node, depth); flush(); }
     }
@@ -107,5 +128,54 @@ export function capturePage(find) {
   // A page may offer its own markdown; the extension checks and fetches it.
   const offered = document.querySelector("link[rel~='alternate'][type='text/markdown']")?.href ?? "";
   const alternate = offered.startsWith("https://") ? offered.slice(0, 2048) : "";
-  return { url: location.href, title: document.title, blocks, truncated, alternate };
+  const page = { url: location.href, title: document.title, blocks, truncated, alternate };
+  if (!about) return page;
+  const count = (selector) => document.querySelectorAll(selector).length;
+  const meta = (selector) => document.querySelector(selector)?.content?.trim().slice(0, 200) || null;
+  // The page's structured data, when it describes the article.
+  let described = {};
+  for (const script of document.querySelectorAll("script[type='application/ld+json']")) {
+    let data;
+    try { data = JSON.parse(script.textContent); } catch { continue; }
+    const items = [data, ...(Array.isArray(data) ? data : []), ...(Array.isArray(data?.["@graph"]) ? data["@graph"] : [])];
+    const found = items.find((item) => item && typeof item === "object" && (item.author || item.datePublished));
+    if (found) { described = found; break; }
+  }
+  const named = (value) => {
+    const name = typeof value === "string" ? value : Array.isArray(value) ? value[0]?.name ?? value[0] : value?.name;
+    return typeof name === "string" && name.trim() ? name.trim().slice(0, 200) : null;
+  };
+  const byline = document.querySelector("[rel='author'],[itemprop='author'],.byline,.author")?.innerText.trim().split("\n")[0].slice(0, 200) || null;
+  const body = document.body;
+  const text = body.innerText.length || 1;
+  const paragraphs = count("p");
+  const controls = count("button") + count("input, select, textarea");
+  const forms = count("form");
+  const drawn = count("canvas") + count("svg");
+  let linked = 0;
+  for (const link of document.getElementsByTagName("a")) linked += link.innerText.length;
+  const path = location.pathname;
+  const ratio = paragraphs > 0 ? controls / paragraphs : controls;
+  const hashRouting = location.hash.includes("#/");
+  page.signals = {
+    isSPA: hashRouting || ratio > 1.4 || forms > paragraphs * 0.6,
+    isDashboard: /(dashboard|admin|console|panel)/i.test(path),
+    isSearch: /search/i.test(path) || /[?&](q|query|search)=/i.test(location.search),
+    isCart: /(cart|checkout)/i.test(path),
+    isFeed: /(\/feed|\/rss)/i.test(path),
+    isSocialFeed: /(twitter\.com|facebook\.com|instagram\.com|tiktok\.com|linkedin\.com)/i.test(location.hostname),
+    canvasHeavy: drawn >= 3,
+    hasArticleTag: articles.length > 0,
+    hasMain: document.querySelector("main") !== null,
+    h1Count: count("h1"),
+    textDensity: Math.min(1, text / Math.max(body.innerHTML.length, text)),
+    linkDensity: linked / text,
+    buttonToParagraphRatio: ratio,
+  };
+  page.meta = {
+    author: meta("meta[name='author']") ?? named(described.author) ?? byline,
+    publication: meta("meta[property='og:site_name']") ?? meta("meta[name='application-name']") ?? named(described.publisher) ?? location.hostname.replace(/^www\./, ""),
+    publishDate: meta("meta[property='article:published_time']") ?? named(described.datePublished) ?? meta("meta[name='date']"),
+  };
+  return page;
 }

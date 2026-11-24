@@ -14,8 +14,6 @@ extern "C" {
     fn tabs_get(tab: i32) -> Result<js_sys::Promise, JsValue>;
     #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = query)]
     fn tabs_query(query: &JsValue) -> Result<js_sys::Promise, JsValue>;
-    #[wasm_bindgen(catch, js_namespace = ["chrome", "permissions"], js_name = contains)]
-    fn permissions_contains(permissions: &JsValue) -> Result<js_sys::Promise, JsValue>;
     #[wasm_bindgen(js_namespace = console, js_name = warn)]
     fn console_warn(message: &str, error: &JsValue);
 }
@@ -121,7 +119,7 @@ pub async fn background_message(message: JsValue, sender: JsValue) -> JsValue {
         "SUMMARIZE_EMAIL" => email_summary_answer(&msg).await,
         "GET_REPLY_SUGGESTIONS" => kept_replies_answer(&text("emailId")).await,
         "GENERATE_REPLY_SUGGESTIONS" => replies_answer(&msg, tab).await,
-        "EXTRACT_AND_SUMMARIZE" => match msg["tabId"].as_i64().map(|id| id as i32).or(tab) {
+        "SUMMARIZE_PAGE" => match msg["tabId"].as_i64().map(|id| id as i32).or(tab) {
             Some(tab) => in_line(summarize(tab, &msg)).await,
             None => json!({"success": false, "error": "no tab"}),
         },
@@ -268,36 +266,15 @@ async fn global_chat_answer(msg: &Value) -> Value {
     result
 }
 
-/// The page tools' summary of tab `tab`: a page its content script reads out, or a PDF whose text
-/// an extension page read and sent. Gated by the reader's settings, cached by address, indexed
-/// for search.
+/// The page tools' summary of tab `tab`'s page, as an extension page read it (`page`: its main
+/// content as markdown, or a PDF's text, with the summary settings' signals and byline). The
+/// address is the tab's own. Gated by the reader's settings, cached by address, indexed for search.
 async fn summarize(tab: i32, msg: &Value) -> Value {
     let force = msg["force"].as_bool().unwrap_or(false);
     let manual = force || msg["trigger"].as_str() == Some("manual");
-    let page = match msg["text"].as_str() {
-        Some(text) => pdf_page(tab, text).await,
-        None => {
-            let ask = to_js(&json!({"type": "EXTRACT_ARTICLE"}));
-            match promise(tabs_send(tab, &ask, &JsValue::UNDEFINED)).await.map(|r| from_js(&r)) {
-                Err(_) => return json!({"success": false, "error": unreachable(tab).await}),
-                Ok(reply) if reply["success"] != true => {
-                    let error = reply["error"].as_str().unwrap_or("extraction failed");
-                    return json!({"success": false, "error": error});
-                }
-                Ok(mut reply) => reply["data"].take(),
-            }
-        }
+    let Some(page) = page_of(tab, &msg["page"]).await else {
+        return json!({"success": false, "error": "That page is not valid."});
     };
-    if !page.is_object() {
-        return json!({"success": false, "error": "extraction failed"});
-    }
-    if page["skip"] == true {
-        // The asking extension page reads a PDF tab's file and sends its text.
-        if page["reason"] == "pdf" {
-            return json!({"success": false, "pdf": true});
-        }
-        return json!({"success": false, "skip": true, "reason": page["reason"]});
-    }
     let gate = from_js(&summary_gate::summary_gate(to_js(&page), manual).await);
     match gate["action"].as_str() {
         Some("skip") => return json!({"success": false, "skip": true, "reason": gate["reason"]}),
@@ -325,27 +302,6 @@ async fn summarize(tab: i32, msg: &Value) -> Value {
     json!({"success": true, "summary": summary})
 }
 
-/// Why tab `tab`'s page did not answer: the reader withheld metldr's access to its site (the
-/// panel's capture says the same), or its content script is not there yet.
-async fn unreachable(tab: i32) -> &'static str {
-    let url = promise(tabs_get(tab)).await.map(|t| from_js(&t)["url"].as_str().unwrap_or_default().to_owned()).unwrap_or_default();
-    let site = url.split_once("://").map(|(scheme, rest)| {
-        let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
-        let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
-        let host = if host.starts_with('[') { host.split_inclusive(']').next().unwrap_or(host) } else { host.split(':').next().unwrap_or(host) };
-        format!("{scheme}://{host}/*")
-    });
-    let allowed = match site {
-        Some(site) => promise(permissions_contains(&to_js(&json!({"origins": [site]})))).await.ok().and_then(|v| v.as_bool()),
-        None => None,
-    };
-    if allowed == Some(false) {
-        "Allow metldr on this site in the extension's site access first."
-    } else {
-        "Refresh the page, then try again."
-    }
-}
-
 /// Indexing for search runs beside the answer; a failure costs only the search entry.
 async fn index(task: impl std::future::Future<Output = Result<(), JsValue>>) {
     if let Err(error) = task.await {
@@ -353,20 +309,22 @@ async fn index(task: impl std::future::Future<Output = Result<(), JsValue>>) {
     }
 }
 
-/// The PDF tab `tab` shows, as a page of `text` an extension page read from its file.
-async fn pdf_page(tab: i32, text: &str) -> Value {
+/// `page` as tab `tab` shows it: its address from the tab, its title from the page or else the
+/// tab (a PDF's file name at worst), and its word count and reading time.
+async fn page_of(tab: i32, page: &Value) -> Option<Value> {
+    let text = page["content"].as_str()?;
+    let mut page = page.clone();
     let tab = promise(tabs_get(tab)).await.map(|t| from_js(&t)).unwrap_or_default();
     let url = tab["url"].as_str().unwrap_or_default();
+    if page["title"].as_str().is_none_or(str::is_empty) {
+        let file = url.split(['?', '#']).next().unwrap_or_default().rsplit('/').next().unwrap_or_default();
+        let named = js_sys::decode_uri_component(file).ok().and_then(|f| f.as_string()).unwrap_or_else(|| file.to_owned());
+        let title = tab["title"].as_str().filter(|t| !t.is_empty()).map(str::to_owned);
+        page["title"] = json!(title.unwrap_or(if named.is_empty() { "Untitled".into() } else { named }));
+    }
     let words = text.split_whitespace().count();
-    let file = url.split(['?', '#']).next().unwrap_or_default().rsplit('/').next().unwrap_or_default();
-    let named = js_sys::decode_uri_component(file).ok().and_then(|f| f.as_string()).unwrap_or_else(|| file.to_owned());
-    let title = tab["title"].as_str().filter(|t| !t.is_empty()).map(str::to_owned).unwrap_or(if named.is_empty() { "PDF".into() } else { named });
-    json!({
-        "title": title,
-        "url": url,
-        "content": text,
-        "wordCount": words,
-        "readTime": format!("{} min", words.div_ceil(200).max(1)),
-        "contentType": "application/pdf",
-    })
+    page["url"] = json!(url);
+    page["wordCount"] = json!(words);
+    page["readTime"] = json!(format!("{} min", words.div_ceil(200).max(1)));
+    Some(page)
 }

@@ -8,10 +8,6 @@ import { emailFromDom } from '../content-ui/gmailDom'
 
 // The listener comes first, so the extension can read the open thread while InboxSDK loads.
 chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
-  if (msg?.type === 'EXTRACT_ARTICLE') {
-    respond({ success: true, data: { skip: true, reason: 'email client' } })
-    return false
-  }
   if (msg?.type !== 'GET_EMAIL_CONTENT') return false
   try {
     const email = emailExtractor.getLastExtracted() ?? emailFromDom()

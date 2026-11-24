@@ -21,7 +21,7 @@ async function fonts() {
 async function summarize(text) {
   if (!text) return failed(SCANNED)
   phase({ phase: 'summarizing' })
-  const request = { type: 'EXTRACT_AND_SUMMARIZE', trigger: 'manual', text }
+  const request = { type: 'SUMMARIZE_PAGE', trigger: 'manual', page: { content: text, contentType: 'application/pdf' } }
   const reply = await chrome.runtime.sendMessage(request).catch(error => ({ error: error.message }))
   bullets = reply?.success ? reply.summary?.bullets ?? [] : []
   if (bullets.length) return phase({ phase: 'summary', bullets })
