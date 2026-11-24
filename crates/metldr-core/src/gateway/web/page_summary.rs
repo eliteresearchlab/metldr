@@ -9,7 +9,8 @@ use web_sys::{IdbDatabase, IdbOpenDbRequest, IdbTransactionMode};
 pub(super) const CACHE: &str = "metldr_cache";
 const PAGES: &str = "page_cache";
 /// How long a cached summary is meant to last, in milliseconds, as the cache records it.
-const KEEP_MS: f64 = 3_600_000.0;
+/// How long a page summary is kept: a week, then the page is summarized again.
+const KEEP_MS: f64 = 7.0 * 24.0 * 3_600_000.0;
 
 /// The page as the extension's extractor read it.
 #[derive(serde::Deserialize)]
@@ -59,8 +60,10 @@ async fn cached(url: &str) -> Option<Value> {
             .transaction_with_str(PAGES)
             .and_then(|tx| tx.object_store(PAGES))
             .ok()?;
-        let entry = keys::done(&store.get(&url.into()).ok()?).await.ok()?;
-        Some(from_js(&entry)["summary"].take()).filter(Value::is_object)
+        let mut entry = from_js(&keys::done(&store.get(&url.into()).ok()?).await.ok()?);
+        let at = entry["timestamp"].as_f64()?;
+        let keep = entry["ttl"].as_f64().unwrap_or(KEEP_MS).min(KEEP_MS);
+        (js_sys::Date::now() - at <= keep).then(|| entry["summary"].take()).filter(Value::is_object)
     };
     let found = read.await;
     db.close();
