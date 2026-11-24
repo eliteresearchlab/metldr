@@ -14,6 +14,8 @@ extern "C" {
     fn tabs_get(tab: i32) -> Result<js_sys::Promise, JsValue>;
     #[wasm_bindgen(catch, js_namespace = ["chrome", "tabs"], js_name = query)]
     fn tabs_query(query: &JsValue) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch, js_namespace = ["chrome", "permissions"], js_name = contains)]
+    fn permissions_contains(permissions: &JsValue) -> Result<js_sys::Promise, JsValue>;
     #[wasm_bindgen(js_namespace = console, js_name = warn)]
     fn console_warn(message: &str, error: &JsValue);
 }
@@ -283,7 +285,7 @@ async fn summarize(tab: i32, msg: &Value) -> Value {
         None => {
             let ask = to_js(&json!({"type": "EXTRACT_ARTICLE"}));
             match promise(tabs_send(tab, &ask, &JsValue::UNDEFINED)).await.map(|r| from_js(&r)) {
-                Err(_) => return json!({"success": false, "error": "content script not ready - please refresh the page"}),
+                Err(_) => return json!({"success": false, "error": unreachable(tab).await}),
                 Ok(reply) if reply["success"] != true => {
                     let error = reply["error"].as_str().unwrap_or("extraction failed");
                     return json!({"success": false, "error": error});
@@ -327,6 +329,27 @@ async fn summarize(tab: i32, msg: &Value) -> Value {
         spawn_local(index(search_store::search_index_summary(bullets.join("\n"), to_js(&source))));
     }
     json!({"success": true, "summary": summary})
+}
+
+/// Why tab `tab`'s page did not answer: the reader withheld metldr's access to its site (the
+/// panel's capture says the same), or its content script is not there yet.
+async fn unreachable(tab: i32) -> &'static str {
+    let url = promise(tabs_get(tab)).await.map(|t| from_js(&t)["url"].as_str().unwrap_or_default().to_owned()).unwrap_or_default();
+    let site = url.split_once("://").map(|(scheme, rest)| {
+        let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
+        let host = if host.starts_with('[') { host.split_inclusive(']').next().unwrap_or(host) } else { host.split(':').next().unwrap_or(host) };
+        format!("{scheme}://{host}/*")
+    });
+    let allowed = match site {
+        Some(site) => promise(permissions_contains(&to_js(&json!({"origins": [site]})))).await.ok().and_then(|v| v.as_bool()),
+        None => None,
+    };
+    if allowed == Some(false) {
+        "Allow metldr on this site in the extension's site access first."
+    } else {
+        "Refresh the page, then try again."
+    }
 }
 
 /// Indexing for search runs beside the answer; a failure costs only the search entry.
