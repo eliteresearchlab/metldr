@@ -89,6 +89,7 @@ async fn cache_ready() -> Result<(), String> {
     let db: IdbDatabase = keys::done(&open).await?.dyn_into().map_err(|_| "The cache could not be opened.")?;
     db.close();
     CACHE_OPEN.set(true);
+    email::prune().await;
     Ok(())
 }
 
