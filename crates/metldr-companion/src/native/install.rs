@@ -99,10 +99,24 @@ fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
     Ok(())
 }
 
+const BINARY: &str = "metldr-companion";
+/// The companion an update replaced, kept so `rollback` can bring it back.
+const PREVIOUS: &str = "metldr-companion.previous";
+
 fn install(extension: &str) -> Result<()> {
+    let browsers = browser_hosts()?;
+    if browsers.is_empty() {
+        return Err("no Chrome, Chromium, Brave or Edge profile found".into());
+    }
     let id = extension_id(extension)?;
+    let current = std::env::current_exe()?.canonicalize()?;
+    install_at(&data_root()?, &browsers, &current, &id)
+}
+
+/// Installs the companion at `current` under `root` for extension `id` and registers it with
+/// each browser in `browsers`. A different companion already there is kept for `rollback`.
+fn install_at(root: &Path, browsers: &[(&str, PathBuf)], current: &Path, id: &str) -> Result<()> {
     let origin = format!("chrome-extension://{id}/");
-    let root = data_root()?;
     let bin = root.join("bin");
     let state = root.join("state");
     fs::create_dir_all(&bin)?;
@@ -112,10 +126,14 @@ fn install(extension: &str) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
     }
-    let executable = bin.join("metldr-companion");
-    let current = std::env::current_exe()?.canonicalize()?;
+    let executable = bin.join(BINARY);
     if current != executable {
-        write_atomic(&executable, &fs::read(&current)?, 0o755)?;
+        let incoming = fs::read(current)?;
+        match fs::read(&executable) {
+            Ok(installed) if installed != incoming => write_atomic(&bin.join(PREVIOUS), &installed, 0o755)?,
+            _ => {}
+        }
+        write_atomic(&executable, &incoming, 0o755)?;
     }
     let config = json!({"schema":1,"extension_origin":origin,"state_root":state});
     write_atomic(
@@ -127,11 +145,7 @@ fn install(extension: &str) -> Result<()> {
         "name": HOST, "description": "metldr companion", "path": executable,
         "type": "stdio", "allowed_origins": [origin],
     }))?;
-    let browsers = browser_hosts()?;
-    if browsers.is_empty() {
-        return Err("no Chrome, Chromium, Brave or Edge profile found".into());
-    }
-    for (name, hosts) in &browsers {
+    for (name, hosts) in browsers {
         fs::create_dir_all(hosts)?;
         write_atomic(&hosts.join(format!("{HOST}.json")), &manifest, 0o644)?;
         println!("registered with {name}");
@@ -140,11 +154,26 @@ fn install(extension: &str) -> Result<()> {
     Ok(())
 }
 
+/// Brings back the companion the last update replaced; the replaced one is kept in its place,
+/// so a second rollback undoes the first.
+fn rollback_at(root: &Path) -> Result<()> {
+    let bin = root.join("bin");
+    let previous = fs::read(bin.join(PREVIOUS)).map_err(|_| "no earlier companion is kept to roll back to")?;
+    let installed = fs::read(bin.join(BINARY))?;
+    write_atomic(&bin.join(PREVIOUS), &installed, 0o755)?;
+    write_atomic(&bin.join(BINARY), &previous, 0o755)?;
+    println!("restored the earlier companion in {}", bin.display());
+    Ok(())
+}
+
 /// Removes the registrations that point at this installation; saved history stays.
 fn uninstall() -> Result<()> {
-    let root = data_root()?;
-    let executable = root.join("bin/metldr-companion");
-    for (name, hosts) in browser_hosts()? {
+    uninstall_at(&data_root()?, &browser_hosts()?)
+}
+
+fn uninstall_at(root: &Path, browsers: &[(&str, PathBuf)]) -> Result<()> {
+    let executable = root.join("bin").join(BINARY);
+    for (name, hosts) in browsers {
         let path = hosts.join(format!("{HOST}.json"));
         let ours = fs::read(&path)
             .ok()
@@ -155,7 +184,7 @@ fn uninstall() -> Result<()> {
             println!("unregistered from {name}");
         }
     }
-    for file in ["metldr-companion", "metldr-companion.json"] {
+    for file in [BINARY, PREVIOUS, "metldr-companion.json"] {
         match fs::remove_file(root.join("bin").join(file)) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
             _ => {}
@@ -165,14 +194,15 @@ fn uninstall() -> Result<()> {
     Ok(())
 }
 
-/// Handles `install <extension id or unpacked directory>` and `uninstall`; `None` for any
-/// other arguments, which belong to the browser.
+/// Handles `install <extension id or unpacked directory>`, `rollback` and `uninstall`; `None`
+/// for any other arguments, which belong to the browser.
 pub(crate) fn command(args: &[String]) -> Option<Result<()>> {
     match args {
         [command, extension] if command == "install" => Some(install(extension)),
         [command] if command == "uninstall" => Some(uninstall()),
-        [command, ..] if command == "install" || command == "uninstall" => Some(Err(
-            "usage: metldr-companion install <extension id or unpacked directory> | uninstall"
+        [command] if command == "rollback" => Some(data_root().and_then(|root| rollback_at(&root))),
+        [command, ..] if ["install", "uninstall", "rollback"].contains(&command.as_str()) => Some(Err(
+            "usage: metldr-companion install <extension id or unpacked directory> | rollback | uninstall"
                 .into(),
         )),
         _ => None,
@@ -191,5 +221,38 @@ mod checks {
         assert_eq!(super::extension_id(&id).unwrap(), id);
         std::fs::remove_dir_all(directory).unwrap();
         assert!(super::extension_id("/no/such/extension").is_err());
+    }
+
+    /// Install, an update over it, rollback twice and uninstall, in a private directory.
+    #[test]
+    fn update_keeps_the_earlier_companion_for_rollback() {
+        let base = std::env::temp_dir().join(format!("metldr-lifecycle-{}", std::process::id()));
+        let (root, hosts) = (base.join("data"), base.join("chrome/NativeMessagingHosts"));
+        std::fs::create_dir_all(&base).unwrap();
+        let (first, second) = (base.join("first"), base.join("second"));
+        std::fs::write(&first, b"companion 1").unwrap();
+        std::fs::write(&second, b"companion 2").unwrap();
+        let browsers = [("Chrome", hosts.clone())];
+        let id = "a".repeat(32);
+        let installed = || std::fs::read(root.join("bin/metldr-companion")).unwrap();
+        let kept = || std::fs::read(root.join("bin/metldr-companion.previous")).ok();
+
+        super::install_at(&root, &browsers, &first, &id).unwrap();
+        assert_eq!((installed(), kept()), (b"companion 1".to_vec(), None));
+        assert!(super::rollback_at(&root).is_err(), "nothing to roll back to yet");
+        super::install_at(&root, &browsers, &first, &id).unwrap();
+        assert_eq!(kept(), None, "the same companion again keeps nothing");
+        super::install_at(&root, &browsers, &second, &id).unwrap();
+        assert_eq!((installed(), kept()), (b"companion 2".to_vec(), Some(b"companion 1".to_vec())));
+        super::rollback_at(&root).unwrap();
+        assert_eq!((installed(), kept()), (b"companion 1".to_vec(), Some(b"companion 2".to_vec())));
+        super::rollback_at(&root).unwrap();
+        assert_eq!(installed(), b"companion 2".to_vec());
+        let manifest = hosts.join("io.metldr.first_flow.json");
+        assert!(manifest.is_file());
+        super::uninstall_at(&root, &browsers).unwrap();
+        assert!(!manifest.exists() && !root.join("bin/metldr-companion").exists() && kept().is_none());
+        assert!(root.join("state").is_dir(), "saved history stays");
+        std::fs::remove_dir_all(base).unwrap();
     }
 }
