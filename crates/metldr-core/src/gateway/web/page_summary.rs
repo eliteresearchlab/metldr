@@ -11,6 +11,8 @@ const PAGES: &str = "page_cache";
 /// How long a cached summary is meant to last, in milliseconds, as the cache records it.
 /// How long a page summary is kept: a week, then the page is summarized again.
 const KEEP_MS: f64 = 7.0 * 24.0 * 3_600_000.0;
+/// About how many words a summary picked from the page's own sentences holds.
+const FIRST_SUMMARY_WORDS: usize = 90;
 
 /// The page as the extension's extractor read it.
 #[derive(serde::Deserialize)]
@@ -123,7 +125,24 @@ pub(super) async fn gateway_page_summary(page: JsValue, force: bool) -> Result<J
         context: Some(format!("This article is titled \"{}\"", page.title)),
     };
     let asked = js_sys::Date::now();
-    let (text, _, model) = summarized(&request).await.map_err(js_error)?;
+    let (text, _, model) = match summarized(&request).await {
+        Ok(written) => written,
+        // With no model to write one, the page's own central sentences, never cached, so the
+        // first summary after a model is set up replaces it.
+        Err(error) if error == NO_ROUTE => {
+            let picked = page::extract::first_summary(&page.content, FIRST_SUMMARY_WORDS);
+            if picked.is_empty() {
+                return Err(js_error(error));
+            }
+            let timing = json!({"extraction": page.extraction_time.unwrap_or(0.0), "llm": 0,
+                "total": (js_sys::Date::now() - started).round(), "cached": false, "model": ""});
+            return Ok(to_js(&json!({"title": page.title, "author": page.author,
+                "publishDate": page.publish_date, "publication": page.publication, "bullets": picked,
+                "readTime": page.read_time, "wordCount": page.word_count, "quick": true,
+                "timestamp": js_sys::Date::now(), "timing": timing})));
+        }
+        Err(error) => return Err(js_error(error)),
+    };
     let llm = (js_sys::Date::now() - asked).round();
     let mut bullets = page::bullets(&text);
     if bullets.is_empty() {

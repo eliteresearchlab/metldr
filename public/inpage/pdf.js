@@ -24,7 +24,7 @@ async function summarize(text) {
   const request = { type: 'SUMMARIZE_PAGE', trigger: 'manual', page: { content: text, contentType: 'application/pdf' } }
   const reply = await chrome.runtime.sendMessage(request).catch(error => ({ error: error.message }))
   bullets = reply?.success ? reply.summary?.bullets ?? [] : []
-  if (bullets.length) return phase({ phase: 'summary', bullets })
+  if (bullets.length) return phase({ phase: 'summary', bullets, quick: reply.summary?.quick === true })
   failed(reply?.error || (reply?.skip ? 'This PDF has too little text to summarize.' : 'The summary failed.'))
 }
 

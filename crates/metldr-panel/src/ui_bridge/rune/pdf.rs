@@ -54,7 +54,12 @@ enum Phase {
     Summarizing,
     /// A PDF on this computer, which only the reader can hand over.
     Choose,
-    Summary { bullets: Vec<String> },
+    /// `quick`: the PDF's own key sentences, picked with no model set up.
+    Summary {
+        bullets: Vec<String>,
+        #[serde(default)]
+        quick: bool,
+    },
     Failed { error: String },
 }
 
@@ -165,7 +170,7 @@ fn card(s: &Tools) -> Option<El> {
                 .child(note(t, "This PDF is on your computer. Choose it to read it here.", p.ink_2))
                 .child(choose)
         }
-        Phase::Summary { bullets } => {
+        Phase::Summary { bullets, .. } => {
             let point = |text: &String| {
                 row()
                     .w_full()
@@ -179,6 +184,7 @@ fn card(s: &Tools) -> Option<El> {
         }
     };
     let title = match s.phase {
+        Phase::Summary { quick: true, .. } => "Key sentences",
         Phase::Summary { .. } => "Summary",
         Phase::Choose => "PDF on this computer",
         _ => "PDF",
@@ -264,7 +270,7 @@ pub fn start_pdf(
 }
 
 /// What the frame's page reports, `{phase: "reading" | "summarizing" | "choose" | "idle"}`,
-/// `{phase: "summary", bullets}` or `{phase: "failed", error}`, as JSON.
+/// `{phase: "summary", bullets, quick}` or `{phase: "failed", error}`, as JSON.
 #[wasm_bindgen]
 pub fn pdf_phase(report: String) {
     let failed = || Phase::Failed { error: "The PDF tools failed.".into() };
