@@ -32,8 +32,8 @@ export class WordFrame {
   private lastDoubleClick = 0
   // Every listener this script adds, removed together when it retires.
   private readonly listening = new AbortController()
-  private readonly answerPull = (message: { type?: string }, _sender: unknown, respond: (job: Job | null) => void): boolean => {
-    if (message?.type !== 'INPAGE_PULL') return false
+  private readonly answerPull = (message: { type?: string; frame?: string }, _sender: unknown, respond: (job: Job | null) => void): boolean => {
+    if (message?.type !== 'INPAGE_PULL' || message.frame !== 'word') return false
     respond(this.job)
     return false
   }

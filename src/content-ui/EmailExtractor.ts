@@ -1,5 +1,5 @@
 import { UIService } from './UIService'
-import { replyPanel } from './ReplyPanel'
+import { replyFrame } from './ReplyFrame'
 import { languageService } from '../services/LanguageService'
 import type { 
   ThreadView, 
@@ -429,7 +429,7 @@ export class EmailExtractor {
       this.handleThreadView(threadView)
     })
 
-    replyPanel.init(sdk)
+    replyFrame.init(sdk)
 
     console.log('metldr: email extractor initialized with inboxsdk')
   }
@@ -867,9 +867,6 @@ export class EmailExtractor {
         UIService.injectSummary(header, summaryCard)
         this.attachRegenerateListener(summaryCard, threadId, emailText, metadata)
 
-        if (replyPanel?.refreshForThread) {
-          replyPanel.refreshForThread(threadId)
-        }
       }
     } finally {
       this.isRegenerating = false
@@ -878,7 +875,7 @@ export class EmailExtractor {
 
   destroy(): void {
     this.processedThreads.clear()
-    replyPanel.hide()
+    replyFrame.hide()
   }
 }
 

@@ -12,6 +12,7 @@ mod conversations;
 mod corrections;
 use metldr_ui::fonts;
 mod gateway;
+mod gmail_replies;
 mod inpage;
 mod ground;
 use theme::Root as _;
@@ -166,6 +167,8 @@ struct State {
     /// Set only in a word popup's frame, where this state draws the popup and nothing else.
     word_popup: Option<Box<word::Popup>>,
     pdf_tools: Option<Box<pdf::Tools>>,
+    /// Set only in a Gmail reply frame, where this state draws the reply card and nothing else.
+    gmail_replies: Option<Box<gmail_replies::Replies>>,
 }
 
 impl Default for State {
@@ -205,6 +208,7 @@ impl Default for State {
             proposed_followup: None,
             word_popup: None,
             pdf_tools: None,
+            gmail_replies: None,
         }
     }
 }
