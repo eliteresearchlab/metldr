@@ -32,7 +32,10 @@ pub struct Entry {
     pub parent_keys: Option<Vec<String>>,
     pub role: String,
     pub name: String,
-    pub identity_name: Option<String>,
+    /// The name an action checks the element against. The page script leaves it out when it is
+    /// `name`, and sends `null` when there is none.
+    #[serde(default, deserialize_with = "present")]
+    pub identity_name: Option<Option<String>>,
     pub details: Option<String>,
     pub selector: Option<String>,
     pub selector_role: Option<String>,
@@ -40,6 +43,17 @@ pub struct Entry {
     pub iframe: bool,
     #[serde(default)]
     pub root: bool,
+}
+
+/// A field that is present, `null` or not, as `Some`; a missing one stays `None` through `default`.
+fn present<'de, D: serde::Deserializer<'de>>(value: D) -> std::result::Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(value).map(Some)
+}
+
+impl Entry {
+    pub fn identity(&self) -> Option<String> {
+        self.identity_name.clone().unwrap_or_else(|| Some(self.name.clone()))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -198,7 +212,7 @@ fn render_capture(capture: &Capture) -> RenderedCapture {
             details: entry.details.clone(),
             selector: entry.selector.clone(),
             role: entry.selector.as_ref().map(|_| entry.selector_role.clone().unwrap_or_else(|| entry.role.clone())),
-            identity_name: entry.identity_name.clone(),
+            identity_name: entry.identity(),
             ref_id: None,
             frame_key: None,
         })

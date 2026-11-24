@@ -50,6 +50,16 @@
     return [icon && `icon:${icon}`, file && `img:${file}`, key && `${key}:${element.getAttribute(key)}`, near && `in:${near}`]
       .filter(Boolean).map((part) => part.slice(0, 48)).join("; ")
   }
+  // An action checks a control's identity name; most equal its name, so those cross to the Rust side
+  // once, and a control with no identity name says so with null.
+  const shareNames = (result) => {
+    for (const entry of result?.entries || []) {
+      if (!entry.selector) continue
+      if (entry.identityName === entry.name) delete entry.identityName
+      else if (entry.identityName === undefined) entry.identityName = null
+    }
+    return result
+  }
   // Adds a hint to each control of `result` that has no name or shares its role and name with
   // another control of the same capture; the name itself, and so the ref's identity, is unchanged.
   const withHints = (helpers, result) => {
@@ -76,17 +86,17 @@
 
     // Compact snapshot capture (today's snapshot()).
     capture(settings) {
-      return withHints(this, capture(settings))
+      return shareNames(withHints(this, capture(settings)))
     },
     captureWithin(element, settings) {
-      return withHints(this, capture(element, settings))
+      return shareNames(withHints(this, capture(element, settings)))
     },
     // A within root given as a snapshot ref, resolved as actions resolve it (selector chains through shadow roots
     // included). { refStatus } when it doesn't resolve to one element.
     captureRef(id, role, name, selector, settings) {
       const found = this.refResolve(id, role, name, selector)
       if (typeof found === "string") return { refStatus: found }
-      return withHints(this, capture(found, settings))
+      return shareNames(withHints(this, capture(found, settings)))
     },
     // A within root given as a Playwright selector: the only match, else the first visible one with a note, as the
     // CSS path in capture does. null when nothing matches.
@@ -95,7 +105,7 @@
       if (matches.length === 0) return null
       const visible = (element) => element.checkVisibility?.({ visibilityProperty: true }) ?? true
       const root = matches.length === 1 ? matches[0] : (matches.find(visible) ?? matches[0])
-      const result = withHints(this, capture(root, settings))
+      const result = shareNames(withHints(this, capture(root, settings)))
       if (matches.length > 1) {
         const which = visible(root) ? "the first visible one" : "the first (none is visible)"
         result.notes = [`within "${selector}" matched ${matches.length} elements; showing ${which}`, ...(result.notes || [])]
