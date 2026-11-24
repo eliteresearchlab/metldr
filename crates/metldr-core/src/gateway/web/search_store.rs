@@ -100,11 +100,6 @@ impl SearchIndex {
         self.dense.search(query, limit as usize)
     }
 
-    /// Page chat context for `focused` (see `Index::context`); `page` may be empty.
-    pub fn context(&self, focused: &str, dense: Vec<String>, limit: u32, page: &str) -> String {
-        self.keywords.context(focused, &dense, limit as usize, page)
-    }
-
     /// `{context, sources: [{index, title, url, type, score, snippet}]}` as JSON.
     pub fn sources(
         &self,
@@ -374,20 +369,9 @@ fn entry(id: String, source: &Source, content: &str, meta: Value) -> Value {
         "metadata": meta, "timestamp": now(), "ttl": CHUNK_KEEP_MS})
 }
 
-fn report(progress: &Option<js_sys::Function>, percent: u32) {
-    if let Some(progress) = progress {
-        let _ = progress.call1(&JsValue::UNDEFINED, &percent.into());
-    }
-}
-
-/// Indexes `text` from `source` unless the same text is indexed already; `progress` hears 0 to
-/// 100. A second call for a source being indexed waits for the first.
-async fn index(
-    store: &Rc<Store>,
-    text: &str,
-    source: &Source,
-    progress: &Option<js_sys::Function>,
-) {
+/// Indexes `text` from `source` unless the same text is indexed already. A second call for a
+/// source being indexed waits for the first.
+async fn index(store: &Rc<Store>, text: &str, source: &Source) {
     let id = &source.source_id;
     if store.indexing.borrow().contains(id) {
         while store.indexing.borrow().contains(id) {
@@ -396,7 +380,6 @@ async fn index(
         return;
     }
     store.indexing.borrow_mut().insert(id.clone());
-    report(progress, 5);
     let hash = fingerprint(text);
     let known = store.hashes.borrow().get(id).cloned();
     let before = known.as_ref().map_or(0, |(_, chunks)| *chunks);
@@ -411,7 +394,6 @@ async fn index(
         _ => false,
     };
     if !done {
-        report(progress, 10);
         let kind = match source.source_type.as_str() {
             "email" => crate::ContentType::Email,
             "pdf" => crate::ContentType::Pdf,
@@ -419,9 +401,8 @@ async fn index(
         };
         let chunks = crate::chunk_for_embedding(text, kind);
         let total = chunks.len();
-        report(progress, 20);
         let db = page_summary::cache().await;
-        for (batch, part) in chunks.chunks(BATCH).enumerate() {
+        for part in chunks.chunks(BATCH) {
             let entries: Vec<Value> = part
                 .iter()
                 .map(|chunk| {
@@ -442,8 +423,6 @@ async fn index(
             for entry in &entries {
                 remember(&mut store.index.borrow_mut(), entry);
             }
-            let share = (batch + 1) * BATCH * 70 / total.max(1);
-            report(progress, 20 + share.min(70) as u32);
         }
         if total > 0 {
             // A page that now cuts into fewer chunks drops the ones past its new end.
@@ -466,7 +445,6 @@ async fn index(
         }
     }
     store.indexing.borrow_mut().remove(id);
-    report(progress, 100);
 }
 
 fn source(value: JsValue) -> Result<Source, JsValue> {
@@ -475,13 +453,9 @@ fn source(value: JsValue) -> Result<Source, JsValue> {
 
 /// Indexes `text` from `source` `{sourceId, sourceUrl, sourceType, title?}` for search.
 #[wasm_bindgen]
-pub async fn search_index(
-    text: String,
-    source_of: JsValue,
-    progress: Option<js_sys::Function>,
-) -> Result<(), JsValue> {
+pub async fn search_index(text: String, source_of: JsValue) -> Result<(), JsValue> {
     let source = source(source_of)?;
-    index(&store().await, &text, &source, &progress).await;
+    index(&store().await, &text, &source).await;
     Ok(())
 }
 
@@ -515,44 +489,6 @@ pub async fn search_index_summary(text: String, source_of: JsValue) -> Result<()
     remember(&mut store.index.borrow_mut(), &summary);
     save_soon(&store);
     Ok(())
-}
-
-/// Whether anything from `source` is indexed.
-#[wasm_bindgen]
-pub async fn search_has(source: String) -> bool {
-    store().await.index.borrow().has_source(&source)
-}
-
-/// Whether `source` is being indexed now.
-#[wasm_bindgen]
-pub fn search_is_indexing(source: &str) -> bool {
-    STORE.with_borrow(|store| {
-        store
-            .as_ref()
-            .is_some_and(|store| store.indexing.borrow().contains(source))
-    })
-}
-
-/// Indexes `text` unless `source` is indexed: `already-indexed`, `was-indexing` or `indexed-now`.
-#[wasm_bindgen]
-pub async fn search_ensure(
-    text: String,
-    source_of: JsValue,
-    progress: Option<js_sys::Function>,
-) -> Result<String, JsValue> {
-    let source = source(source_of)?;
-    let store = store().await;
-    if store.index.borrow().has_source(&source.source_id) {
-        return Ok("already-indexed".into());
-    }
-    let waited = store.indexing.borrow().contains(&source.source_id);
-    index(&store, &text, &source, &progress).await;
-    Ok(if waited {
-        "was-indexing"
-    } else {
-        "indexed-now"
-    }
-    .into())
 }
 
 /// The slow half of a search for `query`: the model's expansion, then the dense neighbours of
@@ -589,14 +525,6 @@ async fn found(store: &Store, query: &str, candidates: u32) -> Found {
     }
     queries.push_back((key, now(), found.clone()));
     found
-}
-
-/// Page chat context: the best chunks for `query`, only from `page` when it is not empty.
-#[wasm_bindgen]
-pub async fn search_context(query: String, limit: u32, page: String) -> String {
-    let store = store().await;
-    let Found { focused, dense } = found(&store, &query, limit * 4).await;
-    store.index.borrow().context(&focused, dense, limit, &page)
 }
 
 /// Global search: `{context, sources}` for `query`, one chunk per page, scored up by the

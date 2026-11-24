@@ -533,44 +533,6 @@ impl Index {
         hits.into_iter().map(|h| (h.slot, whole(h.score))).collect()
     }
 
-    /// Page chat context: the best `limit` chunks, only from `page` when one is given (same
-    /// address up to its query, or one address a prefix of the other), each under a numbered
-    /// source line. Empty when nothing matches.
-    pub fn context(
-        &self,
-        focused: &str,
-        dense: &[impl AsRef<str>],
-        limit: usize,
-        page: &str,
-    ) -> String {
-        let page_base = before_query(page);
-        let from_page = |doc: &Doc| {
-            let base = before_query(&doc.source_url);
-            page.is_empty()
-                || (!doc.source_url.is_empty()
-                    && (&*doc.source_url == page
-                        || base.starts_with(page_base)
-                        || page_base.starts_with(base)))
-        };
-        let mut out = String::new();
-        let hits = self
-            .search(focused, dense, limit * 4)
-            .into_iter()
-            .map(|(slot, _)| self.doc(slot));
-        for (i, doc) in hits.filter(|doc| from_page(doc)).take(limit).enumerate() {
-            if i > 0 {
-                out.push_str("\n\n---\n\n");
-            }
-            out.push_str(&format!(
-                "[Source {}: {}]\n{}",
-                i + 1,
-                doc.label(),
-                doc.content
-            ));
-        }
-        out
-    }
-
     /// Global search answer material: the best `limit` sources, one chunk per page, scored up
     /// by how many of the question's keywords they contain, and the numbered context built from
     /// them.
@@ -866,17 +828,6 @@ mod tests {
             "b",
             false,
         );
-        let context = index.context("tides moon", &["a:0"], 3, "https://sea.test/tides");
-        assert_eq!(context.matches("[Source ").count(), 2);
-        assert!(!context.contains("landing"));
-        assert!(
-            context.starts_with("[Source 1: https://sea.test/tides?x=1]\ntides follow the moon")
-        );
-        assert_eq!(
-            index.context("tides", &[] as &[&str], 3, "https://other.test"),
-            ""
-        );
-
         let found = index.sources("what about tides and the moon", "tides moon", &["a:0"], 5);
         let urls: Vec<_> = found.sources.iter().map(|s| s.url).collect();
         assert_eq!(

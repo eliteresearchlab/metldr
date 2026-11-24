@@ -1,6 +1,6 @@
 import { UIService } from './UIService'
 import { WordFrame } from './WordFrame'
-import { PdfToolbar } from './PdfToolbar'
+import { showPdfTools } from './PdfFrame'
 import { emailExtractor } from './EmailExtractor'
 import { ArticleExtractor } from './ArticleExtractor'
 import type { ThemeColors } from '../types'
@@ -17,6 +17,12 @@ export class ContentScriptBootstrap {
     this.initialized = true
 
     const isGmail = window.location.hostname.includes('mail.google.com')
+    // A PDF tab shows the browser's viewer: the PDF tools sit over it, and nothing reads the page.
+    if (document.contentType === 'application/pdf') {
+      this.setupMessageListeners()
+      showPdfTools()
+      return
+    }
 
     UIService.init()
     await UIService.loadFromStorage()
@@ -31,10 +37,6 @@ export class ContentScriptBootstrap {
       this.initInboxSDK(sdk)
     } else if (isGmail) {
       console.log('metldr: gmail mode, waiting for inboxsdk')
-    } else {
-      console.log('metldr: non-gmail mode, word popup + pdf toolbar')
-      // pdf toolbar auto-initializes on pdf pages
-      new PdfToolbar()
     }
   }
 
@@ -48,6 +50,11 @@ export class ContentScriptBootstrap {
   static setupMessageListeners(): void {
     chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
       if (msg.type === 'EXTRACT_ARTICLE') {
+        // The extension page asking reads a PDF's file itself.
+        if (document.contentType === 'application/pdf') {
+          respond({ success: true, data: { skip: true, reason: 'pdf' } })
+          return true
+        }
         try {
           const extracted = ArticleExtractor.extract()
           respond({ success: true, data: extracted })

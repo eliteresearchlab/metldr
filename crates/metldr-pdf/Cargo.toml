@@ -11,8 +11,6 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.154"
 wasm-bindgen = "=0.2.128"
 
 # PDFium is built for the browser only, so the reader is too.

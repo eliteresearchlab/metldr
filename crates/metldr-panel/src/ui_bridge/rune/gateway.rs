@@ -264,8 +264,19 @@ impl Gateway {
         self.waiting.set(true);
         updates.changed();
         let trigger = if manual { "manual" } else { "auto" };
-        let request = json!({"type":"EXTRACT_AND_SUMMARIZE","tabId":tab,"force":manual,"trigger":trigger});
-        let reply = ask_extension(&request).await;
+        let mut request = json!({"type":"EXTRACT_AND_SUMMARIZE","tabId":tab,"force":manual,"trigger":trigger});
+        let mut reply = ask_extension(&request).await;
+        // A PDF tab's text comes from the file, read here and summarized by the same pipeline.
+        if reply.as_ref().is_some_and(|reply| reply["pdf"] == true) {
+            reply = match crate::flow::read_pdf(&url).await {
+                Ok(text) if !text.is_empty() => {
+                    request["text"] = Value::String(text);
+                    ask_extension(&request).await
+                }
+                Ok(_) => Some(json!({"error": SCANNED})),
+                Err(error) => Some(json!({"error": error.to_string()})),
+            };
+        }
         self.waiting.set(false);
         updates.changed();
         let reply = reply.unwrap_or_default();
@@ -670,26 +681,9 @@ fn ready_routes(reply: &Value) -> Option<(Vec<RouteChoice>, usize)> {
     (!routes.is_empty()).then_some((routes, chosen))
 }
 
-/// The PDF reader's `{pages: [{markdown}]}` as one markdown text, pages in order.
-pub(super) fn document_markdown(document: &str) -> String {
-    #[derive(serde::Deserialize)]
-    struct Read {
-        pages: Vec<Page>,
-    }
-    #[derive(serde::Deserialize)]
-    struct Page {
-        markdown: String,
-    }
-    let pages = serde_json::from_str::<Read>(document).map_or_else(|_| Vec::new(), |read| read.pages);
-    let mut out = String::with_capacity(pages.iter().map(|p| p.markdown.len() + 2).sum());
-    for page in pages.iter().filter(|p| !p.markdown.trim().is_empty()) {
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        out.push_str(&page.markdown);
-    }
-    out
-}
+/// What a PDF without a text layer says.
+pub(super) const SCANNED: &str =
+    "This PDF has no text to read. Scanned pages need text recognition, which is not available yet.";
 
 /// The extension's reply to `request` sent to its service worker, or None.
 pub(super) async fn ask_extension(request: &Value) -> Option<Value> {
@@ -790,7 +784,16 @@ async fn capture() -> Result<(String, String, String), FlowError> {
     let observed = crate::get(&js_sys::Array::from(&values).get(0), "result")
         .map_err(|_| failure("The page could not be read."))?;
     let title = crate::string_property(&observed, "title").unwrap_or_default();
-    let markdown = crate::flow::page_text(&observed, &url, crate::reading::FULL_PAGE).await?;
+    // A PDF tab shows the browser's viewer, so the file is read instead of the page.
+    let markdown = if crate::get(&observed, "pdf").is_ok_and(|pdf| pdf.is_truthy()) {
+        let text = crate::flow::read_pdf(&url).await?;
+        if text.is_empty() {
+            return Err(failure(SCANNED));
+        }
+        text
+    } else {
+        crate::flow::page_text(&observed, &url, crate::reading::FULL_PAGE).await?
+    };
     Ok((url, title, markdown))
 }
 

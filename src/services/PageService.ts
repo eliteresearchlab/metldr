@@ -9,15 +9,12 @@ export class PageService {
     const source = {
       sourceId: url || '',
       sourceUrl: url || '',
-      sourceType: 'article' as const,
+      sourceType: extractedData.contentType === 'application/pdf' ? 'pdf' as const : 'article' as const,
       title: title || url || 'Untitled Article'
     }
     if (url && content) {
-      const progress = (percent: number) => {
-        chrome.runtime.sendMessage({ type: 'INDEXING_PROGRESS', sourceId: url, percent }).catch(() => {})
-      }
       const failed = (err: unknown) => console.warn('[PageService] chunk indexing failed', err)
-      search.index(content, source, progress).catch(failed)
+      search.index(content, source).catch(failed)
     }
     const summary = await pageSummary(extractedData, force)
     if (url && !summary.timing?.cached) {

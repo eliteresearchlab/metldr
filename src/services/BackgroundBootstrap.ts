@@ -1,12 +1,9 @@
-import { cacheService } from './CacheService'
 import {
   clearSummaryCache, dictionary, email, globalChat, lookupWord, recordStat, search, statsSummary,
   summaryGate
 } from './RustCore'
 import { PageService } from './PageService'
-import { pdfService } from './pdf/PdfService'
 import { logger } from './LoggerService'
-import { concurrencyManager } from './ConcurrencyManager'
 
 
 import type {
@@ -24,8 +21,6 @@ import type {
 } from '../types'
 
 const log = logger.createScoped('BackgroundBootstrap')
-const SUMMARY_BULLET_PREFIX_PATTERN = /^[•\-*]\s*/
-const SUMMARY_SENTENCE_SEPARATOR_PATTERN = /[.!?]+/
 const WHITESPACE_PATTERN = /\s+/
 
 export class BackgroundBootstrap {
@@ -67,13 +62,8 @@ export class BackgroundBootstrap {
         return true
       }
 
-      if (msg.type === 'EXTRACT_ONLY') {
-        this._onExtractOnly(msg, respond)
-        return true
-      }
-
       if (msg.type === 'EXTRACT_AND_SUMMARIZE') {
-        this._onExtractAndSummarize(msg, respond)
+        this._onExtractAndSummarize(msg, sender, respond)
         return true
       }
 
@@ -81,8 +71,17 @@ export class BackgroundBootstrap {
       // takes part, so it cannot choose what the frame shows.
       if (msg.type === 'INPAGE_PULL') {
         const tab = sender.tab?.id
-        const fromFrame = sender.url?.endsWith('/inpage/word.html') === true
-        if (tab === undefined || !fromFrame) {
+        const frame = sender.url?.slice(sender.url.lastIndexOf('/inpage/'))
+        if (tab === undefined) {
+          respond(null)
+          return false
+        }
+        // The PDF tools read the PDF the tab shows, as the browser reports it.
+        if (frame === '/inpage/pdf.html') {
+          respond({ url: sender.tab?.url ?? '', title: sender.tab?.title ?? '' })
+          return false
+        }
+        if (frame !== '/inpage/word.html') {
           respond(null)
           return false
         }
@@ -131,59 +130,8 @@ export class BackgroundBootstrap {
         return true
       }
 
-      if (msg.type === 'RAG_HAS_INDEXED_CONTENT') {
-        this._onRagHasIndexedContent(msg as { type: string; sourceUrl: string }, respond)
-        return true
-      }
-
-      if (msg.type === 'RAG_SEARCH_WITH_CONTEXT') {
-        this._onRagSearchWithContext(msg as { type: string; query: string; limit?: number; sourceUrl?: string }, respond)
-        return true
-      }
-
-      if (msg.type === 'RAG_IS_INDEXING') {
-        const { sourceId } = msg as { type: string; sourceId: string }
-        search.isIndexing(sourceId).then(
-          isIndexing => respond({ success: true, isIndexing }),
-          () => respond({ success: false, isIndexing: false })
-        )
-        return true
-      }
-
-      if (msg.type === 'RAG_ENSURE_INDEXED') {
-        this._onRagEnsureIndexed(msg as { type: string; text: string; metadata: any }, respond)
-        return true
-      }
-
-      if (msg.type === 'PDF_SUMMARIZE') {
-        this._onPdfSummarize(msg as { type: string; url: string }, respond)
-        return true
-      }
-
-      if (msg.type === 'PDF_EXTRACT_TEXT') {
-        this._onPdfExtractText(msg as { type: string; url: string }, respond)
-        return true
-      }
-
-      if (msg.type === 'OPEN_SIDE_PANEL') {
-        this._onOpenSidePanel(msg as { type: string; focus?: string }, sender, respond)
-        return true
-      }
-
       if (msg.type === 'TOGGLE_SIDE_PANEL') {
         this._onToggleSidePanel(msg as { type: string; focus?: string }, sender, respond)
-        return true
-      }
-
-      // handler for processing PDFs from ArrayBuffer (local file picker)
-      if (msg.type === 'PDF_PROCESS_ARRAYBUFFER') {
-        this._onPdfProcessArrayBuffer(msg as { type: string; data: number[]; filename: string; action: 'summarize' | 'copy' }, respond)
-        return true
-      }
-
-      // handler for checking page cache (used by PdfToolbar)
-      if (msg.type === 'GET_PAGE_CACHE') {
-        this._onGetPageCache(msg as { type: string; url: string }, respond)
         return true
       }
 
@@ -294,30 +242,26 @@ export class BackgroundBootstrap {
     })()
   }
 
-  static _onExtractOnly(msg: { tabId: number }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const { tabId } = msg
-        if (!tabId) {
-          respond({ success: false, error: 'no tabId' })
-          return
-        }
-        const response = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_ARTICLE' }) as { success: boolean; data?: ExtractedData; error?: string }
-        if (!response?.success || !response.data) {
-          respond({ success: false, error: response?.error || 'extraction failed' })
-          return
-        }
-        respond({ success: true, data: response.data })
-      } catch (err) {
-        respond({ success: false, error: (err as Error).message })
-      }
-    })()
+
+  // A PDF tools frame asks for its own tab; the panel names the active one.
+  static _onExtractAndSummarize(msg: ExtractAndSummarizeMessage, sender: chrome.runtime.MessageSender, respond: ResponseCallback): void {
+    const { force, trigger, text } = msg
+    const tabId = msg.tabId ?? sender.tab?.id
+    if (tabId === undefined) {
+      respond({ success: false, error: 'no tab' })
+      return
+    }
+    this._enqueueSummary(() => this._performExtractAndSummarize(tabId, force || false, trigger || 'auto', text))
+      .then(result => respond(result))
   }
 
-  static _onExtractAndSummarize(msg: ExtractAndSummarizeMessage, respond: ResponseCallback): void {
-    const { tabId, force, trigger } = msg
-    this._enqueueSummary(() => this._performExtractAndSummarize(tabId, force || false, trigger || 'auto'))
-      .then(result => respond(result))
+  // The text of the PDF tab `tabId` shows, read by an extension page, as the extractor's page.
+  static async _pdfPage(tabId: number, text: string): Promise<ExtractedData> {
+    const tab = await chrome.tabs.get(tabId)
+    const url = tab.url ?? ''
+    const wordCount = text.split(WHITESPACE_PATTERN).filter(Boolean).length
+    const title = tab.title || decodeURIComponent(url.split(/[?#]/)[0].split('/').pop() || '') || 'PDF'
+    return { title, url, content: text, wordCount, readTime: `${Math.max(1, Math.ceil(wordCount / 200))} min`, contentType: 'application/pdf' }
   }
 
   static _onWordLookup(msg: WordLookupMessage, respond: ResponseCallback): void {
@@ -367,11 +311,12 @@ export class BackgroundBootstrap {
     return this.summaryQueue as Promise<T | { success: false; error: string }>
   }
 
-  static async _performExtractAndSummarize(tabId: number, force: boolean, trigger = 'auto'): Promise<SummaryResult> {
+  static async _performExtractAndSummarize(tabId: number, force: boolean, trigger = 'auto', text?: string): Promise<SummaryResult> {
     try {
       log.log('_performExtractAndSummarize:', { tabId, force, trigger })
       let extracted: ExtractedData | undefined
-      try {
+      if (text !== undefined) extracted = await this._pdfPage(tabId, text)
+      else try {
         const response = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_ARTICLE' }) as { success: boolean; data?: ExtractedData; error?: string }
         log.log('EXTRACT_ARTICLE response:', { success: response?.success, hasData: !!response?.data, error: response?.error })
         if (!response?.success) {
@@ -384,6 +329,8 @@ export class BackgroundBootstrap {
       }
 
       if (!extracted) return { success: false, error: 'extraction failed' }
+      // The asking extension page reads a PDF tab's file and sends its text.
+      if (extracted.skip && extracted.reason === 'pdf') return { success: false, pdf: true }
       if (extracted.skip) return { success: false, skip: true, reason: extracted.reason }
       const gating = await summaryGate(extracted, trigger === 'manual' || force)
       log.log('classification:', { action: gating.action, reason: gating.reason, wordCount: extracted?.wordCount })
@@ -421,158 +368,11 @@ export class BackgroundBootstrap {
     })()
   }
 
-  static _onRagHasIndexedContent(msg: { type: string; sourceUrl: string }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const hasContent = await search.has(msg.sourceUrl)
-        respond({ success: true, hasContent })
-      } catch (err) {
-        log.error('onRagHasIndexedContent', (err as Error).message)
-        respond({ success: false, error: (err as Error).message, hasContent: false })
-      }
-    })()
-  }
 
-  static _onRagSearchWithContext(msg: { type: string; query: string; limit?: number; sourceUrl?: string }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const context = await search.context(msg.query, msg.limit || 5, msg.sourceUrl)
-        respond({ success: true, context })
-      } catch (err) {
-        log.error('onRagSearchWithContext', (err as Error).message)
-        respond({ success: false, error: (err as Error).message, context: '' })
-      }
-    })()
-  }
 
-  static _onRagEnsureIndexed(msg: { type: string; text: string; metadata: any }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const sourceUrl = msg.metadata?.sourceUrl || msg.metadata?.sourceId || 'unknown'
-        const sourceId = msg.metadata?.sourceId || sourceUrl
-        
-        const broadcastProgress = (percent: number) => {
-          console.log('[BackgroundBootstrap] Broadcasting progress:', percent, 'for', sourceId.slice(0, 40))
-          chrome.runtime.sendMessage({
-            type: 'INDEXING_PROGRESS',
-            sourceId,
-            percent
-          }).catch(() => {})
-        }
-        
-        const result = await concurrencyManager.execute('indexing', sourceUrl, async (signal) => {
-          if (signal.aborted) throw new Error('Indexing aborted')
-          return await search.ensure(msg.text, msg.metadata, broadcastProgress)
-        })
-        
-        respond({ success: true, result })
-      } catch (err) {
-        const errMsg = (err as Error).message
-        if (errMsg !== 'Indexing aborted' && errMsg !== 'Operation cancelled') {
-          log.error('onRagEnsureIndexed', errMsg)
-        }
-        respond({ success: false, error: errMsg })
-      }
-    })()
-  }
 
-  static _onPdfSummarize(msg: { type: string; url: string }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const { url } = msg
-        if (!url) {
-          respond({ success: false, error: 'no url provided' })
-          return
-        }
 
-        log.log('pdf summarize request:', url.slice(0, 80))
 
-        const result = await this._enqueueSummary(() => pdfService.summarize(url))
-        
-        if (typeof result === 'object' && 'success' in result && !result.success) {
-          respond({ success: false, error: result.error })
-          return
-        }
-        
-        const summary = result as string
-        
-        const bullets = summary
-          .split('\n')
-          .filter(line => line.trim().startsWith('•') || line.trim().startsWith('-') || line.trim().startsWith('*'))
-          .map(line => line.replace(SUMMARY_BULLET_PREFIX_PATTERN, '').trim())
-          .filter(Boolean)
-
-        const finalBullets = bullets.length > 0 
-          ? bullets 
-          : summary.split(SUMMARY_SENTENCE_SEPARATOR_PATTERN).filter(s => s.trim().length > 20).slice(0, 5)
-
-        respond({ success: true, summary: { bullets: finalBullets, raw: summary } })
-      } catch (err) {
-        log.error('onPdfSummarize', (err as Error).message)
-        respond({ success: false, error: (err as Error).message })
-      }
-    })()
-  }
-
-  static _onPdfExtractText(msg: { type: string; url: string }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const { url } = msg
-        if (!url) {
-          respond({ success: false, error: 'no url provided' })
-          return
-        }
-
-        log.log('pdf extract text request:', url.slice(0, 80))
-
-        const text = await pdfService.extractFromUrl(url)
-        const wordCount = text.split(WHITESPACE_PATTERN).filter(Boolean).length
-
-        respond({ success: true, text, wordCount })
-      } catch (err) {
-        log.error('onPdfExtractText', (err as Error).message)
-        respond({ success: false, error: (err as Error).message })
-      }
-    })()
-  }
-
-  static _onOpenSidePanel(
-    msg: { type: string; focus?: string },
-    sender: chrome.runtime.MessageSender,
-    respond: ResponseCallback
-  ): void {
-
-    const windowId = sender?.tab?.windowId
-    
-    if (!windowId) {
-      chrome.windows.getCurrent((win) => {
-        if (win?.id) {
-          this._openPageTools(win.id)
-            .then(() => {
-              log.log('side panel opened (fallback)', msg.focus ? `focus: ${msg.focus}` : '')
-              respond({ success: true })
-            })
-            .catch((err) => {
-              log.error('onOpenSidePanel', err.message)
-              respond({ success: false, error: err.message })
-            })
-        } else {
-          respond({ success: false, error: 'no window available' })
-        }
-      })
-      return
-    }
-    
-    this._openPageTools(windowId, sender.tab?.id)
-      .then(() => {
-        log.log('side panel opened', msg.focus ? `focus: ${msg.focus}` : '')
-        respond({ success: true })
-      })
-      .catch((err) => {
-        log.error('onOpenSidePanel', err.message)
-        respond({ success: false, error: err.message })
-      })
-  }
 
   static _onToggleSidePanel(
     msg: { type: string; focus?: string },
@@ -635,101 +435,6 @@ export class BackgroundBootstrap {
     })
   }
 
-  static _onPdfProcessArrayBuffer(
-    msg: { type: string; data: number[]; filename: string; action: 'summarize' | 'copy'; sourceUrl?: string },
-    respond: ResponseCallback
-  ): void {
-    (async () => {
-      try {
-        const { data, filename, action, sourceUrl } = msg
-        const pdfUrl = sourceUrl || `file:///${filename}`
-        log.log(`pdf process arraybuffer request: ${filename} (${action})`)
-        
-        const arrayBuffer = new Uint8Array(data).buffer
-        
-        if (action === 'summarize') {
-          const result = await pdfService.summarizeFromArrayBuffer(arrayBuffer, filename)
-          
-          const bullets = result.summary
-            .split('\n')
-            .filter(line => line.trim().startsWith('•') || line.trim().startsWith('-') || line.trim().startsWith('*'))
-            .map(line => line.replace(SUMMARY_BULLET_PREFIX_PATTERN, '').trim())
-            .filter(Boolean)
-          
-          const finalBullets = bullets.length > 0 
-            ? bullets 
-            : result.summary.split(SUMMARY_SENTENCE_SEPARATOR_PATTERN).filter(s => s.trim().length > 20).slice(0, 5)
-          
-          respond({ success: true, summary: { bullets: finalBullets }, text: result.fullText })
-          
-          ;(async () => {
-            try {
-              const wordCount = result.fullText.split(WHITESPACE_PATTERN).length
-              const readTimeMin = Math.max(1, Math.round(wordCount / 200))
-              const summaryData = {
-                title: filename.replace('.pdf', ''),
-                bullets: finalBullets,
-                readTime: `${readTimeMin} min`,
-                wordCount,
-                timestamp: Date.now(),
-                timing: { total: 0, cached: false }
-              }
-              
-              await cacheService.setPageSummary(pdfUrl, summaryData, 3600)
-              log.log(`cached PDF summary: ${filename}`)
-              
-              const broadcastProgress = (percent: number) => {
-                chrome.runtime.sendMessage({
-                  type: 'INDEXING_PROGRESS',
-                  sourceId: pdfUrl,
-                  percent
-                }).catch(() => {})
-              }
-              
-              await concurrencyManager.execute('indexing', pdfUrl, async (signal) => {
-                if (signal.aborted) throw new Error('Indexing aborted')
-                await search.index(result.fullText, {
-                  sourceId: pdfUrl,
-                  sourceUrl: pdfUrl,
-                  sourceType: 'pdf',
-                  title: filename.replace('.pdf', '')
-                }, broadcastProgress)
-              })
-              
-              log.log(`background indexing complete: ${filename}`)
-            } catch (bgErr) {
-              log.warn('background PDF indexing failed', (bgErr as Error).message)
-            }
-          })()
-          
-        } else {
-          const text = await pdfService.extractFromArrayBuffer(arrayBuffer)
-          const wordCount = text.split(WHITESPACE_PATTERN).filter(Boolean).length
-          respond({ success: true, text, wordCount })
-        }
-      } catch (err) {
-        log.error('onPdfProcessArrayBuffer', (err as Error).message)
-        respond({ success: false, error: (err as Error).message })
-      }
-    })()
-  }
 
-  static _onGetPageCache(msg: { type: string; url: string }, respond: ResponseCallback): void {
-    (async () => {
-      try {
-        const { url } = msg
-        if (!url) {
-          respond({ summary: null })
-          return
-        }
-        
-        const cached = await cacheService.getPageSummary(url)
-        respond({ summary: cached })
-      } catch (err) {
-        log.error('onGetPageCache', (err as Error).message)
-        respond({ summary: null })
-      }
-    })()
-  }
 }
 

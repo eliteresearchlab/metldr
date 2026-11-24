@@ -58,6 +58,21 @@ pub(super) fn install_pick(pick: Function) {
     PICK.with(|slot| *slot.borrow_mut() = Some(pick));
 }
 
+thread_local! { static READ_PDF: RefCell<Option<Function>> = const { RefCell::new(None) }; }
+pub(super) fn install_read_pdf(read: Function) {
+    READ_PDF.with(|slot| *slot.borrow_mut() = Some(read));
+}
+
+/// The PDF at `url` as markdown, read in the chat page by its PDF module.
+#[cfg(feature = "rune-ui")]
+pub(crate) async fn read_pdf(url: &str) -> Result<String> {
+    let read = READ_PDF.with(|slot| slot.borrow().clone());
+    let read = read.ok_or_else(|| FlowError::Host("PDF reading is unavailable.".into()))?;
+    let pending = read.call1(&JsValue::NULL, &url.into()).map_err(js_error)?;
+    let text = crate::promise(pending).map_err(js_error)?.await.map_err(js_error)?;
+    Ok(text.as_string().unwrap_or_default())
+}
+
 /// Opens the page's file picker for a document to attach.
 #[cfg(feature = "rune-ui")]
 pub(crate) fn pick_document() -> bool {

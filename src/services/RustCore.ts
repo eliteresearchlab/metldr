@@ -1,8 +1,8 @@
 import initCore, {
   dictionary_request, email_cache, email_cache_set, email_kept_replies, email_replies, email_summary,
   gateway_complete, gateway_global_chat, gateway_page_summary,
-  gateway_preferred, gateway_summarize, gateway_word_lookup, search_context, search_ensure,
-  search_has, search_index, search_index_summary, search_is_indexing,
+  gateway_preferred, gateway_summarize, gateway_word_lookup,
+  search_index, search_index_summary,
   stats_record, stats_summary, summary_cache_clear, summary_gate, summary_prefs_load,
   summary_prefs_save
 } from '../../crates/metldr-core/pkg/metldr_core'
@@ -183,29 +183,13 @@ export async function globalChat(messages: Turn[]): Promise<GlobalChatResult> {
 }
 
 export const search = {
-  async index(text: string, source: SearchSource, progress?: (percent: number) => void): Promise<void> {
+  async index(text: string, source: SearchSource): Promise<void> {
     await cacheReady()
-    await search_index(text, source, progress)
+    await search_index(text, source)
   },
   async indexSummary(text: string, source: SearchSource): Promise<void> {
     await cacheReady()
     await search_index_summary(text, source)
-  },
-  async has(sourceUrl: string): Promise<boolean> {
-    await cacheReady()
-    return search_has(sourceUrl)
-  },
-  async isIndexing(sourceId: string): Promise<boolean> {
-    await cacheReady()
-    return search_is_indexing(sourceId)
-  },
-  async ensure(text: string, source: SearchSource, progress?: (percent: number) => void): Promise<string> {
-    await cacheReady()
-    return search_ensure(text, source, progress)
-  },
-  async context(query: string, limit: number, sourceUrl?: string): Promise<string> {
-    await cacheReady()
-    return search_context(query, limit, sourceUrl ?? '')
   }
 }
 
@@ -213,20 +197,12 @@ export const search = {
 // preferred route, indexed for search and counted in stats.
 type Metadata = Record<string, unknown> | null
 
-function indexingProgress(sourceId: string): (percent: number) => void {
-  return percent => {
-    const message = { type: 'INDEXING_PROGRESS', sourceId, percent }
-    chrome.runtime.sendMessage(message).catch(() => {})
-  }
-}
-
 export const email = {
   async summary(
     content: string, id: string | null, metadata: Metadata, force: boolean
   ): Promise<EmailSummary> {
     await cacheReady()
-    const progress = id ? indexingProgress(id) : undefined
-    return email_summary(content, id ?? undefined, metadata, force, progress)
+    return email_summary(content, id ?? undefined, metadata, force)
   },
   async replies(
     id: string, content: string, metadata: Metadata, force: boolean

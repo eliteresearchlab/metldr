@@ -12,12 +12,14 @@ mod conversations;
 mod corrections;
 use metldr_ui::fonts;
 mod gateway;
+mod inpage;
 mod ground;
 use theme::Root as _;
 mod glimm;
 mod messages;
 mod pi_replies;
 mod page_tools;
+mod pdf;
 mod preferences;
 mod replies;
 mod secrets;
@@ -162,6 +164,7 @@ struct State {
     proposed_followup: Option<answers::Followup>,
     /// Set only in a word popup's frame, where this state draws the popup and nothing else.
     word_popup: Option<Box<word::Popup>>,
+    pdf_tools: Option<Box<pdf::Tools>>,
 }
 
 impl Default for State {
@@ -200,6 +203,7 @@ impl Default for State {
             thread_rect: ::rune::Live::new([0.0; 4]),
             proposed_followup: None,
             word_popup: None,
+            pdf_tools: None,
         }
     }
 }
@@ -416,7 +420,7 @@ impl State {
     }
 
     /// Makes the read document the chat's source and asks for its summary.
-    fn attach_document(&mut self, name: String, document: &str, error: Option<String>) {
+    fn attach_document(&mut self, name: String, markdown: String, error: Option<String>) {
         let (Some(gateway), Some(updates)) = (self.gateway().cloned(), self.updates.clone()) else {
             let gateway_only = "PDFs open in the chat once it answers through the extension.";
             return self.fail(FlowError::Host(gateway_only.into()));
@@ -427,10 +431,8 @@ impl State {
         if gateway.streaming() {
             return self.fail(FlowError::Host("Wait for the answer, then attach the PDF.".into()));
         }
-        let markdown = gateway::document_markdown(document);
-        if markdown.trim().is_empty() {
-            let scanned = "This PDF has no text to read. Scanned pages need text recognition, which is not available yet.";
-            return self.fail(FlowError::Host(scanned.into()));
+        if markdown.is_empty() {
+            return self.fail(FlowError::Host(gateway::SCANNED.into()));
         }
         spawn_local(async move {
             let done = gateway.attach(name, markdown, Rc::clone(&updates)).await;
@@ -2297,6 +2299,7 @@ fn ask_for_cjk() {
 pub fn start_rune_chat(
     capture: Function,
     pick: Function,
+    read_pdf: Function,
     fonts: js_sys::Array,
     want_fonts: Function,
 ) -> Result<(), JsValue> {
@@ -2310,6 +2313,7 @@ pub fn start_rune_chat(
         let fonts = fonts::read(&fonts, &fonts::NAMES).map_err(|e| crate::err(&e))?;
         crate::flow::install_capture(capture);
         crate::flow::install_pick(pick);
+        crate::flow::install_read_pdf(read_pdf);
         WANT_FONTS.with(|want| *want.borrow_mut() = Some(want_fonts));
         let spec = AppSpec {
             fonts: fonts::retain(fonts),
@@ -2365,13 +2369,12 @@ pub fn add_rune_chat_fonts(group: String, fonts: js_sys::Array) -> Result<(), Js
     Ok(())
 }
 
-/// A document the page read for the chat: its file name and the PDF reader's JSON, or the
-/// reader's error.
+/// A document the page read for the chat: its file name and markdown, or the reader's error.
 #[wasm_bindgen]
-pub fn rune_chat_attach(name: String, document: String, error: Option<String>) {
+pub fn rune_chat_attach(name: String, markdown: String, error: Option<String>) {
     HOST.with(|host| {
         if let Some(host) = host.borrow().as_ref() {
-            host.update(move |state: &mut State, _| state.attach_document(name, &document, error));
+            host.update(move |state: &mut State, _| state.attach_document(name, markdown, error));
         }
     });
 }

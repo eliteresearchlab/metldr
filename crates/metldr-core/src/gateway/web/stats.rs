@@ -75,7 +75,7 @@ pub async fn stats_record(event: JsValue) {
     match text("kind") {
         "summary" => {
             let summary = stats::Event::Summary {
-                email: event["email"] == true,
+                of: if event["email"] == true { stats::Read::Email } else { stats::Read::Page },
                 words_in: number("wordsIn"),
                 words_out: number("wordsOut"),
                 tokens_out: number("tokensOut"),

@@ -198,9 +198,9 @@ pub enum Event<'a> {
         ms: f64,
         model: &'a str,
     },
-    /// A page or email summary: the words read and written, its time, model and site.
+    /// A page, PDF or email summary: the words read and written, its time, model and site.
     Summary {
-        email: bool,
+        of: Read,
         words_in: f64,
         words_out: f64,
         tokens_out: f64,
@@ -212,6 +212,14 @@ pub enum Event<'a> {
     Lookup,
     /// Reply suggestions written for an email.
     Replies(f64),
+}
+
+/// What a summary read, for the count it adds to.
+#[derive(Clone, Copy)]
+pub enum Read {
+    Page,
+    Pdf,
+    Email,
 }
 
 /// `event` added to `day` (a stored record, or null for a new day `date`). Fields the record
@@ -277,7 +285,7 @@ pub fn record(day: serde_json::Value, date: &str, event: &Event) -> serde_json::
             count(&mut map, "modelUsage", model);
         }
         Event::Summary {
-            email,
+            of,
             words_in,
             words_out,
             tokens_out,
@@ -286,7 +294,12 @@ pub fn record(day: serde_json::Value, date: &str, event: &Event) -> serde_json::
             site,
         } => {
             add(&mut map, "summariesGenerated", 1.0);
-            add(&mut map, if email { "emailsProcessed" } else { "pagesProcessed" }, 1.0);
+            let processed = match of {
+                Read::Page => "pagesProcessed",
+                Read::Pdf => "pdfsProcessed",
+                Read::Email => "emailsProcessed",
+            };
+            add(&mut map, processed, 1.0);
             add(&mut map, "totalWordsRead", words_in);
             add(&mut map, "totalWordsSummarized", words_out);
             add(&mut map, "tokensOutput", tokens_out);
@@ -368,7 +381,7 @@ mod checks {
         let mut old = new.clone();
         old["timeInGmail"] = json!(12);
         let summary = Event::Summary {
-            email: false,
+            of: Read::Page,
             words_in: 900.0,
             words_out: 60.0,
             tokens_out: 80.0,
