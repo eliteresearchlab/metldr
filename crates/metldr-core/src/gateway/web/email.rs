@@ -8,6 +8,30 @@ use web_sys::IdbTransactionMode;
 const SUMMARIES: &str = "email_summaries";
 const REPLIES: &str = "email_replies";
 const SESSIONS: &str = "email_sessions";
+/// How long an email's summary, replies and message count are kept: 30 days.
+const KEEP_MS: f64 = 30.0 * 24.0 * 3_600_000.0;
+
+/// Deletes email records older than [`KEEP_MS`], or written before records had a time.
+pub(super) async fn prune() {
+    let Some(db) = page_summary::cache().await else { return };
+    let run = async {
+        let names = js_sys::Array::of3(&SUMMARIES.into(), &REPLIES.into(), &SESSIONS.into());
+        let tx = db.transaction_with_str_sequence_and_mode(&names, IdbTransactionMode::Readwrite).ok()?;
+        for name in [SUMMARIES, REPLIES, SESSIONS] {
+            let store = tx.object_store(name).ok()?;
+            let all = from_js(&keys::done(&store.get_all().ok()?).await.ok()?);
+            for record in all.as_array().into_iter().flatten() {
+                let fresh = record["timestamp"].as_f64().is_some_and(|at| js_sys::Date::now() - at <= KEEP_MS);
+                if !fresh && let Some(id) = record["emailId"].as_str() {
+                    let _ = store.delete(&id.into());
+                }
+            }
+        }
+        dictionary::finished(&tx).await.ok()
+    };
+    let _ = run.await;
+    db.close();
+}
 
 /// The value kept for `id` in `store`.
 async fn read(store: &str, id: &str) -> Option<Value> {
@@ -29,7 +53,7 @@ async fn write(store: &str, id: &str, value: Option<&Value>) {
         let tx = db.transaction_with_str_and_mode(store, IdbTransactionMode::Readwrite).map_err(err)?;
         let files = tx.object_store(store).map_err(err)?;
         match value {
-            Some(value) => files.put(&to_js(&json!({"emailId": id, "value": value}))),
+            Some(value) => files.put(&to_js(&json!({"emailId": id, "value": value, "timestamp": js_sys::Date::now()}))),
             None => files.delete(&id.into()),
         }
         .map_err(err)?;
@@ -185,7 +209,7 @@ pub(super) async fn email_cache_set(id: String, summary: JsValue, email_count: O
         let Some(db) = page_summary::cache().await else { return };
         let written = async {
             let tx = db.transaction_with_str_and_mode(SESSIONS, IdbTransactionMode::Readwrite).map_err(err)?;
-            let record = to_js(&json!({"emailId": id, "emailCount": count}));
+            let record = to_js(&json!({"emailId": id, "emailCount": count, "timestamp": js_sys::Date::now()}));
             tx.object_store(SESSIONS).and_then(|s| s.put(&record)).map_err(err)?;
             dictionary::finished(&tx).await
         };
