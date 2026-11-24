@@ -12,7 +12,7 @@
     "build:fast": "cross-env METLDR_PROFILE=fast npm run build",
     "prebuild:main": "npm run build:rust && npm run build:chat",
     "build:main": "vite build",
-    "build:content": "cross-env BUILD_TARGET=content vite build",
+    "build:content": "cross-env BUILD_TARGET=content vite build && cross-env BUILD_TARGET=gmail vite build",
     "preview": "vite preview",
     "build:chat": "node scripts/build-chat.mjs",
     "check:chat": "npm --prefix extension/chat-ui run check",

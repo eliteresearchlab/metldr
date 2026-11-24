@@ -2,7 +2,7 @@
 import { gsap } from 'gsap'
 import { UIService } from './UIService'
 import { emailExtractor } from './EmailExtractor'
-import { ContentScriptBootstrap } from './ContentScriptBootstrap'
+import { emailFromDom } from './gmailDom'
 import { languageService } from '../services/LanguageService'
 import type { 
   InboxSDK, 
@@ -312,9 +312,8 @@ export class ReplyPanel {
     }
   }
 
-  // use existing extraction from ContentScriptBootstrap
   private extractEmailFromPage(): { subject?: string; from?: string; body?: string } | null {
-    const result = ContentScriptBootstrap.extractEmailFromDOM()
+    const result = emailFromDom()
     if (result) {
       return {
         subject: result.metadata?.subject,

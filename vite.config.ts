@@ -4,7 +4,9 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync
 import { basename, dirname, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 
-const isContentBuild = process.env.BUILD_TARGET === 'content'
+// Each content script is its own build: an IIFE inlines its imports, so it cannot share chunks.
+const contentEntry = ({ content: 'main', gmail: 'gmail' } as Record<string, string>)[process.env.BUILD_TARGET ?? '']
+const isContentBuild = contentEntry !== undefined
 const privateFiles = [
   '**/.tmp/**', '**/prototypes/**', '**/docs/**',
   '**/{AGENTS,CLAUDE,PRODUCT,DESIGN}.md', '**/crates/**/target/**', '**/target/**',
@@ -121,9 +123,9 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: !isContentBuild,
     rollupOptions: isContentBuild ? {
-      input: 'src/content/main.ts',
+      input: `src/content/${contentEntry}.ts`,
       output: {
-        entryFileNames: 'content.js',
+        entryFileNames: `${process.env.BUILD_TARGET}.js`,
         format: 'iife',
         name: 'MeTLDRContent',
         inlineDynamicImports: true,

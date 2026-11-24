@@ -7,7 +7,6 @@ const SEARCH_QUERY_REGEX = /[?&](q|query|search)=/i;
 const CART_PATH_REGEX = /(cart|checkout)/i;
 const FEED_PATH_REGEX = /(\/feed|\/rss)/i;
 const SOCIAL_HOSTNAME_REGEX = /(twitter\.com|facebook\.com|instagram\.com|tiktok\.com|linkedin\.com)/i;
-const EMAIL_HOSTNAME_REGEX = /mail\.google\.com/;
 const SYSTEM_URL_REGEX = /^chrome:|^edge:|^about:|^chrome-extension:/;
 
 export class ArticleExtractor {
@@ -43,10 +42,6 @@ export class ArticleExtractor {
     const textDensity = textLength > 0 ? Math.min(1, textLength / Math.max(body?.innerHTML?.length || textLength, textLength)) : 0;
     const canvasHeavy = (canvasCount + svgCount) >= 3;
     const isSPA = hashRouting || buttonToParagraphRatio > 1.4 || formCount > paragraphCount * 0.6;
-    
-    if (EMAIL_HOSTNAME_REGEX.test(hostname)) {
-      return { skip: true, reason: 'email client' };
-    }
     
     if (SYSTEM_URL_REGEX.test(url)) {
       return { skip: true, reason: 'system page' };

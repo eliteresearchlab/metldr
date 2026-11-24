@@ -38,6 +38,19 @@
         "content.js"
       ],
       "run_at": "document_start",
+      "world": "ISOLATED",
+      "exclude_matches": [
+        "https://mail.google.com/*"
+      ]
+    },
+    {
+      "matches": [
+        "https://mail.google.com/*"
+      ],
+      "js": [
+        "gmail.js"
+      ],
+      "run_at": "document_start",
       "world": "ISOLATED"
     }
   ],
