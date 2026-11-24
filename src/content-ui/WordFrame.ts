@@ -30,7 +30,6 @@ export class WordFrame {
   private pending: ReturnType<typeof setTimeout> | null = null
   private idle: ReturnType<typeof setTimeout> | null = null
   private lastDoubleClick = 0
-  private readonly isGmail = window.location.hostname.includes('mail.google.com')
 
   constructor() {
     document.addEventListener('click', event => {
@@ -70,7 +69,6 @@ export class WordFrame {
   }
 
   handleTextSelection(event: MouseEvent): void {
-    if (this.isGmail) return
     this.lastDoubleClick = Date.now()
     this.cancelPending()
     const target = event.target as HTMLElement

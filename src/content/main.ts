@@ -1,27 +1,32 @@
-import * as InboxSDK from '@inboxsdk/core';
-import { ContentScriptBootstrap } from '../content-ui/ContentScriptBootstrap';
-import { INBOXSDK_APP_ID } from '../config/secrets';
+import { WordFrame } from '../content-ui/WordFrame'
+import { showPdfTools } from '../content-ui/PdfFrame'
+import { ArticleExtractor } from '../content-ui/ArticleExtractor'
 
-const isGmail = window.location.hostname.includes('mail.google.com');
+// The content script of every page but Gmail's, which has its own (gmail.ts): the word popup's
+// frame, the PDF tools over a PDF tab and the article the page tools read.
 
-if (isGmail) {
-  // initialize message listeners immediately (before InboxSDK loads)
-  // this ensures GET_EMAIL_CONTENT works even during InboxSDK loading
-  ContentScriptBootstrap.init(null).then(() => {
-    console.log('metldr: base init done, loading inboxsdk...');
-  }).catch(err => {
-    console.error('metldr: base init failed:', err);
-  });
-  
-  // then load InboxSDK and enhance with email extraction
-  InboxSDK.load(2, INBOXSDK_APP_ID).then((sdk) => {
-    console.log('metldr: inboxsdk loaded');
-    ContentScriptBootstrap.initInboxSDK(sdk);
-  }).catch(err => {
-    console.error('metldr: inboxsdk load failed:', err);
-  });
+const isPdf = document.contentType === 'application/pdf'
+
+chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+  if (msg?.type !== 'EXTRACT_ARTICLE') return false
+  // The extension page asking reads a PDF's file itself.
+  if (isPdf) {
+    respond({ success: true, data: { skip: true, reason: 'pdf' } })
+    return false
+  }
+  try {
+    respond({ success: true, data: ArticleExtractor.extract() })
+  } catch (err) {
+    console.error('metldr: extraction failed:', err)
+    respond({ success: false, error: (err as Error).message })
+  }
+  return false
+})
+
+// A PDF tab shows the browser's viewer: the PDF tools sit over it, and nothing reads the page.
+if (isPdf) {
+  showPdfTools()
 } else {
-  ContentScriptBootstrap.init(null).catch(err => {
-    console.error('metldr: init failed:', err);
-  });
+  const words = new WordFrame()
+  document.addEventListener('dblclick', event => words.handleTextSelection(event))
 }
