@@ -13,6 +13,7 @@ mod corrections;
 use metldr_ui::fonts;
 mod gateway;
 mod gmail_replies;
+mod gmail_summary;
 mod inpage;
 mod ground;
 use theme::Root as _;
@@ -169,6 +170,8 @@ struct State {
     pdf_tools: Option<Box<pdf::Tools>>,
     /// Set only in a Gmail reply frame, where this state draws the reply card and nothing else.
     gmail_replies: Option<Box<gmail_replies::Replies>>,
+    /// Set only in a Gmail summary frame, where this state draws the summary card and nothing else.
+    gmail_summary: Option<Box<gmail_summary::Card>>,
 }
 
 impl Default for State {
@@ -209,6 +212,7 @@ impl Default for State {
             word_popup: None,
             pdf_tools: None,
             gmail_replies: None,
+            gmail_summary: None,
         }
     }
 }

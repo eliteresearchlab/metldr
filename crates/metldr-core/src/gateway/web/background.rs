@@ -144,14 +144,6 @@ pub async fn background_message(message: JsValue, sender: JsValue) -> JsValue {
             Ok(()) => return email::email_cache(text("emailId")).await,
             Err(_) => json!({"cached": null, "emailCount": 0}),
         },
-        "SET_EMAIL_CACHE" => match cache_ready().await {
-            Ok(()) => {
-                let count = msg["emailCount"].as_u64().map(|n| n as u32);
-                email::email_cache_set(text("emailId"), to_js(&msg["summary"]), count).await;
-                json!({"success": true})
-            }
-            Err(_) => json!({"success": false}),
-        },
         _ => return JsValue::UNDEFINED,
     };
     to_js(&answer)
@@ -235,9 +227,9 @@ async fn inpage_pull(sender: &Value, tab: Option<i32>) -> JsValue {
             "url": sender["tab"]["url"].as_str().unwrap_or_default(),
             "title": sender["tab"]["title"].as_str().unwrap_or_default(),
         })),
-        (Some(tab), "/inpage/word.html" | "/inpage/replies.html") => {
+        (Some(tab), "/inpage/word.html" | "/inpage/replies.html" | "/inpage/summary.html") => {
             // Each frame's script answers only for its own frame.
-            let kind = if frame == "/inpage/word.html" { "word" } else { "replies" };
+            let kind = frame.trim_start_matches("/inpage/").trim_end_matches(".html");
             let ask = to_js(&json!({"type": "INPAGE_PULL", "frame": kind}));
             promise(tabs_send(tab, &ask, &to_js(&json!({"frameId": 0})))).await.unwrap_or(JsValue::NULL)
         }
