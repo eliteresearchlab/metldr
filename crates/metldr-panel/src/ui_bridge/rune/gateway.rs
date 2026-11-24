@@ -96,7 +96,7 @@ fn post(port: &JsValue, message: &Value) -> Result<(), FlowError> {
 }
 
 /// A JavaScript message as JSON.
-fn json_of(message: &JsValue) -> Option<Value> {
+pub(super) fn json_of(message: &JsValue) -> Option<Value> {
     let raw = js_sys::JSON::stringify(message).ok()?.as_string()?;
     serde_json::from_str(&raw).ok()
 }

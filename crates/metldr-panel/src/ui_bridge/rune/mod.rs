@@ -26,6 +26,7 @@ mod secrets;
 mod settings;
 mod sources;
 mod stats;
+mod summary_settings;
 mod theme;
 mod word;
 
@@ -2208,7 +2209,7 @@ const PAGE_TOOLS: Section = Section {
     key: "page-tools",
     trigger: "settings-section-page-tools",
     panel: "settings-panel-page-tools",
-    title: "Word lookup and dictionaries",
+    title: "Page tools",
 };
 const PROVIDERS: Section = Section {
     key: "providers",

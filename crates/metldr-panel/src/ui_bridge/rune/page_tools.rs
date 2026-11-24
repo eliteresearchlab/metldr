@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use wasm_bindgen::closure::Closure;
 
 const POPUP: &str = "wordPopupEnabled";
+/// The page summary settings' key (summary_settings.rs).
+const SUMMARY_PREFS: &str = "summaryPrefs";
 /// The service worker's dictionary keys; a change to any of them is a new state to show.
 const DICTIONARY_KEYS: [&str; 3] = [
     "dictDownloadProgress",
@@ -48,6 +50,7 @@ pub(super) struct PageTools {
     dictionaries: Option<Dictionaries>,
     /// The last clear of the cached summaries: whether it worked.
     cleared: Option<bool>,
+    pub(super) summaries: super::summary_settings::SummarySettings,
 }
 
 impl Drop for PageTools {
@@ -63,11 +66,13 @@ impl PageTools {
     /// the dictionaries resumes their downloads, as opening the panel always has.
     pub(super) fn setup(&mut self, wake: ::rune::Waker) {
         self.wake = Some(wake);
+        self.summaries.load(self.wake.clone());
         let Ok(event) = crate::chrome_api("storage").and_then(|s| crate::get(&s, "onChanged"))
         else {
             return;
         };
         let (inbox, wake) = (Rc::clone(&self.inbox), self.wake.clone());
+        let summaries = self.summaries.loader();
         let callback =
             Closure::<dyn FnMut(JsValue, JsValue)>::new(move |changes: JsValue, area: JsValue| {
                 if area.as_string().as_deref() != Some("local") {
@@ -81,6 +86,9 @@ impl PageTools {
                     if let Some(wake) = &wake {
                         wake();
                     }
+                }
+                if has(SUMMARY_PREFS) {
+                    summaries.load(wake.clone());
                 }
                 if DICTIONARY_KEYS.iter().any(|key| has(key)) {
                     ask(
@@ -115,7 +123,13 @@ impl PageTools {
     }
 
     /// Takes what arrived since the last frame; true when the section changes.
+    /// What redraws the panel once a request answers.
+    pub(super) fn wake(&self) -> Option<::rune::Waker> {
+        self.wake.clone()
+    }
+
     pub(super) fn poll(&mut self) -> bool {
+        let summaries = self.summaries.poll();
         let mut inbox = self.inbox.borrow_mut();
         let changed =
             inbox.popup.is_some() || inbox.dictionaries.is_some() || inbox.cleared.is_some();
@@ -126,7 +140,7 @@ impl PageTools {
         if let Some(cleared) = inbox.cleared.take() {
             self.cleared = Some(cleared);
         }
-        changed
+        changed || summaries
     }
 
     fn set_popup(&mut self, on: bool) {
@@ -211,6 +225,7 @@ impl PageTools {
                     .role(if cleared { "status" } else { "alert" }),
             );
         }
+        out = out.child(self.summaries.view(typography, palette));
         out = out.child(typography.text("Dictionaries").role("heading"));
         match &self.dictionaries {
             None => {
