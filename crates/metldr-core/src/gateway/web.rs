@@ -124,6 +124,7 @@ fn saved<'a>(settings: &'a Value, route: &str, field: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
+mod background;
 mod dictionary;
 mod email;
 mod language;

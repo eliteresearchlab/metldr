@@ -64,7 +64,7 @@ const actions = {
     }
   },
   async chat() {
-    const reply = await chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL', focus: 'chat' }).catch(() => null)
+    const reply = await chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => null)
     if (reply?.success === false) failed(reply.error || 'The chat could not open.')
   }
 }

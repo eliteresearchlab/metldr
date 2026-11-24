@@ -6,7 +6,7 @@ use super::*;
 use crate::{page, stats as counts};
 use web_sys::{IdbDatabase, IdbOpenDbRequest, IdbTransactionMode};
 
-const CACHE: &str = "metldr_cache";
+pub(super) const CACHE: &str = "metldr_cache";
 const PAGES: &str = "page_cache";
 /// How long a cached summary is meant to last, in milliseconds, as the cache records it.
 const KEEP_MS: f64 = 3_600_000.0;
