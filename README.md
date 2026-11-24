@@ -99,7 +99,7 @@ Free for noncommercial use under the [PolyForm Noncommercial License](LICENSE). 
 
 ## Build and setup
 
-Install Node.js and the pinned Rust toolchain, then build:
+Install Node.js, the pinned Rust toolchain and Binaryen 133 (`wasm-opt`; `mise install` sets it up), then build:
 
 ```sh
 rustup target add wasm32-unknown-unknown

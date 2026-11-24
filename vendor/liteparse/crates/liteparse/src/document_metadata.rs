@@ -6,6 +6,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 const SCAN_BUFFER_BYTES: usize = 1 << 20;
 const SCAN_OVERLAP: usize = 64;
+#[cfg(not(target_arch = "wasm32"))]
 const XMP_MAX_BYTES: usize = 64 * 1024;
 /// Above this size, resolving the catalog's `/Metadata` object costs more than
 /// the whole parse: lopdf decodes every stream, so a 103 MB file takes ~7.8 s
