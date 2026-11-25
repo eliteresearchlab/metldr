@@ -120,13 +120,14 @@ pub fn retain(fonts: Vec<Vec<u8>>) -> &'static [&'static [u8]] {
 }
 
 /// Keeps a group added after start like [`retain`]. `None` when it was already kept, so a
-/// document adds each group to the renderer once.
+/// document adds each group to the renderer once, and for a name that is no group.
 pub fn retain_group(name: &str, fonts: Vec<Vec<u8>>) -> Option<&'static [&'static [u8]]> {
     let cell = match name {
+        "fallbacks" => &RETAINED_FALLBACKS,
         "scripts" => &RETAINED_SCRIPTS,
         "cjk" => &RETAINED_CJK,
         "emoji" => &RETAINED_EMOJI,
-        _ => &RETAINED_FALLBACKS,
+        _ => return None,
     };
     cell.with(|retained| {
         let mut fresh = false;
