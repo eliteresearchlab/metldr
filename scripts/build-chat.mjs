@@ -97,16 +97,17 @@ async function copyRune() {
   };
   const names = list('NAMES');
   const fallbacks = list('FALLBACKS');
+  const scripts = list('SCRIPTS');
   const cjk = list('CJK');
   const emoji = list('EMOJI');
   const fonts = join(output, 'fonts');
   await mkdir(fonts, { recursive: true });
   const assets = join(root, 'crates/metldr-panel/assets/fonts');
   for (const name of names) await copyFile(join(assets, name), join(fonts, name));
-  for (const name of [...fallbacks, ...cjk, ...emoji]) {
+  for (const name of [...fallbacks, ...scripts, ...cjk, ...emoji]) {
     await copyFile(join(assets, 'fallback', name), join(fonts, name));
   }
-  await writeFile(join(fonts, 'manifest.json'), JSON.stringify({ fonts: names, fallbacks, cjk, emoji }));
+  await writeFile(join(fonts, 'manifest.json'), JSON.stringify({ fonts: names, fallbacks, scripts, cjk, emoji }));
 }
 
 export async function buildChat() {
