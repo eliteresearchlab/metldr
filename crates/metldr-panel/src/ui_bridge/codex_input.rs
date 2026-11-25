@@ -313,7 +313,7 @@ impl UiCodexAnswer {
                     }
                     for value in &row.values {
                         let other = question.other
-                            && value != ""
+                            && !value.is_empty()
                             && !question.options.iter().any(|o| o.label == *value);
                         if !question.options.iter().any(|o| o.label == *value)
                             && !(other && value.chars().count() <= 4096)

@@ -54,11 +54,9 @@ impl Operation {
                             .any(|r| r.request == p.request)
                 })
             })
-        {
-            if let Some(pending) = self.pending().cloned() {
+            && let Some(pending) = self.pending().cloned() {
                 *self = Self::Recorded(pending);
             }
-        }
     }
 }
 
@@ -461,7 +459,7 @@ async fn reconcile(core: &Core, flow: &FlowClient, pending: &Pending) -> Reconci
     if !flow.same_connection(&core.flow()) {
         return Reconciled::Unknown;
     }
-    let observed_sequence = view.sequence.clone();
+    let observed_sequence = view.sequence;
     let Ok(accepted) = core.accept(view) else {
         return Reconciled::Unknown;
     };

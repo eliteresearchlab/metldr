@@ -181,18 +181,16 @@ pub fn accept_panel(port: JsValue) {
         let reply_port = port.clone();
         listen(&port, "onMessage", move |message| {
             let request = get(&message, "request").ok().and_then(|v| v.as_string());
-            if let Err(error) = forward_request(&reply_port, message) {
-                if let Some(request) = request {
+            if let Err(error) = forward_request(&reply_port, message)
+                && let Some(request) = request {
                     let message: String = js_message(&error).chars().take(64).collect();
                     if let Ok(raw) = serde_json::to_string(
                         &json!({"v":crate::WIRE_VERSION,"request":request,"kind":"error","message":message}),
-                    ) {
-                        if let Ok(value) = js_sys::JSON::parse(&raw) {
+                    )
+                        && let Ok(value) = js_sys::JSON::parse(&raw) {
                             let _ = call(&reply_port, "postMessage", &[value]);
                         }
-                    }
                 }
-            }
         })?;
         let disconnected_port = port.clone();
         listen(&port, "onDisconnect", move |_| {
@@ -308,7 +306,7 @@ fn forward_panel(message: &Value) {
         return;
     };
     for port in BACKGROUND.with(|b| b.borrow().panels.clone()) {
-        let _ = call(&port, "postMessage", &[value.clone()]);
+        let _ = call(&port, "postMessage", std::slice::from_ref(&value));
     }
 }
 fn connect_native() -> Result<(), JsValue> {
@@ -383,8 +381,8 @@ fn remove_panel(port: &JsValue) {
     for watch in watches {
         if watch.queued {
             BACKGROUND.with(|b| b.borrow_mut().readiness.discard_request(&watch.request));
-        } else if ready {
-            if let Some(native) = native.as_ref() {
+        } else if ready
+            && let Some(native) = native.as_ref() {
                 let Some(id) = next_cleanup_request() else {
                     continue;
                 };
@@ -394,7 +392,6 @@ fn remove_panel(port: &JsValue) {
                     let _ = call(native, "postMessage", &[value]);
                 }
             }
-        }
     }
 }
 
@@ -503,11 +500,11 @@ async fn await_call(object: &JsValue, method: &str, args: &[JsValue]) -> Result<
 fn listen(
     target: &JsValue,
     event: &str,
-    mut callback: impl FnMut(JsValue) + 'static,
+    callback: impl FnMut(JsValue) + 'static,
 ) -> Result<(), JsValue> {
     let event = get(target, event)?;
     let add = get(&event, "addListener")?.dyn_into::<Function>()?;
-    let listener = Closure::<dyn FnMut(JsValue)>::new(move |value| callback(value));
+    let listener = Closure::<dyn FnMut(JsValue)>::new(callback);
     add.call1(&event, listener.as_ref())?;
     listener.forget();
     Ok(())

@@ -664,7 +664,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
         }
         Menu::Models => {
             if let Some(gateway) = state.gateway() {
-                return Some(gateway_menu(state, gateway, typography, &p));
+                return Some(gateway_menu(state, gateway, typography, p));
             }
             // Configured routes by section with short names; routes still to set up fold into one
             // row that opens Settings. Full labels stay the accessible names.
@@ -711,7 +711,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
                     close_menu,
                 ));
             }
-            let mut menu = model_panel(rows, &p);
+            let mut menu = model_panel(rows, p);
             if supports_plan(&state.selection) {
                 let modes = [
                     (Mode::Configured, "Codex configured mode"),
@@ -758,7 +758,7 @@ pub(super) fn menu(state: &State) -> Option<El> {
             }
             // A mode is the chat's setting, so it shows once a chat is connected.
             if state.core().is_some() {
-                menu = menu.child(approval_rows(state, typography, &p));
+                menu = menu.child(approval_rows(state, typography, p));
             }
             Some(menu)
         }

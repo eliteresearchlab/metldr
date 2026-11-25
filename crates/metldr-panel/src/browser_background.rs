@@ -512,11 +512,10 @@ fn reserve_call(
         {
             return Err("Browser call does not match the active attachment.".into());
         }
-        if let Some(session) = session {
-            if active.sessions.get(session).is_none() {
+        if let Some(session) = session
+            && active.sessions.get(session).is_none() {
                 return Err("Unknown browser target session.".into());
             }
-        }
         active.last_call = call_id;
         Ok(active.epoch)
     })
@@ -663,11 +662,10 @@ fn clear_attachment(connection: u64, epoch: u64) {
     if let Some(attachment) = attachment {
         let attaching =
             STATE.with(|state| state.borrow().blocked_tabs.contains_key(&attachment.tab));
-        if !attaching {
-            if let Some(cleanup) = detach_later(attachment.tab) {
+        if !attaching
+            && let Some(cleanup) = detach_later(attachment.tab) {
                 release::remember(connection, &attachment, cleanup);
             }
-        }
     }
 }
 
@@ -714,15 +712,14 @@ async fn inject_banner(connection: u64, epoch: u64) -> Result<(), String> {
 }
 
 fn remove_banner(tab: i32) {
-    if let Ok(tabs) = chrome_api("tabs") {
-        if let Ok(message) = parse(&json!({"kind":"metldr-banner-remove"})) {
+    if let Ok(tabs) = chrome_api("tabs")
+        && let Ok(message) = parse(&json!({"kind":"metldr-banner-remove"})) {
             let _ = call(
                 &tabs,
                 "sendMessage",
                 &[JsValue::from_f64(tab as f64), message],
             );
         }
-    }
 }
 
 fn remove_banner_document(tab: i32, document: &str) {
@@ -972,7 +969,8 @@ fn on_detach(source: JsValue) {
         {
             return None;
         }
-        let attachment = if state
+        
+        if state
             .active
             .as_ref()
             .is_some_and(|active| Some(active.tab) == tab)
@@ -980,8 +978,7 @@ fn on_detach(source: JsValue) {
             state.active.take()
         } else {
             None
-        };
-        attachment
+        }
     });
     if let Some(active) = attachment {
         remove_banner(active.tab);

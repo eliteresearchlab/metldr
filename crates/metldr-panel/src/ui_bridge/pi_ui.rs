@@ -229,13 +229,11 @@ impl Core {
                 .workflow
                 .as_deref()
                 .is_some_and(|workflow| destination == "pi" || destination == workflow)
-        {
-            if let Some(editor) = editor
+            && let Some(editor) = editor
                 && editor.revision.to_string() == revision
             {
                 return Ok(editor.text.clone());
             }
-        }
         Err(FlowError::InvalidInput(
             "This Pi suggestion is no longer available.".into(),
         ))

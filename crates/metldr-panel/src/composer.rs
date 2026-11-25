@@ -67,10 +67,10 @@ fn codex_ready(view: &PageView, session: &AgentSessionView) -> bool {
 }
 
 /// The chat's most recently created session that can continue now.
-fn newest<'a>(
-    sessions: &'a [AgentSessionView],
+fn newest(
+    sessions: &[AgentSessionView],
     ready: impl Fn(&AgentSessionView) -> bool,
-) -> Option<&'a AgentSessionView> {
+) -> Option<&AgentSessionView> {
     sessions.iter().filter(|session| ready(session)).max_by_key(|session| {
         let id = session.workflow.as_str();
         id.rsplit(':').next().and_then(|n| n.parse::<u64>().ok()).unwrap_or(0)

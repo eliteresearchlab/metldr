@@ -73,6 +73,8 @@ struct Updates {
     titles_dirty: Cell<bool>,
     /// A gateway opened after the companion could not connect, for the next poll to adopt.
     gateway: RefCell<Option<Rc<gateway::Gateway>>>,
+    /// The active page's title and key sentences, for the setup screen when nothing answers.
+    key_sentences: RefCell<Option<(String, Vec<String>)>>,
 }
 
 impl Updates {
@@ -92,6 +94,7 @@ impl Updates {
             archive_epoch,
             titles_dirty: Cell::new(false),
             gateway: RefCell::default(),
+            key_sentences: RefCell::default(),
         })
     }
 
@@ -1012,6 +1015,15 @@ fn poll(state: &mut State, _: f64, tx: &mut Tx) -> bool {
                         opening.changed();
                     }
                 });
+                // While the routes are probed, the page's own key sentences, which need no model,
+                // so a reader without one sees something of the page at once.
+                let reading = Rc::clone(&updates);
+                spawn_local(async move {
+                    if let Some(found) = gateway::key_sentences().await {
+                        *reading.key_sentences.borrow_mut() = Some(found);
+                        reading.changed();
+                    }
+                });
             }
         }
     }
@@ -1868,6 +1880,26 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 state.review(tx);
             });
             thread = thread.child(setup.child(row().gap(8.0).child(set_up).child(retry)));
+            let picked = state.updates.as_ref().and_then(|updates| updates.key_sentences.borrow().clone());
+            if let Some((title, sentences)) = picked {
+                let point = |text: String| {
+                    row()
+                        .w_full()
+                        .gap(8.0)
+                        .child(typography.text("\u{2022}").color(palette.ink_2))
+                        .child(typography.text(text).wrap().grow(1.0).shrink())
+                };
+                let heading = if title.is_empty() { "Key sentences".to_owned() } else { format!("Key sentences: {title}") };
+                thread = thread.child(
+                    col()
+                        .key("panel-key-sentences")
+                        .w_full()
+                        .gap(8.0)
+                        .pt(16.0)
+                        .child(typography.text(heading).role("heading").wrap())
+                        .children(sentences.into_iter().map(point)),
+                );
+            }
         }
         return col()
             .w_full()
