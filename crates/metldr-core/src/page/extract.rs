@@ -25,7 +25,7 @@ pub fn first_summary(markdown: &str, budget: usize) -> Vec<&str> {
         .iter()
         .copied()
         .enumerate()
-        .filter(|(_, s)| (MIN_WORDS..=MAX_WORDS).contains(&s.split_whitespace().count()))
+        .filter(|(_, s)| (MIN_WORDS..=MAX_WORDS).contains(&s.split_whitespace().count()) && ends_a_sentence(s))
         .take(MAX_SENTENCES)
         .collect();
     if candidates.len() < 3 {
@@ -48,6 +48,11 @@ pub fn first_summary(markdown: &str, budget: usize) -> Vec<&str> {
     }
     chosen.sort_unstable();
     chosen.into_iter().map(|i| candidates[i].1).collect()
+}
+
+/// Whether `sentence` closes with a stop, so taglines, captions and menu lines are left out.
+fn ends_a_sentence(sentence: &str) -> bool {
+    sentence.trim_end_matches(['"', '\'', ')', ']', '”', '’']).ends_with(['.', '!', '?'])
 }
 
 /// The prose sentences of `markdown`: headings, tables and code are left out, list markers and
@@ -204,14 +209,14 @@ mod tests {
 
     #[test]
     fn a_page_is_summarized_by_its_central_sentences_in_reading_order() {
-        let page = "# Rust\n\nRust is a programming language that is fast and memory safe. \
+        let page = "# Rust\n\nFrom Wikipedia, the free encyclopedia\n\nRust is a programming language that is fast and memory safe. \
             Mr. Hoare started Rust as a personal project in 2006. The weather was nice that day. \
             Rust's ownership model makes the language memory safe without a garbage collector. \
             Many companies now write fast and memory safe services in the Rust language.\n\n\
             ```\nfn main() {}\n```\n\n| a | b |\n\n- Cargo builds Rust programs and fetches the crates they use.";
         let summary = first_summary(page, 25);
         assert_eq!(summary[0], "Rust is a programming language that is fast and memory safe.");
-        assert!(summary.iter().all(|s| !s.contains("fn main") && !s.starts_with('|') && !s.starts_with('#')));
+        assert!(summary.iter().all(|s| !s.contains("fn main") && !s.contains("encyclopedia") && !s.starts_with('|') && !s.starts_with('#')));
         assert!(sentences(page).contains(&"Mr. Hoare started Rust as a personal project in 2006."));
         assert!(first_summary("Too short. Really.", 50).is_empty());
     }
