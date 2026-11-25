@@ -177,8 +177,7 @@ pub(super) fn native_message(message: JsValue) {
     if let Some(request) = get(&message, "request")
         .ok()
         .and_then(|value| value.as_string())
-    {
-        if BACKGROUND.with(|state| state.borrow_mut().stop_requests.remove(&request)) {
+        && BACKGROUND.with(|state| state.borrow_mut().stop_requests.remove(&request)) {
             let stopped = get(&message, "stopped")
                 .ok()
                 .and_then(|value| value.as_f64());
@@ -196,7 +195,6 @@ pub(super) fn native_message(message: JsValue) {
             }
             return;
         }
-    }
     let Ok(raw) = js_sys::JSON::stringify(&message) else {
         return;
     };
@@ -224,7 +222,7 @@ pub(super) fn native_message(message: JsValue) {
     };
     let panels = BACKGROUND.with(|b| b.borrow().panels.clone());
     for port in panels {
-        let _ = call(&port, "postMessage", &[value.clone()]);
+        let _ = call(&port, "postMessage", std::slice::from_ref(&value));
     }
 }
 

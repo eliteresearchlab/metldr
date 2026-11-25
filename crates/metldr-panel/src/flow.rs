@@ -194,11 +194,9 @@ impl FlowClient {
                     if let Some(text) = get(&message, "message")
                         .ok()
                         .and_then(|value| value.as_string())
-                    {
-                        if let Some(document) =
+                        && let Some(document) =
                             web_sys::window().and_then(|window| window.document())
-                        {
-                            if let Some(body) = document.body() {
+                            && let Some(body) = document.body() {
                                 let notice = document.get_element_by_id("metldr-stop-notice").or_else(|| {
                                     let element = document.create_element("div").ok()?;
                                     element.set_id("metldr-stop-notice");
@@ -221,8 +219,6 @@ impl FlowClient {
                                     );
                                 }
                             }
-                        }
-                    }
                     return;
                 }
                 let result = decode_frame(message)
@@ -1315,7 +1311,7 @@ impl Timer {
 }
 impl Drop for Timer {
     fn drop(&mut self) {
-        let _ = call(&js_sys::global(), "clearTimeout", &[self.id.clone()]);
+        let _ = call(&js_sys::global(), "clearTimeout", std::slice::from_ref(&self.id));
     }
 }
 

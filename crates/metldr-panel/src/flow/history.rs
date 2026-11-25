@@ -522,14 +522,13 @@ struct Pinned {
 
 impl Drop for Pinned {
     fn drop(&mut self) {
-        if let Some(identity) = &self.identity {
-            if let Ok(request) = self.flow.inner.request_id() {
+        if let Some(identity) = &self.identity
+            && let Ok(request) = self.flow.inner.request_id() {
                 let _ = self.flow.inner.post(
                     &request,
                     json!({"op":"history_release","identity":identity}),
                 );
             }
-        }
     }
 }
 

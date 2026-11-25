@@ -299,11 +299,10 @@ impl Protocol {
     }
 
     pub(crate) fn remove_watch(&mut self, id: &str) {
-        if let Some((_, _, cell)) = self.watches.remove(id) {
-            if let Some(cell) = cell.upgrade() {
+        if let Some((_, _, cell)) = self.watches.remove(id)
+            && let Some(cell) = cell.upgrade() {
                 cell.borrow_mut().close();
             }
-        }
     }
 
     pub(crate) fn observe(&mut self) -> Result<Rc<RefCell<WatchCell>>, FlowError> {

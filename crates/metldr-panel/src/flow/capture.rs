@@ -97,7 +97,7 @@ pub(super) fn selected(flow: &FlowClient) -> impl Future<Output = Result<Value>>
         let value = call(
             &chrome_api("permissions").map_err(js_error)?,
             "request",
-            &[grant.clone()],
+            std::slice::from_ref(&grant),
         )
         .map_err(js_error)?;
         Ok::<_, FlowError>((selected, epoch, grant, promise(value).map_err(js_error)?))

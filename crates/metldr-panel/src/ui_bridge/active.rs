@@ -140,7 +140,7 @@ impl Active {
             .into_iter()
             .collect();
         let stream = RunStream::new(self.core.scope.conversation.clone(), ui_run_id, messages)
-            .map_err(|error| FlowError::InvalidInput(error))?;
+            .map_err(FlowError::InvalidInput)?;
         self.core.owner.borrow_mut().observe(self.native.clone())?;
         *self.observation.borrow_mut() = Observation::Watching(None);
         self.core.page.notify_settings();

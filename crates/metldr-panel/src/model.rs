@@ -1491,14 +1491,13 @@ impl PageView {
             .map(|source| source.into_view(&wire.store))
             .transpose()?;
         let mut ids = std::collections::BTreeSet::new();
-        if let Some(profile) = &wire.pi_profile {
-            if !valid_fingerprint(&profile.fingerprint)
+        if let Some(profile) = &wire.pi_profile
+            && (!valid_fingerprint(&profile.fingerprint)
                 || !valid_label(&profile.provider, 128)
-                || !valid_label(&profile.model, 128)
+                || !valid_label(&profile.model, 128))
             {
                 return Err(FlowError::Protocol("invalid Pi profile".into()));
             }
-        }
         let mut sessions = std::collections::BTreeSet::new();
         for session in &wire.agent_sessions {
             if !valid_id(session.workflow.as_str())

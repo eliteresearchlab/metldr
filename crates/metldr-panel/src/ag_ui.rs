@@ -310,18 +310,16 @@ impl RunStream {
             .messages
             .iter()
             .rposition(|entry| matches!(entry, EntryState::Artifact { .. }))
-        {
-            if current.len() <= last
+            && (current.len() <= last
                 || self.messages[..=last]
                     .iter()
                     .zip(&current)
                     .any(|(old, next)| {
                         old.id() != next.id() || !valid_artifact_transition(old, next)
-                    })
+                    }))
             {
                 return Err("saved artifact position or identity changed".into());
             }
-        }
         let was_started = self.started;
         let terminal = status.is_terminal();
         let mut events = Vec::new();
