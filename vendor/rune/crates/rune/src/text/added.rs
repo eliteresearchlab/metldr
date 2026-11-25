@@ -30,6 +30,7 @@ thread_local! {
     /// on demand knows when to.
     static CJK_SEEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static EMOJI_SEEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static SCRIPTS_SEEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Whether any text laid out on this thread held Han, kana, Hangul or Bopomofo. An app that
@@ -46,10 +47,17 @@ pub fn emoji_seen() -> bool {
     EMOJI_SEEN.get()
 }
 
-/// Notes `text` for [`cjk_seen`] and [`emoji_seen`]. ASCII text, and every call once both were
-/// seen, costs one check.
+/// Whether any text laid out on this thread held Hebrew, Arabic, Devanagari, Bengali or Thai,
+/// or a symbol, arrow, box drawing or math character an interface face seldom carries. An app
+/// that ships fonts for these adds them once this turns true.
+pub fn scripts_seen() -> bool {
+    SCRIPTS_SEEN.get()
+}
+
+/// Notes `text` for [`cjk_seen`], [`emoji_seen`] and [`scripts_seen`]. ASCII text, and every
+/// call once all three were seen, costs one check.
 pub(super) fn note_text(text: &str) {
-    if text.is_ascii() || (CJK_SEEN.get() && EMOJI_SEEN.get()) {
+    if text.is_ascii() || (CJK_SEEN.get() && EMOJI_SEEN.get() && SCRIPTS_SEEN.get()) {
         return;
     }
     let cjk = |c: u32| matches!(c,
@@ -57,11 +65,16 @@ pub(super) fn note_text(text: &str) {
         | 0x3130..=0x318F | 0x31A0..=0x31FF | 0x3200..=0x4DBF | 0x4E00..=0x9FFF | 0xA960..=0xA97F
         | 0xAC00..=0xD7FF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x3FFFF);
     let emoji = |c: u32| matches!(c, 0x1F000..=0x1FAFF | 0xFE0F | 0x2B50 | 0x2B55);
+    let script = |c: u32| matches!(c,
+        0x0590..=0x08FF | 0x0900..=0x09FF | 0x0E00..=0x0E7F | 0xA8E0..=0xA8FF | 0xFB1D..=0xFDFF
+        | 0xFE70..=0xFEFF | 0x2100..=0x214F | 0x2190..=0x2BFF | 0x1D400..=0x1D7FF);
     for c in text.chars().map(u32::from) {
         if cjk(c) {
             CJK_SEEN.set(true);
         } else if emoji(c) {
             EMOJI_SEEN.set(true);
+        } else if script(c) {
+            SCRIPTS_SEEN.set(true);
         }
     }
 }
@@ -128,6 +141,18 @@ mod tests {
         assert!(!emoji_seen());
         ts.layout_rich("ship it 🚀", &[], style, 1.0, None);
         assert!(emoji_seen());
+    }
+
+    /// Hebrew, Arabic, Indic, Thai, symbol and math text marks the thread; extended Latin,
+    /// Greek and Cyrillic, which the interface fallbacks cover, never do.
+    #[test]
+    fn other_scripts_are_noted_once_laid_out() {
+        let mut ts = TextSystem::new(&[INTER], ("Inter", "Inter"));
+        let style = TextStyle::new(13.0, 400.0);
+        ts.layout_rich("café, Ελληνικά, Русский • …", &[], style, 1.0, None);
+        assert!(!scripts_seen());
+        ts.layout_rich("שלום", &[], style, 1.0, None);
+        assert!(scripts_seen());
     }
 
     /// A running text system and one built later both draw with an added font, and the

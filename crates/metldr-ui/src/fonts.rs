@@ -20,9 +20,8 @@ pub const NAMES: [&str; 7] = [
 ];
 /// Approved fallbacks, added after the first frame so a cold open neither fetches nor parses
 /// them first: Allo's oblique in each weight (named into the variable face's family, so italic
-/// text finds them), Inter for the Greek, Cyrillic, Vietnamese and extended Latin Allo lacks,
-/// and Noto for other scripts and symbols (about 3 MB).
-pub const FALLBACKS: [&str; 24] = [
+/// text finds them) and Inter for the Greek, Cyrillic, Vietnamese and extended Latin Allo lacks.
+pub const FALLBACKS: [&str; 16] = [
     "AlloVariable-ThinItalic.otf",
     "AlloVariable-ExtraLightItalic.otf",
     "AlloVariable-LightItalic.otf",
@@ -39,6 +38,10 @@ pub const FALLBACKS: [&str; 24] = [
     "df0a9ae256c0569c-s.ttf",
     "8e9860b6e62d6359-s.ttf",
     "e4af272ccee01ff0-s.p.ttf",
+];
+/// Noto for other scripts, symbols and math (about 2.6 MB), added only once the chat lays out
+/// text that needs them.
+pub const SCRIPTS: [&str; 8] = [
     "NotoSansHebrew-Regular.ttf",
     "NotoSansArabic-Regular.ttf",
     "NotoSansDevanagari-Regular.ttf",
@@ -60,6 +63,7 @@ pub const FAMILIES: (&str, &str) = ("Allo Variable", "JetBrains Mono");
 thread_local! {
     static RETAINED: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
     static RETAINED_FALLBACKS: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
+    static RETAINED_SCRIPTS: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
     static RETAINED_CJK: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
     static RETAINED_EMOJI: OnceCell<&'static [&'static [u8]]> = const { OnceCell::new() };
 }
@@ -68,6 +72,7 @@ thread_local! {
 pub fn group(name: &str) -> Option<&'static [&'static str]> {
     match name {
         "fallbacks" => Some(&FALLBACKS),
+        "scripts" => Some(&SCRIPTS),
         "cjk" => Some(&CJK),
         "emoji" => Some(&EMOJI),
         _ => None,
@@ -118,6 +123,7 @@ pub fn retain(fonts: Vec<Vec<u8>>) -> &'static [&'static [u8]] {
 /// document adds each group to the renderer once.
 pub fn retain_group(name: &str, fonts: Vec<Vec<u8>>) -> Option<&'static [&'static [u8]]> {
     let cell = match name {
+        "scripts" => &RETAINED_SCRIPTS,
         "cjk" => &RETAINED_CJK,
         "emoji" => &RETAINED_EMOJI,
         _ => &RETAINED_FALLBACKS,
