@@ -764,6 +764,17 @@ pub(super) async fn show_words(page: &str, words: &str) -> Result<(), FlowError>
     crate::await_call(&scripting, "executeScript", &[details]).await.map(|_| ()).map_err(|_| failure())
 }
 
+/// About how many words the key sentences on the setup screen hold.
+const KEY_SENTENCE_WORDS: usize = 90;
+
+/// The active tab's title and its key sentences, picked in the panel without a model; `None`
+/// when the page cannot be read or has too few sentences.
+pub(super) async fn key_sentences() -> Option<(String, Vec<String>)> {
+    let page = capture(false).await.ok()?;
+    let picked = metldr_core::page::extract::first_summary(&page.markdown, KEY_SENTENCE_WORDS);
+    (!picked.is_empty()).then(|| (page.title, picked.into_iter().map(str::to_owned).collect()))
+}
+
 /// The active tab's page, captured without the companion.
 struct Captured {
     tab: f64,
